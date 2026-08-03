@@ -1,0 +1,13 @@
+{{define "service_forbidden"}}
+{{template "head" .}}
+{{template "nav" .}}
+<main class="auth-shell" id="main-content">
+  <section class="auth-card">
+    <span class="badge danger">403</span>
+    <h1>Доступ запрещён</h1>
+    <p class="muted">Вашему аккаунту не разрешён доступ к {{.Service}}.</p>
+    <a class="button ghost" href="/app">Вернуться на главную</a>
+  </section>
+</main>
+</body></html>
+{{end}}

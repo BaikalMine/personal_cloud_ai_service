@@ -1,0 +1,35 @@
+{{define "admin_service"}}
+{{template "head" .}}
+{{template "admin_nav" .}}
+<main class="page" id="main-content">
+  <section class="hero">
+    <div><p class="eyebrow">Аналитика сервиса за 30 дней</p><h1>{{.Analytics.DisplayName}}</h1></div>
+    <div class="actions">
+      <a class="button ghost" href="/admin/services/comfyui">ComfyUI</a>
+      <a class="button ghost" href="/admin/services/openwebui">OpenWebUI</a>
+    </div>
+  </section>
+  <section class="grid cards">
+    <article class="card"><span class="muted">Запросы</span><strong class="big">{{formatNumber .Analytics.Requests}}</strong></article>
+    <article class="card"><span class="muted">Пользователи</span><strong class="big">{{formatNumber .Analytics.Users}}</strong></article>
+    <article class="card"><span class="muted">Передано</span><strong class="big">{{formatBytes .Analytics.Bytes}}</strong></article>
+    <article class="card"><span class="muted">Ошибки</span><strong class="big">{{formatNumber .Analytics.Errors}}</strong></article>
+    <article class="card"><span class="muted">Среднее время ответа</span><strong class="big">{{formatDuration .Analytics.AverageDuration}}</strong></article>
+    <article class="card"><span class="muted">Активные WebSocket</span><strong class="big">{{formatNumber .Analytics.ActiveWebSockets}}</strong></article>
+  </section>
+  <section class="panel">
+    <h2>Активность по дням</h2>
+    <div class="service-chart">
+      {{range .Analytics.Trend}}
+      <div class="service-chart-row">
+        <span>{{.Label}}</span>
+        <div class="bar"><i style="width: {{pct .RequestPercent}}%"></i></div>
+        <b>{{formatNumber .Requests}}</b>
+        <small>Пользователи: {{formatNumber .Users}} &middot; ошибки: {{formatNumber .Errors}} &middot; {{formatBytes .Bytes}}</small>
+      </div>
+      {{end}}
+    </div>
+  </section>
+</main>
+</body></html>
+{{end}}

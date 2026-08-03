@@ -1,0 +1,14 @@
+{{define "admin_sessions"}}
+{{template "head" .}}
+{{template "admin_nav" .}}
+<main class="page" id="main-content">
+  <section class="hero"><div><p class="eyebrow">Контроль доступа</p><h1>Активные сессии</h1></div><span class="live-badge"><i></i>Текущие подключения</span></section>
+  <section class="panel">
+    <div class="panel-heading"><div><p class="section-kicker">Сначала свежие</p><h2>Сессии пользователей</h2></div></div>
+    <table><thead><tr><th>Пользователь</th><th>IP</th><th>Создана</th><th>Последняя активность</th><th>Истекает</th><th>Устройство</th><th></th></tr></thead><tbody>
+    {{range .Sessions}}<tr><td><span class="user-link"><span class="account-indicator"></span>{{.Username}}</span></td><td><code>{{.IP}}</code></td><td>{{formatTime .CreatedAt}}</td><td>{{formatTime .LastSeenAt}}</td><td>{{formatTime .ExpiresAt}}</td><td class="path">{{.UserAgent}}</td><td><div class="table-actions"><form method="post" action="/admin/sessions/{{.ID}}/revoke"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="action-button danger" type="submit" data-confirm="Завершить эту сессию?"><span class="action-icon" aria-hidden="true">&#215;</span>Завершить</button></form></div></td></tr>{{else}}<tr><td colspan="7" class="muted">Активных сессий нет.</td></tr>{{end}}
+    </tbody></table>
+  </section>
+</main>
+</body></html>
+{{end}}

@@ -1,0 +1,83 @@
+{{define "app"}}
+{{template "head" .}}
+{{template "nav" .}}
+<main class="page" id="main-content">
+  <section class="hero">
+    <div>
+      <p class="eyebrow">Рабочее пространство</p>
+      <h1>Здравствуйте, {{.CurrentUser.Username}}</h1>
+    </div>
+    <div class="hero-actions"><a class="button ghost" href="/account/sessions">Мои сессии</a><a class="button ghost" href="/account/password">Безопасность</a></div>
+  </section>
+
+  <section class="grid two service-grid" aria-label="Доступные сервисы">
+    {{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseComfyUI}}<a class="service-card" href="/comfyui/" target="_blank" rel="noopener">
+      <div class="service-card-heading"><span class="service-symbol comfyui">CU</span><span class="badge ok">Доступ разрешён</span></div>
+      <h2>ComfyUI</h2><span class="service-open">Открыть рабочую область</span>
+      {{with index .Services 0}}<p class="service-state {{if .Online}}online{{else}}offline{{end}}"><i></i>{{.Detail}} · {{.Latency}}</p>{{end}}
+    </a>{{else}}<article class="service-card disabled"><div class="service-card-heading"><span class="service-symbol comfyui">CU</span><span class="badge danger">Нет доступа</span></div><h2>ComfyUI</h2><span class="service-open">Доступ не назначен</span></article>{{end}}
+    {{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseOpenWebUI}}<a class="service-card" href="/openwebui/" target="_blank" rel="noopener">
+      <div class="service-card-heading"><span class="service-symbol openwebui">OW</span><span class="badge ok">Доступ разрешён</span></div>
+      <h2>OpenWebUI</h2><span class="service-open">Открыть рабочую область</span>
+      {{with index .Services 1}}<p class="service-state {{if .Online}}online{{else}}offline{{end}}"><i></i>{{.Detail}} · {{.Latency}}</p>{{end}}
+    </a>{{else}}<article class="service-card disabled"><div class="service-card-heading"><span class="service-symbol openwebui">OW</span><span class="badge danger">Нет доступа</span></div><h2>OpenWebUI</h2><span class="service-open">Доступ не назначен</span></article>{{end}}
+  </section>
+
+  <section class="panel mining-control {{if .Mining.Running}}is-running{{end}}" aria-labelledby="mining-title">
+    <div class="panel-heading mining-heading">
+      <div><p class="section-kicker">Вычислительные ресурсы</p><h2 id="mining-title">Майнинг</h2></div>
+      <span class="mining-status {{if .Mining.Running}}running{{else if .Mining.Available}}stopped{{else}}unavailable{{end}}"><i></i>{{if .Mining.Running}}Работает{{else if .Mining.Available}}Остановлен{{else}}Недоступен{{end}}</span>
+    </div>
+    {{if eq .MiningStatus "started"}}<p class="success-box">Майнинг запущен.</p>{{else if eq .MiningStatus "stopped"}}<p class="success-box">Майнинг остановлен, ресурсы освобождены.</p>{{else if eq .MiningStatus "error"}}<p class="alert">Не удалось изменить состояние майнинга.</p>{{else if eq .MiningStatus "unavailable"}}<p class="alert">Windows-agent управления майнингом недоступен.</p>{{end}}
+    <div class="mining-control-body">
+      <div class="miner-identity">
+        {{if .Mining.Active}}
+          {{if .Mining.Active.IconMIME}}<img class="miner-icon" src="/mining/icon/{{.Mining.Active.ID}}" alt="">{{else}}<span class="miner-icon-fallback">MN</span>{{end}}
+          <span><b>{{.Mining.Active.Name}}</b><small>{{.Mining.Active.ProcessName}}{{with .Mining.Active.State.PIDs}} · PID {{index . 0}}{{end}}</small></span>
+        {{else if .Mining.Default}}
+          {{if .Mining.Default.IconMIME}}<img class="miner-icon" src="/mining/icon/{{.Mining.Default.ID}}" alt="">{{else}}<span class="miner-icon-fallback">MN</span>{{end}}
+          <span><b>{{.Mining.Default.Name}}</b><small>Профиль по умолчанию</small></span>
+        {{else}}
+          <span class="miner-icon-fallback">MN</span><span><b>Профиль не настроен</b><small>Обратитесь к администратору</small></span>
+        {{end}}
+      </div>
+      <div class="mining-action">
+        <p>{{.Mining.Message}}</p>
+        <form method="post" action="/mining/toggle">
+          <input type="hidden" name="csrf" value="{{.CSRF}}">
+          <button type="submit" {{if not .Mining.Available}}disabled{{end}} class="{{if .Mining.Running}}danger{{end}}" data-confirm="{{if .Mining.Running}}Остановить майнинг и освободить ресурсы?{{else}}Запустить майнинг? Он займёт вычислительные ресурсы этого компьютера.{{end}}">{{if .Mining.Running}}Остановить майнинг{{else}}Запустить майнинг{{end}}</button>
+        </form>
+      </div>
+      <div class="miner-script-used">
+        <span>Используемый скрипт</span>
+        <code>{{if .Mining.Active}}{{.Mining.Active.ScriptPath}}{{else if .Mining.Default}}{{.Mining.Default.ScriptPath}}{{else}}Не настроен{{end}}</code>
+      </div>
+      <details class="miner-script-details" open>
+        <summary>Содержимое скрипта</summary>
+        {{if .Mining.Script.Content}}
+        <div class="script-fingerprint"><span>SHA-256</span><code>{{.Mining.Script.SHA256}}</code></div>
+        <pre>{{.Mining.Script.Content}}</pre>
+        {{else}}<p class="muted">{{if .Mining.Script.Message}}{{.Mining.Script.Message}}{{else}}Содержимое скрипта недоступно.{{end}}</p>{{end}}
+      </details>
+    </div>
+  </section>
+
+  <section class="metric-grid metrics-four user-metrics" aria-label="Статистика аккаунта">
+    <article class="metric-card tone-green"><span>Запросы сегодня</span><strong>{{formatNumber .Stats.TodayRequests}}</strong><small>с начала суток</small></article>
+    <article class="metric-card tone-blue"><span>Запросы за 7 дней</span><strong>{{formatNumber .Stats.WeekRequests}}</strong><small>все сервисы</small></article>
+    <article class="metric-card tone-amber"><span>Передано данных</span><strong>{{formatBytes .Stats.TotalBytesOut}}</strong><small>исходящий трафик</small></article>
+    <article class="metric-card tone-indigo"><span>Последний сервис</span><strong>{{if .Stats.LastService}}{{.Stats.LastService}}{{else}}Нет данных{{end}}</strong><small>последняя активность</small></article>
+  </section>
+
+  <section class="panel">
+    <div class="panel-heading"><div><p class="section-kicker">Последние 7 дней</p><h2>Динамика использования</h2></div></div>
+    {{template "chart" .Stats.Chart}}
+  </section>
+
+  <section class="panel">
+    <div class="panel-heading"><div><p class="section-kicker">Только важные действия</p><h2>Последняя активность</h2><p class="panel-intro">Здесь показаны ваши действия в сервисах без служебных запросов интерфейса.</p></div></div>
+    {{template "activity_table" .Activities}}
+  </section>
+</main>
+</body></html>
+{{end}}

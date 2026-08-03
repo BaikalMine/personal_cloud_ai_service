@@ -1,0 +1,16 @@
+{{define "admin_audit"}}
+{{template "head" .}}
+{{template "admin_nav" .}}
+<main class="page" id="main-content">
+  <section class="hero"><div><p class="eyebrow">Безопасность</p><h1>Журнал аудита</h1></div><span class="live-badge"><i></i>События системы</span></section>
+  <section class="panel">
+    <div class="panel-heading"><div><p class="section-kicker">Для администратора</p><h2>Последние события системы</h2><p class="panel-intro">Здесь остаются технические и безопасностные события. Понятные действия пользователей смотрите в их профиле.</p></div></div>
+    <table><thead><tr><th>Время</th><th>Инициатор</th><th>Действие</th><th>Объект</th><th>IP</th><th>Детали</th></tr></thead><tbody>
+    {{range .Audits}}
+      <tr><td>{{formatTime .CreatedAt}}</td><td>{{if .Actor}}{{.Actor}}{{else}}система{{end}}</td><td>{{auditActionLabel .Action}}</td><td>{{auditTargetLabel .TargetType}} {{if .TargetID.Valid}}#{{.TargetID.Int64}}{{end}}</td><td>{{.IP}}</td><td class="path">{{auditMetadataLabel .Metadata}}</td></tr>
+    {{else}}<tr><td colspan="6" class="muted">Событий аудита пока нет.</td></tr>{{end}}
+    </tbody></table>
+  </section>
+</main>
+</body></html>
+{{end}}

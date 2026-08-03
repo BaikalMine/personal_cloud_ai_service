@@ -1,0 +1,23 @@
+{{define "invite"}}
+{{template "head" .}}
+<main class="auth-shell" id="main-content">
+  <section class="auth-card">
+    <p class="eyebrow">Приглашение</p><h1>Создание аккаунта</h1>
+    {{if .Invalid}}
+      <p class="alert">Приглашение недействительно, просрочено, отозвано или уже использовано максимальное число раз.</p>
+      <a class="button ghost" href="/login">Вернуться ко входу</a>
+    {{else}}
+      <p class="muted">Укажите данные новой учётной записи.</p>
+      <p class="access-preview">Доступ: {{if .Access.GrantComfyUI}}<span class="badge">ComfyUI</span>{{end}} {{if .Access.GrantOpenWebUI}}<span class="badge">OpenWebUI</span>{{end}}</p>
+      {{if .Error}}<p class="alert">{{.Error}}</p>{{end}}
+      <form method="post">
+        <label>Логин<input name="username" autocomplete="username" placeholder="От 3 символов" required minlength="3" autofocus></label>
+        <label>Email <span class="muted">необязательно</span><input name="email" type="email" autocomplete="email"></label>
+        <label>Пароль<input name="password" type="password" autocomplete="new-password" placeholder="Не менее 10 символов" required minlength="10"></label>
+        <button type="submit">Создать аккаунт</button>
+      </form>
+    {{end}}
+  </section>
+</main>
+</body></html>
+{{end}}

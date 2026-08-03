@@ -1,0 +1,112 @@
+{{define "head"}}
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}} - AI Access Gateway</title>
+  <link rel="stylesheet" href="/static/style.css?v={{.AssetVersion}}">
+  <script src="/static/app.js?v={{.AssetVersion}}" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main-content">К содержимому</a>
+{{end}}
+
+{{define "nav"}}
+<header class="topbar user-topbar">
+  <div class="brand-cluster">
+    <a class="brand-mark" href="/app" aria-label="Главная AI Gateway">AI</a>
+    <a class="brand" href="/app"><b>AI Gateway</b><span>Рабочее пространство</span></a>
+  </div>
+  <button class="menu-toggle" type="button" aria-label="Открыть меню" aria-controls="user-navigation" aria-expanded="false"><i></i><i></i><i></i></button>
+  <div class="topbar-menu" id="user-navigation">
+    <nav class="primary-nav" aria-label="Основная навигация">
+      <a href="/app">Обзор</a>
+      <a href="/comfyui/" target="_blank" rel="noopener">ComfyUI</a>
+      <a href="/openwebui/" target="_blank" rel="noopener">OpenWebUI</a>
+      <a href="/account/sessions">Сессии</a>
+      {{if .CurrentUser}}{{if eq .CurrentUser.Role "admin"}}<a href="{{.AdminBaseURL}}/admin">Администрирование</a>{{end}}{{end}}
+    </nav>
+    <div class="user-menu">
+      {{if .CurrentUser}}<a class="account-chip" href="/account/password"><span class="account-indicator"></span><span><b>{{.CurrentUser.Username}}</b><small>{{roleLabel .CurrentUser.Role}}</small></span></a>{{end}}
+      <form method="post" action="/logout" class="nav-form"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit" class="nav-button">Выйти</button></form>
+    </div>
+  </div>
+</header>
+{{end}}
+
+{{define "admin_nav"}}
+<header class="admin-mobilebar">
+  <a class="brand-cluster" href="/admin"><span class="brand-mark">AI</span><span class="brand"><b>AI Gateway</b><span>Администрирование</span></span></a>
+  <button class="menu-toggle" type="button" aria-label="Открыть меню" aria-controls="admin-navigation" aria-expanded="false"><i></i><i></i><i></i></button>
+</header>
+<aside class="admin-sidebar" id="admin-navigation">
+  <div class="admin-brand">
+    <a class="brand-mark" href="/admin" aria-label="Главная админки">AI</a>
+    <div><a class="brand" href="/admin"><b>AI Gateway</b><span>Администрирование</span></a></div>
+  </div>
+  <nav class="admin-nav" aria-label="Административная навигация">
+    <span class="nav-section">Система</span>
+    <a href="/admin">Обзор</a>
+    <a href="/admin/metrics">Метрики</a>
+    <a href="/admin/services/comfyui">Сервисы</a>
+    <a href="/admin/mining">Майнинг</a>
+    <span class="nav-section">Доступ</span>
+    <a href="/admin/users">Пользователи</a>
+    <a href="/admin/invites">Приглашения</a>
+    <a href="/admin/sessions">Сессии</a>
+    <span class="nav-section">Контроль</span>
+    <a href="/admin/content">AI-контент</a>
+    <a href="/admin/audit">Журнал аудита</a>
+  </nav>
+  <div class="admin-actions">
+    {{if .CurrentUser}}<div class="admin-account"><span class="account-indicator"></span><span><b>{{.CurrentUser.Username}}</b><small>{{roleLabel .CurrentUser.Role}}</small></span></div>{{end}}
+    <a href="{{.PublicBaseURL}}/app">Режим пользователя</a>
+    <a href="/account/password">Сменить пароль</a>
+    <form method="post" action="/logout" class="nav-form"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit" class="nav-button">Выйти</button></form>
+  </div>
+</aside>
+{{end}}
+
+{{define "metric_cards"}}
+<section class="grid cards metric-strip">
+  {{range .}}
+  <article class="card summary-card">
+    <span class="muted">{{.Label}}</span>
+    <strong class="big">{{.Value}}</strong>
+  </article>
+  {{end}}
+</section>
+{{end}}
+
+{{define "activity_table"}}
+<div class="table-scroll"><table>
+  <thead><tr><th>Время</th><th>Сервис</th><th>Действие</th><th>Результат</th><th>Время ответа</th><th>Данные</th></tr></thead>
+  <tbody>
+  {{range .}}
+    <tr>
+      <td data-label="Время">{{formatTime .CreatedAt}}</td>
+      <td data-label="Сервис"><span class="badge">{{.ServiceLabel}}</span></td>
+      <td data-label="Действие"><strong>{{.Summary}}</strong>{{if gt .Count 1}}<small class="activity-repeat">Повторено {{.Count}} раз</small>{{end}}</td>
+      <td data-label="Результат"><span class="activity-result {{if ge .Status 400}}is-error{{else}}is-ok{{end}}"><i></i>{{if ge .Status 400}}Не выполнено{{else}}Выполнено{{end}}</span></td>
+      <td data-label="Время ответа">{{.Duration}} мс</td>
+      <td data-label="Данные">{{formatBytes .Bytes}}</td>
+    </tr>
+  {{else}}
+    <tr><td colspan="6" class="muted">Понятных действий пока нет.</td></tr>
+  {{end}}
+  </tbody>
+</table></div>
+{{end}}
+
+{{define "chart"}}
+<div class="chart" role="img" aria-label="Диаграмма активности">
+  {{range .}}
+  <div class="barrow">
+    <span>{{.Label}}</span>
+    <div class="bar"><i style="width: {{pct .Percent}}%"></i></div>
+    <b>{{formatNumber .Count}}</b>
+  </div>
+  {{end}}
+</div>
+{{end}}

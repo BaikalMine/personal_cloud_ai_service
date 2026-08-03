@@ -1,0 +1,96 @@
+{{define "admin_user_detail"}}
+{{template "head" .}}
+{{template "admin_nav" .}}
+<main class="page" id="main-content">
+  <section class="hero profile-hero">
+    <div>
+      <p class="eyebrow">Профиль пользователя</p>
+      <h1>{{.Profile.Username}}</h1>
+      <div class="profile-badges">
+        <span class="badge">{{roleLabel .Profile.Role}}</span>
+        {{if .Profile.Disabled}}<span class="badge danger">Отключён</span>{{else if .AccountLocked}}<span class="badge danger">Вход заблокирован</span>{{else}}<span class="badge ok">Активен</span>{{end}}
+      </div>
+    </div>
+    <a class="button ghost" href="/admin/users">К списку пользователей</a>
+  </section>
+
+  {{if .AccountLocked}}<p class="alert">Вход заблокирован до {{formatTime .Profile.LockedUntil}}.</p>{{end}}
+  {{if eq .SecurityStatus "unlocked"}}<p class="success-box">Блокировка и счётчик неудачных попыток сброшены.</p>{{end}}
+
+  <section class="metric-grid metrics-four profile-metrics" aria-label="Статистика пользователя">
+    <article class="metric-card tone-blue"><span>Всего запросов</span><strong>{{formatNumber .Stats.TotalRequests}}</strong><small>за всё время</small></article>
+    <article class="metric-card tone-amber"><span>Передано данных</span><strong>{{formatBytes .Stats.TotalBytesOut}}</strong><small>исходящий трафик</small></article>
+    <article class="metric-card tone-indigo"><span>Последний сервис</span><strong>{{if .Stats.LastService}}{{.Stats.LastService}}{{else}}Нет данных{{end}}</strong><small>последняя активность</small></article>
+    <article class="metric-card {{if gt .Profile.FailedLoginCount 0}}tone-red{{else}}tone-green{{end}}"><span>Ошибки входа</span><strong>{{formatNumber .Profile.FailedLoginCount}}</strong><small>текущий счётчик</small></article>
+  </section>
+
+  <section class="detail-grid">
+    <section class="panel profile-overview">
+      <div class="panel-heading"><div><p class="section-kicker">Учётная запись</p><h2>Основные данные</h2></div></div>
+      <dl class="key-values">
+        <div><dt>Логин</dt><dd>{{.Profile.Username}}</dd></div>
+        <div><dt>Email</dt><dd>{{if .Profile.Email.Valid}}{{.Profile.Email.String}}{{else}}Не указан{{end}}</dd></div>
+        <div><dt>Роль</dt><dd>{{roleLabel .Profile.Role}}</dd></div>
+        <div><dt>Создан</dt><dd>{{formatTime .Profile.CreatedAt}}</dd></div>
+        <div><dt>Последний вход</dt><dd>{{formatTime .Profile.LastLoginAt}}</dd></div>
+      </dl>
+    </section>
+
+    <section class="panel access-panel">
+      <div class="panel-heading"><div><p class="section-kicker">Разрешения</p><h2>Доступ к сервисам</h2></div></div>
+      {{if eq .AccessStatus "changed"}}<p class="success-box">Права доступа обновлены.</p>{{end}}
+      {{if eq .Profile.Role "admin"}}
+      <p class="access-note"><span class="account-indicator"></span>Администратору доступны оба сервиса.</p>
+      {{else}}
+      <form method="post" class="access-form">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <input type="hidden" name="action" value="update_access">
+        <label class="service-toggle"><input name="can_use_comfyui" type="checkbox" {{if .Profile.CanUseComfyUI}}checked{{end}}><span><b>ComfyUI</b><small>{{if .Profile.CanUseComfyUI}}Доступ разрешён{{else}}Доступ закрыт{{end}}</small></span></label>
+        <label class="service-toggle"><input name="can_use_openwebui" type="checkbox" {{if .Profile.CanUseOpenWebUI}}checked{{end}}><span><b>OpenWebUI</b><small>{{if .Profile.CanUseOpenWebUI}}Доступ разрешён{{else}}Доступ закрыт{{end}}</small></span></label>
+        <button type="submit">Сохранить права</button>
+      </form>
+      {{end}}
+    </section>
+
+    <section class="panel password-panel">
+      <div class="panel-heading"><div><p class="section-kicker">Безопасность</p><h2>Установить новый пароль</h2></div></div>
+      {{if eq .PasswordStatus "changed"}}<p class="success-box">Пароль изменён, остальные сессии завершены.</p>{{end}}
+      {{if eq .PasswordStatus "invalid"}}<p class="alert">Пароли должны совпадать и содержать не менее 10 символов.</p>{{end}}
+      <form method="post">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <input type="hidden" name="action" value="change_password">
+        <label>Новый пароль<input name="new_password" type="password" autocomplete="new-password" placeholder="Не менее 10 символов" required minlength="10"></label>
+        <label>Повторите пароль<input name="confirm_password" type="password" autocomplete="new-password" placeholder="Повторите новый пароль" required minlength="10"></label>
+        <button type="submit">Установить пароль</button>
+      </form>
+    </section>
+
+    <section class="panel security-panel">
+      <div class="panel-heading"><div><p class="section-kicker">Управление</p><h2>Сессии и статус</h2></div></div>
+      <form method="post" class="stack-actions">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <button name="action" value="revoke_sessions" class="ghost" data-confirm="Завершить все активные сессии пользователя?">Завершить все сессии</button>
+        {{if gt .Profile.FailedLoginCount 0}}<button name="action" value="unlock" class="ghost">Снять блокировку входа</button>{{end}}
+        {{if ne .Profile.Role "admin"}}
+          {{if .Profile.Disabled}}<button name="action" value="enable">Включить пользователя</button>{{else}}<button name="action" value="disable" class="danger" data-confirm="Отключить пользователя и завершить его активные сессии?">Отключить пользователя</button>{{end}}
+        {{end}}
+      </form>
+    </section>
+
+    <section class="panel span-two">
+      <div class="panel-heading"><div><p class="section-kicker">Распределение</p><h2>Использование сервисов</h2></div></div>
+      <table><thead><tr><th>Сервис</th><th>Запросы</th><th>Передано</th><th>Ошибки</th></tr></thead><tbody>
+      {{range .Stats.ByService}}<tr><td><a class="service-link" href="/admin/services/{{.Service}}"><i class="service-icon {{.Service}}"></i>{{.Service}}</a></td><td class="numeric">{{formatNumber .Requests}}</td><td>{{formatBytes .Bytes}}</td><td><span class="error-count {{if gt .Errors 0}}has-errors{{end}}">{{formatNumber .Errors}}</span></td></tr>{{else}}<tr><td colspan="4" class="muted">Сервисами ещё не пользовались.</td></tr>{{end}}
+      </tbody></table>
+    </section>
+
+    <section class="panel span-two">
+      <div class="panel-heading"><div><p class="section-kicker">Последние 7 дней</p><h2>Динамика активности</h2></div></div>
+      {{template "chart" .Stats.Chart}}
+    </section>
+  </section>
+
+  <section class="panel"><div class="panel-heading"><div><p class="section-kicker">Понятные действия пользователя</p><h2>Последняя активность</h2><p class="panel-intro">Служебный трафик скрыт, повторяющиеся действия объединены.</p></div></div>{{template "activity_table" .Activities}}</section>
+</main>
+</body></html>
+{{end}}

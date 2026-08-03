@@ -1,0 +1,61 @@
+name: ai-gateway-e2e
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "5m"
+    max-file: "2"
+
+services:
+  postgres:
+    image: postgres:16-alpine@sha256:fd1e8d0274f13f5a03a2673a207b28e14823c2f2efc3ca4bb4197c8a9f841bdc
+    environment:
+      POSTGRES_DB: gateway_e2e
+      POSTGRES_USER: gateway_e2e
+      POSTGRES_PASSWORD: gateway-e2e-password
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gateway_e2e -d gateway_e2e"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    logging: *default-logging
+
+  app:
+    build: .
+    image: ai-access-gateway-e2e-app
+    environment:
+      DATABASE_URL: postgres://gateway_e2e:gateway-e2e-password@postgres:5432/gateway_e2e?sslmode=disable
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: gateway-e2e-admin-password
+      SESSION_SECRET: "01234567890123456789012345678901"
+      PUBLIC_BASE_URL: http://127.0.0.1:18090
+      COOKIE_SECURE: "false"
+      SESSION_IDLE_TIMEOUT: 1h
+      ACCOUNT_LOCK_THRESHOLD: "3"
+      ACCOUNT_LOCK_DURATION: 2m
+      PUBLIC_ADDR: :8090
+      ADMIN_ADDR: :8091
+      ADMIN_ALLOWED_CIDRS: 127.0.0.1,::1,172.16.0.0/12
+      TRUSTED_PROXIES: 127.0.0.1,::1
+      COMFYUI_UPSTREAM: http://host.docker.internal:8088
+      OPENWEBUI_UPSTREAM: http://openwebui:8080
+      COMFYUI_UPSTREAM_USERNAME: ${E2E_COMFYUI_USERNAME:-}
+      COMFYUI_UPSTREAM_PASSWORD: ${E2E_COMFYUI_PASSWORD:-}
+    networks:
+      - default
+      - ai-access-backend
+    ports:
+      - "18090:8090"
+      - "18091:8091"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    logging: *default-logging
+
+networks:
+  ai-access-backend:
+    external: true

@@ -1,0 +1,402 @@
+package database
+
+import (
+	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"fmt"
+	"sort"
+	"strings"
+)
+
+const migrationLockID int64 = 746218390
+
+type migration struct {
+	version    int64
+	name       string
+	statements []string
+}
+
+var migrationCatalog = []migration{
+	{
+		version: 1,
+		name:    "initial_schema",
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS users (
+				id BIGSERIAL PRIMARY KEY,
+				username TEXT NOT NULL UNIQUE,
+				email TEXT NULL,
+				password_hash TEXT NOT NULL,
+				role TEXT NOT NULL CHECK (role IN ('admin','user')),
+				disabled BOOLEAN NOT NULL DEFAULT FALSE,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				last_login_at TIMESTAMPTZ NULL
+			)`,
+			`CREATE TABLE IF NOT EXISTS sessions (
+				id BIGSERIAL PRIMARY KEY,
+				user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				token_hash TEXT NOT NULL UNIQUE,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				expires_at TIMESTAMPTZ NOT NULL,
+				last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				user_agent TEXT NOT NULL DEFAULT '',
+				ip TEXT NOT NULL DEFAULT ''
+			)`,
+			`CREATE TABLE IF NOT EXISTS invites (
+				id BIGSERIAL PRIMARY KEY,
+				token_hash TEXT NOT NULL UNIQUE,
+				created_by_user_id BIGINT NULL REFERENCES users(id) ON DELETE SET NULL,
+				max_uses INT NOT NULL DEFAULT 1,
+				used_count INT NOT NULL DEFAULT 0,
+				expires_at TIMESTAMPTZ NOT NULL,
+				revoked BOOLEAN NOT NULL DEFAULT FALSE,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`CREATE TABLE IF NOT EXISTS invite_uses (
+				id BIGSERIAL PRIMARY KEY,
+				invite_id BIGINT NOT NULL REFERENCES invites(id) ON DELETE CASCADE,
+				user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				used_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				ip TEXT NOT NULL DEFAULT ''
+			)`,
+			`CREATE TABLE IF NOT EXISTS proxy_requests (
+				id BIGSERIAL PRIMARY KEY,
+				user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				service TEXT NOT NULL,
+				method TEXT NOT NULL,
+				path TEXT NOT NULL,
+				status_code INT NOT NULL,
+				duration_ms BIGINT NOT NULL,
+				bytes_in BIGINT NOT NULL DEFAULT 0,
+				bytes_out BIGINT NOT NULL DEFAULT 0,
+				is_websocket BOOLEAN NOT NULL DEFAULT FALSE,
+				client_ip TEXT NOT NULL DEFAULT '',
+				user_agent TEXT NOT NULL DEFAULT '',
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`CREATE TABLE IF NOT EXISTS websocket_sessions (
+				id BIGSERIAL PRIMARY KEY,
+				user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				service TEXT NOT NULL,
+				opened_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				closed_at TIMESTAMPTZ NULL,
+				duration_ms BIGINT NULL,
+				client_ip TEXT NOT NULL DEFAULT '',
+				user_agent TEXT NOT NULL DEFAULT ''
+			)`,
+			`CREATE TABLE IF NOT EXISTS audit_log (
+				id BIGSERIAL PRIMARY KEY,
+				actor_user_id BIGINT NULL REFERENCES users(id) ON DELETE SET NULL,
+				action TEXT NOT NULL,
+				target_type TEXT NOT NULL,
+				target_id BIGINT NULL,
+				ip TEXT NOT NULL DEFAULT '',
+				user_agent TEXT NOT NULL DEFAULT '',
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+			)`,
+		},
+	},
+	{
+		version: 2,
+		name:    "service_permissions",
+		statements: []string{
+			`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_use_comfyui BOOLEAN NOT NULL DEFAULT TRUE`,
+			`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_use_openwebui BOOLEAN NOT NULL DEFAULT TRUE`,
+			`ALTER TABLE invites ADD COLUMN IF NOT EXISTS grant_comfyui BOOLEAN NOT NULL DEFAULT TRUE`,
+			`ALTER TABLE invites ADD COLUMN IF NOT EXISTS grant_openwebui BOOLEAN NOT NULL DEFAULT TRUE`,
+		},
+	},
+	{
+		version: 3,
+		name:    "query_indexes",
+		statements: []string{
+			`CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions(user_id)`,
+			`CREATE INDEX IF NOT EXISTS sessions_expires_idx ON sessions(expires_at)`,
+			`CREATE INDEX IF NOT EXISTS proxy_requests_user_time_idx ON proxy_requests(user_id, created_at DESC)`,
+			`CREATE INDEX IF NOT EXISTS proxy_requests_service_time_idx ON proxy_requests(service, created_at DESC)`,
+			`CREATE INDEX IF NOT EXISTS websocket_sessions_open_idx ON websocket_sessions(closed_at)`,
+			`CREATE INDEX IF NOT EXISTS websocket_sessions_service_open_idx ON websocket_sessions(service) WHERE closed_at IS NULL`,
+			`CREATE INDEX IF NOT EXISTS audit_log_time_idx ON audit_log(created_at DESC)`,
+			`CREATE INDEX IF NOT EXISTS audit_log_actor_time_idx ON audit_log(actor_user_id, created_at DESC)`,
+		},
+	},
+	{
+		version: 4,
+		name:    "data_integrity_constraints",
+		statements: []string{
+			`DO $$ BEGIN
+				IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'proxy_requests_service_valid' AND conrelid = 'proxy_requests'::regclass) THEN
+					ALTER TABLE proxy_requests ADD CONSTRAINT proxy_requests_service_valid CHECK (service IN ('comfyui','openwebui')) NOT VALID;
+				END IF;
+			END $$`,
+			`DO $$ BEGIN
+				IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'proxy_requests_values_valid' AND conrelid = 'proxy_requests'::regclass) THEN
+					ALTER TABLE proxy_requests ADD CONSTRAINT proxy_requests_values_valid CHECK (status_code BETWEEN 100 AND 599 AND duration_ms >= 0 AND bytes_in >= 0 AND bytes_out >= 0) NOT VALID;
+				END IF;
+			END $$`,
+			`DO $$ BEGIN
+				IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'websocket_sessions_service_valid' AND conrelid = 'websocket_sessions'::regclass) THEN
+					ALTER TABLE websocket_sessions ADD CONSTRAINT websocket_sessions_service_valid CHECK (service IN ('comfyui','openwebui')) NOT VALID;
+				END IF;
+			END $$`,
+			`DO $$ BEGIN
+				IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invites_usage_valid' AND conrelid = 'invites'::regclass) THEN
+					ALTER TABLE invites ADD CONSTRAINT invites_usage_valid CHECK (max_uses > 0 AND used_count >= 0 AND used_count <= max_uses) NOT VALID;
+				END IF;
+			END $$`,
+			`ALTER TABLE proxy_requests VALIDATE CONSTRAINT proxy_requests_service_valid`,
+			`ALTER TABLE proxy_requests VALIDATE CONSTRAINT proxy_requests_values_valid`,
+			`ALTER TABLE websocket_sessions VALIDATE CONSTRAINT websocket_sessions_service_valid`,
+			`ALTER TABLE invites VALIDATE CONSTRAINT invites_usage_valid`,
+		},
+	},
+	{
+		version: 5,
+		name:    "account_lockout",
+		statements: []string{
+			`ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_count INT NOT NULL DEFAULT 0`,
+			`ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ NULL`,
+			`CREATE INDEX IF NOT EXISTS users_locked_until_idx ON users(locked_until) WHERE locked_until IS NOT NULL`,
+			`DO $$ BEGIN
+				IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_failed_login_count_valid' AND conrelid = 'users'::regclass) THEN
+					ALTER TABLE users ADD CONSTRAINT users_failed_login_count_valid CHECK (failed_login_count >= 0) NOT VALID;
+				END IF;
+			END $$`,
+			`ALTER TABLE users VALIDATE CONSTRAINT users_failed_login_count_valid`,
+		},
+	},
+	{
+		version: 6,
+		name:    "encrypted_content_audit",
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS content_events (
+				id BIGSERIAL PRIMARY KEY,
+				user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				service TEXT NOT NULL CHECK (service IN ('comfyui','openwebui')),
+				kind TEXT NOT NULL CHECK (kind IN ('comfyui_prompt','openwebui_chat')),
+				external_id TEXT NULL,
+				model TEXT NOT NULL DEFAULT '',
+				prompt_cipher BYTEA NOT NULL,
+				response_cipher BYTEA NOT NULL,
+				metadata_cipher BYTEA NOT NULL,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				expires_at TIMESTAMPTZ NOT NULL DEFAULT (now() + interval '7 days')
+			)`,
+			`CREATE INDEX IF NOT EXISTS content_events_created_at_idx ON content_events(created_at DESC)`,
+			`CREATE INDEX IF NOT EXISTS content_events_user_created_idx ON content_events(user_id, created_at DESC)`,
+			`CREATE INDEX IF NOT EXISTS content_events_external_idx ON content_events(service, external_id) WHERE external_id IS NOT NULL`,
+			`CREATE TABLE IF NOT EXISTS content_media (
+				id BIGSERIAL PRIMARY KEY,
+				event_id BIGINT NOT NULL REFERENCES content_events(id) ON DELETE CASCADE,
+				media_type TEXT NOT NULL CHECK (media_type IN ('image','video')),
+				mime_type TEXT NOT NULL,
+				original_name TEXT NOT NULL,
+				payload_cipher BYTEA NOT NULL,
+				size_bytes BIGINT NOT NULL CHECK (size_bytes >= 0),
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				expires_at TIMESTAMPTZ NOT NULL DEFAULT (now() + interval '3 days'),
+				UNIQUE(event_id, original_name)
+			)`,
+			`CREATE INDEX IF NOT EXISTS content_media_expires_idx ON content_media(expires_at)`,
+		},
+	},
+	{
+		version: 7,
+		name:    "comfy_output_ownership",
+		statements: []string{
+			`ALTER TABLE content_media ADD COLUMN IF NOT EXISTS subfolder TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE content_media ADD COLUMN IF NOT EXISTS storage_type TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE content_media DROP CONSTRAINT IF EXISTS content_media_event_id_original_name_key`,
+			`DO $$ BEGIN
+				IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'content_media_event_output_unique' AND conrelid = 'content_media'::regclass) THEN
+					ALTER TABLE content_media ADD CONSTRAINT content_media_event_output_unique UNIQUE(event_id,original_name,subfolder,storage_type);
+				END IF;
+			END $$`,
+			`CREATE TABLE IF NOT EXISTS comfy_output_ownership (
+				id BIGSERIAL PRIMARY KEY,
+				event_id BIGINT NOT NULL REFERENCES content_events(id) ON DELETE CASCADE,
+				user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				prompt_id TEXT NOT NULL,
+				filename TEXT NOT NULL,
+				subfolder TEXT NOT NULL DEFAULT '',
+				storage_type TEXT NOT NULL DEFAULT '',
+				media_type TEXT NOT NULL CHECK (media_type IN ('image','video')),
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				expires_at TIMESTAMPTZ NOT NULL DEFAULT (now() + interval '7 days'),
+				UNIQUE(event_id,filename,subfolder,storage_type)
+			)`,
+			`CREATE INDEX IF NOT EXISTS comfy_output_lookup_idx ON comfy_output_ownership(filename,subfolder,storage_type,created_at DESC)`,
+			`CREATE INDEX IF NOT EXISTS comfy_output_expires_idx ON comfy_output_ownership(expires_at)`,
+		},
+	},
+	{
+		version: 8,
+		name:    "comfy_user_state",
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS comfy_settings (
+				user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+				settings JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(settings) = 'object'),
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`CREATE TABLE IF NOT EXISTS comfy_userdata (
+				user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				path TEXT NOT NULL,
+				payload BYTEA NOT NULL,
+				size_bytes BIGINT NOT NULL,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				modified_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				PRIMARY KEY (user_id, path),
+				CHECK (char_length(path) BETWEEN 1 AND 1024),
+				CHECK (size_bytes = octet_length(payload)),
+				CHECK (size_bytes BETWEEN 0 AND 33554432)
+			)`,
+			`CREATE INDEX IF NOT EXISTS comfy_userdata_user_path_idx ON comfy_userdata(user_id, path text_pattern_ops)`,
+		},
+	},
+	{
+		version: 9,
+		name:    "mining_profiles",
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS miners (
+				id BIGSERIAL PRIMARY KEY,
+				name TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 80),
+				script_path TEXT NOT NULL UNIQUE CHECK (char_length(script_path) BETWEEN 1 AND 1024),
+				process_name TEXT NOT NULL CHECK (char_length(process_name) BETWEEN 5 AND 128),
+				icon_mime TEXT NOT NULL DEFAULT '',
+				icon_data BYTEA NOT NULL DEFAULT ''::bytea CHECK (octet_length(icon_data) <= 262144),
+				enabled BOOLEAN NOT NULL DEFAULT TRUE,
+				is_default BOOLEAN NOT NULL DEFAULT FALSE,
+				created_by_user_id BIGINT NULL REFERENCES users(id) ON DELETE SET NULL,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS miners_single_default_idx ON miners(is_default) WHERE is_default`,
+			`CREATE INDEX IF NOT EXISTS miners_enabled_idx ON miners(enabled, name)`,
+		},
+	},
+}
+
+func Migrate(ctx context.Context, db *sql.DB) error {
+	if err := validateMigrations(migrationCatalog); err != nil {
+		return err
+	}
+
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return fmt.Errorf("begin migrations: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, migrationLockID); err != nil {
+		return fmt.Errorf("lock migrations: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS schema_migrations (
+			version BIGINT PRIMARY KEY,
+			name TEXT NOT NULL,
+			checksum TEXT NOT NULL,
+			applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		)
+	`); err != nil {
+		return fmt.Errorf("create migration table: %w", err)
+	}
+
+	applied, err := appliedMigrations(ctx, tx)
+	if err != nil {
+		return err
+	}
+	catalog := make(map[int64]migration, len(migrationCatalog))
+	for _, item := range migrationCatalog {
+		catalog[item.version] = item
+	}
+	for version := range applied {
+		if _, ok := catalog[version]; !ok {
+			return fmt.Errorf("database schema version %d is newer than this binary", version)
+		}
+	}
+
+	for _, item := range migrationCatalog {
+		checksum := migrationChecksum(item)
+		if stored, ok := applied[item.version]; ok {
+			if stored != checksum {
+				return fmt.Errorf("migration %d (%s) checksum mismatch", item.version, item.name)
+			}
+			continue
+		}
+		for statementIndex, statement := range item.statements {
+			if _, err := tx.ExecContext(ctx, statement); err != nil {
+				return fmt.Errorf("apply migration %d (%s), statement %d: %w", item.version, item.name, statementIndex+1, err)
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO schema_migrations (version, name, checksum) VALUES ($1,$2,$3)
+		`, item.version, item.name, checksum); err != nil {
+			return fmt.Errorf("record migration %d (%s): %w", item.version, item.name, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit migrations: %w", err)
+	}
+	return nil
+}
+
+func appliedMigrations(ctx context.Context, tx *sql.Tx) (map[int64]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT version, checksum FROM schema_migrations ORDER BY version`)
+	if err != nil {
+		return nil, fmt.Errorf("read applied migrations: %w", err)
+	}
+	defer rows.Close()
+	applied := make(map[int64]string)
+	for rows.Next() {
+		var version int64
+		var checksum string
+		if err := rows.Scan(&version, &checksum); err != nil {
+			return nil, fmt.Errorf("scan applied migration: %w", err)
+		}
+		applied[version] = checksum
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate applied migrations: %w", err)
+	}
+	return applied, nil
+}
+
+func migrationChecksum(item migration) string {
+	hash := sha256.New()
+	fmt.Fprintf(hash, "%d\x00%s\x00", item.version, item.name)
+	for _, statement := range item.statements {
+		hash.Write([]byte(strings.TrimSpace(statement)))
+		hash.Write([]byte{0})
+	}
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+func validateMigrations(items []migration) error {
+	if len(items) == 0 {
+		return fmt.Errorf("migration catalog is empty")
+	}
+	versions := make([]int64, 0, len(items))
+	seenNames := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if item.version <= 0 || strings.TrimSpace(item.name) == "" || len(item.statements) == 0 {
+			return fmt.Errorf("invalid migration definition at version %d", item.version)
+		}
+		if _, exists := seenNames[item.name]; exists {
+			return fmt.Errorf("duplicate migration name %q", item.name)
+		}
+		seenNames[item.name] = struct{}{}
+		versions = append(versions, item.version)
+	}
+	if !sort.SliceIsSorted(versions, func(i, j int) bool { return versions[i] < versions[j] }) {
+		return fmt.Errorf("migration versions must be strictly increasing")
+	}
+	for index, version := range versions {
+		if version != int64(index+1) {
+			return fmt.Errorf("migration versions must be contiguous: got %d at position %d", version, index+1)
+		}
+	}
+	return nil
+}

@@ -1,0 +1,67 @@
+{{define "admin_mining"}}
+{{template "head" .}}
+{{template "admin_nav" .}}
+<main class="page" id="main-content">
+  <section class="hero admin-hero">
+    <div><p class="eyebrow">Управление ресурсами</p><h1>Майнинг</h1></div>
+    <span class="mining-status {{if .Mining.Running}}running{{else if .Mining.Available}}stopped{{else}}unavailable{{end}}"><i></i>{{if .Mining.Running}}Работает{{else if .Mining.Available}}Остановлен{{else}}Агент недоступен{{end}}</span>
+  </section>
+
+  {{if .Error}}<p class="alert">{{.Error}}</p>{{end}}
+  {{if eq .Status "created"}}<p class="success-box">Профиль майнинга добавлен.</p>{{else if eq .Status "started"}}<p class="success-box">Майнинг запущен.</p>{{else if eq .Status "stopped"}}<p class="success-box">Майнинг остановлен.</p>{{else if eq .Status "updated"}}<p class="success-box">Настройки майнинга обновлены.</p>{{end}}
+
+  <section class="panel">
+    <div class="panel-heading"><div><p class="section-kicker">Общее состояние</p><h2>Профили запуска</h2></div><span class="muted">{{len .Mining.Miners}} настроено</span></div>
+    <p class="panel-intro">{{.Mining.Message}}</p>
+    <details class="miner-script-details admin-script-details" open>
+      <summary>Содержимое активного скрипта</summary>
+      {{if .Mining.Script.Content}}
+      <div class="script-fingerprint"><span>SHA-256</span><code>{{.Mining.Script.SHA256}}</code></div>
+      <pre>{{.Mining.Script.Content}}</pre>
+      {{else}}<p class="muted">{{if .Mining.Script.Message}}{{.Mining.Script.Message}}{{else}}Содержимое скрипта недоступно.{{end}}</p>{{end}}
+    </details>
+    <div class="miner-list">
+      {{range .Mining.Miners}}
+      <article class="miner-row {{if .State.Running}}is-running{{end}} {{if not .Enabled}}is-disabled{{end}}">
+        <div class="miner-identity">
+          {{if .IconMIME}}<img class="miner-icon" src="/mining/icon/{{.ID}}" alt="">{{else}}<span class="miner-icon-fallback">MN</span>{{end}}
+          <span><b>{{.Name}}</b><small>{{.ProcessName}}{{if .Default}} · профиль по умолчанию{{end}}</small></span>
+        </div>
+        <div class="miner-path"><span>Скрипт запуска</span><code>{{.ScriptPath}}</code></div>
+        <div class="miner-row-status">
+          <span class="mining-status {{if .State.Running}}running{{else if $.Mining.Available}}stopped{{else}}unavailable{{end}}"><i></i>{{if .State.Running}}Работает{{else if $.Mining.Available}}Остановлен{{else}}Нет связи{{end}}</span>
+          {{with .State.PIDs}}<small>PID {{index . 0}}</small>{{end}}
+        </div>
+        <form method="post" class="miner-actions">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}">
+          {{if .State.Running}}<button name="action" value="stop" class="danger">Остановить</button>{{else}}<button name="action" value="start" {{if or (not .Enabled) (not $.Mining.Available)}}disabled{{end}}>Запустить</button>{{end}}
+          {{if not .Default}}<button name="action" value="default" class="ghost" {{if not .Enabled}}disabled{{end}}>Сделать основным</button>{{end}}
+          {{if .Enabled}}{{if not .Default}}<button name="action" value="disable" class="ghost">Отключить</button>{{end}}{{else}}<button name="action" value="enable" class="ghost">Включить</button>{{end}}
+          {{if not .Default}}<button name="action" value="delete" class="ghost danger-text" data-confirm="Удалить профиль {{.Name}}?">Удалить</button>{{end}}
+        </form>
+      </article>
+      {{else}}
+      <p class="empty-state">Профили майнинга ещё не добавлены.</p>
+      {{end}}
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-heading"><div><p class="section-kicker">Новый профиль</p><h2>Добавить майнер</h2></div></div>
+    <form method="post" enctype="multipart/form-data" class="miner-create-form">
+      <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="action" value="create">
+      <div class="invite-fields">
+        <label>Название<input name="name" maxlength="80" placeholder="Например, SRBMiner Pearl" required></label>
+        <label>Имя процесса<input name="process_name" maxlength="128" placeholder="SRBMiner-MULTI.exe" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,126}\.exe" required></label>
+      </div>
+      <label>Полный путь к скрипту запуска<input name="script_path" maxlength="1024" placeholder="Путь к .bat-файлу запуска" required></label>
+      <div class="miner-create-footer">
+        <label class="file-field"><span>Иконка профиля</span><input name="icon" type="file" accept="image/png,image/jpeg,image/webp,image/x-icon,.ico"><small>PNG, JPEG, WebP или ICO, до 256 КБ</small></label>
+        <label class="checkline"><input name="is_default" type="checkbox"><span>Сделать профилем по умолчанию</span></label>
+        <button type="submit">Добавить профиль</button>
+      </div>
+    </form>
+  </section>
+</main>
+</body></html>
+{{end}}

@@ -1,0 +1,40 @@
+{{define "admin_invites"}}
+{{template "head" .}}
+{{template "admin_nav" .}}
+<main class="page" id="main-content">
+  <section class="hero"><div><p class="eyebrow">Управление доступом</p><h1>Приглашения</h1></div></section>
+  {{if .InviteLink}}<section class="panel success invite-result"><div class="panel-heading"><div><p class="section-kicker">Готово</p><h2>Ссылка создана</h2></div></div><div class="copyrow"><p class="copyline" id="invite-link">{{.InviteLink}}</p><button class="ghost" type="button" data-copy-target="#invite-link">Копировать ссылку</button></div></section>{{end}}
+  <section class="panel">
+    <div class="panel-heading"><div><p class="section-kicker">Новый доступ</p><h2>Создать приглашение</h2></div></div>
+    {{if .Error}}<p class="alert">{{.Error}}</p>{{end}}
+    <form method="post" class="invite-form">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <div class="invite-fields"><label>Срок действия<input name="expires_at" type="datetime-local"></label><label>Количество активаций<input name="max_uses" type="number" value="1" min="1"></label></div>
+      <fieldset class="service-access"><legend>Доступ к сервисам</legend><label class="service-toggle"><input name="grant_comfyui" type="checkbox" checked><span><b>ComfyUI</b><small>Разрешить при регистрации</small></span></label><label class="service-toggle"><input name="grant_openwebui" type="checkbox" checked><span><b>OpenWebUI</b><small>Разрешить при регистрации</small></span></label></fieldset>
+      <button type="submit">Создать приглашение</button>
+    </form>
+  </section>
+  <section class="panel">
+    <div class="panel-heading"><div><p class="section-kicker">История</p><h2>Созданные приглашения</h2></div></div>
+    <table><thead><tr><th>ID</th><th>Создал</th><th>Доступ</th><th>Активации</th><th>Истекает</th><th>Статус</th><th></th></tr></thead><tbody>
+    {{range .Invites}}
+      <tr>
+        <td>{{.ID}}</td><td>{{.CreatedBy}}</td><td>{{if .GrantComfyUI}}<span class="badge">ComfyUI</span>{{end}} {{if .GrantOpenWebUI}}<span class="badge">OpenWebUI</span>{{end}}</td><td>{{.UsedCount}} / {{.MaxUses}}</td><td>{{formatTime .ExpiresAt}}</td>
+        <td><span class="badge {{if eq .Status "active"}}ok{{else}}danger{{end}}">{{inviteStatusLabel .Status}}</span></td>
+        <td><div class="table-actions">
+          <form method="post" action="/admin/invites/{{.ID}}/{{if .Revoked}}unrevoke{{else}}revoke{{end}}">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <button class="action-button {{if .Revoked}}restore{{else}}warning{{end}}" {{if not .Revoked}}data-confirm="Отозвать это приглашение?"{{end}}><span class="action-icon" aria-hidden="true">{{if .Revoked}}&#8634;{{else}}&#8722;{{end}}</span>{{if .Revoked}}Вернуть{{else}}Отозвать{{end}}</button>
+          </form>
+          <form method="post" action="/admin/invites/{{.ID}}/delete">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <button class="action-button danger" type="submit" data-confirm="Удалить приглашение навсегда? Ссылка больше не будет работать."><span class="action-icon" aria-hidden="true">&#215;</span>Удалить</button>
+          </form>
+        </div></td>
+      </tr>
+    {{else}}<tr><td colspan="7" class="muted">Приглашений пока нет.</td></tr>{{end}}
+    </tbody></table>
+  </section>
+</main>
+</body></html>
+{{end}}

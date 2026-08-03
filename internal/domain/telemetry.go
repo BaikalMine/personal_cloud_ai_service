@@ -1,0 +1,105 @@
+package domain
+
+import "time"
+
+type ProxyRequestRecord struct {
+	UserID     int64
+	Service    string
+	Method     string
+	Path       string
+	Status     int
+	DurationMS int64
+	BytesIn    int64
+	BytesOut   int64
+	WebSocket  bool
+	ClientIP   string
+	UserAgent  string
+}
+
+type AuditEvent struct {
+	ActorUserID *int64
+	Action      string
+	TargetType  string
+	TargetID    *int64
+	IP          string
+	UserAgent   string
+	Metadata    map[string]any
+}
+
+type Activity struct {
+	Service      string
+	ServiceLabel string
+	Summary      string
+	Method       string
+	Path         string
+	Status       int
+	Duration     int64
+	Bytes        int64
+	Count        int
+	WebSocket    bool
+	CreatedAt    time.Time
+}
+
+type ServiceUsage struct {
+	Service  string
+	Requests int64
+	Users    int64
+	Bytes    int64
+	Errors   int64
+}
+
+type ServiceTrendPoint struct {
+	Label          string
+	Requests       int64
+	Users          int64
+	Errors         int64
+	Bytes          int64
+	RequestPercent int
+}
+
+type ServiceAnalytics struct {
+	Service          string
+	DisplayName      string
+	Requests         int64
+	Users            int64
+	Bytes            int64
+	Errors           int64
+	AverageDuration  int64
+	ActiveWebSockets int64
+	Trend            []ServiceTrendPoint
+}
+
+type ChartPoint struct {
+	Label   string
+	Count   int64
+	Percent int
+}
+
+type UserStats struct {
+	TotalRequests int64
+	TotalBytesOut int64
+	TodayRequests int64
+	WeekRequests  int64
+	AvgDuration   int64
+	LastService   string
+	ByService     []ServiceUsage
+	Chart         []ChartPoint
+}
+
+type TopUser struct {
+	Username string
+	Value    int64
+}
+
+type AdminStats struct {
+	ActiveUsers      int64
+	RequestsToday    int64
+	Requests7Days    int64
+	ActiveWebSockets int64
+	AverageDuration  int64
+	ErrorRate        string
+	TopUsersRequests []TopUser
+	TopUsersTraffic  []TopUser
+	UsageByService   []ServiceUsage
+	Trend            []ChartPoint
+}

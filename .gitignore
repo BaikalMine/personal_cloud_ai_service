@@ -1,0 +1,10 @@
+.env
+/gateway
+postgres-data/
+*.log
+backups/
+*.dump
+*.zip
+coverage.out
+coverage.html
+dist/

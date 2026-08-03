@@ -1,0 +1,35 @@
+{{define "account_sessions"}}
+{{template "head" .}}
+{{template "nav" .}}
+<main class="page" id="main-content">
+  <section class="hero">
+    <div><p class="eyebrow">Безопасность аккаунта</p><h1>Активные сессии</h1></div>
+    <form method="post" action="/account/sessions">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="action" value="revoke_others">
+      <button class="ghost" type="submit" data-confirm="Завершить все остальные активные сессии?">Завершить остальные</button>
+    </form>
+  </section>
+  {{if .Message}}<p class="success-box">{{.Message}}</p>{{end}}
+  <section class="panel">
+    <div class="panel-heading"><div><p class="section-kicker">Устройства и подключения</p><h2>Ваши сессии</h2></div></div>
+    <table>
+      <thead><tr><th>Сессия</th><th>IP</th><th>Создана</th><th>Последняя активность</th><th>Истекает</th><th>Устройство</th><th></th></tr></thead>
+      <tbody>
+      {{range .Sessions}}
+        <tr>
+          <td>{{if .Current}}<span class="badge ok">текущая</span>{{else}}#{{.ID}}{{end}}</td>
+          <td><code>{{.IP}}</code></td>
+          <td>{{formatTime .CreatedAt}}</td>
+          <td>{{formatTime .LastSeenAt}}</td>
+          <td>{{formatTime .ExpiresAt}}</td>
+          <td class="path">{{.UserAgent}}</td>
+          <td>{{if not .Current}}<div class="table-actions"><form method="post" action="/account/sessions"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="action" value="revoke"><input type="hidden" name="session_id" value="{{.ID}}"><button class="action-button danger" type="submit" data-confirm="Завершить эту сессию?"><span class="action-icon" aria-hidden="true">&#215;</span>Завершить</button></form></div>{{end}}</td>
+        </tr>
+      {{else}}<tr><td colspan="7" class="muted">Активных сессий нет.</td></tr>{{end}}
+      </tbody>
+    </table>
+  </section>
+</main>
+</body></html>
+{{end}}

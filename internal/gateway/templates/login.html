@@ -1,0 +1,18 @@
+{{define "login"}}
+{{template "head" .}}
+<main class="auth-shell" id="main-content">
+  <section class="auth-card">
+    <p class="eyebrow">Защищённый доступ</p>
+    <h1>Вход в AI Gateway</h1>
+    <p class="muted">Используйте выданную учётную запись.</p>
+    {{if .Error}}<p class="alert">{{.Error}}</p>{{end}}
+    <form method="post" action="/login">
+      <input type="hidden" name="next" value="{{.Next}}">
+      <label>Логин<input name="username" autocomplete="username" placeholder="Ваш логин" required autofocus></label>
+      <label>Пароль<input name="password" type="password" autocomplete="current-password" placeholder="Ваш пароль" required></label>
+      <button type="submit">Войти</button>
+    </form>
+  </section>
+</main>
+</body></html>
+{{end}}

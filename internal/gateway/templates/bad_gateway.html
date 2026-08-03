@@ -1,0 +1,12 @@
+{{define "bad_gateway"}}
+{{template "head" .}}
+{{template "nav" .}}
+<main class="auth-shell" id="main-content">
+  <section class="auth-card">
+    <h1>Сервис недоступен</h1>
+    <p class="muted">Сейчас не удаётся подключиться к {{.Service}}. Запустите сервис и обновите страницу.</p>
+    <a class="button" href="/app">Вернуться на главную</a>
+  </section>
+</main>
+</body></html>
+{{end}}
