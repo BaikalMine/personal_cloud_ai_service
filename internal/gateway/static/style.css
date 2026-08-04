@@ -580,6 +580,8 @@ code { color: var(--cyan); }
 .update-state.current { color: var(--muted); }
 .update-state.warning { border-color: rgba(255, 191, 104, .4); color: var(--amber); background: rgba(255, 191, 104, .07); }
 .update-state.offline { color: var(--coral); }
+.update-direct-action { min-height: 28px; flex: 0 0 auto; padding: 0 9px; border: 1px solid rgba(98, 221, 181, .48); border-radius: 4px; background: rgba(98, 221, 181, .1); color: var(--mint); font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.update-direct-action:hover { border-color: var(--mint); background: rgba(98, 221, 181, .18); }
 .update-versions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0; }
 .update-versions div { min-width: 0; padding: 9px 10px; border: 1px solid var(--line); background: rgba(0, 0, 0, .11); }
 .update-versions dt { color: var(--faint); font-size: 9px; font-weight: 800; text-transform: uppercase; }

@@ -31,7 +31,7 @@
         </label>
         <div class="update-item-top">
           <div class="update-service"><span class="update-symbol {{.Name}}">{{if eq .Name "gateway"}}AG{{else if eq .Name "comfyui"}}CU{{else}}OW{{end}}</span><span><h3>{{.DisplayName}}</h3><p>{{if not .Configured}}Не настроен{{else if .UpdateAvailable}}Найдена новая версия{{else if .Message}}Проверка требует внимания{{else}}Версия актуальна{{end}}</p></span></div>
-          {{if .UpdateAvailable}}<span class="update-state available">обновить</span>{{else if .Message}}<span class="update-state warning">внимание</span>{{else if .Configured}}<span class="update-state current">актуально</span>{{else}}<span class="update-state offline">нет связи</span>{{end}}
+          {{if and .UpdateAvailable .CanInstall}}<button type="submit" name="action" value="install:{{.Name}}" class="update-direct-action" data-confirm="Установить обновление {{.DisplayName}}? Компонент будет автоматически перезапущен.">Обновить</button>{{else if .UpdateAvailable}}<span class="update-state warning">внимание</span>{{else if .Message}}<span class="update-state warning">внимание</span>{{else if .Configured}}<span class="update-state current">актуально</span>{{else}}<span class="update-state offline">нет связи</span>{{end}}
         </div>
         <dl class="update-versions">
           <div><dt>Установлено</dt><dd><code>{{if .CurrentVersion}}{{.CurrentVersion}}{{else}}-{{end}}</code></dd></div>

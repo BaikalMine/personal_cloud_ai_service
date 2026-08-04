@@ -81,7 +81,12 @@ func (a *App) handleAdminUpdates(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "доступ запрещён", http.StatusForbidden)
 			return
 		}
+		action := r.FormValue("action")
 		components := r.FormValue("component")
+		if target, directInstall := strings.CutPrefix(action, "install:"); directInstall {
+			components = target
+			action = "install"
+		}
 		if components == "" {
 			components = r.FormValue("components")
 		}
@@ -92,7 +97,7 @@ func (a *App) handleAdminUpdates(w http.ResponseWriter, r *http.Request) {
 		request := updates.Request{Components: selected}
 		if !validUpdateRequest(request) {
 			message = "Выберите хотя бы один компонент для проверки или обновления."
-		} else if r.FormValue("action") == "install" {
+		} else if action == "install" {
 			status, _ = a.updates.Install(r.Context(), request)
 			message = status.Message
 			actor := a.currentUser(r)
