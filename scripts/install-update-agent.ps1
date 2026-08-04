@@ -187,7 +187,7 @@ $config = [ordered]@{
         image_variable = 'OPENWEBUI_IMAGE'
         image_repository = 'ghcr.io/open-webui/open-webui'
         release_api = 'https://api.github.com/repos/open-webui/open-webui/releases/latest'
-        health_url = 'http://127.0.0.1:8080/health'
+        health_url = 'docker://openwebui'
     }
 }
 [IO.File]::WriteAllText($configPath, (Convert-ToJsonSafe $config), [Text.UTF8Encoding]::new($false))

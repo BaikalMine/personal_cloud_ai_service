@@ -432,6 +432,9 @@ func (c *ControllerImpl) comfyBusy(ctx context.Context) (bool, error) {
 }
 
 func (c *ControllerImpl) waitHealth(ctx context.Context, endpoint string) error {
+	if container, found := strings.CutPrefix(endpoint, "docker://"); found {
+		return c.waitContainerHealth(ctx, container)
+	}
 	deadline := time.Now().Add(healthTimeout)
 	for time.Now().Before(deadline) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -451,6 +454,26 @@ func (c *ControllerImpl) waitHealth(ctx context.Context, endpoint string) error 
 		}
 	}
 	return errors.New("сервис не прошёл проверку работоспособности за 2 минуты")
+}
+
+func (c *ControllerImpl) waitContainerHealth(ctx context.Context, container string) error {
+	container = strings.TrimSpace(container)
+	if container == "" {
+		return errors.New("контейнер для проверки работоспособности не задан")
+	}
+	deadline := time.Now().Add(healthTimeout)
+	for time.Now().Before(deadline) {
+		state, err := c.runner.Run(ctx, "", "docker", "inspect", "--format", "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}", container)
+		if err == nil && strings.TrimSpace(state) == "healthy" {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+	return fmt.Errorf("контейнер %s не прошёл Docker healthcheck за 2 минуты", container)
 }
 
 func selected(request updates.Request) map[string]bool {
