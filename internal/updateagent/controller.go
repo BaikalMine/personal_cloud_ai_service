@@ -424,11 +424,46 @@ func (c *ControllerImpl) comfyBusy(ctx context.Context) (bool, error) {
 	if response.StatusCode != http.StatusOK {
 		return false, fmt.Errorf("ComfyUI вернул HTTP %d для очереди", response.StatusCode)
 	}
-	var queue [2][]json.RawMessage
-	if err := json.NewDecoder(response.Body).Decode(&queue); err != nil {
+	var payload json.RawMessage
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
 		return false, fmt.Errorf("очередь ComfyUI: %w", err)
 	}
-	return len(queue[0]) > 0 || len(queue[1]) > 0, nil
+	busy, err := comfyQueueBusy(payload)
+	if err != nil {
+		return false, fmt.Errorf("очередь ComfyUI: %w", err)
+	}
+	return busy, nil
+}
+
+func comfyQueueBusy(payload json.RawMessage) (bool, error) {
+	switch firstJSONByte(payload) {
+	case '{':
+		var queue struct {
+			Running []json.RawMessage `json:"queue_running"`
+			Pending []json.RawMessage `json:"queue_pending"`
+		}
+		if err := json.Unmarshal(payload, &queue); err != nil {
+			return false, err
+		}
+		return len(queue.Running) > 0 || len(queue.Pending) > 0, nil
+	case '[':
+		var queue [2][]json.RawMessage
+		if err := json.Unmarshal(payload, &queue); err != nil {
+			return false, err
+		}
+		return len(queue[0]) > 0 || len(queue[1]) > 0, nil
+	default:
+		return false, errors.New("неподдерживаемый формат ответа")
+	}
+}
+
+func firstJSONByte(payload []byte) byte {
+	for _, value := range payload {
+		if value != ' ' && value != '\n' && value != '\r' && value != '\t' {
+			return value
+		}
+	}
+	return 0
 }
 
 func (c *ControllerImpl) waitHealth(ctx context.Context, endpoint string) error {
