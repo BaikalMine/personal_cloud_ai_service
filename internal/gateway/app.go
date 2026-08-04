@@ -22,6 +22,7 @@ import (
 	"ai-access-gateway/internal/mining"
 	"ai-access-gateway/internal/security"
 	"ai-access-gateway/internal/store"
+	"ai-access-gateway/internal/updates"
 )
 
 //go:embed templates/*.html static/*
@@ -91,6 +92,7 @@ func Run() error {
 		csrfSigner:        security.NewCSRFSigner(cfg.SessionSecret),
 		store:             repository,
 		mining:            mining.NewClient(cfg.MiningAgentURL, cfg.MiningAgentToken),
+		updates:           updates.NewClient(cfg.UpdateAgentURL, cfg.UpdateAgentToken),
 		contentCipher:     contentCipher,
 		mediaCaptureSlots: make(chan struct{}, maxConcurrentMediaCaptures),
 		adminMediaSlots:   make(chan struct{}, maxConcurrentAdminMediaResponses),

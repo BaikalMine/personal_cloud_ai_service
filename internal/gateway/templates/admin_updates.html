@@ -1,0 +1,36 @@
+{{define "admin_updates"}}
+{{template "head" .}}
+{{template "admin_nav" .}}
+<main class="page" id="main-content">
+  <section class="hero admin-hero">
+    <div><p class="eyebrow">Сопровождение системы</p><h1>Обновления</h1></div>
+    <span class="live-badge"><i></i>{{if .Updates.Available}}агент доступен{{else}}агент не подключён{{end}}</span>
+  </section>
+  {{if .Message}}<p class="alert">{{.Message}}</p>{{end}}
+  <section class="panel">
+    <div class="panel-heading"><div><p class="section-kicker">Контроль версий</p><h2>Компоненты</h2></div></div>
+    <p class="panel-intro">Проверка не меняет систему. Установка создаёт откатную точку, обновляет выбранный компонент и ждёт его штатного запуска.</p>
+    <form method="post" class="update-form">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <div class="miner-list">
+      {{range .Updates.Components}}
+        <label class="miner-row {{if .UpdateAvailable}}is-running{{end}}">
+          <input type="checkbox" name="components" value="{{.Name}}" {{if .UpdateAvailable}}checked{{end}} {{if not .Configured}}disabled{{end}}>
+          <span class="miner-identity"><span class="miner-icon-fallback">UP</span><span><b>{{.DisplayName}}</b><small>{{if .Configured}}{{if .UpdateAvailable}}Доступна новая версия{{else}}Актуальная версия{{end}}{{else}}Не настроен{{end}}</small></span></span>
+          <span class="miner-path"><span>Установлено</span><code>{{if .CurrentVersion}}{{.CurrentVersion}}{{else}}-{{end}}</code></span>
+          <span class="miner-path"><span>Доступно</span><code>{{if .LatestVersion}}{{.LatestVersion}}{{else}}-{{end}}</code></span>
+          <span class="miner-row-status">{{if .Message}}<small>{{.Message}}</small>{{else if .CanInstall}}<span class="mining-status stopped"><i></i>готово</span>{{end}}</span>
+        </label>
+      {{else}}
+        <p class="empty-state">Агент обновлений пока не передал состояние компонентов.</p>
+      {{end}}
+      </div>
+      <div class="miner-create-footer">
+        <button type="submit" name="action" value="check">Проверить выбранное</button>
+        <button type="submit" name="action" value="install" class="danger">Установить выбранное</button>
+      </div>
+    </form>
+  </section>
+</main>
+</body></html>
+{{end}}

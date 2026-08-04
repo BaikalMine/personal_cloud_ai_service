@@ -12,6 +12,7 @@ import (
 
 	"ai-access-gateway/internal/security"
 	"ai-access-gateway/internal/store"
+	"ai-access-gateway/internal/updates"
 )
 
 const maxConcurrentAdminMediaResponses = 2
@@ -52,6 +53,8 @@ func (a *App) handleAdminRoutes(w http.ResponseWriter, r *http.Request) {
 		a.handleAdminMetricsPage(w, r)
 	case path == "mining":
 		a.handleAdminMining(w, r)
+	case path == "updates":
+		a.handleAdminUpdates(w, r)
 	case strings.HasPrefix(path, "content/media/"):
 		a.handleAdminContentMedia(w, r, strings.TrimPrefix(path, "content/media/"))
 	case path == "content":
@@ -63,6 +66,68 @@ func (a *App) handleAdminRoutes(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (a *App) handleAdminUpdates(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		w.Header().Set("Allow", "GET, POST")
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
+	status := updates.Status{}
+	message := ""
+	if r.Method == http.MethodPost {
+		if !a.validCSRF(r) {
+			http.Error(w, "доступ запрещён", http.StatusForbidden)
+			return
+		}
+		components := r.FormValue("component")
+		if components == "" {
+			components = r.FormValue("components")
+		}
+		selected := r.Form["components"]
+		if components != "" && len(selected) == 0 {
+			selected = []string{components}
+		}
+		request := updates.Request{Components: selected}
+		if !validUpdateRequest(request) {
+			message = "Выберите хотя бы один компонент для проверки или обновления."
+		} else if r.FormValue("action") == "install" {
+			status, _ = a.updates.Install(r.Context(), request)
+			message = status.Message
+			actor := a.currentUser(r)
+			a.audit(r.Context(), &actor.ID, "updates_install_requested", "system", nil, a.clientIP(r), r.UserAgent(), map[string]any{"components": selected})
+			if message == "" {
+				message = "Команда обновления принята. Если обновлялся сам Gateway, страница может кратко перезагрузиться."
+			}
+		} else {
+			status, _ = a.updates.Check(r.Context(), request)
+			message = status.Message
+		}
+	} else {
+		status, _ = a.updates.Status(r.Context())
+		message = status.Message
+	}
+	a.render(w, r, "admin_updates", map[string]any{
+		"Title": "Обновления", "Updates": status, "Message": message,
+	})
+}
+
+func validUpdateRequest(request updates.Request) bool {
+	if len(request.Components) == 0 || len(request.Components) > 3 {
+		return false
+	}
+	seen := make(map[string]struct{}, len(request.Components))
+	for _, component := range request.Components {
+		if !updates.ValidComponent(component) {
+			return false
+		}
+		if _, found := seen[component]; found {
+			return false
+		}
+		seen[component] = struct{}{}
+	}
+	return true
 }
 
 func (a *App) handleAdminContent(w http.ResponseWriter, r *http.Request) {

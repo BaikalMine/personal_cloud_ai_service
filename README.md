@@ -17,6 +17,7 @@ the proxied ComfyUI and OpenWebUI interfaces remain unchanged.
 - `internal/gateway/templates`: server-rendered UI templates.
 - `internal/gateway/static`: local CSS assets.
 - `cmd/mining-agent`: restricted Windows host agent used to start and stop allow-listed mining scripts.
+- `cmd/update-agent`: restricted Windows host agent used by administrators to check and install component updates.
 - `docker-compose.yml`: app and PostgreSQL services.
 
 The gateway keeps the public and admin listeners separate. The admin listener is
@@ -80,6 +81,39 @@ for a live tail. The inbound firewall rule remains restricted to Docker/WSL
 networks. The agent accepts only authenticated start, stop, and state requests,
 and scripts must resolve below the configured mining directory; arbitrary
 commands are not accepted.
+
+## Managed updates
+
+The administrator page `/admin/updates` can check and install updates for the
+Gateway, ComfyUI, and Open WebUI. It is enabled by a second Windows host agent
+on port `8093`, restricted in the firewall to Docker/WSL networks and protected
+by a unique bearer token. The service itself has no public update endpoint.
+
+Build and install the agent from an elevated PowerShell session. Supply the
+actual local paths only at installation time; they are written to the protected
+agent configuration and are not stored in the repository.
+
+```powershell
+$env:GOOS = 'windows'
+$env:GOARCH = 'amd64'
+go build -trimpath -ldflags '-s -w' -o .\dist\update-agent.exe .\cmd\update-agent
+.\scripts\install-update-agent.ps1 `
+  -Executable .\dist\update-agent.exe `
+  -GatewayRoot <gateway-source-directory> `
+  -ComfyRoot <comfyui-source-directory> `
+  -ComfyPython <comfyui-python-executable> `
+  -OpenWebUIComposeFile <openwebui-compose-file> `
+  -GenerateToken
+```
+
+The installer records the currently running Open WebUI image as a digest pin,
+then future Open WebUI updates use the latest official release tag and digest.
+Before each update the agent verifies that the Git worktree is clean and, for
+ComfyUI, that its queue is idle. Gateway and ComfyUI updates retain the prior
+commit and roll back after a failed rebuild or health check. Open WebUI restores
+the previous image pin if its replacement does not become healthy. A successful
+ComfyUI restart opens a visible console window, matching the normal manual
+workflow. The agent never opens ports `8188`, `11434`, `3000`, `8088`, or `8089`.
 
 The Keenetic HTTPS proxy must preserve the public `Host` value and response
 security headers. Verify the final Internet-facing response after router

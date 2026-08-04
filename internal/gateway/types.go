@@ -16,6 +16,7 @@ import (
 	"ai-access-gateway/internal/mining"
 	"ai-access-gateway/internal/security"
 	"ai-access-gateway/internal/store"
+	"ai-access-gateway/internal/updates"
 )
 
 const (
@@ -40,6 +41,7 @@ type App struct {
 	csrfSigner        *security.CSRFSigner
 	store             *store.Store
 	mining            *mining.Client
+	updates           *updates.Client
 	contentCipher     *contentcrypto.Cipher
 	mediaCaptureSlots chan struct{}
 	adminMediaSlots   chan struct{}
