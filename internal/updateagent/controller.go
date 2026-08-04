@@ -93,6 +93,17 @@ func (c *ControllerImpl) Install(_ context.Context, request updates.Request) (up
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 	components := selected(request)
+	preflight, err := c.inspect(ctx, components)
+	if err != nil {
+		return preflight, err
+	}
+	components = installableComponents(preflight, components)
+	if len(components) == 0 {
+		if preflight.Message == "" {
+			preflight.Message = "Выбранные компоненты уже актуальны или не готовы к безопасной установке."
+		}
+		return preflight, nil
+	}
 	if components[updates.ComponentGateway] {
 		if err := c.installGateway(ctx); err != nil {
 			status, _ := c.inspect(context.Background(), components)
@@ -517,6 +528,16 @@ func selected(request updates.Request) map[string]bool {
 		items[item] = true
 	}
 	return items
+}
+
+func installableComponents(status updates.Status, requested map[string]bool) map[string]bool {
+	allowed := make(map[string]bool, len(requested))
+	for _, component := range status.Components {
+		if requested[component.Name] && component.UpdateAvailable && component.CanInstall {
+			allowed[component.Name] = true
+		}
+	}
+	return allowed
 }
 
 func readEnvValue(path, key string) (string, error) {

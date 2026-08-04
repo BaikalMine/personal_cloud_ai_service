@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"ai-access-gateway/internal/updates"
 )
 
 func TestWriteEnvValueReplacesOnlyRequestedValue(t *testing.T) {
@@ -59,5 +61,20 @@ func TestComfyQueueBusySupportsCurrentAndLegacyFormats(t *testing.T) {
 				t.Fatalf("busy = %v, want %v", busy, test.busy)
 			}
 		})
+	}
+}
+
+func TestInstallableComponentsRequiresSafeAvailableUpdate(t *testing.T) {
+	requested := map[string]bool{
+		"gateway": true, "comfyui": true, "openwebui": true,
+	}
+	status := updates.Status{Components: []updates.ComponentStatus{
+		{Name: "gateway", UpdateAvailable: false, CanInstall: true},
+		{Name: "comfyui", UpdateAvailable: true, CanInstall: false},
+		{Name: "openwebui", UpdateAvailable: true, CanInstall: true},
+	}}
+	allowed := installableComponents(status, requested)
+	if len(allowed) != 1 || !allowed["openwebui"] {
+		t.Fatalf("allowed = %#v, want openwebui only", allowed)
 	}
 }
