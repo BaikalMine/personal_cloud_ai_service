@@ -108,8 +108,19 @@ func (a *App) handleAdminUpdates(w http.ResponseWriter, r *http.Request) {
 		status, _ = a.updates.Status(r.Context())
 		message = status.Message
 	}
+	overview := UpdateOverview{}
+	for _, component := range status.Components {
+		switch {
+		case component.UpdateAvailable:
+			overview.Available++
+		case component.Message != "":
+			overview.Blocked++
+		case component.Configured:
+			overview.Current++
+		}
+	}
 	a.render(w, r, "admin_updates", map[string]any{
-		"Title": "Обновления", "Updates": status, "Message": message,
+		"Title": "Обновления", "Updates": status, "Overview": overview, "Message": message,
 	})
 }
 

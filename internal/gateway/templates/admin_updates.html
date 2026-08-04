@@ -1,36 +1,54 @@
 {{define "admin_updates"}}
 {{template "head" .}}
 {{template "admin_nav" .}}
-<main class="page" id="main-content">
-  <section class="hero admin-hero">
-    <div><p class="eyebrow">Сопровождение системы</p><h1>Обновления</h1></div>
-    <span class="live-badge"><i></i>{{if .Updates.Available}}агент доступен{{else}}агент не подключён{{end}}</span>
+<main class="page updates-page" id="main-content">
+  <section class="hero admin-hero updates-hero">
+    <div><p class="eyebrow">Сопровождение системы</p><h1>Обновления</h1><p class="hero-note">Контроль версий, безопасная установка и автоматический возврат к работе.</p></div>
+    <span class="live-badge {{if not .Updates.Available}}is-offline{{end}}"><i></i>{{if .Updates.Available}}агент подключён{{else}}агент недоступен{{end}}</span>
   </section>
+
   {{if .Message}}<p class="alert">{{.Message}}</p>{{end}}
-  <section class="panel">
-    <div class="panel-heading"><div><p class="section-kicker">Контроль версий</p><h2>Компоненты</h2></div></div>
-    <p class="panel-intro">Проверка не меняет систему. Установка создаёт откатную точку, обновляет выбранный компонент и ждёт его штатного запуска.</p>
-    <form method="post" class="update-form">
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <div class="miner-list">
-      {{range .Updates.Components}}
-        <label class="miner-row {{if .UpdateAvailable}}is-running{{end}}">
-          <input type="checkbox" name="components" value="{{.Name}}" {{if .UpdateAvailable}}checked{{end}} {{if not .Configured}}disabled{{end}}>
-          <span class="miner-identity"><span class="miner-icon-fallback">UP</span><span><b>{{.DisplayName}}</b><small>{{if .Configured}}{{if .UpdateAvailable}}Доступна новая версия{{else}}Актуальная версия{{end}}{{else}}Не настроен{{end}}</small></span></span>
-          <span class="miner-path"><span>Установлено</span><code>{{if .CurrentVersion}}{{.CurrentVersion}}{{else}}-{{end}}</code></span>
-          <span class="miner-path"><span>Доступно</span><code>{{if .LatestVersion}}{{.LatestVersion}}{{else}}-{{end}}</code></span>
-          <span class="miner-row-status">{{if .Message}}<small>{{.Message}}</small>{{else if .CanInstall}}<span class="mining-status stopped"><i></i>готово</span>{{end}}</span>
-        </label>
-      {{else}}
-        <p class="empty-state">Агент обновлений пока не передал состояние компонентов.</p>
-      {{end}}
-      </div>
-      <div class="miner-create-footer">
-        <button type="submit" name="action" value="check">Проверить выбранное</button>
-        <button type="submit" name="action" value="install" class="danger">Установить выбранное</button>
-      </div>
-    </form>
+
+  <section class="updates-summary" aria-label="Сводка обновлений">
+    <div><span>Доступно обновлений</span><strong>{{.Overview.Available}}</strong></div>
+    <div><span>Актуальны</span><strong>{{.Overview.Current}}</strong></div>
+    <div><span>Требуют внимания</span><strong>{{.Overview.Blocked}}</strong></div>
   </section>
+
+  <form method="post" class="updates-workspace">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <section class="updates-headline">
+      <div><p class="section-kicker">Версии компонентов</p><h2>Выберите, что проверить или установить</h2></div>
+      <p>Установка создаёт точку отката и завершится только после успешной проверки сервиса.</p>
+    </section>
+
+    <div class="updates-grid">
+    {{range .Updates.Components}}
+      <article class="update-item {{if .UpdateAvailable}}has-update{{else if .Message}}needs-attention{{else}}is-current{{end}}">
+        <label class="update-selection">
+          <input type="checkbox" name="components" value="{{.Name}}" {{if .UpdateAvailable}}checked{{end}} {{if not .Configured}}disabled{{end}}>
+          <span class="update-check" aria-hidden="true"></span>
+        </label>
+        <div class="update-item-top">
+          <div class="update-service"><span class="update-symbol {{.Name}}">{{if eq .Name "gateway"}}AG{{else if eq .Name "comfyui"}}CU{{else}}OW{{end}}</span><span><h3>{{.DisplayName}}</h3><p>{{if not .Configured}}Не настроен{{else if .UpdateAvailable}}Найдена новая версия{{else if .Message}}Проверка требует внимания{{else}}Версия актуальна{{end}}</p></span></div>
+          {{if .UpdateAvailable}}<span class="update-state available">обновить</span>{{else if .Message}}<span class="update-state warning">внимание</span>{{else if .Configured}}<span class="update-state current">актуально</span>{{else}}<span class="update-state offline">нет связи</span>{{end}}
+        </div>
+        <dl class="update-versions">
+          <div><dt>Установлено</dt><dd><code>{{if .CurrentVersion}}{{.CurrentVersion}}{{else}}-{{end}}</code></dd></div>
+          <div><dt>Доступно</dt><dd><code>{{if .LatestVersion}}{{.LatestVersion}}{{else}}-{{end}}</code></dd></div>
+        </dl>
+        {{if .Message}}<p class="update-note">{{.Message}}</p>{{else if .UpdateAvailable}}<p class="update-note">Компонент будет перезапущен автоматически после успешной установки.</p>{{else}}<p class="update-note">Повторная установка не требуется.</p>{{end}}
+      </article>
+    {{else}}
+      <p class="empty-state">Агент обновлений пока не передал состояние компонентов.</p>
+    {{end}}
+    </div>
+
+    <footer class="updates-actions">
+      <p><span></span>Проверка не меняет сервисы. Установка работает только для доступных и безопасных обновлений.</p>
+      <div><button type="submit" name="action" value="check" class="ghost">Проверить выбранное</button><button type="submit" name="action" value="install" class="danger" data-confirm="Установить выбранные обновления? Сервисы с новой версией будут автоматически перезапущены.">Установить выбранное</button></div>
+    </footer>
+  </form>
 </main>
 </body></html>
 {{end}}

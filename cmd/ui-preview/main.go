@@ -9,6 +9,7 @@ import (
 	"ai-access-gateway/internal/domain"
 	"ai-access-gateway/internal/gateway"
 	"ai-access-gateway/internal/mining"
+	"ai-access-gateway/internal/updates"
 )
 
 func main() {
@@ -89,6 +90,15 @@ func main() {
 		},
 	}))
 	mux.HandleFunc("/preview/mining", render("admin_mining", "Управление майнингом", map[string]any{"Mining": miningOverview, "Error": "", "Status": ""}))
+	mux.HandleFunc("/preview/updates", render("admin_updates", "Обновления", map[string]any{
+		"Updates": updates.Status{Available: true, Components: []updates.ComponentStatus{
+			{Name: updates.ComponentGateway, DisplayName: "AI Access Gateway", Configured: true, CurrentVersion: "16278624f83b", LatestVersion: "16278624f83b"},
+			{Name: updates.ComponentComfyUI, DisplayName: "ComfyUI", Configured: true, CurrentVersion: "9a9fdb10ed14", LatestVersion: "9a9fdb10ed14"},
+			{Name: updates.ComponentOpenWebUI, DisplayName: "Open WebUI", Configured: true, CurrentVersion: "v0.9.5", LatestVersion: "v0.11.0", UpdateAvailable: true, CanInstall: true},
+		}},
+		"Overview": gateway.UpdateOverview{Available: 1, Current: 2},
+		"Message":  "",
+	}))
 	users := []domain.UserRow{
 		{ID: 1, Username: "admin", Email: "admin@example.local", Role: "admin", CanUseComfyUI: true, CanUseOpenWebUI: true, Requests: 96, LastLoginAt: sql.NullTime{Time: now.Add(-time.Hour), Valid: true}},
 		{ID: 2, Username: "rayka", Email: "rayka@example.local", Role: "user", CanUseComfyUI: true, CanUseOpenWebUI: true, Requests: 302, LastLoginAt: sql.NullTime{Time: now.Add(-8 * time.Minute), Valid: true}},

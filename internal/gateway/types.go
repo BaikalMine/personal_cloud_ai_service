@@ -108,6 +108,12 @@ type MiningOverview struct {
 	Script    mining.Script
 }
 
+type UpdateOverview struct {
+	Available int
+	Current   int
+	Blocked   int
+}
+
 type ContentEventView struct {
 	ID         int64
 	UserID     int64
