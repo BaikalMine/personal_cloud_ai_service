@@ -321,6 +321,16 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 		checksum := migrationChecksum(item)
 		if stored, ok := applied[item.version]; ok {
 			if stored != checksum {
+				compatible, err := canReplaceRedactedMigrationChecksum(ctx, tx, item)
+				if err != nil {
+					return err
+				}
+				if compatible {
+					if _, err := tx.ExecContext(ctx, `UPDATE schema_migrations SET checksum = $2 WHERE version = $1`, item.version, checksum); err != nil {
+						return fmt.Errorf("update redacted migration %d (%s) checksum: %w", item.version, item.name, err)
+					}
+					continue
+				}
 				return fmt.Errorf("migration %d (%s) checksum mismatch", item.version, item.name)
 			}
 			continue
@@ -341,6 +351,33 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("commit migrations: %w", err)
 	}
 	return nil
+}
+
+func canReplaceRedactedMigrationChecksum(ctx context.Context, tx *sql.Tx, item migration) (bool, error) {
+	if !isRedactedMigration(item) {
+		return false, nil
+	}
+
+	// Migration 9 was redacted to remove a machine-specific default profile.
+	// Verify its actual DDL before replacing the old checksum in an existing DB.
+	var compatible bool
+	err := tx.QueryRowContext(ctx, `
+		SELECT
+			to_regclass('public.miners') IS NOT NULL
+			AND (SELECT count(*) FROM information_schema.columns
+				WHERE table_schema = 'public' AND table_name = 'miners'
+				AND column_name IN ('id', 'name', 'script_path', 'process_name', 'enabled', 'is_default', 'created_by_user_id')) = 7
+			AND EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'miners' AND indexname = 'miners_single_default_idx')
+			AND EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'miners' AND indexname = 'miners_enabled_idx')
+	`).Scan(&compatible)
+	if err != nil {
+		return false, fmt.Errorf("verify redacted migration %d (%s): %w", item.version, item.name, err)
+	}
+	return compatible, nil
+}
+
+func isRedactedMigration(item migration) bool {
+	return item.version == 9 && item.name == "mining_profiles"
 }
 
 func appliedMigrations(ctx context.Context, tx *sql.Tx) (map[int64]string, error) {
