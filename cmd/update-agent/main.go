@@ -49,8 +49,9 @@ func main() {
 		Handler:           server.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		// Installations may pull images or rebuild dependencies for several minutes.
+		WriteTimeout: 25 * time.Minute,
+		IdleTimeout:  60 * time.Second,
 	}
 	log.Printf("update agent listening on %s", config.ListenAddress)
 	log.Fatal(httpServer.ListenAndServe())

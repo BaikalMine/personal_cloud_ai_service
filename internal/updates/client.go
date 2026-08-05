@@ -15,19 +15,26 @@ import (
 
 const maxResponseBytes = 1 << 20
 
+const (
+	requestTimeout = 8 * time.Second
+	installTimeout = 25 * time.Minute
+)
+
 var ErrUnavailable = errors.New("update agent is unavailable")
 
 type Client struct {
 	baseURL *url.URL
 	token   string
 	http    *http.Client
+	install *http.Client
 }
 
 func NewClient(baseURL *url.URL, token string) *Client {
 	return &Client{
 		baseURL: baseURL,
 		token:   strings.TrimSpace(token),
-		http:    &http.Client{Timeout: 8 * time.Second},
+		http:    &http.Client{Timeout: requestTimeout},
+		install: &http.Client{Timeout: installTimeout},
 	}
 }
 
@@ -36,26 +43,26 @@ func (c *Client) Configured() bool {
 }
 
 func (c *Client) Status(ctx context.Context) (Status, error) {
-	return c.do(ctx, http.MethodGet, "/v1/status", nil)
+	return c.do(c.http, ctx, http.MethodGet, "/v1/status", nil)
 }
 
 func (c *Client) Check(ctx context.Context, request Request) (Status, error) {
-	return c.command(ctx, "/v1/check", request)
+	return c.command(c.http, ctx, "/v1/check", request)
 }
 
 func (c *Client) Install(ctx context.Context, request Request) (Status, error) {
-	return c.command(ctx, "/v1/install", request)
+	return c.command(c.install, ctx, "/v1/install", request)
 }
 
-func (c *Client) command(ctx context.Context, path string, command Request) (Status, error) {
+func (c *Client) command(client *http.Client, ctx context.Context, path string, command Request) (Status, error) {
 	payload, err := json.Marshal(command)
 	if err != nil {
 		return Status{}, err
 	}
-	return c.do(ctx, http.MethodPost, path, bytes.NewReader(payload))
+	return c.do(client, ctx, http.MethodPost, path, bytes.NewReader(payload))
 }
 
-func (c *Client) do(ctx context.Context, method, path string, body io.Reader) (Status, error) {
+func (c *Client) do(client *http.Client, ctx context.Context, method, path string, body io.Reader) (Status, error) {
 	if !c.Configured() {
 		return Status{Message: "Агент обновлений не настроен."}, ErrUnavailable
 	}
@@ -72,7 +79,7 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader) (S
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
-	response, err := c.http.Do(request)
+	response, err := client.Do(request)
 	if err != nil {
 		return Status{Message: "Агент обновлений недоступен."}, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}

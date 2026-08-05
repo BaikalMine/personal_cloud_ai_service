@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 
@@ -87,12 +88,15 @@ func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request, command f
 		writeStatus(w, http.StatusBadRequest, updates.Status{Message: "Некорректный список компонентов."})
 		return
 	}
+	log.Printf("update command started components=%s", strings.Join(request.Components, ","))
 	status, err := command(r.Context(), request)
 	if err != nil {
+		log.Printf("update command failed components=%s error=%v", strings.Join(request.Components, ","), err)
 		writeStatus(w, http.StatusConflict, statusWithError(status, err))
 		return
 	}
 	status.Available = true
+	log.Printf("update command completed components=%s", strings.Join(request.Components, ","))
 	writeStatus(w, http.StatusOK, status)
 }
 
