@@ -30,6 +30,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $taskName = 'AI Access Gateway Update Agent'
+$watchdogTaskName = 'AI Access Gateway Update Agent Watchdog'
 $firewallName = 'AI Access Gateway Update Agent - Docker only'
 $port = 8093
 $failureLog = Join-Path $env:TEMP 'ai-update-agent-install-error.log'
@@ -149,12 +150,15 @@ $configPath = Join-Path $InstallDirectory 'config.json'
 $logPath = Join-Path $InstallDirectory 'agent.log'
 $launcherPath = Join-Path $InstallDirectory 'start-comfyui.cmd'
 $stopperPath = Join-Path $InstallDirectory 'stop-comfyui.ps1'
+$watchdogPath = Join-Path $InstallDirectory 'ensure-update-agent.ps1'
 
 Copy-Item -LiteralPath $sourceExecutable -Destination $targetExecutable -Force
 $launcher = "@echo off`r`ntitle ComfyUI`r`ncd /d `"$comfyRoot`"`r`n`"$comfyPython`" main.py --listen 0.0.0.0`r`necho.`r`necho ComfyUI stopped. Press any key to close this window.`r`npause > nul`r`n"
 [IO.File]::WriteAllText($launcherPath, $launcher, [Text.UTF8Encoding]::new($false))
 $stopper = "`$processes = Get-CimInstance Win32_Process -Filter `"Name = 'python.exe'`" | Where-Object { `$_.CommandLine -match '(?i)(^|\s)main\.py(\s|$)' -and `$_.CommandLine -match '(?i)--listen\s+0\.0\.0\.0' }`r`nforeach (`$process in `$processes) { Stop-Process -Id `$process.ProcessId -Force -ErrorAction Stop }`r`n"
 [IO.File]::WriteAllText($stopperPath, $stopper, [Text.UTF8Encoding]::new($false))
+$watchdog = "`$ErrorActionPreference = 'Stop'`r`n`$listener = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue`r`nif (-not `$listener) { Start-ScheduledTask -TaskName '$taskName' }`r`n"
+[IO.File]::WriteAllText($watchdogPath, $watchdog, [Text.UTF8Encoding]::new($false))
 
 $config = [ordered]@{
     listen_address = $ListenAddress
@@ -201,6 +205,10 @@ $trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity.Name
 $taskPrincipal = New-ScheduledTaskPrincipal -UserId $identity.Name -LogonType Interactive -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $taskPrincipal -Settings $settings -Description 'Windows host agent for AI Access Gateway updates and visible ComfyUI restarts.' | Out-Null
+
+$watchdogCommand = "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$watchdogPath`""
+& schtasks.exe /Create /TN $watchdogTaskName /TR $watchdogCommand /SC MINUTE /MO 2 /RU SYSTEM /RL HIGHEST /F | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Failed to create the update agent watchdog task.' }
 
 Get-NetFirewallRule -DisplayName $firewallName -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 New-NetFirewallRule -DisplayName $firewallName -Direction Inbound -Action Allow -Protocol TCP -LocalPort $port -RemoteAddress $DockerRemoteAddresses -Profile Any | Out-Null
