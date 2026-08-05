@@ -8,3 +8,4 @@ backups/
 coverage.out
 coverage.html
 dist/
+bin/
