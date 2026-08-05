@@ -221,10 +221,19 @@ func (c *ControllerImpl) inspectComfyUI(ctx context.Context) updates.ComponentSt
 func (c *ControllerImpl) inspectOpenWebUI(ctx context.Context) updates.ComponentStatus {
 	target := c.config.OpenWebUI
 	item := updates.ComponentStatus{Name: updates.ComponentOpenWebUI, DisplayName: "Open WebUI", Configured: true, CheckedAt: time.Now().UTC()}
-	current, err := c.runner.Run(ctx, target.ComposeDirectory, "docker", "inspect", "--format", "{{.Config.Image}}", target.ContainerName)
+	labels, err := c.runner.Run(ctx, target.ComposeDirectory, "docker", "inspect", "--format", "{{json .Config.Labels}}", target.ContainerName)
 	if err != nil {
 		item.Message = fmt.Sprintf("Open WebUI: %v", err)
 		return item
+	}
+	current := openWebUILabelVersion(labels)
+	if current == "" {
+		current, err = c.runner.Run(ctx, target.ComposeDirectory, "docker", "inspect", "--format", "{{.Config.Image}}", target.ContainerName)
+		if err != nil {
+			item.Message = fmt.Sprintf("Open WebUI: %v", err)
+			return item
+		}
+		current = imageVersion(current)
 	}
 	latest, err := c.latestRelease(ctx, target.ReleaseAPI)
 	if err != nil {
@@ -233,7 +242,7 @@ func (c *ControllerImpl) inspectOpenWebUI(ctx context.Context) updates.Component
 	}
 	item.CurrentVersion = imageVersion(current)
 	item.LatestVersion = latest
-	item.UpdateAvailable = item.CurrentVersion != latest
+	item.UpdateAvailable = !sameReleaseVersion(item.CurrentVersion, latest)
 	if _, err := os.Stat(target.ComposeFile); err != nil {
 		item.Message = "Файл Docker Compose Open WebUI недоступен."
 		return item
@@ -601,6 +610,26 @@ func imageVersion(value string) string {
 		return value[colon+1:]
 	}
 	return value
+}
+
+func sameReleaseVersion(left, right string) bool {
+	return strings.EqualFold(normalizeReleaseVersion(left), normalizeReleaseVersion(right))
+}
+
+func normalizeReleaseVersion(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) > 0 && (value[0] == 'v' || value[0] == 'V') {
+		return value[1:]
+	}
+	return value
+}
+
+func openWebUILabelVersion(value string) string {
+	var labels map[string]string
+	if err := json.Unmarshal([]byte(value), &labels); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(labels["org.opencontainers.image.version"])
 }
 func shorten(value string) string {
 	if len(value) > 600 {

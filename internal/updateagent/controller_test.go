@@ -78,3 +78,22 @@ func TestInstallableComponentsRequiresSafeAvailableUpdate(t *testing.T) {
 		t.Fatalf("allowed = %#v, want openwebui only", allowed)
 	}
 }
+
+func TestSameReleaseVersionIgnoresVPrefix(t *testing.T) {
+	if !sameReleaseVersion("0.11.0", "v0.11.0") {
+		t.Fatal("expected OCI image version and release tag to match")
+	}
+	if sameReleaseVersion("0.11.0", "v0.11.1") {
+		t.Fatal("different releases must not match")
+	}
+}
+
+func TestOpenWebUILabelVersion(t *testing.T) {
+	labels := `{"org.opencontainers.image.version":"0.11.0","other":"value"}`
+	if version := openWebUILabelVersion(labels); version != "0.11.0" {
+		t.Fatalf("version = %q, want 0.11.0", version)
+	}
+	if version := openWebUILabelVersion(`not json`); version != "" {
+		t.Fatalf("version = %q, want empty", version)
+	}
+}
