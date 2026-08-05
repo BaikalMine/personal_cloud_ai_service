@@ -159,6 +159,7 @@ $stopper = "`$processes = Get-CimInstance Win32_Process -Filter `"Name = 'python
 [IO.File]::WriteAllText($stopperPath, $stopper, [Text.UTF8Encoding]::new($false))
 $watchdog = "`$ErrorActionPreference = 'Stop'`r`n`$listener = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue`r`nif (-not `$listener) { Start-ScheduledTask -TaskName '$taskName' }`r`n"
 [IO.File]::WriteAllText($watchdogPath, $watchdog, [Text.UTF8Encoding]::new($false))
+$launchCommand = "Start-Process -FilePath '$launcherPath' -WindowStyle Normal"
 
 $config = [ordered]@{
     listen_address = $ListenAddress
@@ -178,7 +179,7 @@ $config = [ordered]@{
         branch = $comfyBranch
         python_executable = $comfyPython
         launch_arguments = @('main.py', '--listen', '0.0.0.0')
-        launch_command = @($env:ComSpec, '/c', "start `"ComfyUI`" `"$launcherPath`"")
+        launch_command = @('powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', $launchCommand)
         stop_command = @('powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $stopperPath)
         health_url = 'http://127.0.0.1:8188/'
     }

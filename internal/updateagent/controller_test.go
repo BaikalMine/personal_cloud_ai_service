@@ -1,13 +1,33 @@
 package updateagent
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"ai-access-gateway/internal/updates"
 )
+
+type recordingRunner struct {
+	runCalls   []string
+	startCalls []string
+	startErr   error
+}
+
+func (r *recordingRunner) Run(_ context.Context, _ string, name string, _ ...string) (string, error) {
+	r.runCalls = append(r.runCalls, name)
+	return "", nil
+}
+
+func (r *recordingRunner) Start(_ string, name string, _ ...string) error {
+	r.startCalls = append(r.startCalls, name)
+	return r.startErr
+}
 
 func TestWriteEnvValueReplacesOnlyRequestedValue(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".env")
@@ -95,5 +115,49 @@ func TestOpenWebUILabelVersion(t *testing.T) {
 	}
 	if version := openWebUILabelVersion(`not json`); version != "" {
 		t.Fatalf("version = %q, want empty", version)
+	}
+}
+
+func TestRestartComfyUIStartsAndChecksHealth(t *testing.T) {
+	health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer health.Close()
+	runner := &recordingRunner{}
+	controller := &ControllerImpl{
+		config: Config{ComfyUI: ComfyTarget{
+			WorkingDirectory: "C:\\ComfyUI",
+			StopCommand:      []string{"stop"},
+			LaunchCommand:    []string{"launch"},
+			HealthURL:        health.URL,
+		}},
+		runner: runner,
+		client: health.Client(),
+	}
+	if err := controller.restartComfyUI(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.runCalls) != 1 || runner.runCalls[0] != "stop" {
+		t.Fatalf("stop calls = %#v", runner.runCalls)
+	}
+	if len(runner.startCalls) != 1 || runner.startCalls[0] != "launch" {
+		t.Fatalf("start calls = %#v", runner.startCalls)
+	}
+}
+
+func TestRestartComfyUIReportsStartFailure(t *testing.T) {
+	runner := &recordingRunner{startErr: errors.New("launcher failed")}
+	controller := &ControllerImpl{
+		config: Config{ComfyUI: ComfyTarget{
+			WorkingDirectory: "C:\\ComfyUI",
+			StopCommand:      []string{"stop"},
+			LaunchCommand:    []string{"launch"},
+			HealthURL:        "http://127.0.0.1:8188/",
+		}},
+		runner: runner,
+		client: &http.Client{},
+	}
+	if err := controller.restartComfyUI(context.Background()); err == nil {
+		t.Fatal("expected launcher error")
 	}
 }

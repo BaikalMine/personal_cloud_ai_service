@@ -26,7 +26,7 @@
     {{range .Updates.Components}}
       <article class="update-item {{if .UpdateAvailable}}has-update{{else if .Message}}needs-attention{{else}}is-current{{end}}">
         <label class="update-selection">
-          <input type="checkbox" name="components" value="{{.Name}}" {{if .UpdateAvailable}}checked{{end}} {{if not .Configured}}disabled{{end}}>
+          <input type="checkbox" name="components" value="{{.Name}}" {{if not .Configured}}disabled{{end}}>
           <span class="update-check" aria-hidden="true"></span>
         </label>
         <div class="update-item-top">

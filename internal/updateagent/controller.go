@@ -317,10 +317,7 @@ func (c *ControllerImpl) installComfyUI(ctx context.Context) error {
 	if _, err := c.runner.Run(ctx, target.WorkingDirectory, target.PythonExecutable, "-m", "pip", "install", "-r", "requirements.txt"); err != nil {
 		return c.rollbackComfyUI(ctx, previous, err)
 	}
-	if err := c.stopAndStartComfyUI(ctx); err != nil {
-		return c.rollbackComfyUI(ctx, previous, err)
-	}
-	if err := c.waitHealth(ctx, target.HealthURL); err != nil {
+	if err := c.restartComfyUI(ctx); err != nil {
 		return c.rollbackComfyUI(ctx, previous, err)
 	}
 	return nil
@@ -331,21 +328,27 @@ func (c *ControllerImpl) rollbackComfyUI(ctx context.Context, previous string, c
 	if _, err := c.git(ctx, target.WorkingDirectory, "reset", "--hard", previous); err != nil {
 		return fmt.Errorf("%w; откат ComfyUI не удался: %v", cause, err)
 	}
-	if err := c.stopAndStartComfyUI(ctx); err != nil {
+	if err := c.restartComfyUI(ctx); err != nil {
 		return fmt.Errorf("%w; ComfyUI откатился, но не перезапустился: %v", cause, err)
 	}
 	return cause
 }
 
-func (c *ControllerImpl) stopAndStartComfyUI(ctx context.Context) error {
+func (c *ControllerImpl) restartComfyUI(ctx context.Context) error {
 	target := c.config.ComfyUI
-	if len(target.StopCommand) == 0 {
+	if len(target.StopCommand) == 0 || len(target.LaunchCommand) == 0 {
 		return errors.New("команда остановки ComfyUI не задана")
 	}
 	if _, err := c.runner.Run(ctx, target.WorkingDirectory, target.StopCommand[0], target.StopCommand[1:]...); err != nil {
 		return fmt.Errorf("остановка ComfyUI: %w", err)
 	}
-	return c.runner.Start(target.WorkingDirectory, target.LaunchCommand[0], target.LaunchCommand[1:]...)
+	if err := c.runner.Start(target.WorkingDirectory, target.LaunchCommand[0], target.LaunchCommand[1:]...); err != nil {
+		return fmt.Errorf("start ComfyUI: %w", err)
+	}
+	if err := c.waitHealth(ctx, target.HealthURL); err != nil {
+		return fmt.Errorf("check ComfyUI: %w", err)
+	}
+	return nil
 }
 
 func (c *ControllerImpl) installOpenWebUI(ctx context.Context) error {
