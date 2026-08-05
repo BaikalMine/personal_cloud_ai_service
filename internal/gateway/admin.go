@@ -81,27 +81,14 @@ func (a *App) handleAdminUpdates(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "доступ запрещён", http.StatusForbidden)
 			return
 		}
-		action := r.FormValue("action")
-		components := r.FormValue("component")
-		if target, directInstall := strings.CutPrefix(action, "install:"); directInstall {
-			components = target
-			action = "install"
-		}
-		if components == "" {
-			components = r.FormValue("components")
-		}
-		selected := r.Form["components"]
-		if components != "" && len(selected) == 0 {
-			selected = []string{components}
-		}
-		request := updates.Request{Components: selected}
+		action, request := updateRequestFromForm(r)
 		if !validUpdateRequest(request) {
 			message = "Выберите хотя бы один компонент для проверки или обновления."
 		} else if action == "install" {
 			status, _ = a.updates.Install(r.Context(), request)
 			message = status.Message
 			actor := a.currentUser(r)
-			a.audit(r.Context(), &actor.ID, "updates_install_requested", "system", nil, a.clientIP(r), r.UserAgent(), map[string]any{"components": selected})
+			a.audit(r.Context(), &actor.ID, "updates_install_requested", "system", nil, a.clientIP(r), r.UserAgent(), map[string]any{"components": request.Components})
 			if message == "" {
 				message = "Команда обновления принята. Если обновлялся сам Gateway, страница может кратко перезагрузиться."
 			}
@@ -127,6 +114,22 @@ func (a *App) handleAdminUpdates(w http.ResponseWriter, r *http.Request) {
 	a.render(w, r, "admin_updates", map[string]any{
 		"Title": "Обновления", "Updates": status, "Overview": overview, "Message": message,
 	})
+}
+
+// updateRequestFromForm keeps a direct card action isolated from the batch checkboxes.
+func updateRequestFromForm(r *http.Request) (string, updates.Request) {
+	action := r.FormValue("action")
+	if target, directInstall := strings.CutPrefix(action, "install:"); directInstall {
+		return "install", updates.Request{Components: []string{target}}
+	}
+
+	selected := r.Form["components"]
+	if len(selected) == 0 {
+		if component := r.FormValue("component"); component != "" {
+			selected = []string{component}
+		}
+	}
+	return action, updates.Request{Components: selected}
 }
 
 func validUpdateRequest(request updates.Request) bool {
