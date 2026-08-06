@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -146,7 +147,7 @@ func downloadMinerArchive(ctx context.Context, rawURL string) (string, string, e
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return "", "", fmt.Errorf("загрузка архива: сервер ответил %s", response.Status)
 	}
-	archiveName, err := archiveNameFromURL(response.Request.URL)
+	archiveName, err := archiveNameFromResponse(response, parsed)
 	if err != nil {
 		return "", "", err
 	}
@@ -192,7 +193,42 @@ func validateArchiveURL(raw string) (*url.URL, error) {
 
 func archiveNameFromURL(parsed *url.URL) (string, error) {
 	name, err := url.PathUnescape(path.Base(parsed.Path))
-	if err != nil || name == "." || name == "/" || !strings.EqualFold(filepath.Ext(name), ".zip") {
+	if err != nil {
+		return "", errors.New("ссылка должна вести на ZIP-архив")
+	}
+	return validateArchiveName(name)
+}
+
+func archiveNameFromResponse(response *http.Response, original *url.URL) (string, error) {
+	if raw := response.Header.Get("Content-Disposition"); raw != "" {
+		_, parameters, err := mime.ParseMediaType(raw)
+		if err == nil {
+			for _, key := range []string{"filename", "filename*"} {
+				if value := parameters[key]; value != "" {
+					value = strings.TrimPrefix(value, "UTF-8''")
+					if decoded, decodeErr := url.PathUnescape(value); decodeErr == nil {
+						if name, nameErr := validateArchiveName(decoded); nameErr == nil {
+							return name, nil
+						}
+					}
+				}
+			}
+		}
+	}
+	for _, candidate := range []*url.URL{response.Request.URL, original} {
+		if candidate == nil {
+			continue
+		}
+		if name, err := archiveNameFromURL(candidate); err == nil {
+			return name, nil
+		}
+	}
+	return "", errors.New("ссылка должна вести на ZIP-архив")
+}
+
+func validateArchiveName(raw string) (string, error) {
+	name := path.Base(strings.ReplaceAll(strings.TrimSpace(raw), "\\", "/"))
+	if name == "." || name == "/" || !strings.EqualFold(filepath.Ext(name), ".zip") {
 		return "", errors.New("ссылка должна вести на ZIP-архив")
 	}
 	return name, nil
