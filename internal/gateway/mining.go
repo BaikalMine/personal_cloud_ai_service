@@ -158,6 +158,29 @@ func (a *App) handleAdminMining(w http.ResponseWriter, r *http.Request) {
 	user := a.currentUser(r)
 	status := "updated"
 	switch action {
+	case "update":
+		archiveURL := strings.TrimSpace(r.FormValue("archive_url"))
+		if len(archiveURL) == 0 || len(archiveURL) > 2048 {
+			err = errors.New("укажите HTTPS-ссылку на ZIP-архив обновления")
+			break
+		}
+		if a.mining == nil || !a.mining.Configured() {
+			err = errors.New("агент управления майнингом недоступен")
+			break
+		}
+		updateResult, updateErr := a.mining.Update(r.Context(), mining.UpdateRequest{
+			ScriptPath: miner.ScriptPath, ProcessName: miner.ProcessName, MinerName: miner.Name, ArchiveURL: archiveURL,
+		})
+		err = updateErr
+		if err != nil && updateResult.Message != "" {
+			err = errors.New(updateResult.Message)
+		}
+		if err == nil {
+			a.audit(r.Context(), &user.ID, "miner_updated", "miner", &id, a.clientIP(r), r.UserAgent(), map[string]any{
+				"name": miner.Name, "process_name": miner.ProcessName, "archive_url": archiveURL,
+			})
+			status = "miner-updated"
+		}
 	case "start":
 		overview := a.miningOverview(r.Context(), true)
 		if !overview.Available {

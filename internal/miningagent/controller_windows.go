@@ -91,6 +91,10 @@ func (c *windowsController) Script(ctx context.Context, rawPath string) (mining.
 func (c *windowsController) Start(ctx context.Context, request mining.Request) (mining.State, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.startLocked(ctx, request)
+}
+
+func (c *windowsController) startLocked(ctx context.Context, request mining.Request) (mining.State, error) {
 	state, err := c.stateLocked(ctx, request.ProcessName)
 	if err != nil {
 		return state, err
@@ -155,6 +159,10 @@ func (c *windowsController) Start(ctx context.Context, request mining.Request) (
 func (c *windowsController) Stop(ctx context.Context, request mining.Request) (mining.State, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.stopLocked(ctx, request)
+}
+
+func (c *windowsController) stopLocked(ctx context.Context, request mining.Request) (mining.State, error) {
 	state, err := c.stateLocked(ctx, request.ProcessName)
 	if err != nil {
 		return state, err

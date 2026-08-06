@@ -541,6 +541,13 @@ code { color: var(--cyan); }
 .miner-row-status small { color: var(--muted); }
 .miner-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin: -3px 0 0; }
 .miner-actions button { min-height: 34px; padding: 0 11px; font-size: 11px; }
+.miner-update-details { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-top: 12px; }
+.miner-update-details summary { cursor: pointer; color: var(--text-soft); font-size: 12px; font-weight: 800; }
+.miner-update-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px 14px; margin-top: 12px; }
+.miner-update-form label { display: grid; gap: 6px; color: var(--faint); font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.miner-update-form input { min-width: 0; }
+.miner-update-form button { min-height: 38px; }
+.miner-update-note { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
 .danger-text { color: #ffaaa5 !important; }
 
 /* Updates */
@@ -709,6 +716,8 @@ code { color: var(--cyan); }
   .miner-row-status { justify-items: start; }
   .miner-actions { justify-content: stretch; }
   .miner-actions button { flex: 1 1 140px; }
+  .miner-update-form { grid-template-columns: 1fr; }
+  .miner-update-form button { width: 100%; }
 	.updates-summary { grid-template-columns: 1fr; }
 	.updates-summary > div { min-height: 58px; border-right: 0; border-bottom: 1px solid var(--line); }
 	.updates-summary > div:last-child { border-bottom: 0; }

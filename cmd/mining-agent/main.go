@@ -56,7 +56,7 @@ func run(configPath string) error {
 		Handler:           agent.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      15 * time.Second,
+		WriteTimeout:      35 * time.Minute,
 		IdleTimeout:       30 * time.Second,
 		MaxHeaderBytes:    16 << 10,
 	}

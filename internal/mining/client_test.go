@@ -69,3 +69,28 @@ func TestClientReadsScriptContent(t *testing.T) {
 		t.Fatalf("unexpected script: %+v", script)
 	}
 }
+
+func TestClientUsesLongRunningMinerUpdateEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-token" || r.URL.Path != "/v1/update" {
+			t.Fatalf("unexpected request: %s", r.URL.String())
+		}
+		var request UpdateRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if request.ArchiveURL != "https://example.com/miner.zip" || request.MinerName != "Example miner" {
+			t.Fatalf("unexpected update request: %+v", request)
+		}
+		_ = json.NewEncoder(w).Encode(UpdateResult{Success: true, PreservedScripts: 3, Message: "ok"})
+	}))
+	defer server.Close()
+	baseURL, _ := url.Parse(server.URL)
+	client := NewClient(baseURL, "test-token")
+	result, err := client.Update(context.Background(), UpdateRequest{
+		ScriptPath: `testdata/mining/start.bat`, ProcessName: "miner.exe", MinerName: "Example miner", ArchiveURL: "https://example.com/miner.zip",
+	})
+	if err != nil || !result.Success || result.PreservedScripts != 3 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}

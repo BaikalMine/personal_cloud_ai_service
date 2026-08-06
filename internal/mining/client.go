@@ -32,6 +32,23 @@ type Request struct {
 	ProcessName string `json:"process_name"`
 }
 
+type UpdateRequest struct {
+	ScriptPath  string `json:"script_path"`
+	ProcessName string `json:"process_name"`
+	MinerName   string `json:"miner_name,omitempty"`
+	ArchiveURL  string `json:"archive_url"`
+}
+
+type UpdateResult struct {
+	Success          bool   `json:"success"`
+	ArchiveName      string `json:"archive_name,omitempty"`
+	InstalledPath    string `json:"installed_path,omitempty"`
+	BackupPath       string `json:"backup_path,omitempty"`
+	PreservedScripts int    `json:"preserved_scripts,omitempty"`
+	Restarted        bool   `json:"restarted,omitempty"`
+	Message          string `json:"message,omitempty"`
+}
+
 type Script struct {
 	Path    string `json:"path,omitempty"`
 	Content string `json:"content,omitempty"`
@@ -40,25 +57,28 @@ type Script struct {
 }
 
 type Client struct {
-	baseURL *url.URL
-	token   string
-	http    *http.Client
+	baseURL    *url.URL
+	token      string
+	http       *http.Client
+	updateHTTP *http.Client
 }
 
 func NewClient(baseURL *url.URL, token string) *Client {
+	transport := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		MaxIdleConns:          4,
+		IdleConnTimeout:       30 * time.Second,
+		TLSHandshakeTimeout:   3 * time.Second,
+		ResponseHeaderTimeout: 4 * time.Second,
+	}
 	return &Client{
 		baseURL: baseURL,
 		token:   strings.TrimSpace(token),
 		http: &http.Client{
-			Timeout: 5 * time.Second,
-			Transport: &http.Transport{
-				Proxy:                 http.ProxyFromEnvironment,
-				MaxIdleConns:          4,
-				IdleConnTimeout:       30 * time.Second,
-				TLSHandshakeTimeout:   3 * time.Second,
-				ResponseHeaderTimeout: 4 * time.Second,
-			},
+			Timeout:   5 * time.Second,
+			Transport: transport,
 		},
+		updateHTTP: &http.Client{Timeout: 35 * time.Minute, Transport: transport},
 	}
 }
 
@@ -83,6 +103,40 @@ func (c *Client) Start(ctx context.Context, request Request) (State, error) {
 
 func (c *Client) Stop(ctx context.Context, request Request) (State, error) {
 	return c.command(ctx, "/v1/stop", request)
+}
+
+func (c *Client) Update(ctx context.Context, request UpdateRequest) (UpdateResult, error) {
+	if !c.Configured() {
+		return UpdateResult{Message: "Агент управления майнингом не настроен."}, ErrUnavailable
+	}
+	payload, err := json.Marshal(request)
+	if err != nil {
+		return UpdateResult{}, err
+	}
+	target := c.resolve("/v1/update")
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), bytes.NewReader(payload))
+	if err != nil {
+		return UpdateResult{}, err
+	}
+	httpRequest.Header.Set("Authorization", "Bearer "+c.token)
+	httpRequest.Header.Set("Accept", "application/json")
+	httpRequest.Header.Set("Content-Type", "application/json")
+	response, err := c.updateHTTP.Do(httpRequest)
+	if err != nil {
+		return UpdateResult{Message: "Windows-agent недоступен."}, fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	defer response.Body.Close()
+	var result UpdateResult
+	if err := json.NewDecoder(io.LimitReader(response.Body, maxResponseBytes)).Decode(&result); err != nil {
+		return UpdateResult{}, fmt.Errorf("decode mining update response: %w", err)
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		if result.Message == "" {
+			result.Message = "Windows-agent отклонил обновление майнера."
+		}
+		return result, fmt.Errorf("mining agent returned %s", response.Status)
+	}
+	return result, nil
 }
 
 func (c *Client) Script(ctx context.Context, scriptPath string) (Script, error) {

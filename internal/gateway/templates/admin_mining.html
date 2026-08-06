@@ -8,7 +8,7 @@
   </section>
 
   {{if .Error}}<p class="alert">{{.Error}}</p>{{end}}
-  {{if eq .Status "created"}}<p class="success-box">Профиль майнинга добавлен.</p>{{else if eq .Status "started"}}<p class="success-box">Майнинг запущен.</p>{{else if eq .Status "stopped"}}<p class="success-box">Майнинг остановлен.</p>{{else if eq .Status "updated"}}<p class="success-box">Настройки майнинга обновлены.</p>{{end}}
+  {{if eq .Status "created"}}<p class="success-box">Профиль майнинга добавлен.</p>{{else if eq .Status "started"}}<p class="success-box">Майнинг запущен.</p>{{else if eq .Status "stopped"}}<p class="success-box">Майнинг остановлен.</p>{{else if eq .Status "updated"}}<p class="success-box">Настройки майнинга обновлены.</p>{{else if eq .Status "miner-updated"}}<p class="success-box">Майнер обновлён. BAT-файлы сохранены.</p>{{end}}
 
   <section class="panel">
     <div class="panel-heading"><div><p class="section-kicker">Общее состояние</p><h2>Профили запуска</h2></div><span class="muted">{{len .Mining.Miners}} настроено</span></div>
@@ -39,6 +39,15 @@
           {{if .Enabled}}{{if not .Default}}<button name="action" value="disable" class="ghost">Отключить</button>{{end}}{{else}}<button name="action" value="enable" class="ghost">Включить</button>{{end}}
           {{if not .Default}}<button name="action" value="delete" class="ghost danger-text" data-confirm="Удалить профиль {{.Name}}?">Удалить</button>{{end}}
         </form>
+        <details class="miner-update-details">
+          <summary>Обновить майнер из ZIP</summary>
+          <form method="post" class="miner-update-form">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="action" value="update">
+            <label>Ссылка на ZIP-релиз<input name="archive_url" type="url" inputmode="url" maxlength="2048" placeholder="https://github.com/.../SRBMiner-Multi-3-5-0-win64.zip" pattern="https://.+" required></label>
+            <p class="miner-update-note">Проверю имя архива и наличие {{.ProcessName}}, сохраню ваши .bat и выполню откат при ошибке запуска.</p>
+            <button type="submit" class="ghost" data-confirm="Обновить {{.Name}} из указанного ZIP-архива? Если майнер запущен, он будет перезапущен после проверки новой версии.">Обновить майнер</button>
+          </form>
+        </details>
       </article>
       {{else}}
       <p class="empty-state">Профили майнинга ещё не добавлены.</p>

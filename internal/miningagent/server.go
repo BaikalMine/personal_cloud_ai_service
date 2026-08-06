@@ -23,6 +23,7 @@ type Controller interface {
 	Script(context.Context, string) (mining.Script, error)
 	Start(context.Context, mining.Request) (mining.State, error)
 	Stop(context.Context, mining.Request) (mining.State, error)
+	Update(context.Context, mining.UpdateRequest) (mining.UpdateResult, error)
 }
 
 type Server struct {
@@ -47,6 +48,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/v1/script", s.authenticate(http.HandlerFunc(s.handleScript)))
 	mux.Handle("/v1/start", s.authenticate(http.HandlerFunc(s.handleStart)))
 	mux.Handle("/v1/stop", s.authenticate(http.HandlerFunc(s.handleStop)))
+	mux.Handle("/v1/update", s.authenticate(http.HandlerFunc(s.handleUpdate)))
 	return securityHeaders(mux)
 }
 
@@ -105,6 +107,36 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	s.handleCommand(w, r, s.controller.Stop)
+}
+
+func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBytes)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var request mining.UpdateRequest
+	if err := decoder.Decode(&request); err != nil {
+		writeUpdate(w, http.StatusBadRequest, mining.UpdateResult{Message: "Некорректное тело запроса."})
+		return
+	}
+	request.ScriptPath = strings.TrimSpace(request.ScriptPath)
+	request.ProcessName = strings.TrimSpace(request.ProcessName)
+	request.MinerName = strings.TrimSpace(request.MinerName)
+	request.ArchiveURL = strings.TrimSpace(request.ArchiveURL)
+	if len(request.ScriptPath) == 0 || len(request.ScriptPath) > 1024 || !validProcessName(request.ProcessName) || len(request.MinerName) > 80 || len(request.ArchiveURL) == 0 || len(request.ArchiveURL) > 2048 {
+		writeUpdate(w, http.StatusBadRequest, mining.UpdateResult{Message: "Проверьте путь скрипта, имя процесса и ссылку на ZIP-архив."})
+		return
+	}
+	result, err := s.controller.Update(r.Context(), request)
+	if err != nil {
+		writeUpdate(w, http.StatusConflict, updateWithError(result, err))
+		return
+	}
+	result.Success = true
+	writeUpdate(w, http.StatusOK, result)
 }
 
 func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request, command func(context.Context, mining.Request) (mining.State, error)) {
@@ -172,6 +204,20 @@ func writeScript(w http.ResponseWriter, status int, script mining.Script) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(script)
+}
+
+func writeUpdate(w http.ResponseWriter, status int, result mining.UpdateResult) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(result)
+}
+
+func updateWithError(result mining.UpdateResult, err error) mining.UpdateResult {
+	if result.Message == "" {
+		result.Message = err.Error()
+	}
+	return result
 }
 
 func methodNotAllowed(w http.ResponseWriter, allowed string) {

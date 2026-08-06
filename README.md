@@ -82,6 +82,15 @@ networks. The agent accepts only authenticated start, stop, and state requests,
 and scripts must resolve below the configured mining directory; arbitrary
 commands are not accepted.
 
+The administrator can update a miner from `/admin/mining` with an HTTPS link to
+its ZIP release. The Windows agent downloads the archive into a temporary file,
+checks that its name matches the configured miner and that the expected process
+executable is present, rejects unsafe archive paths, and extracts it inside the
+mining directory. Existing user `.bat` files are copied into the new version by
+relative path. A running miner is stopped and restarted after the new version
+passes validation; if the restart fails, the previous directory is restored.
+The previous directory is retained as a timestamped backup for manual rollback.
+
 ## Managed updates
 
 The administrator page `/admin/updates` can check and install updates for the
@@ -154,7 +163,7 @@ count. Older manual dumps without a manifest are never removed.
 - `/admin/users`, `/admin/invites`, `/admin/sessions`: identity and access administration.
 - `/admin/services/comfyui` and `/admin/services/openwebui`: 30-day service analytics.
 - `/admin/metrics` and `/admin/audit`: operational metrics and security audit history.
-- `/admin/mining`: miner profiles, icons, scripts, status, and start/stop controls.
+- `/admin/mining`: miner profiles, icons, scripts, status, start/stop controls, and ZIP updates.
 - `/metrics`: Prometheus text format on the LAN-only admin listener.
 
 Administrators can independently grant ComfyUI and OpenWebUI access from each

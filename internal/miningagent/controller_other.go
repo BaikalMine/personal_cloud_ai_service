@@ -30,3 +30,7 @@ func (unsupportedController) Start(context.Context, mining.Request) (mining.Stat
 func (unsupportedController) Stop(context.Context, mining.Request) (mining.State, error) {
 	return mining.State{}, errors.New("mining agent process control requires Windows")
 }
+
+func (unsupportedController) Update(context.Context, mining.UpdateRequest) (mining.UpdateResult, error) {
+	return mining.UpdateResult{}, errors.New("mining agent miner updates require Windows")
+}

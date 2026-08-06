@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"ai-access-gateway/internal/mining"
@@ -30,6 +31,10 @@ func (f *fakeController) Start(_ context.Context, request mining.Request) (minin
 func (f *fakeController) Stop(_ context.Context, request mining.Request) (mining.State, error) {
 	f.request = request
 	return mining.State{Running: false}, nil
+}
+
+func (f *fakeController) Update(_ context.Context, request mining.UpdateRequest) (mining.UpdateResult, error) {
+	return mining.UpdateResult{ArchiveName: request.ArchiveURL, PreservedScripts: 2}, nil
 }
 
 func TestServerRequiresToken(t *testing.T) {
@@ -72,5 +77,21 @@ func TestServerReturnsAuthenticatedScript(t *testing.T) {
 	}
 	if response.Code != http.StatusOK || script.Content != "@echo off" || script.SHA256 != "abc" {
 		t.Fatalf("status=%d script=%+v", response.Code, script)
+	}
+}
+
+func TestServerReturnsAuthenticatedMinerUpdate(t *testing.T) {
+	agent, _ := NewServer("01234567890123456789012345678901", &fakeController{})
+	request := httptest.NewRequest(http.MethodPost, "/v1/update", strings.NewReader(`{"script_path":"C:\\Mining\\start.bat","process_name":"miner.exe","archive_url":"https://example.com/miner.zip"}`))
+	request.Header.Set("Authorization", "Bearer 01234567890123456789012345678901")
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	agent.Handler().ServeHTTP(response, request)
+	var result mining.UpdateResult
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusOK || !result.Success || result.PreservedScripts != 2 {
+		t.Fatalf("status=%d result=%+v", response.Code, result)
 	}
 }
