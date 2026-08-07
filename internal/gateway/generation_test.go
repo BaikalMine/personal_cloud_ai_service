@@ -2,7 +2,11 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -86,5 +90,61 @@ func TestParseGenerationOutputs(t *testing.T) {
 	}
 	if !strings.Contains(outputs[0].URL, "/comfyui/view?") && !strings.Contains(outputs[1].URL, "/comfyui/view?") {
 		t.Fatalf("missing image view URL: %#v", outputs)
+	}
+}
+
+func TestSubmitComfyPromptInjectsUserClientID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/prompt" {
+			t.Fatalf("unexpected upstream request: %s %s", r.Method, r.URL.Path)
+		}
+		var document struct {
+			ClientID string         `json:"client_id"`
+			Prompt   map[string]any `json:"prompt"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&document); err != nil {
+			t.Fatal(err)
+		}
+		if document.ClientID == "" || len(document.Prompt) != 1 {
+			t.Fatalf("gateway identity or prompt missing: %#v", document)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"prompt_id":"abcdef0123456789"}`))
+	}))
+	defer server.Close()
+	upstream, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := &App{cfg: Config{ComfyUIUpstream: upstream, SessionSecret: "01234567890123456789012345678901"}}
+	promptID, err := app.submitComfyPrompt(context.Background(), 17, map[string]any{"1": map[string]any{"class_type": "Test"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if promptID != "abcdef0123456789" {
+		t.Fatalf("prompt ID = %q", promptID)
+	}
+}
+
+func TestFetchGenerationStatusParsesHistory(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/history/abcdef0123456789" {
+			t.Fatalf("unexpected history path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"abcdef0123456789":{"status":{"status_str":"success","completed":true},"outputs":{"9":{"images":[{"filename":"result.png","subfolder":"","type":"output"}]}}}}`))
+	}))
+	defer server.Close()
+	upstream, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := &App{cfg: Config{ComfyUIUpstream: upstream, SessionSecret: "01234567890123456789012345678901"}}
+	status, err := app.fetchGenerationStatus(context.Background(), "abcdef0123456789", 17)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.State != "completed" || len(status.Outputs) != 1 || status.Outputs[0].Filename != "result.png" {
+		t.Fatalf("unexpected status: %#v", status)
 	}
 }
