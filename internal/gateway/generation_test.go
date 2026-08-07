@@ -1,10 +1,29 @@
 package gateway
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
 )
+
+func TestGenerateTemplateRenders(t *testing.T) {
+	templates, err := ParseTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	err = templates.ExecuteTemplate(&output, "generate", map[string]any{
+		"Title": "Быстрая генерация", "CSRF": "csrf", "AssetVersion": "asset",
+		"Workflows": []workflowView{{ID: "text-to-image", Name: "Текст в изображение", Description: "Описание"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "data-comfy-generation") || !strings.Contains(output.String(), "/static/generate.js") {
+		t.Fatal("generation template did not render the wizard")
+	}
+}
 
 func TestWorkflowDefinitionsBuildTypedPrompt(t *testing.T) {
 	definitions, err := loadWorkflowDefinitions()
