@@ -1,0 +1,80 @@
+{{define "generate"}}
+{{template "head" .}}
+<script src="/static/generate.js?v={{.AssetVersion}}" defer></script>
+{{template "nav" .}}
+<main class="page generation-page" id="main-content" data-comfy-generation data-selected-workflow="{{.SelectedWorkflow}}">
+  <section class="hero generation-hero">
+    <div>
+      <p class="eyebrow">ComfyUI без сложного интерфейса</p>
+      <h1>Быстрая генерация</h1>
+      <p class="hero-copy">Выберите готовый сценарий, добавьте исходные данные и запустите генерацию с телефона.</p>
+    </div>
+    <a class="button ghost" href="/app">Вернуться в Gateway</a>
+  </section>
+
+  <section class="generation-progress" aria-label="Шаги генерации">
+    <span class="generation-step is-active" data-progress="1"><b>1</b><span>Сценарий</span></span>
+    <i></i><span class="generation-step" data-progress="2"><b>2</b><span>Исходник</span></span>
+    <i></i><span class="generation-step" data-progress="3"><b>3</b><span>Промты</span></span>
+    <i></i><span class="generation-step" data-progress="4"><b>4</b><span>Запуск</span></span>
+  </section>
+
+  <form class="generation-wizard" id="generation-form">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="template_id" id="template-id">
+    <input type="hidden" name="input_image" id="input-image">
+
+    <section class="generation-panel is-visible" data-step="1">
+      <div class="panel-heading"><div><p class="section-kicker">Шаг 1 из 4</p><h2>Что будем делать?</h2><p class="panel-intro">Шаблон уже содержит базовый workflow и безопасно запускается от вашего пользователя.</p></div></div>
+      <div class="workflow-choices">
+        {{range .Workflows}}
+        <button class="workflow-choice" type="button" data-workflow-id="{{.ID}}" data-requires-image="{{.RequiresImage}}">
+          <span class="workflow-choice-icon">{{if .RequiresImage}}IMG{{else}}TXT{{end}}</span>
+          <span><strong>{{.Name}}</strong><small>{{.Description}}</small></span>
+          <span class="workflow-choice-check" aria-hidden="true">&#10003;</span>
+        </button>
+        {{end}}
+      </div>
+      <div class="generation-actions"><button type="button" class="button generation-next" disabled>Продолжить</button></div>
+    </section>
+
+    <section class="generation-panel" data-step="2">
+      <div class="panel-heading"><div><p class="section-kicker">Шаг 2 из 4</p><h2>Добавьте фото</h2><p class="panel-intro">Исходник используется только выбранным workflow и остается в вашем namespace ComfyUI.</p></div></div>
+      <label class="upload-zone" for="source-image"><span class="upload-icon">+</span><strong>Выбрать фото</strong><small>PNG, JPG или WEBP</small><input id="source-image" type="file" accept="image/png,image/jpeg,image/webp"></label>
+      <div class="upload-preview" id="upload-preview" hidden><img id="upload-preview-image" alt="Предпросмотр исходного фото"><span><strong id="upload-name"></strong><small id="upload-state">Фото выбрано</small></span></div>
+      <div class="generation-actions"><button type="button" class="button ghost generation-back">Назад</button><button type="button" class="button generation-next" id="upload-next" disabled>Загрузить и продолжить</button></div>
+    </section>
+
+    <section class="generation-panel" data-step="3">
+      <div class="panel-heading"><div><p class="section-kicker">Шаг 3 из 4</p><h2>Опишите результат</h2><p class="panel-intro">Пишите обычным языком. Негативный промт можно оставить пустым.</p></div></div>
+      <label>Позитивный промт<textarea name="positive_prompt" id="positive-prompt" rows="5" maxlength="4000" placeholder="Например: портрет в мягком вечернем свете, высокая детализация" required></textarea></label>
+      <label>Негативный промт<textarea name="negative_prompt" id="negative-prompt" rows="3" maxlength="4000" placeholder="Например: blurry, low quality, deformed hands"></textarea></label>
+      <div class="generation-actions"><button type="button" class="button ghost generation-back">Назад</button><button type="button" class="button generation-next" id="prompts-next" disabled>К параметрам</button></div>
+    </section>
+
+    <section class="generation-panel" data-step="4">
+      <div class="panel-heading"><div><p class="section-kicker">Шаг 4 из 4</p><h2>Параметры и запуск</h2><p class="panel-intro">Модель выбирается из доступных checkpoint-файлов ComfyUI.</p></div></div>
+      <label>Модель checkpoint
+        {{if .Models}}<select name="checkpoint" id="checkpoint" required><option value="">Выберите модель</option>{{range .Models}}<option value="{{.}}">{{.}}</option>{{end}}</select>
+        {{else}}<input name="checkpoint" id="checkpoint" placeholder="Например, model.safetensors" required><small class="field-hint">Список моделей сейчас недоступен. Укажите точное имя файла из ComfyUI.</small>{{end}}
+      </label>
+      <div class="generation-fields">
+        <label>Ширина<input name="width" type="number" min="256" max="2048" step="64" value="1024"></label>
+        <label>Высота<input name="height" type="number" min="256" max="2048" step="64" value="1024"></label>
+        <label>Шаги<input name="steps" type="number" min="1" max="100" value="25"></label>
+        <label>CFG<input name="cfg" type="number" min="1" max="30" step="0.5" value="7"></label>
+        <label class="denoise-field">Сила изменения<input name="denoise" type="number" min="0.05" max="1" step="0.05" value="0.7"></label>
+        <label>Seed<input name="seed" type="number" min="-1" value="-1"><small class="field-hint">-1 = случайный</small></label>
+      </div>
+      <div class="generation-actions"><button type="button" class="button ghost generation-back">Назад</button><button type="submit" class="button" id="generation-submit">Запустить генерацию</button></div>
+    </section>
+  </form>
+
+  <section class="generation-result panel" id="generation-result" hidden aria-live="polite">
+    <div class="panel-heading"><div><p class="section-kicker">Результат</p><h2 id="generation-result-title">Генерация выполняется</h2></div></div>
+    <p class="generation-status" id="generation-status"></p>
+    <div class="generation-output-grid" id="generation-output-grid"></div>
+  </section>
+</main>
+</body></html>
+{{end}}

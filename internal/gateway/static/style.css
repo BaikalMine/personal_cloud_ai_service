@@ -680,6 +680,57 @@ code { color: var(--cyan); }
   .content-filter-actions { justify-content: flex-end; }
 }
 
+/* ComfyUI quick generation */
+.generation-launch { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: 14px 0; }
+.generation-launch h2 { margin: 0 0 5px; font-size: 16px; }
+.generation-launch .panel-intro { margin: 0; }
+.generation-page { max-width: 900px; }
+.generation-hero { align-items: flex-start; }
+.hero-copy { max-width: 620px; margin: 9px 0 0; color: var(--muted); }
+.generation-progress { display: flex; align-items: center; gap: 8px; margin: 0 0 16px; color: var(--faint); }
+.generation-progress > i { flex: 1; height: 1px; background: var(--line); }
+.generation-step { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; font-weight: 750; white-space: nowrap; }
+.generation-step b { width: 27px; height: 27px; display: grid; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; color: var(--muted); }
+.generation-step.is-active { color: var(--text); }
+.generation-step.is-active b { border-color: var(--mint); background: #17362c; color: var(--mint); }
+.generation-step.is-complete b { border-color: var(--cyan); background: #16282d; color: var(--cyan); }
+.generation-panel { display: none; min-width: 0; padding: 20px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); box-shadow: var(--shadow); }
+.generation-panel.is-visible { display: block; animation: panel-enter .18s ease-out both; }
+.workflow-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+.workflow-choice { min-height: 100px; display: grid; grid-template-columns: 42px minmax(0, 1fr) 20px; align-items: center; gap: 12px; padding: 13px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-raised); color: var(--text); text-align: left; box-shadow: none; }
+.workflow-choice:hover { border-color: var(--line-strong); background: var(--surface-active); transform: none; }
+.workflow-choice.is-selected { border-color: var(--mint); background: #142b24; box-shadow: 0 0 0 1px rgba(98,221,181,.16); }
+.workflow-choice-icon { width: 40px; height: 40px; display: grid; place-items: center; border: 1px solid #396675; border-radius: 7px; color: var(--cyan); font-size: 10px; font-weight: 900; }
+.workflow-choice strong, .workflow-choice small { display: block; }
+.workflow-choice small { margin-top: 5px; color: var(--muted); font-weight: 600; }
+.workflow-choice-check { color: var(--mint); opacity: 0; font-size: 18px; }
+.workflow-choice.is-selected .workflow-choice-check { opacity: 1; }
+.generation-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 22px; }
+.generation-actions button { min-width: 150px; }
+.upload-zone { min-height: 190px; display: grid; place-items: center; align-content: center; gap: 7px; margin: 0; padding: 22px; border: 1px dashed #4d7777; border-radius: 7px; background: #122124; color: var(--text); cursor: pointer; text-align: center; }
+.upload-zone:hover { border-color: var(--cyan); background: #162b2f; }
+.upload-zone input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.upload-zone small, .upload-preview small, .field-hint { color: var(--muted); font-size: 11px; font-weight: 600; }
+.upload-icon { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid var(--cyan); border-radius: 50%; color: var(--cyan); font-size: 25px; font-weight: 400; }
+.upload-preview { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-raised); }
+.upload-preview img { width: 64px; height: 64px; object-fit: cover; border-radius: 5px; }
+.upload-preview strong, .upload-preview small { display: block; overflow-wrap: anywhere; }
+textarea { width: 100%; min-height: 92px; resize: vertical; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-input); color: var(--text); font: inherit; line-height: 1.45; }
+textarea:focus { outline: 2px solid rgba(85,199,216,.22); border-color: var(--cyan); }
+.generation-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.generation-fields label { margin: 0; }
+.generation-fields .field-hint { display: block; margin-top: 5px; }
+.is-hidden { display: none !important; }
+.generation-result { margin-top: 16px; }
+.generation-status { margin: 0; color: var(--muted); }
+.generation-result.has-error { border-color: #754044; }
+.generation-result.has-error .generation-status { color: #ffd0cd; }
+.generation-output-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 15px; }
+.generation-output { margin: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-raised); }
+.generation-output img, .generation-output video { display: block; width: 100%; max-height: 620px; object-fit: contain; background: #080a0a; }
+.generation-output figcaption { padding: 8px 10px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+@keyframes panel-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
 @media (max-width: 620px) {
   .page, .admin-sidebar ~ .page { width: calc(100% - 20px); padding: 20px 0 44px; }
   .hero { min-height: 0; align-items: flex-start; flex-direction: column; gap: 12px; }
@@ -716,6 +767,15 @@ code { color: var(--cyan); }
   .miner-row-status { justify-items: start; }
   .miner-actions { justify-content: stretch; }
   .miner-actions button { flex: 1 1 140px; }
+	.generation-launch { align-items: stretch; flex-direction: column; }
+	.generation-launch .button { width: 100%; }
+	.generation-progress { gap: 4px; }
+	.generation-step { flex-direction: column; gap: 3px; font-size: 9px; }
+	.generation-step b { width: 25px; height: 25px; }
+	.workflow-choices, .generation-fields, .generation-output-grid { grid-template-columns: 1fr; }
+	.generation-panel { padding: 14px; }
+	.generation-actions { align-items: stretch; flex-direction: column-reverse; }
+	.generation-actions button { width: 100%; }
   .miner-update-form { grid-template-columns: 1fr; }
   .miner-update-form button { width: 100%; }
 	.updates-summary { grid-template-columns: 1fr; }

@@ -46,6 +46,8 @@ type App struct {
 	mediaCaptureSlots chan struct{}
 	adminMediaSlots   chan struct{}
 	comfyUploadSlots  chan struct{}
+	generationMu      sync.Mutex
+	generationJobs    map[string]*generationJob
 
 	requestsTotal atomic.Int64
 	loginFailures atomic.Int64
@@ -53,6 +55,12 @@ type App struct {
 
 	proxyMu     sync.Mutex
 	proxyCounts map[string]int64
+}
+
+type generationJob struct {
+	UserID    int64
+	CreatedAt time.Time
+	Outputs   map[string]struct{}
 }
 
 type User = domain.User

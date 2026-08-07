@@ -97,6 +97,7 @@ func Run() error {
 		mediaCaptureSlots: make(chan struct{}, maxConcurrentMediaCaptures),
 		adminMediaSlots:   make(chan struct{}, maxConcurrentAdminMediaResponses),
 		comfyUploadSlots:  make(chan struct{}, maxConcurrentComfyUploads),
+		generationJobs:    make(map[string]*generationJob),
 		proxyCounts:       map[string]int64{},
 	}
 
@@ -156,7 +157,7 @@ func ParseTemplates() (*Templates, error) {
 		return nil, err
 	}
 	hash := sha256.New()
-	for _, path := range []string{"static/style.css", "static/app.js"} {
+	for _, path := range []string{"static/style.css", "static/app.js", "static/generate.js"} {
 		body, err := embeddedFS.ReadFile(path)
 		if err != nil {
 			return nil, err
@@ -171,6 +172,7 @@ func (a *App) publicMux() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/static/style.css", a.handleStaticCSS)
 	mux.HandleFunc("/static/app.js", a.handleStaticJS)
+	mux.HandleFunc("/static/generate.js", a.handleStaticJS)
 	mux.HandleFunc("/healthz", a.handleHealthz)
 	mux.HandleFunc("/login", a.handleLogin)
 	mux.HandleFunc("/logout", a.handleLogout)
@@ -180,6 +182,7 @@ func (a *App) publicMux() http.Handler {
 	mux.Handle("/account/sessions", a.requireAuth(http.HandlerFunc(a.handleAccountSessions)))
 	mux.Handle("/mining/toggle", a.requireAuth(http.HandlerFunc(a.handleMiningToggle)))
 	mux.Handle("/mining/icon/", a.requireAuth(http.HandlerFunc(a.handleMinerIcon)))
+	a.registerGenerationRoutes(mux)
 	a.registerServiceRoutes(mux)
 	return mux
 }
@@ -202,6 +205,7 @@ func (a *App) adminMux() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/static/style.css", a.handleStaticCSS)
 	mux.HandleFunc("/static/app.js", a.handleStaticJS)
+	mux.HandleFunc("/static/generate.js", a.handleStaticJS)
 	mux.HandleFunc("/healthz", a.handleHealthz)
 	mux.HandleFunc("/login", a.handleLogin)
 	mux.HandleFunc("/logout", a.handleLogout)
@@ -273,7 +277,11 @@ func (a *App) handleStaticJS(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	body, err := embeddedFS.ReadFile("static/app.js")
+	asset := "static/app.js"
+	if r.URL.Path == "/static/generate.js" {
+		asset = "static/generate.js"
+	}
+	body, err := embeddedFS.ReadFile(asset)
 	if err != nil {
 		http.NotFound(w, r)
 		return
