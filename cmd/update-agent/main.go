@@ -39,11 +39,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("configure update agent: %v", err)
 	}
-	server, err := updateagent.NewServer(config.Token, controller)
+	server, err := updateagent.NewServer(config.Token, controller, config.ComfyUI)
 	if err != nil {
 		log.Fatalf("create update agent: %v", err)
 	}
-
 	httpServer := &http.Server{
 		Addr:              config.ListenAddress,
 		Handler:           server.Handler(),

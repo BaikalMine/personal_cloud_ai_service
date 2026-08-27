@@ -86,7 +86,7 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 		go func(username string) {
 			defer wg.Done()
 			userID, _, registerErr := repository.RegisterFromInvite(context.Background(), store.RegisterFromInviteParams{
-				TokenHash: inviteHash, Username: username, PasswordHash: userHash, IP: "192.0.2.10",
+				TokenHash: inviteHash, Username: username, Email: username + "@example.test", PasswordHash: userHash, IP: "192.0.2.10",
 			})
 			results <- registrationResult{userID: userID, err: registerErr}
 		}(username)
@@ -116,6 +116,10 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	}
 	if !user.CanUseComfyUI || user.CanUseOpenWebUI {
 		t.Fatalf("invite permissions were not preserved: comfy=%v openweb=%v", user.CanUseComfyUI, user.CanUseOpenWebUI)
+	}
+	byEmail, passwordHash, err := repository.FindUserWithPassword(ctx, strings.ToUpper(user.Email.String))
+	if err != nil || byEmail.ID != registeredUserID || passwordHash != userHash {
+		t.Fatalf("find user by email: user=%+v err=%v", byEmail, err)
 	}
 	assertComfyUserStateIsolation(t, ctx, repository, registeredUserID, adminID)
 
@@ -158,12 +162,12 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	}
 	if err := repository.InsertContentMedia(ctx, domain.ContentMediaRecord{
 		EventID: eventID, MediaType: "image", MIMEType: "image/png", OriginalName: "result.png",
-		Subfolder: "alice", StorageType: "output", PayloadCipher: []byte{4, 5, 6}, SizeBytes: 3,
+		Subfolder: "alice", StorageType: "output", PayloadCipher: []byte{4, 5, 6}, SizeBytes: 3, ExpiresAt: time.Now().Add(24 * time.Hour),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	assertRetentionWindow(t, db, "content_events", 7*24*time.Hour)
-	assertRetentionWindow(t, db, "content_media", 3*24*time.Hour)
+	assertRetentionWindow(t, db, "content_media", 24*time.Hour)
 	if used, err := repository.ContentMediaBytesForUser(ctx, registeredUserID); err != nil || used != 3 {
 		t.Fatalf("media usage: bytes=%d err=%v", used, err)
 	}
@@ -174,6 +178,20 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	events, err := repository.ListContentEvents(ctx, 10, user.Username, "comfyui")
 	if err != nil || len(events) != 1 || events[0].ID != eventID {
 		t.Fatalf("filtered content events: events=%v err=%v", events, err)
+	}
+	deleted, err = repository.DeleteUser(ctx, registeredUserID, user.Username)
+	if err != nil || !deleted {
+		t.Fatalf("delete user: deleted=%v err=%v", deleted, err)
+	}
+	if _, err := repository.UserByID(ctx, registeredUserID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("deleted user remained readable: %v", err)
+	}
+	var remainingEvents int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM content_events WHERE user_id=$1`, registeredUserID).Scan(&remainingEvents); err != nil || remainingEvents != 0 {
+		t.Fatalf("deleted user content remained: count=%d err=%v", remainingEvents, err)
+	}
+	if deleted, err := repository.DeleteUser(ctx, adminID, "admin"); err != nil || deleted {
+		t.Fatalf("admin deletion protection: deleted=%v err=%v", deleted, err)
 	}
 }
 

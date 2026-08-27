@@ -37,14 +37,18 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "неверные данные формы", http.StatusBadRequest)
 		return
 	}
-	username := strings.TrimSpace(r.Form.Get("username"))
+	identity := strings.TrimSpace(r.Form.Get("login"))
+	if identity == "" {
+		// Keep existing password-manager and direct-form clients working.
+		identity = strings.TrimSpace(r.Form.Get("username"))
+	}
 	password := r.Form.Get("password")
 	nextURL := safeNext(r.Form.Get("next"))
-	limitKey := loginRateLimitKey(ip, username)
+	limitKey := loginRateLimitKey(ip, identity)
 	if !a.loginLimiter.Allow(limitKey) {
 		a.loginFailures.Add(1)
 		a.audit(r.Context(), nil, "user_login_failed", "user", nil, ip, r.UserAgent(), map[string]any{
-			"username": truncate(username, 256), "reason": "rate_limited",
+			"identity": truncate(identity, 256), "reason": "rate_limited",
 		})
 		a.render(w, r, "login", map[string]any{"Title": "Вход", "Error": "Слишком много попыток входа. Попробуйте позже."})
 		return
@@ -53,8 +57,8 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var user User
 	var passwordHash string
 	var err error
-	if len(username) <= 256 {
-		user, passwordHash, err = a.store.FindUserWithPassword(r.Context(), username)
+	if len(identity) <= 254 {
+		user, passwordHash, err = a.store.FindUserWithPassword(r.Context(), identity)
 	} else {
 		err = sql.ErrNoRows
 	}
@@ -73,7 +77,7 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 			reason = "account_locked"
 		} else if userFound && user.Role != "admin" && !user.Disabled && !passwordValid {
 			lockedUntil, failureErr := a.store.RecordLoginFailure(
-				r.Context(), username, a.cfg.AccountLockThreshold, a.cfg.AccountLockDuration,
+				r.Context(), identity, a.cfg.AccountLockThreshold, a.cfg.AccountLockDuration,
 			)
 			if failureErr != nil {
 				log.Printf("record login failure: %v", failureErr)
@@ -81,7 +85,7 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 				reason = "account_locked"
 			}
 		}
-		a.audit(r.Context(), nil, "user_login_failed", "user", nil, ip, r.UserAgent(), map[string]any{"username": truncate(username, 256), "reason": reason})
+		a.audit(r.Context(), nil, "user_login_failed", "user", nil, ip, r.UserAgent(), map[string]any{"identity": truncate(identity, 256), "reason": reason})
 		a.render(w, r, "login", map[string]any{"Title": "Вход", "Error": "Неверный логин или пароль.", "Next": nextURL})
 		return
 	}
@@ -212,6 +216,10 @@ func (a *App) handleInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	if errors.Is(err, store.ErrUsernameExists) {
 		a.render(w, r, "invite", map[string]any{"Title": "Создание аккаунта", "Token": token, "Error": "Этот логин уже занят."})
+		return
+	}
+	if errors.Is(err, store.ErrEmailExists) {
+		a.render(w, r, "invite", map[string]any{"Title": "Создание аккаунта", "Token": token, "Error": "Этот email уже используется."})
 		return
 	}
 	if err != nil {

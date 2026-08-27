@@ -276,6 +276,66 @@ var migrationCatalog = []migration{
 			`CREATE INDEX IF NOT EXISTS miners_enabled_idx ON miners(enabled, name)`,
 		},
 	},
+	{
+		version: 10,
+		name:    "generation_media_24h_retention",
+		statements: []string{
+			`ALTER TABLE content_media ALTER COLUMN expires_at SET DEFAULT (now() + interval '24 hours')`,
+			`ALTER TABLE comfy_output_ownership ALTER COLUMN expires_at SET DEFAULT (now() + interval '24 hours')`,
+			`UPDATE content_media m SET expires_at = LEAST(m.expires_at, m.created_at + interval '24 hours')
+			  FROM content_events e WHERE e.id=m.event_id AND e.service='comfyui'`,
+			`UPDATE comfy_output_ownership SET expires_at = LEAST(expires_at, created_at + interval '24 hours')`,
+		},
+	},
+	{
+		version: 11,
+		name:    "content_media_hash_for_matched_output_cleanup",
+		statements: []string{
+			`ALTER TABLE content_media ADD COLUMN IF NOT EXISTS content_hash TEXT NOT NULL DEFAULT ''`,
+			`CREATE INDEX IF NOT EXISTS content_media_expired_comfy_idx ON content_media(expires_at,event_id)`,
+		},
+	},
+	{
+		version: 12,
+		name:    "profile_hidden_generation_media",
+		statements: []string{
+			`ALTER TABLE content_media ADD COLUMN IF NOT EXISTS profile_hidden_at TIMESTAMPTZ NULL`,
+			`CREATE INDEX IF NOT EXISTS content_media_profile_visible_idx ON content_media(event_id,expires_at) WHERE profile_hidden_at IS NULL`,
+		},
+	},
+	{
+		version: 13,
+		name:    "case_insensitive_unique_user_emails",
+		statements: []string{
+			`CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_unique_idx
+			 ON users (LOWER(email)) WHERE email IS NOT NULL AND email <> ''`,
+		},
+	},
+	{
+		version: 14,
+		name:    "quick_generation_access_and_quotas",
+		statements: []string{
+			`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_use_quick_generation BOOLEAN NOT NULL DEFAULT TRUE`,
+			`ALTER TABLE users ADD COLUMN IF NOT EXISTS generation_daily_limit INT NOT NULL DEFAULT 0`,
+			`ALTER TABLE users ADD COLUMN IF NOT EXISTS generation_total_limit BIGINT NOT NULL DEFAULT 0`,
+			`ALTER TABLE users ADD COLUMN IF NOT EXISTS generation_total_used BIGINT NOT NULL DEFAULT 0`,
+			`ALTER TABLE invites ADD COLUMN IF NOT EXISTS grant_quick_generation BOOLEAN NOT NULL DEFAULT TRUE`,
+			`ALTER TABLE invites ADD COLUMN IF NOT EXISTS generation_daily_limit INT NOT NULL DEFAULT 0`,
+			`ALTER TABLE invites ADD COLUMN IF NOT EXISTS generation_total_limit BIGINT NOT NULL DEFAULT 0`,
+			`CREATE TABLE IF NOT EXISTS quick_generation_daily_usage (
+				user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				usage_date DATE NOT NULL,
+				used_count INT NOT NULL DEFAULT 0 CHECK (used_count >= 0),
+				PRIMARY KEY (user_id, usage_date)
+			)`,
+			`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_generation_daily_limit_valid`,
+			`ALTER TABLE users ADD CONSTRAINT users_generation_daily_limit_valid CHECK (generation_daily_limit >= 0)`,
+			`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_generation_total_limit_valid`,
+			`ALTER TABLE users ADD CONSTRAINT users_generation_total_limit_valid CHECK (generation_total_limit >= 0 AND generation_total_used >= 0)`,
+			`ALTER TABLE invites DROP CONSTRAINT IF EXISTS invites_generation_limits_valid`,
+			`ALTER TABLE invites ADD CONSTRAINT invites_generation_limits_valid CHECK (generation_daily_limit >= 0 AND generation_total_limit >= 0)`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

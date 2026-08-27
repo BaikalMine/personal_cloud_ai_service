@@ -331,7 +331,7 @@ func (a *App) renderStatus(w http.ResponseWriter, r *http.Request, status int, n
 	data["AssetVersion"] = a.tpl.AssetVersion
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' blob: data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'")
 	if status != http.StatusOK {
 		w.WriteHeader(status)
 	}

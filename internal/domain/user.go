@@ -6,17 +6,21 @@ import (
 )
 
 type User struct {
-	ID               int64
-	Username         string
-	Email            sql.NullString
-	Role             string
-	Disabled         bool
-	CanUseComfyUI    bool
-	CanUseOpenWebUI  bool
-	FailedLoginCount int
-	LockedUntil      sql.NullTime
-	CreatedAt        time.Time
-	LastLoginAt      sql.NullTime
+	ID                    int64
+	Username              string
+	Email                 sql.NullString
+	Role                  string
+	Disabled              bool
+	CanUseComfyUI         bool
+	CanUseOpenWebUI       bool
+	CanUseQuickGeneration bool
+	GenerationDailyLimit  int
+	GenerationTotalLimit  int64
+	GenerationTotalUsed   int64
+	FailedLoginCount      int
+	LockedUntil           sql.NullTime
+	CreatedAt             time.Time
+	LastLoginAt           sql.NullTime
 }
 
 func (u User) IsLocked(now time.Time) bool {
@@ -28,6 +32,8 @@ func (u User) CanUseService(service string) bool {
 		return true
 	}
 	switch service {
+	case "quick_generation":
+		return u.CanUseQuickGeneration
 	case "comfyui":
 		return u.CanUseComfyUI
 	case "openwebui":
@@ -38,19 +44,23 @@ func (u User) CanUseService(service string) bool {
 }
 
 type UserRow struct {
-	ID               int64
-	Username         string
-	Email            string
-	Role             string
-	Disabled         bool
-	CanUseComfyUI    bool
-	CanUseOpenWebUI  bool
-	FailedLoginCount int
-	LockedUntil      sql.NullTime
-	Locked           bool
-	CreatedAt        time.Time
-	LastLoginAt      sql.NullTime
-	Requests         int64
+	ID                    int64
+	Username              string
+	Email                 string
+	Role                  string
+	Disabled              bool
+	CanUseComfyUI         bool
+	CanUseOpenWebUI       bool
+	CanUseQuickGeneration bool
+	GenerationDailyLimit  int
+	GenerationTotalLimit  int64
+	GenerationTotalUsed   int64
+	FailedLoginCount      int
+	LockedUntil           sql.NullTime
+	Locked                bool
+	CreatedAt             time.Time
+	LastLoginAt           sql.NullTime
+	Requests              int64
 }
 
 type AccountSession struct {

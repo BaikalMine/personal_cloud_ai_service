@@ -14,15 +14,19 @@ import (
 var (
 	ErrInviteUnavailable = errors.New("invite is unavailable")
 	ErrUsernameExists    = errors.New("username already exists")
+	ErrEmailExists       = errors.New("email already exists")
 )
 
 type CreateInviteParams struct {
-	TokenHash       string
-	CreatedByUserID int64
-	MaxUses         int
-	ExpiresAt       time.Time
-	GrantComfyUI    bool
-	GrantOpenWebUI  bool
+	TokenHash            string
+	CreatedByUserID      int64
+	MaxUses              int
+	ExpiresAt            time.Time
+	GrantComfyUI         bool
+	GrantOpenWebUI       bool
+	GrantQuickGeneration bool
+	GenerationDailyLimit int
+	GenerationTotalLimit int64
 }
 
 type RegisterFromInviteParams struct {
@@ -36,10 +40,12 @@ type RegisterFromInviteParams struct {
 func (s *Store) AvailableInvite(ctx context.Context, tokenHash string) (domain.InviteAccess, error) {
 	var access domain.InviteAccess
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, grant_comfyui, grant_openwebui
+		SELECT id, grant_comfyui, grant_openwebui, grant_quick_generation,
+		       generation_daily_limit, generation_total_limit
 		FROM invites
 		WHERE token_hash = $1 AND revoked = false AND expires_at > now() AND used_count < max_uses
-	`, tokenHash).Scan(&access.ID, &access.GrantComfyUI, &access.GrantOpenWebUI)
+	`, tokenHash).Scan(&access.ID, &access.GrantComfyUI, &access.GrantOpenWebUI,
+		&access.GrantQuickGeneration, &access.GenerationDailyLimit, &access.GenerationTotalLimit)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.InviteAccess{}, ErrInviteUnavailable
 	}
@@ -54,20 +60,23 @@ func (s *Store) RegisterFromInvite(ctx context.Context, params RegisterFromInvit
 	defer tx.Rollback()
 
 	var inviteID int64
-	var grantComfyUI, grantOpenWebUI bool
+	var grantComfyUI, grantOpenWebUI, grantQuickGeneration bool
+	var generationDailyLimit int
+	var generationTotalLimit int64
 	err = tx.QueryRowContext(ctx, `
 		UPDATE invites
 		SET used_count = used_count + 1
 		WHERE token_hash = $1 AND revoked = false AND expires_at > now() AND used_count < max_uses
-		RETURNING id, grant_comfyui, grant_openwebui
-	`, params.TokenHash).Scan(&inviteID, &grantComfyUI, &grantOpenWebUI)
+		RETURNING id, grant_comfyui, grant_openwebui, grant_quick_generation,
+		          generation_daily_limit, generation_total_limit
+	`, params.TokenHash).Scan(&inviteID, &grantComfyUI, &grantOpenWebUI,
+		&grantQuickGeneration, &generationDailyLimit, &generationTotalLimit)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, 0, ErrInviteUnavailable
 	}
 	if err != nil {
 		return 0, 0, err
 	}
-
 	var email any
 	if params.Email != "" {
 		email = params.Email
@@ -75,13 +84,18 @@ func (s *Store) RegisterFromInvite(ctx context.Context, params RegisterFromInvit
 	var userID int64
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO users
-			(username, email, password_hash, role, can_use_comfyui, can_use_openwebui)
-		VALUES ($1,$2,$3,'user',$4,$5)
+			(username, email, password_hash, role, can_use_comfyui, can_use_openwebui,
+			 can_use_quick_generation, generation_daily_limit, generation_total_limit)
+		VALUES ($1,$2,$3,'user',$4,$5,$6,$7,$8)
 		RETURNING id
-	`, params.Username, email, params.PasswordHash, grantComfyUI, grantOpenWebUI).Scan(&userID)
+	`, params.Username, email, params.PasswordHash, grantComfyUI, grantOpenWebUI,
+		grantQuickGeneration, generationDailyLimit, generationTotalLimit).Scan(&userID)
 	if err != nil {
 		var pqErr *pq.Error
 		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+			if pqErr.Constraint == "users_email_lower_unique_idx" {
+				return 0, 0, ErrEmailExists
+			}
 			return 0, 0, ErrUsernameExists
 		}
 		return 0, 0, err
@@ -99,10 +113,12 @@ func (s *Store) CreateInvite(ctx context.Context, params CreateInviteParams) (in
 	var id int64
 	err := s.db.QueryRowContext(ctx, `
 		INSERT INTO invites
-			(token_hash, created_by_user_id, max_uses, expires_at, grant_comfyui, grant_openwebui)
-		VALUES ($1,$2,$3,$4,$5,$6)
+			(token_hash, created_by_user_id, max_uses, expires_at, grant_comfyui, grant_openwebui,
+			 grant_quick_generation, generation_daily_limit, generation_total_limit)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 		RETURNING id
-	`, params.TokenHash, params.CreatedByUserID, params.MaxUses, params.ExpiresAt, params.GrantComfyUI, params.GrantOpenWebUI).Scan(&id)
+	`, params.TokenHash, params.CreatedByUserID, params.MaxUses, params.ExpiresAt, params.GrantComfyUI,
+		params.GrantOpenWebUI, params.GrantQuickGeneration, params.GenerationDailyLimit, params.GenerationTotalLimit).Scan(&id)
 	return id, err
 }
 
@@ -130,7 +146,8 @@ func (s *Store) ListInvites(ctx context.Context, limit int) ([]domain.InviteRow,
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT i.id, COALESCE(u.username,''), i.max_uses, i.used_count, i.expires_at,
-		       i.revoked, i.grant_comfyui, i.grant_openwebui,
+		       i.revoked, i.grant_comfyui, i.grant_openwebui, i.grant_quick_generation,
+		       i.generation_daily_limit, i.generation_total_limit,
 		       CASE
 		         WHEN i.revoked THEN 'revoked'
 		         WHEN i.expires_at <= now() THEN 'expired'
@@ -152,7 +169,8 @@ func (s *Store) ListInvites(ctx context.Context, limit int) ([]domain.InviteRow,
 		if err := rows.Scan(
 			&invite.ID, &invite.CreatedBy, &invite.MaxUses, &invite.UsedCount,
 			&invite.ExpiresAt, &invite.Revoked, &invite.GrantComfyUI,
-			&invite.GrantOpenWebUI, &invite.Status, &invite.CreatedAt,
+			&invite.GrantOpenWebUI, &invite.GrantQuickGeneration, &invite.GenerationDailyLimit,
+			&invite.GenerationTotalLimit, &invite.Status, &invite.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

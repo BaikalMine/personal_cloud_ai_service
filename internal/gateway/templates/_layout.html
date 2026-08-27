@@ -22,9 +22,9 @@
   <div class="topbar-menu" id="user-navigation">
     <nav class="primary-nav" aria-label="Основная навигация">
       <a href="/app">Обзор</a>
-      <a href="/generate">Быстрая генерация</a>
-      <a href="/comfyui/" target="_blank" rel="noopener">ComfyUI</a>
-      <a href="/openwebui/" target="_blank" rel="noopener">OpenWebUI</a>
+      {{if .CurrentUser}}{{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseQuickGeneration}}<a href="/generate">Быстрая генерация</a>{{end}}{{end}}
+      {{if .CurrentUser}}{{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseComfyUI}}<a href="/comfyui/" target="_blank" rel="noopener">ComfyUI</a>{{end}}{{end}}
+      {{if .CurrentUser}}{{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseOpenWebUI}}<a href="/openwebui/" target="_blank" rel="noopener">OpenWebUI</a>{{end}}{{end}}
       <a href="/account/sessions">Сессии</a>
       {{if .CurrentUser}}{{if eq .CurrentUser.Role "admin"}}<a href="{{.AdminBaseURL}}/admin">Администрирование</a>{{end}}{{end}}
     </nav>

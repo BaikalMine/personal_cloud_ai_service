@@ -175,6 +175,7 @@ $config = [ordered]@{
     }
     comfyui = [ordered]@{
         working_directory = $comfyRoot
+		output_directory = (Join-Path $comfyRoot 'output')
         remote_url = $comfyRemote
         branch = $comfyBranch
         python_executable = $comfyPython

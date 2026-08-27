@@ -8,7 +8,8 @@
       <a class="button ghost" href="/login">Вернуться ко входу</a>
     {{else}}
       <p class="muted">Укажите данные новой учётной записи.</p>
-      <p class="access-preview">Доступ: {{if .Access.GrantComfyUI}}<span class="badge">ComfyUI</span>{{end}} {{if .Access.GrantOpenWebUI}}<span class="badge">OpenWebUI</span>{{end}}</p>
+      <p class="access-preview">Доступ: {{if .Access.GrantQuickGeneration}}<span class="badge ok">Быстрая генерация</span>{{end}} {{if .Access.GrantComfyUI}}<span class="badge">ComfyUI</span>{{end}} {{if .Access.GrantOpenWebUI}}<span class="badge">OpenWebUI</span>{{end}}</p>
+      {{if .Access.GrantQuickGeneration}}<p class="muted">Лимиты быстрых генераций: {{if gt .Access.GenerationDailyLimit 0}}{{.Access.GenerationDailyLimit}} в сутки{{else}}без суточного лимита{{end}}, {{if gt .Access.GenerationTotalLimit 0}}{{.Access.GenerationTotalLimit}} всего{{else}}без общего лимита{{end}}.</p>{{end}}
       {{if .Error}}<p class="alert">{{.Error}}</p>{{end}}
       <form method="post">
         <label>Логин<input name="username" autocomplete="username" placeholder="От 3 символов" required minlength="3" autofocus></label>

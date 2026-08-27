@@ -54,6 +54,40 @@ func (c *Client) Install(ctx context.Context, request Request) (Status, error) {
 	return c.command(c.install, ctx, "/v1/install", request)
 }
 
+func (c *Client) DeleteComfyOutputs(ctx context.Context, files []ComfyOutputFile) (ComfyOutputDeleteResult, error) {
+	if !c.Configured() {
+		return ComfyOutputDeleteResult{}, ErrUnavailable
+	}
+	payload, err := json.Marshal(ComfyOutputDeleteRequest{Files: files})
+	if err != nil {
+		return ComfyOutputDeleteResult{}, err
+	}
+	target := *c.baseURL
+	target.Path = "/v1/comfy-output/delete"
+	target.RawQuery = ""
+	target.Fragment = ""
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), bytes.NewReader(payload))
+	if err != nil {
+		return ComfyOutputDeleteResult{}, err
+	}
+	request.Header.Set("Authorization", "Bearer "+c.token)
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Content-Type", "application/json")
+	response, err := c.http.Do(request)
+	if err != nil {
+		return ComfyOutputDeleteResult{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	defer response.Body.Close()
+	var result ComfyOutputDeleteResult
+	if err := json.NewDecoder(io.LimitReader(response.Body, maxResponseBytes)).Decode(&result); err != nil {
+		return ComfyOutputDeleteResult{}, fmt.Errorf("decode ComfyUI output delete response: %w", err)
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return result, fmt.Errorf("update agent returned %s", response.Status)
+	}
+	return result, nil
+}
+
 func (c *Client) command(client *http.Client, ctx context.Context, path string, command Request) (Status, error) {
 	payload, err := json.Marshal(command)
 	if err != nil {

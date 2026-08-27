@@ -1,7 +1,7 @@
 {
   "id": "image-to-image",
   "name": "Фото и промт",
-  "description": "Перерисовывает загруженное фото с учетом описания.",
+  "description": "Редактирует загруженное фото по инструкции через Flux 2.",
   "requires_image": true,
   "nodes": {
     "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "{{checkpoint}}"}},

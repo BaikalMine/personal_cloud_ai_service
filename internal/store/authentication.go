@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func (s *Store) RecordLoginFailure(ctx context.Context, username string, threshold int, lockDuration time.Duration) (sql.NullTime, error) {
+func (s *Store) RecordLoginFailure(ctx context.Context, identity string, threshold int, lockDuration time.Duration) (sql.NullTime, error) {
 	var lockedUntil sql.NullTime
 	err := s.db.QueryRowContext(ctx, `
 		WITH next_failure AS (
@@ -14,7 +14,8 @@ func (s *Store) RecordLoginFailure(ctx context.Context, username string, thresho
 			       CASE WHEN locked_until IS NOT NULL AND locked_until <= now()
 			            THEN 1 ELSE failed_login_count + 1 END AS failure_count
 			FROM users
-			WHERE username = $1 AND disabled = false
+			WHERE (username = $1 OR (email IS NOT NULL AND LOWER(email) = LOWER($1)))
+			  AND disabled = false
 			FOR UPDATE
 		)
 		UPDATE users u
@@ -27,7 +28,7 @@ func (s *Store) RecordLoginFailure(ctx context.Context, username string, thresho
 		FROM next_failure
 		WHERE u.id = next_failure.id
 		RETURNING u.locked_until
-	`, username, threshold, int64(lockDuration.Seconds())).Scan(&lockedUntil)
+	`, identity, threshold, int64(lockDuration.Seconds())).Scan(&lockedUntil)
 	return lockedUntil, err
 }
 

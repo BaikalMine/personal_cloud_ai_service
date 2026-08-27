@@ -18,13 +18,14 @@ func (s *Store) EnsureBootstrapAdmin(ctx context.Context, username, initialPassw
 		return ErrInvalidBootstrapAdmin
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO users (username, password_hash, role, disabled, can_use_comfyui, can_use_openwebui)
-		VALUES ($1, $2, 'admin', false, true, true)
+		INSERT INTO users (username, password_hash, role, disabled, can_use_comfyui, can_use_openwebui, can_use_quick_generation)
+		VALUES ($1, $2, 'admin', false, true, true, true)
 		ON CONFLICT (username) DO UPDATE SET
 			role = 'admin',
 			disabled = false,
 			can_use_comfyui = true,
 			can_use_openwebui = true,
+			can_use_quick_generation = true,
 			failed_login_count = 0,
 			locked_until = NULL
 	`, username, initialPasswordHash)

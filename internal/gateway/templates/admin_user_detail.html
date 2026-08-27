@@ -16,6 +16,8 @@
 
   {{if .AccountLocked}}<p class="alert">Вход заблокирован до {{formatTime .Profile.LockedUntil}}.</p>{{end}}
   {{if eq .SecurityStatus "unlocked"}}<p class="success-box">Блокировка и счётчик неудачных попыток сброшены.</p>{{end}}
+  {{if eq .DeleteStatus "confirmation_required"}}<p class="alert">Для удаления введите логин пользователя.</p>{{end}}
+  {{if eq .DeleteStatus "confirmation_invalid"}}<p class="alert">Логин не совпадает или эту учётную запись нельзя удалить.</p>{{end}}
 
   <section class="metric-grid metrics-four profile-metrics" aria-label="Статистика пользователя">
     <article class="metric-card tone-blue"><span>Всего запросов</span><strong>{{formatNumber .Stats.TotalRequests}}</strong><small>за всё время</small></article>
@@ -39,14 +41,17 @@
     <section class="panel access-panel">
       <div class="panel-heading"><div><p class="section-kicker">Разрешения</p><h2>Доступ к сервисам</h2></div></div>
       {{if eq .AccessStatus "changed"}}<p class="success-box">Права доступа обновлены.</p>{{end}}
+	  {{if eq .AccessStatus "invalid_limits"}}<p class="alert">Проверьте лимиты генераций: допустимы только неотрицательные числа.</p>{{end}}
       {{if eq .Profile.Role "admin"}}
       <p class="access-note"><span class="account-indicator"></span>Администратору доступны оба сервиса.</p>
       {{else}}
       <form method="post" class="access-form">
         <input type="hidden" name="csrf" value="{{.CSRF}}">
         <input type="hidden" name="action" value="update_access">
+        <label class="service-toggle"><input name="can_use_quick_generation" type="checkbox" {{if .Profile.CanUseQuickGeneration}}checked{{end}}><span><b>Быстрая генерация</b><small>{{if .Profile.CanUseQuickGeneration}}Разрешена без доступа к ComfyUI{{else}}Доступ закрыт{{end}}</small></span></label>
         <label class="service-toggle"><input name="can_use_comfyui" type="checkbox" {{if .Profile.CanUseComfyUI}}checked{{end}}><span><b>ComfyUI</b><small>{{if .Profile.CanUseComfyUI}}Доступ разрешён{{else}}Доступ закрыт{{end}}</small></span></label>
         <label class="service-toggle"><input name="can_use_openwebui" type="checkbox" {{if .Profile.CanUseOpenWebUI}}checked{{end}}><span><b>OpenWebUI</b><small>{{if .Profile.CanUseOpenWebUI}}Доступ разрешён{{else}}Доступ закрыт{{end}}</small></span></label>
+        <div class="invite-fields"><label>Суточный лимит быстрых генераций<input name="generation_daily_limit" type="number" min="0" max="100000" value="{{.Profile.GenerationDailyLimit}}"><small class="field-hint">0 = без лимита</small></label><label>Общий лимит быстрых генераций<input name="generation_total_limit" type="number" min="0" max="10000000" value="{{.Profile.GenerationTotalLimit}}"><small class="field-hint">0 = без лимита · использовано: {{.Profile.GenerationTotalUsed}}</small></label></div>
         <button type="submit">Сохранить права</button>
       </form>
       {{end}}
@@ -75,6 +80,15 @@
           {{if .Profile.Disabled}}<button name="action" value="enable">Включить пользователя</button>{{else}}<button name="action" value="disable" class="danger" data-confirm="Отключить пользователя и завершить его активные сессии?">Отключить пользователя</button>{{end}}
         {{end}}
       </form>
+	  {{if ne .Profile.Role "admin"}}
+	  <form method="post" class="delete-account-form">
+		<input type="hidden" name="csrf" value="{{.CSRF}}">
+		<input type="hidden" name="action" value="delete">
+		<label>Подтвердите логином <input name="confirm_username" autocomplete="off" placeholder="{{.Profile.Username}}" required></label>
+		<p class="muted">Удаление необратимо: будут удалены сессии, сохранённые настройки, файлы профиля и данные сервисов пользователя.</p>
+		<button type="submit" class="danger" data-confirm="Удалить учётную запись {{.Profile.Username}} без возможности восстановления?">Удалить учётную запись</button>
+	  </form>
+	  {{end}}
     </section>
 
     <section class="panel span-two">

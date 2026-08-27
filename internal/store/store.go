@@ -16,16 +16,22 @@ func New(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-func (s *Store) FindUserWithPassword(ctx context.Context, username string) (domain.User, string, error) {
+func (s *Store) FindUserWithPassword(ctx context.Context, identity string) (domain.User, string, error) {
 	var user domain.User
 	var passwordHash string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, username, email, role, disabled, can_use_comfyui, can_use_openwebui,
+		SELECT id, username, email, role, disabled, can_use_comfyui, can_use_openwebui, can_use_quick_generation,
+		       generation_daily_limit, generation_total_limit, generation_total_used,
 		       failed_login_count, locked_until, created_at, last_login_at, password_hash
-		FROM users WHERE username = $1
-	`, username).Scan(
+		FROM users
+		WHERE username = $1 OR (email IS NOT NULL AND LOWER(email) = LOWER($1))
+		ORDER BY CASE WHEN username = $1 THEN 0 ELSE 1 END
+		LIMIT 1
+	`, identity).Scan(
 		&user.ID, &user.Username, &user.Email, &user.Role, &user.Disabled,
-		&user.CanUseComfyUI, &user.CanUseOpenWebUI, &user.FailedLoginCount, &user.LockedUntil,
+		&user.CanUseComfyUI, &user.CanUseOpenWebUI, &user.CanUseQuickGeneration,
+		&user.GenerationDailyLimit, &user.GenerationTotalLimit, &user.GenerationTotalUsed,
+		&user.FailedLoginCount, &user.LockedUntil,
 		&user.CreatedAt, &user.LastLoginAt, &passwordHash,
 	)
 	return user, passwordHash, err
@@ -35,7 +41,8 @@ func (s *Store) UserBySessionHash(ctx context.Context, tokenHash string, idleTim
 	var user domain.User
 	err := s.db.QueryRowContext(ctx, `
 		SELECT u.id, u.username, u.email, u.role, u.disabled, u.can_use_comfyui,
-		       u.can_use_openwebui, u.failed_login_count, u.locked_until, u.created_at, u.last_login_at
+		       u.can_use_openwebui, u.can_use_quick_generation, u.generation_daily_limit,
+		       u.generation_total_limit, u.generation_total_used, u.failed_login_count, u.locked_until, u.created_at, u.last_login_at
 		FROM sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = $1
 		  AND s.expires_at > now()
@@ -43,7 +50,9 @@ func (s *Store) UserBySessionHash(ctx context.Context, tokenHash string, idleTim
 		  AND u.disabled = false
 	`, tokenHash, int64(idleTimeout.Seconds())).Scan(
 		&user.ID, &user.Username, &user.Email, &user.Role, &user.Disabled,
-		&user.CanUseComfyUI, &user.CanUseOpenWebUI, &user.FailedLoginCount, &user.LockedUntil,
+		&user.CanUseComfyUI, &user.CanUseOpenWebUI, &user.CanUseQuickGeneration,
+		&user.GenerationDailyLimit, &user.GenerationTotalLimit, &user.GenerationTotalUsed,
+		&user.FailedLoginCount, &user.LockedUntil,
 		&user.CreatedAt, &user.LastLoginAt,
 	)
 	return user, err
@@ -52,12 +61,15 @@ func (s *Store) UserBySessionHash(ctx context.Context, tokenHash string, idleTim
 func (s *Store) UserByID(ctx context.Context, id int64) (domain.User, error) {
 	var user domain.User
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, username, email, role, disabled, can_use_comfyui, can_use_openwebui,
+		SELECT id, username, email, role, disabled, can_use_comfyui, can_use_openwebui, can_use_quick_generation,
+		       generation_daily_limit, generation_total_limit, generation_total_used,
 		       failed_login_count, locked_until, created_at, last_login_at
 		FROM users WHERE id = $1
 	`, id).Scan(
 		&user.ID, &user.Username, &user.Email, &user.Role, &user.Disabled,
-		&user.CanUseComfyUI, &user.CanUseOpenWebUI, &user.FailedLoginCount, &user.LockedUntil,
+		&user.CanUseComfyUI, &user.CanUseOpenWebUI, &user.CanUseQuickGeneration,
+		&user.GenerationDailyLimit, &user.GenerationTotalLimit, &user.GenerationTotalUsed,
+		&user.FailedLoginCount, &user.LockedUntil,
 		&user.CreatedAt, &user.LastLoginAt,
 	)
 	return user, err
@@ -66,7 +78,9 @@ func (s *Store) UserByID(ctx context.Context, id int64) (domain.User, error) {
 func (s *Store) ListUsers(ctx context.Context, search string) ([]domain.UserRow, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT u.id, u.username, COALESCE(u.email,''), u.role, u.disabled,
-		       u.can_use_comfyui, u.can_use_openwebui, u.failed_login_count, u.locked_until,
+		       u.can_use_comfyui, u.can_use_openwebui, u.can_use_quick_generation,
+		       u.generation_daily_limit, u.generation_total_limit, u.generation_total_used,
+		       u.failed_login_count, u.locked_until,
 		       COALESCE(u.locked_until > now(), false), u.created_at, u.last_login_at,
 		       COUNT(pr.id) AS requests
 		FROM users u
@@ -85,7 +99,9 @@ func (s *Store) ListUsers(ctx context.Context, search string) ([]domain.UserRow,
 		var user domain.UserRow
 		if err := rows.Scan(
 			&user.ID, &user.Username, &user.Email, &user.Role, &user.Disabled,
-			&user.CanUseComfyUI, &user.CanUseOpenWebUI, &user.FailedLoginCount, &user.LockedUntil,
+			&user.CanUseComfyUI, &user.CanUseOpenWebUI, &user.CanUseQuickGeneration,
+			&user.GenerationDailyLimit, &user.GenerationTotalLimit, &user.GenerationTotalUsed,
+			&user.FailedLoginCount, &user.LockedUntil,
 			&user.Locked, &user.CreatedAt, &user.LastLoginAt, &user.Requests,
 		); err != nil {
 			return nil, err
@@ -162,11 +178,27 @@ func (s *Store) SetDisabled(ctx context.Context, userID int64, disabled bool) (b
 	return affected > 0, revoked, nil
 }
 
-func (s *Store) SetServiceAccess(ctx context.Context, userID int64, comfyUI, openWebUI bool) (bool, error) {
+// DeleteUser permanently removes a regular account and all data owned by it.
+// Database foreign keys revoke sessions and cascade dependent user records.
+func (s *Store) DeleteUser(ctx context.Context, userID int64, username string) (bool, error) {
 	result, err := s.db.ExecContext(ctx, `
-		UPDATE users SET can_use_comfyui = $2, can_use_openwebui = $3
+		DELETE FROM users
+		WHERE id = $1 AND username = $2 AND role <> 'admin'
+	`, userID, username)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	return affected > 0, err
+}
+
+func (s *Store) SetServiceAccess(ctx context.Context, userID int64, comfyUI, openWebUI, quickGeneration bool, dailyLimit int, totalLimit int64) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE users
+		SET can_use_comfyui = $2, can_use_openwebui = $3, can_use_quick_generation = $4,
+		    generation_daily_limit = $5, generation_total_limit = $6
 		WHERE id = $1 AND role <> 'admin'
-	`, userID, comfyUI, openWebUI)
+	`, userID, comfyUI, openWebUI, quickGeneration, dailyLimit, totalLimit)
 	if err != nil {
 		return false, err
 	}

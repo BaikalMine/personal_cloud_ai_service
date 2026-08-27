@@ -6,22 +6,43 @@ import (
 	"time"
 )
 
-const maintenanceInterval = time.Hour
+const maintenanceInterval = 15 * time.Minute
+const generationRefreshInterval = 30 * time.Second
 
 func (a *App) runMaintenance(ctx context.Context) {
+	backfillCtx, backfillCancel := context.WithTimeout(ctx, 2*time.Minute)
+	a.backfillComfyContentMedia(backfillCtx)
+	a.backfillContentMediaHashes(backfillCtx)
+	backfillCancel()
 	ticker := time.NewTicker(maintenanceInterval)
 	defer ticker.Stop()
+	generationTicker := time.NewTicker(generationRefreshInterval)
+	defer generationTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-generationTicker.C:
+			refreshCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			a.refreshTrackedGenerationStatuses(refreshCtx)
+			cancel()
 		case <-ticker.C:
+			backfillCtx, backfillCancel := context.WithTimeout(ctx, 2*time.Minute)
+			a.backfillComfyContentMedia(backfillCtx)
+			a.backfillContentMediaHashes(backfillCtx)
+			backfillCancel()
 			cleanupCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			deletedMedia, mediaErr := a.store.DeleteExpiredMedia(cleanupCtx)
+			deletedMedia, mediaErr := a.deleteExpiredComfyMedia(cleanupCtx)
 			if mediaErr != nil {
-				log.Printf("delete expired media: %v", mediaErr)
+				log.Printf("delete expired ComfyUI media: %v", mediaErr)
 			} else if deletedMedia > 0 {
-				log.Printf("deleted %d expired media items", deletedMedia)
+				log.Printf("deleted %d expired ComfyUI media items", deletedMedia)
+			}
+			deletedOtherMedia, otherMediaErr := a.store.DeleteExpiredNonComfyMedia(cleanupCtx)
+			if otherMediaErr != nil {
+				log.Printf("delete expired non-ComfyUI media: %v", otherMediaErr)
+			} else if deletedOtherMedia > 0 {
+				log.Printf("deleted %d expired non-ComfyUI media items", deletedOtherMedia)
 			}
 			deleted, err := a.store.DeleteExpiredSessions(cleanupCtx, a.cfg.SessionIdleTimeout)
 			if err != nil {

@@ -7,15 +7,18 @@ import (
 )
 
 func TestUserCanUseService(t *testing.T) {
-	user := User{CanUseComfyUI: true, CanUseOpenWebUI: false}
+	user := User{CanUseComfyUI: true, CanUseOpenWebUI: false, CanUseQuickGeneration: true}
 	if !user.CanUseService("comfyui") {
 		t.Fatal("expected ComfyUI access")
+	}
+	if !user.CanUseService("quick_generation") {
+		t.Fatal("expected quick generation access")
 	}
 	if user.CanUseService("openwebui") || user.CanUseService("unknown") {
 		t.Fatal("unexpected service access")
 	}
 	admin := User{Role: "admin"}
-	if !admin.CanUseService("comfyui") || !admin.CanUseService("openwebui") {
+	if !admin.CanUseService("comfyui") || !admin.CanUseService("openwebui") || !admin.CanUseService("quick_generation") {
 		t.Fatal("administrator must have access to known services")
 	}
 }

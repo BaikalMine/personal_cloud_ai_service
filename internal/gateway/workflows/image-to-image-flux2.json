@@ -1,0 +1,602 @@
+{
+  "id": "image-to-image-flux2",
+  "name": "Flux 2: фото и промт",
+  "description": "Оригинальный проверенный Flux 2 workflow с привязкой редактирования к исходному фото.",
+  "requires_image": true,
+  "nodes": {
+    "10": {
+      "class_type": "VAELoader",
+      "inputs": {
+        "vae_name": "{{vae}}"
+      }
+    },
+    "12": {
+      "class_type": "UNETLoader",
+      "inputs": {
+        "unet_name": "{{diffusion_model}}",
+        "weight_dtype": "default"
+      }
+    },
+    "95": {
+      "class_type": "PathchSageAttentionKJ",
+      "inputs": {
+        "sage_attention": "auto",
+        "allow_compile": true,
+        "model": [
+          "539",
+          0
+        ]
+      }
+    },
+    "106": {
+      "class_type": "easy positive",
+      "inputs": {
+        "positive": "{{positive_prompt}}"
+      }
+    },
+    "284": {
+      "class_type": "FluxGuidance",
+      "inputs": {
+        "guidance": [
+          "286",
+          0
+        ],
+        "conditioning": [
+          "1321",
+          0
+        ]
+      }
+    },
+    "286": {
+      "class_type": "mxSlider",
+      "inputs": {
+        "Xi": "{{flux_guidance}}",
+        "Xf": "{{flux_guidance}}",
+        "isfloatX": 1
+      }
+    },
+    "303": {
+      "class_type": "Any Switch (rgthree)",
+      "inputs": {
+        "any_01": [
+          "12",
+          0
+        ]
+      }
+    },
+    "404": {
+      "class_type": "Seed (rgthree)",
+      "inputs": {
+        "seed": "{{seed}}"
+      }
+    },
+    "534": {
+      "class_type": "JoinStrings",
+      "inputs": {
+        "delimiter": ",",
+        "string1": [
+          "106",
+          0
+        ],
+        "string2": [
+          "809",
+          0
+        ]
+      }
+    },
+    "539": {
+      "class_type": "Power Lora Loader (rgthree)",
+      "inputs": {
+        "PowerLoraLoaderHeaderWidget": {
+          "type": "PowerLoraLoaderHeaderWidget"
+        },
+        "➕ Add Lora": "",
+        "model": [
+          "303",
+          0
+        ],
+        "clip": [
+          "1105",
+          0
+        ]
+      }
+    },
+    "715": {
+      "class_type": "easy negative",
+      "inputs": {
+        "negative": "{{negative_prompt}}"
+      }
+    },
+    "809": {
+      "class_type": "JoinStrings",
+      "inputs": {
+        "delimiter": ", "
+      }
+    },
+    "851": {
+      "class_type": "Flux2KleinEnhancer",
+      "inputs": {
+        "active_scale": "{{flux_active_scale}}",
+        "per_token_whiten": "{{flux_token_whiten}}",
+        "norm_equalize": "{{flux_norm_equalize}}",
+        "early_layer_scale": 1.0,
+        "mid_layer_scale": 1.0,
+        "late_layer_scale": 1.0,
+        "preserve_original": 0.0,
+        "active_end_override": 0,
+        "device": "auto",
+        "debug": false,
+        "conditioning": [
+          "1381",
+          0
+        ]
+      }
+    },
+    "1061": {
+      "class_type": "ImageScaleToTotalPixels",
+      "inputs": {
+        "upscale_method": "area",
+        "megapixels": "{{source_megapixels}}",
+        "resolution_steps": 1,
+        "image": [
+          "1075",
+          0
+        ]
+      }
+    },
+    "1073": {
+      "class_type": "VAEEncode",
+      "inputs": {
+        "pixels": [
+          "1061",
+          0
+        ],
+        "vae": [
+          "10",
+          0
+        ]
+      }
+    },
+    "1075": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{input_image}}"
+      }
+    },
+    "1076": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{input_image_2}}"
+      }
+    },
+    "1065": {
+      "class_type": "ImageScaleToTotalPixels",
+      "inputs": {
+        "upscale_method": "area",
+        "megapixels": "{{source_megapixels}}",
+        "resolution_steps": 1,
+        "image": ["1076", 0]
+      }
+    },
+    "1066": {
+      "class_type": "VAEEncode",
+      "inputs": {
+        "pixels": ["1065", 0],
+        "vae": ["10", 0]
+      }
+    },
+    "1077": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{input_image_3}}"
+      }
+    },
+    "1063": {
+      "class_type": "ImageScaleToTotalPixels",
+      "inputs": {
+        "upscale_method": "area",
+        "megapixels": "{{source_megapixels}}",
+        "resolution_steps": 1,
+        "image": ["1077", 0]
+      }
+    },
+    "1072": {
+      "class_type": "VAEEncode",
+      "inputs": {
+        "pixels": ["1063", 0],
+        "vae": ["10", 0]
+      }
+    },
+    "1316": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{input_image_4}}"
+      }
+    },
+    "1317": {
+      "class_type": "ImageScaleToTotalPixels",
+      "inputs": {
+        "upscale_method": "area",
+        "megapixels": "{{source_megapixels}}",
+        "resolution_steps": 1,
+        "image": ["1316", 0]
+      }
+    },
+    "1318": {
+      "class_type": "VAEEncode",
+      "inputs": {
+        "pixels": ["1317", 0],
+        "vae": ["10", 0]
+      }
+    },
+    "1105": {
+      "class_type": "ClipLoaderGGUF",
+      "inputs": {
+        "clip_name": "{{text_encoder}}",
+        "type": "flux2",
+        "device": "default"
+      }
+    },
+    "1171": {
+      "class_type": "ShowText|pysssss",
+      "inputs": {
+        "text_0": "{{positive_prompt}}",
+        "text": [
+          "1422",
+          0
+        ]
+      }
+    },
+    "1291": {
+      "class_type": "vsLinx_BooleanFlip",
+      "inputs": {
+        "boolean": true
+      }
+    },
+    "1305": {
+      "class_type": "LCAspectRatioPipeOut",
+      "inputs": {
+        "max_resolution": "{{max_longest_side}}",
+        "resolution_source": "{{edit_use_custom_size}}",
+        "aspect_ratio": "{{edit_aspect_preset}}",
+        "custom_width": "{{width}}",
+        "custom_height": "{{height}}",
+        "swap_dimensions": "{{edit_swap_dimensions}}",
+        "upscale_method": "{{edit_resize_method}}",
+        "proportion": "{{edit_proportion}}",
+        "crop_location": "{{edit_crop_location}}",
+        "pad_color": "{{edit_pad_color}}",
+        "divisible_by": 8,
+        "batch_size": 1,
+        "image": [
+          "1075",
+          0
+        ]
+      }
+    },
+    "1319": {
+      "class_type": "LCPipeEdit",
+      "inputs": {
+        "pipe": [
+          "1328",
+          0
+        ],
+        "model_1": [
+          "95",
+          0
+        ],
+        "clip_1": [
+          "539",
+          1
+        ],
+        "vae_1": [
+          "10",
+          0
+        ],
+        "vae_2": [
+          "10",
+          0
+        ],
+        "positive_prompt": [
+          "1171",
+          0
+        ],
+        "positive": [
+          "851",
+          0
+        ],
+        "negative_prompt": [
+          "715",
+          0
+        ],
+        "negative": [
+          "1376",
+          0
+        ],
+        "seed": [
+          "404",
+          0
+        ]
+      }
+    },
+    "1321": {
+      "class_type": "LCPromptToConditioning",
+      "inputs": {
+        "clip": [
+          "539",
+          1
+        ],
+        "string": [
+          "1171",
+          0
+        ]
+      }
+    },
+    "1328": {
+      "class_type": "LCSamplerConfigureSimplePipeOut",
+      "inputs": {
+        "total_steps": "{{steps}}",
+        "detailer_steps": "{{flux_detailer_steps}}",
+        "denoise": "{{denoise}}",
+        "_gap1": "",
+        "cfg": "{{cfg}}",
+        "_gap2": "",
+        "sampler_name": "{{sampler}}",
+        "scheduler": "{{scheduler}}",
+        "pipe": [
+          "1403",
+          0
+        ]
+      }
+    },
+    "1341": {
+      "class_type": "SaveImage",
+      "inputs": {
+        "filename_prefix": "AI-Gateway-Flux2-Edit",
+        "images": [
+          "1362",
+          0
+        ]
+      }
+    },
+    "1350": {
+      "class_type": "LCBasicScheduler",
+      "inputs": {
+        "scheduler": [
+          "1367",
+          24
+        ],
+        "steps": [
+          "1367",
+          18
+        ],
+        "model": [
+          "1367",
+          1
+        ]
+      }
+    },
+    "1355": {
+      "class_type": "SamplerCustomAdvanced",
+      "inputs": {
+        "noise": [
+          "1365",
+          0
+        ],
+        "guider": [
+          "1359",
+          0
+        ],
+        "sampler": [
+          "1361",
+          0
+        ],
+        "sigmas": [
+          "1350",
+          0
+        ],
+        "latent_image": [
+          "1400",
+          0
+        ]
+      }
+    },
+    "1359": {
+      "class_type": "CFGGuider",
+      "inputs": {
+        "cfg": [
+          "1367",
+          19
+        ],
+        "model": [
+          "1367",
+          1
+        ],
+        "positive": [
+          "1367",
+          14
+        ],
+        "negative": [
+          "1367",
+          16
+        ]
+      }
+    },
+    "1361": {
+      "class_type": "Any Switch (rgthree)",
+      "inputs": {
+        "any_02": [
+          "1363",
+          0
+        ]
+      }
+    },
+    "1362": {
+      "class_type": "VAEDecode",
+      "inputs": {
+        "samples": [
+          "1355",
+          0
+        ],
+        "vae": [
+          "1367",
+          3
+        ]
+      }
+    },
+    "1363": {
+      "class_type": "KSamplerSelect",
+      "inputs": {
+        "sampler_name": [
+          "1367",
+          23
+        ]
+      }
+    },
+    "1365": {
+      "class_type": "RandomNoise",
+      "inputs": {
+        "noise_seed": [
+          "1367",
+          17
+        ]
+      }
+    },
+    "1367": {
+      "class_type": "LCPipeOut",
+      "inputs": {
+        "pipe": [
+          "1319",
+          0
+        ]
+      }
+    },
+    "1376": {
+      "class_type": "LCPromptToConditioning",
+      "inputs": {
+        "clip": [
+          "539",
+          1
+        ],
+        "string": [
+          "715",
+          0
+        ]
+      }
+    },
+    "1381": {
+      "class_type": "LCAnySwitch",
+      "inputs": {
+        "inputcount": 2,
+        "any_01": [
+          "1398",
+          0
+        ],
+        "any_02": [
+          "1321",
+          0
+        ]
+      }
+    },
+    "1398": {
+      "class_type": "LCReferenceLatent",
+      "inputs": {
+        "conditioning": [
+          "284",
+          0
+        ],
+        "latent_1": [
+          "1073",
+          0
+        ],
+        "latent_2": [
+          "1066",
+          0
+        ],
+        "latent_3": [
+          "1072",
+          0
+        ],
+        "latent_4": [
+          "1318",
+          0
+        ]
+      }
+    },
+    "1400": {
+      "class_type": "LCDenoise",
+      "inputs": {
+        "denoise": [
+          "1367",
+          20
+        ],
+        "samples": [
+          "1367",
+          11
+        ]
+      }
+    },
+    "1403": {
+      "class_type": "LCPipeEdit",
+      "inputs": {
+        "pipe": [
+          "1305",
+          0
+        ],
+        "vae_1": [
+          "10",
+          0
+        ],
+        "vae_2": [
+          "10",
+          0
+        ],
+        "latent": [
+          "1405",
+          0
+        ]
+      }
+    },
+    "1405": {
+      "class_type": "LCAnySwitch",
+      "inputs": {
+        "inputcount": 2,
+        "any_02": [
+          "1406",
+          0
+        ]
+      }
+    },
+    "1406": {
+      "class_type": "EmptyFlux2LatentImage",
+      "inputs": {
+        "width": [
+          "1305",
+          3
+        ],
+        "height": [
+          "1305",
+          4
+        ],
+        "batch_size": [
+          "1305",
+          6
+        ]
+      }
+    },
+    "1422": {
+      "class_type": "LCAnySwitch",
+      "inputs": {
+        "inputcount": 2,
+        "any_01": [
+          "534",
+          0
+        ],
+        "any_02": [
+          "534",
+          0
+        ]
+      }
+    }
+  }
+}

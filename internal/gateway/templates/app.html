@@ -23,8 +23,8 @@
     </a>{{else}}<article class="service-card disabled"><div class="service-card-heading"><span class="service-symbol openwebui">OW</span><span class="badge danger">Нет доступа</span></div><h2>OpenWebUI</h2><span class="service-open">Доступ не назначен</span></article>{{end}}
   </section>
 
-  {{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseComfyUI}}<section class="generation-launch panel">
-    <div><p class="section-kicker">Для телефона</p><h2>Быстрая генерация через ComfyUI</h2><p class="panel-intro">Готовые workflow, загрузка фото и промты в несколько шагов, без открытия рабочего интерфейса.</p></div>
+  {{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseQuickGeneration}}<section class="generation-launch panel">
+    <div><p class="section-kicker">Для телефона</p><h2>Быстрая генерация</h2><p class="panel-intro">Готовые workflow, загрузка фото и промты в несколько шагов, без доступа к рабочему интерфейсу ComfyUI.</p></div>
     <a class="button" href="/generate">Начать генерацию</a>
   </section>{{end}}
 

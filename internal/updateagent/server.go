@@ -22,18 +22,23 @@ type Controller interface {
 }
 
 type Server struct {
-	tokenHash  [32]byte
-	controller Controller
+	tokenHash   [32]byte
+	controller  Controller
+	comfyOutput ComfyTarget
 }
 
-func NewServer(token string, controller Controller) (*Server, error) {
+func NewServer(token string, controller Controller, comfyTarget ...ComfyTarget) (*Server, error) {
 	if len(strings.TrimSpace(token)) < 32 {
 		return nil, errors.New("update agent token must contain at least 32 characters")
 	}
 	if controller == nil {
 		return nil, errors.New("controller is required")
 	}
-	return &Server{tokenHash: sha256.Sum256([]byte(strings.TrimSpace(token))), controller: controller}, nil
+	server := &Server{tokenHash: sha256.Sum256([]byte(strings.TrimSpace(token))), controller: controller}
+	if len(comfyTarget) > 0 {
+		server.comfyOutput = comfyTarget[0]
+	}
+	return server, nil
 }
 
 func (s *Server) Handler() http.Handler {
@@ -42,6 +47,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/v1/status", s.authenticate(http.HandlerFunc(s.handleStatus)))
 	mux.Handle("/v1/check", s.authenticate(http.HandlerFunc(s.handleCheck)))
 	mux.Handle("/v1/install", s.authenticate(http.HandlerFunc(s.handleInstall)))
+	mux.Handle("/v1/comfy-output/delete", s.authenticate(http.HandlerFunc(s.handleDeleteComfyOutput)))
 	return securityHeaders(mux)
 }
 
@@ -73,6 +79,29 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
 	s.handleCommand(w, r, s.controller.Install)
+}
+
+func (s *Server) handleDeleteComfyOutput(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBytes)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var request updates.ComfyOutputDeleteRequest
+	if err := decoder.Decode(&request); err != nil || len(request.Files) == 0 || len(request.Files) > 50 {
+		writeJSON(w, http.StatusBadRequest, updates.ComfyOutputDeleteResult{Rejected: len(request.Files)})
+		return
+	}
+	result, err := DeleteComfyOutputFiles(r.Context(), s.comfyOutput, request.Files)
+	if err != nil {
+		log.Printf("delete ComfyUI output: %v", err)
+		writeJSON(w, http.StatusInternalServerError, result)
+		return
+	}
+	log.Printf("processed %d expired ComfyUI output files: deleted=%d missing=%d mismatched=%d rejected=%d", len(request.Files), result.Deleted, result.Missing, result.Mismatched, result.Rejected)
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request, command func(context.Context, updates.Request) (updates.Status, error)) {
@@ -139,10 +168,14 @@ func statusWithError(status updates.Status, err error) updates.Status {
 }
 
 func writeStatus(w http.ResponseWriter, statusCode int, status updates.Status) {
+	writeJSON(w, statusCode, status)
+}
+
+func writeJSON(w http.ResponseWriter, statusCode int, payload any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(statusCode)
-	_ = json.NewEncoder(w).Encode(status)
+	_ = json.NewEncoder(w).Encode(payload)
 }
 
 func methodNotAllowed(w http.ResponseWriter, allowed string) {

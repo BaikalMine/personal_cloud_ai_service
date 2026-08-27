@@ -102,6 +102,8 @@ func (a *App) audit(ctx context.Context, actor *int64, action, targetType string
 
 func serviceDisplayName(service string) string {
 	switch service {
+	case "quick_generation":
+		return "Быстрая генерация"
 	case "comfyui":
 		return "ComfyUI"
 	case "openwebui":

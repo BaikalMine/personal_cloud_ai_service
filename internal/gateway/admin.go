@@ -2,7 +2,9 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"log"
 	"mime"
 	"net/http"
 	"path/filepath"
@@ -167,6 +169,7 @@ func (a *App) handleAdminContent(w http.ResponseWriter, r *http.Request) {
 	if len(query) > 200 {
 		query = query[:200]
 	}
+	a.backfillComfyContentMedia(r.Context())
 	rowLimit := 200
 	if query != "" {
 		rowLimit = 500
@@ -226,6 +229,19 @@ func (a *App) handleAdminContent(w http.ResponseWriter, r *http.Request) {
 		"Title": "AI-контент пользователей", "Events": events,
 		"Username": username, "Service": service, "Query": query, "Overview": overview,
 	})
+}
+
+func (a *App) backfillComfyContentMedia(ctx context.Context) {
+	items, err := a.store.UnarchivedComfyOutputs(ctx, 12)
+	if err != nil {
+		log.Printf("find unarchived ComfyUI outputs: %v", err)
+		return
+	}
+	for _, item := range items {
+		a.archiveGenerationOutputs(ctx, item.UserID, []generationOutput{{
+			Filename: item.Filename, Subfolder: item.Subfolder, Type: item.StorageType, MediaType: item.MediaType,
+		}})
+	}
 }
 
 func (a *App) handleAdminContentMedia(w http.ResponseWriter, r *http.Request, rawID string) {
@@ -314,7 +330,10 @@ func (a *App) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ошибка базы данных", http.StatusInternalServerError)
 		return
 	}
-	a.render(w, r, "admin_users", map[string]any{"Title": "Пользователи", "Users": users, "Query": search})
+	a.render(w, r, "admin_users", map[string]any{
+		"Title": "Пользователи", "Users": users, "Query": search,
+		"DeleteStatus": r.URL.Query().Get("deleted"),
+	})
 }
 
 func (a *App) handleAdminUserDetail(w http.ResponseWriter, r *http.Request, rest string) {
@@ -353,6 +372,24 @@ func (a *App) handleAdminUserDetail(w http.ResponseWriter, r *http.Request, rest
 			if updated {
 				a.audit(r.Context(), &actor.ID, "user_enabled", "user", &id, a.clientIP(r), r.UserAgent(), nil)
 			}
+		case "delete":
+			confirmation := strings.TrimSpace(r.Form.Get("confirm_username"))
+			if confirmation == "" {
+				http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?delete=confirmation_required", id), http.StatusFound)
+				return
+			}
+			deleted, err := a.store.DeleteUser(r.Context(), id, confirmation)
+			if err != nil {
+				http.Error(w, "не удалось удалить пользователя", http.StatusInternalServerError)
+				return
+			}
+			if !deleted {
+				http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?delete=confirmation_invalid", id), http.StatusFound)
+				return
+			}
+			a.audit(r.Context(), &actor.ID, "user_deleted", "user", &id, a.clientIP(r), r.UserAgent(), map[string]any{"username": confirmation})
+			http.Redirect(w, r, "/admin/users?deleted=1", http.StatusFound)
+			return
 		case "revoke_sessions":
 			_, _ = a.store.RevokeSessions(r.Context(), id)
 			a.audit(r.Context(), &actor.ID, "sessions_revoked", "user", &id, a.clientIP(r), r.UserAgent(), nil)
@@ -370,13 +407,19 @@ func (a *App) handleAdminUserDetail(w http.ResponseWriter, r *http.Request, rest
 		case "update_access":
 			comfyUI := r.Form.Get("can_use_comfyui") == "on"
 			openWebUI := r.Form.Get("can_use_openwebui") == "on"
-			updated, err := a.store.SetServiceAccess(r.Context(), id, comfyUI, openWebUI)
+			quickGeneration := r.Form.Get("can_use_quick_generation") == "on"
+			dailyLimit, totalLimit, limitErr := parseGenerationLimits(r)
+			if limitErr != nil {
+				http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?access=invalid_limits", id), http.StatusFound)
+				return
+			}
+			updated, err := a.store.SetServiceAccess(r.Context(), id, comfyUI, openWebUI, quickGeneration, dailyLimit, totalLimit)
 			if err != nil {
 				http.Error(w, "не удалось обновить права доступа", http.StatusInternalServerError)
 				return
 			}
 			if updated {
-				a.audit(r.Context(), &actor.ID, "user_service_access_updated", "user", &id, a.clientIP(r), r.UserAgent(), map[string]any{"comfyui": comfyUI, "openwebui": openWebUI})
+				a.audit(r.Context(), &actor.ID, "user_service_access_updated", "user", &id, a.clientIP(r), r.UserAgent(), map[string]any{"comfyui": comfyUI, "openwebui": openWebUI, "quick_generation": quickGeneration, "generation_daily_limit": dailyLimit, "generation_total_limit": totalLimit})
 			}
 			http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?access=changed", id), http.StatusFound)
 			return
@@ -427,6 +470,7 @@ func (a *App) handleAdminUserDetail(w http.ResponseWriter, r *http.Request, rest
 		"PasswordStatus": r.URL.Query().Get("password"),
 		"AccessStatus":   r.URL.Query().Get("access"),
 		"SecurityStatus": r.URL.Query().Get("security"),
+		"DeleteStatus":   r.URL.Query().Get("delete"),
 		"AccountLocked":  user.IsLocked(time.Now()),
 	})
 }
@@ -460,9 +504,16 @@ func (a *App) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
 		}
 		grantComfyUI := r.Form.Get("grant_comfyui") == "on"
 		grantOpenWebUI := r.Form.Get("grant_openwebui") == "on"
-		if !grantComfyUI && !grantOpenWebUI {
+		grantQuickGeneration := r.Form.Get("grant_quick_generation") == "on"
+		dailyLimit, totalLimit, limitErr := parseGenerationLimits(r)
+		if limitErr != nil {
 			invites, _ := a.store.ListInvites(r.Context(), 200)
-			a.render(w, r, "admin_invites", map[string]any{"Title": "Приглашения", "Invites": invites, "Error": "Выберите хотя бы один сервис."})
+			a.render(w, r, "admin_invites", map[string]any{"Title": "Приглашения", "Invites": invites, "Error": limitErr.Error()})
+			return
+		}
+		if !grantComfyUI && !grantOpenWebUI && !grantQuickGeneration {
+			invites, _ := a.store.ListInvites(r.Context(), 200)
+			a.render(w, r, "admin_invites", map[string]any{"Title": "Приглашения", "Invites": invites, "Error": "Выберите хотя бы один тип доступа."})
 			return
 		}
 		token, err := security.RandomToken()
@@ -471,18 +522,21 @@ func (a *App) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		id, err := a.store.CreateInvite(r.Context(), store.CreateInviteParams{
-			TokenHash:       security.HashToken(token),
-			CreatedByUserID: actor.ID,
-			MaxUses:         maxUses,
-			ExpiresAt:       expiresAt,
-			GrantComfyUI:    grantComfyUI,
-			GrantOpenWebUI:  grantOpenWebUI,
+			TokenHash:            security.HashToken(token),
+			CreatedByUserID:      actor.ID,
+			MaxUses:              maxUses,
+			ExpiresAt:            expiresAt,
+			GrantComfyUI:         grantComfyUI,
+			GrantOpenWebUI:       grantOpenWebUI,
+			GrantQuickGeneration: grantQuickGeneration,
+			GenerationDailyLimit: dailyLimit,
+			GenerationTotalLimit: totalLimit,
 		})
 		if err != nil {
 			http.Error(w, "ошибка базы данных", http.StatusInternalServerError)
 			return
 		}
-		a.audit(r.Context(), &actor.ID, "invite_created", "invite", &id, a.clientIP(r), r.UserAgent(), map[string]any{"max_uses": maxUses, "expires_at": expiresAt, "grant_comfyui": grantComfyUI, "grant_openwebui": grantOpenWebUI})
+		a.audit(r.Context(), &actor.ID, "invite_created", "invite", &id, a.clientIP(r), r.UserAgent(), map[string]any{"max_uses": maxUses, "expires_at": expiresAt, "grant_comfyui": grantComfyUI, "grant_openwebui": grantOpenWebUI, "grant_quick_generation": grantQuickGeneration, "generation_daily_limit": dailyLimit, "generation_total_limit": totalLimit})
 		invites, _ := a.store.ListInvites(r.Context(), 200)
 		a.render(w, r, "admin_invites", map[string]any{
 			"Title":      "Приглашения",
@@ -497,6 +551,18 @@ func (a *App) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.render(w, r, "admin_invites", map[string]any{"Title": "Приглашения", "Invites": invites})
+}
+
+func parseGenerationLimits(r *http.Request) (int, int64, error) {
+	dailyLimit, err := strconv.Atoi(strings.TrimSpace(r.Form.Get("generation_daily_limit")))
+	if err != nil || dailyLimit < 0 || dailyLimit > 100000 {
+		return 0, 0, fmt.Errorf("суточный лимит должен быть числом от 0 до 100000")
+	}
+	totalLimit, err := strconv.ParseInt(strings.TrimSpace(r.Form.Get("generation_total_limit")), 10, 64)
+	if err != nil || totalLimit < 0 || totalLimit > 10000000 {
+		return 0, 0, fmt.Errorf("общий лимит должен быть числом от 0 до 10000000")
+	}
+	return dailyLimit, totalLimit, nil
 }
 
 func (a *App) handleAdminInviteAction(w http.ResponseWriter, r *http.Request, rest string) {

@@ -8,7 +8,7 @@
     {{if .Error}}<p class="alert">{{.Error}}</p>{{end}}
     <form method="post" action="/login">
       <input type="hidden" name="next" value="{{.Next}}">
-      <label>Логин<input name="username" autocomplete="username" placeholder="Ваш логин" required autofocus></label>
+      <label>Логин или e-mail<input name="login" autocomplete="username" placeholder="Ваш логин или e-mail" required autofocus></label>
       <label>Пароль<input name="password" type="password" autocomplete="current-password" placeholder="Ваш пароль" required></label>
       <button type="submit">Войти</button>
     </form>

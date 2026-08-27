@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -225,10 +227,12 @@ func (a *App) persistComfyMedia(ctx context.Context, capture *proxyContentCaptur
 	if mimeType == "" {
 		mimeType = "application/octet-stream"
 	}
+	digest := sha256.Sum256(capture.response.data)
 	return a.store.InsertContentMedia(ctx, domain.ContentMediaRecord{
 		EventID: eventID, MediaType: capture.mediaType, MIMEType: mimeType,
 		OriginalName: capture.mediaName, Subfolder: capture.mediaSubfolder, StorageType: capture.mediaStorageType,
-		PayloadCipher: payload, SizeBytes: int64(len(capture.response.data)),
+		PayloadCipher: payload, SizeBytes: int64(len(capture.response.data)), ContentHash: hex.EncodeToString(digest[:]),
+		ExpiresAt: time.Now().Add(24 * time.Hour),
 	})
 }
 

@@ -27,6 +27,12 @@ func TestInjectOpenWebUIReturnLink(t *testing.T) {
 	if !strings.Contains(content, `class="ai-gateway-return"`) || !strings.Contains(content, `href="/app"`) {
 		t.Fatalf("return link was not injected: %s", content)
 	}
+	if !strings.Contains(content, `.ai-gateway-return-bar{position:fixed`) {
+		t.Fatalf("return link must not take space in the OpenWebUI viewport: %s", content)
+	}
+	if strings.Contains(content, `.ai-gateway-return-bar{position:relative`) {
+		t.Fatalf("return link shifts the OpenWebUI viewport: %s", content)
+	}
 	if got, want := resp.ContentLength, int64(len(body)); got != want {
 		t.Fatalf("ContentLength = %d, want %d", got, want)
 	}

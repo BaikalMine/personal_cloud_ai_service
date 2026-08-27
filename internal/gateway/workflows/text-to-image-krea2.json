@@ -1,0 +1,28 @@
+{
+  "id": "text-to-image-krea2",
+  "name": "Krea 2: текст в изображение",
+  "description": "Качественная двухэтапная генерация на основе рабочего PhotoFlow Krea 2.",
+  "requires_image": false,
+  "nodes": {
+    "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "{{diffusion_model}}", "weight_dtype": "default"}},
+    "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "{{text_encoder}}", "type": "krea2", "device": "default"}},
+    "3": {"class_type": "VAELoader", "inputs": {"vae_name": "{{vae}}"}},
+    "4": {"class_type": "LoraLoader", "inputs": {"lora_name": "{{lora_1}}", "strength_model": "{{lora_model_strength_1}}", "strength_clip": "{{lora_clip_strength_1}}", "model": ["1", 0], "clip": ["2", 0]}},
+    "17": {"class_type": "LoraLoader", "inputs": {"lora_name": "{{lora_2}}", "strength_model": "{{lora_model_strength_2}}", "strength_clip": "{{lora_clip_strength_2}}", "model": ["4", 0], "clip": ["4", 1]}},
+    "18": {"class_type": "LoraLoader", "inputs": {"lora_name": "{{lora_3}}", "strength_model": "{{lora_model_strength_3}}", "strength_clip": "{{lora_clip_strength_3}}", "model": ["17", 0], "clip": ["17", 1]}},
+    "19": {"class_type": "LoraLoader", "inputs": {"lora_name": "{{lora_4}}", "strength_model": "{{lora_model_strength_4}}", "strength_clip": "{{lora_clip_strength_4}}", "model": ["18", 0], "clip": ["18", 1]}},
+    "5": {"class_type": "ModelPatchTorchSettings", "inputs": {"enable_fp16_accumulation": true, "model": ["19", 0]}},
+    "6": {"class_type": "CLIPTextEncode", "inputs": {"text": "{{positive_prompt}}", "clip": ["19", 1]}},
+    "7": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["6", 0]}},
+    "8": {"class_type": "EmptyLatentImage", "inputs": {"width": "{{base_width}}", "height": "{{base_height}}", "batch_size": 1}},
+    "9": {"class_type": "KSampler", "inputs": {"seed": "{{seed}}", "steps": "{{steps}}", "cfg": "{{cfg}}", "sampler_name": "{{sampler}}", "scheduler": "{{scheduler}}", "denoise": 1, "model": ["5", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["8", 0]}},
+    "10": {"class_type": "VAEDecodeTiled", "inputs": {"tile_size": 512, "overlap": 64, "temporal_size": 64, "temporal_overlap": 8, "samples": ["9", 0], "vae": ["3", 0]}},
+    "11": {"class_type": "ImageScale", "inputs": {"upscale_method": "lanczos", "width": "{{width}}", "height": "{{height}}", "crop": "disabled", "image": ["10", 0]}},
+    "12": {"class_type": "VAEEncodeTiled", "inputs": {"tile_size": 512, "overlap": 64, "temporal_size": 64, "temporal_overlap": 8, "pixels": ["11", 0], "vae": ["3", 0]}},
+    "13": {"class_type": "KSampler", "inputs": {"seed": "{{seed}}", "steps": "{{upscale_steps}}", "cfg": 1, "sampler_name": "{{upscale_sampler}}", "scheduler": "simple", "denoise": "{{upscale_denoise}}", "model": ["5", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["12", 0]}},
+    "14": {"class_type": "KSampler", "inputs": {"seed": "{{seed}}", "steps": "{{detail_steps}}", "cfg": "{{detail_cfg}}", "sampler_name": "{{detail_sampler}}", "scheduler": "{{detail_scheduler}}", "denoise": "{{detail_denoise}}", "model": ["5", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["13", 0]}},
+    "15": {"class_type": "VAEDecodeTiled", "inputs": {"tile_size": 512, "overlap": 64, "temporal_size": 64, "temporal_overlap": 8, "samples": ["14", 0], "vae": ["3", 0]}},
+    "20": {"class_type": "ColorTransfer", "inputs": {"image_target": ["15", 0], "image_ref": ["10", 0], "method": "{{color_method}}", "source_stats": "{{color_mode}}", "strength": "{{color_strength}}"}},
+    "16": {"class_type": "SaveImage", "inputs": {"filename_prefix": "AI-Gateway-Krea2", "images": ["20", 0]}}
+  }
+}
