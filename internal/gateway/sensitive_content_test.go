@@ -16,4 +16,3 @@ func TestSensitiveGenerationDetection(t *testing.T) {
 		t.Fatal("ordinary prompt was marked sensitive")
 	}
 }
-
