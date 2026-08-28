@@ -177,6 +177,7 @@ func (a *App) publicMux() http.Handler {
 	mux.HandleFunc("/static/style.css", a.handleStaticCSS)
 	mux.HandleFunc("/static/app.js", a.handleStaticJS)
 	mux.HandleFunc("/static/generate.js", a.handleStaticJS)
+	mux.HandleFunc("/static/fonts/", a.handleStaticFont)
 	mux.HandleFunc("/healthz", a.handleHealthz)
 	mux.HandleFunc("/login", a.handleLogin)
 	mux.HandleFunc("/logout", a.handleLogout)
@@ -217,6 +218,7 @@ func (a *App) adminMux() http.Handler {
 	mux.HandleFunc("/static/style.css", a.handleStaticCSS)
 	mux.HandleFunc("/static/app.js", a.handleStaticJS)
 	mux.HandleFunc("/static/generate.js", a.handleStaticJS)
+	mux.HandleFunc("/static/fonts/", a.handleStaticFont)
 	mux.HandleFunc("/healthz", a.handleHealthz)
 	mux.HandleFunc("/login", a.handleLogin)
 	mux.HandleFunc("/logout", a.handleLogout)
@@ -298,6 +300,31 @@ func (a *App) handleStaticJS(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	_, _ = w.Write(body)
+}
+
+func (a *App) handleStaticFont(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
+	asset := ""
+	switch r.URL.Path {
+	case "/static/fonts/manrope-cyrillic.woff2":
+		asset = "static/fonts/manrope-cyrillic.woff2"
+	case "/static/fonts/manrope-latin.woff2":
+		asset = "static/fonts/manrope-latin.woff2"
+	default:
+		http.NotFound(w, r)
+		return
+	}
+	body, err := embeddedFS.ReadFile(asset)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "font/woff2")
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	_, _ = w.Write(body)
 }
 
