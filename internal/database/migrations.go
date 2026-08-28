@@ -400,6 +400,21 @@ var migrationCatalog = []migration{
 			`ALTER TABLE invites ADD COLUMN IF NOT EXISTS grant_video BOOLEAN NOT NULL DEFAULT FALSE`,
 		},
 	},
+	{
+		version: 20,
+		name:    "generation_request_recovery",
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS generation_requests (
+				user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				request_id TEXT NOT NULL,
+				prompt_id TEXT NULL UNIQUE,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				PRIMARY KEY (user_id, request_id)
+			)`,
+			`CREATE INDEX IF NOT EXISTS generation_requests_created_at_idx ON generation_requests(created_at DESC)`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

@@ -29,6 +29,9 @@
   const miniMaxVideoMode = document.getElementById("minimax-video-mode");
   const miniMaxVideoModeSelect = document.getElementById("minimax-video-mode-select");
   const miniMaxVideoModeHint = document.getElementById("minimax-video-mode-hint");
+  const miniMaxVideoAspect = document.getElementById("minimax-video-aspect");
+  const miniMaxVideoQuality = document.getElementById("minimax-video-quality");
+  const miniMaxVideoResolutionPreview = document.getElementById("minimax-video-resolution-preview");
   const workflowNote = document.getElementById("generation-workflow-note");
   const positive = document.getElementById("positive-prompt");
   const promptAssistant = document.getElementById("prompt-assistant");
@@ -124,6 +127,8 @@
   let promptAssistantSuggestion = "";
   let promptAssistantAction = "";
   let activeGenerationID = "";
+  let activeGenerationRequestID = "";
+  const activeGenerationStorageKey = "ai-gateway.active-generation";
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const referenceRoleLabels = {
@@ -135,11 +140,55 @@
     background: "Фон и окружение",
     details: "Текст и мелкие детали",
   };
+  const miniMaxVideoProfiles = {
+    360: { short: 352, long: 640, label: "360p" },
+    480: { short: 480, long: 864, label: "480p" },
+    720: { short: 704, long: 1280, label: "720p" },
+    1080: { short: 1088, long: 1920, label: "1080p" },
+    1440: { short: 1440, long: 2560, label: "1440p" },
+    2160: { short: 2176, long: 3840, label: "2160p" },
+  };
   const numericValue = (value, fallback = 0) => {
     const parsed = Number(String(value).replaceAll(",", "."));
     return Number.isFinite(parsed) ? parsed : fallback;
   };
+  const syncMiniMaxVideoProfile = () => {
+    if (!miniMaxVideoResolutionPreview) return;
+    const quality = Number(miniMaxVideoQuality?.value);
+    const profile = miniMaxVideoProfiles[quality] || miniMaxVideoProfiles[720];
+    const aspect = miniMaxVideoAspect?.value || "portrait";
+    let width = profile.short;
+    let height = profile.long;
+    if (aspect === "landscape") [width, height] = [height, width];
+    if (aspect === "square") height = width;
+    const adjusted = [360, 720, 1080, 2160].includes(quality);
+    miniMaxVideoResolutionPreview.textContent = `${width} × ${height} · ${profile.label}${adjusted ? " · кратно 32" : ""}`;
+  };
   const roundToMultiple = (value, multiple) => Math.max(256, Math.floor(value / multiple) * multiple);
+  const pause = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+  const newGenerationRequestID = () => window.crypto?.randomUUID?.() || `generation-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`;
+  const persistActiveGeneration = () => {
+    if (!activeGenerationRequestID) return;
+    try {
+      window.localStorage.setItem(activeGenerationStorageKey, JSON.stringify({ requestID: activeGenerationRequestID, promptID: activeGenerationID, savedAt: Date.now() }));
+    } catch (_) {
+      // Private browsing can reject storage; the current tab can still poll normally.
+    }
+  };
+  const clearActiveGeneration = () => {
+    activeGenerationID = "";
+    activeGenerationRequestID = "";
+    try { window.localStorage.removeItem(activeGenerationStorageKey); } catch (_) {}
+  };
+  const storedActiveGeneration = () => {
+    try {
+      const value = JSON.parse(window.localStorage.getItem(activeGenerationStorageKey) || "null");
+      if (!value || typeof value.requestID !== "string" || Date.now() - Number(value.savedAt || 0) > 24 * 60 * 60 * 1000) return null;
+      return value;
+    } catch (_) {
+      return null;
+    }
+  };
 
   const setGenerationActions = ({ retry = false, cancel = false } = {}) => {
     if (!resultActions) return;
@@ -816,6 +865,7 @@
     setFieldState(".standard-main-settings", !isEdit && !isMiniMax);
     setFieldState(".minimax-video-settings", isMiniMax);
     setFieldState(".minimax-reference-field", isMiniMax && miniMaxVideoModeSelect?.value === "references");
+    if (isMiniMax) syncMiniMaxVideoProfile();
     if (isFluxEdit) syncAdaptiveLoraSlots("flux");
     if (isKreaText) syncAdaptiveLoraSlots("krea");
     if (qualityField) qualityField.hidden = !isKreaText;
@@ -1022,6 +1072,7 @@
     updateWorkflowNext();
     syncWorkflowFields();
   });
+  [miniMaxVideoAspect, miniMaxVideoQuality].forEach((field) => field?.addEventListener("change", syncMiniMaxVideoProfile));
 
   imageSlots.forEach((item) => {
     item.input?.addEventListener("change", () => {
@@ -1320,40 +1371,135 @@
   window.setInterval(refreshExpiryLabels, 30000);
 
   const poll = async (promptID) => {
-    const deadline = Date.now() + 10 * 60 * 1000;
+    const isVideo = selectedGenerationWorkflow()?.dataset.family === "minimax_h3";
+    const deadline = Date.now() + (isVideo ? 60 : 20) * 60 * 1000;
+    let failedAttempts = 0;
     while (Date.now() < deadline) {
       if (activeGenerationID !== promptID) return;
-      const response = await fetch(`/generate/status?prompt_id=${encodeURIComponent(promptID)}`, { credentials: "same-origin" });
-      const payload = await response.json().catch(() => ({}));
-      if (activeGenerationID !== promptID) return;
-      if (!response.ok) throw new Error(payload.error || "Не удалось получить статус");
-      resultStatus.textContent = payload.message || "Проверяем состояние...";
-      if (!liveProgressReceived) {
-        if (payload.state === "queued") {
-          const detail = queuePositionDetail(payload.queue_position, payload.queue_total);
-          setGenerationProgress("В очереди ComfyUI", detail, null);
-        } else if (payload.state === "running") {
-          setGenerationProgress("ComfyUI выполняет workflow", "Стадия будет показана сразу после подключения", null);
+      try {
+        const response = await fetch(`/generate/status?prompt_id=${encodeURIComponent(promptID)}`, { credentials: "same-origin" });
+        const payload = await response.json().catch(() => ({}));
+        if (activeGenerationID !== promptID) return;
+        if (!response.ok) {
+          if (response.status >= 400 && response.status < 500) {
+            clearActiveGeneration();
+            setGenerationActions({ retry: true });
+            resultTitle.textContent = "Не удалось восстановить генерацию";
+            resultStatus.textContent = payload.error || "Доступ к сохранённой генерации больше недоступен.";
+            result.classList.add("has-error");
+            return;
+          }
+          throw new Error(payload.error || "Не удалось получить статус");
         }
+        failedAttempts = 0;
+        resultStatus.textContent = payload.message || "Проверяем состояние...";
+        if (!liveProgressReceived) {
+          if (payload.state === "queued") {
+            const detail = queuePositionDetail(payload.queue_position, payload.queue_total);
+            setGenerationProgress("В очереди ComfyUI", detail, null);
+          } else if (payload.state === "running") {
+            setGenerationProgress("ComfyUI выполняет workflow", "Статус восстанавливается через HTTP", null);
+          }
+        }
+        if (payload.state === "completed") {
+          clearActiveGeneration();
+          setGenerationActions();
+          resultTitle.textContent = "Готово";
+          setGenerationProgress("Готово", "Результат подготовлен", 100);
+          renderOutputs(payload.outputs || []);
+          try { await refreshLibrary(); } catch (_) {}
+          result.scrollIntoView({ block: "start", behavior: "smooth" });
+          return;
+        }
+        if (payload.state === "error") {
+          clearActiveGeneration();
+          setGenerationActions({ retry: true });
+          resultTitle.textContent = "Генерация завершилась с ошибкой";
+          resultStatus.textContent = payload.message || "ComfyUI завершил генерацию с ошибкой";
+          result.classList.add("has-error");
+          return;
+        }
+      } catch (_) {
+        failedAttempts += 1;
+        if (activeGenerationID !== promptID) return;
+        const retryAfter = Math.min(15000, 2000 * failedAttempts);
+        resultStatus.textContent = `Связь с Gateway временно потеряна. Повторяем проверку через ${Math.ceil(retryAfter / 1000)} сек.`;
+        setGenerationProgress("Восстанавливаем связь", "Генерация в ComfyUI не отменена", null);
+        await pause(retryAfter);
+        continue;
       }
-      if (payload.state === "completed") {
-        activeGenerationID = "";
-        setGenerationActions();
-        resultTitle.textContent = "Готово";
-        setGenerationProgress("Готово", "Результат подготовлен", 100);
-        renderOutputs(payload.outputs || []);
-		await refreshLibrary();
-        result.scrollIntoView({ block: "start", behavior: "smooth" });
-        return;
-      }
-      if (payload.state === "error") {
-        activeGenerationID = "";
-        setGenerationActions({ retry: true });
-        throw new Error(payload.message || "ComfyUI завершил генерацию с ошибкой");
-      }
-      await new Promise((resolve) => window.setTimeout(resolve, 2000));
+      await pause(2000);
     }
-    throw new Error("Генерация выполняется слишком долго. Проверьте результат позже в ComfyUI.");
+    if (activeGenerationID === promptID) {
+      resultTitle.textContent = "Генерация всё ещё выполняется";
+      resultStatus.textContent = "Статус сохранён. Откройте страницу позже: Gateway автоматически продолжит проверку результата.";
+      setGenerationActions({ cancel: true });
+    }
+  };
+
+  const monitorGeneration = async (promptID) => {
+    if (!promptID) return false;
+    activeGenerationID = promptID;
+    persistActiveGeneration();
+    setGenerationActions({ cancel: true });
+    refreshQueueOverview();
+    connectProgressSocket(promptID);
+    try {
+      await poll(promptID);
+    } finally {
+      closeProgressSocket();
+    }
+    return true;
+  };
+
+  const recoverGeneration = async (requestID, { attempts = 24 } = {}) => {
+    if (!requestID) return false;
+    activeGenerationRequestID = requestID;
+    persistActiveGeneration();
+    result.hidden = false;
+    runProgress.hidden = false;
+    result.classList.remove("has-error");
+    resultTitle.textContent = "Восстанавливаем генерацию";
+    setGenerationActions({ cancel: Boolean(activeGenerationID) });
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        const response = await fetch(`/generate/recover?request_id=${encodeURIComponent(requestID)}`, { credentials: "same-origin" });
+        const payload = await response.json().catch(() => ({}));
+        if (response.status === 404) {
+          clearActiveGeneration();
+          setGenerationActions({ retry: true });
+          resultTitle.textContent = "Запуск не был подтверждён";
+          resultStatus.textContent = "Задача не была поставлена в очередь. Её можно запустить ещё раз.";
+          result.classList.add("has-error");
+          return false;
+        }
+        if (!response.ok) throw new Error(payload.error || "Не удалось восстановить запуск");
+        if (payload.prompt_id) {
+          activeGenerationID = payload.prompt_id;
+          activeGenerationRequestID = payload.request_id || requestID;
+          persistActiveGeneration();
+          resultTitle.textContent = "Генерация выполняется";
+          resultStatus.textContent = payload.message || "Генерация восстановлена.";
+          if (payload.state === "queued") {
+            setGenerationProgress("В очереди ComfyUI", queuePositionDetail(payload.queue_position, payload.queue_total), null);
+          } else if (payload.state === "running") {
+            setGenerationProgress("ComfyUI выполняет workflow", "Статус восстанавливается через HTTP", null);
+          }
+          await monitorGeneration(payload.prompt_id);
+          return true;
+        }
+      } catch (_) {
+        // The request id remains in local storage, so a page reload can continue recovery.
+      }
+      const retryAfter = Math.min(15000, 1500 * (attempt + 1));
+      resultStatus.textContent = `Подтверждаем запуск в Gateway. Повторяем через ${Math.ceil(retryAfter / 1000)} сек.`;
+      setGenerationProgress("Восстанавливаем запуск", "ComfyUI не получит дубликат задачи", null);
+      await pause(retryAfter);
+    }
+    resultTitle.textContent = "Статус запуска ещё уточняется";
+    resultStatus.textContent = "Попробуем снова автоматически после обновления страницы. Повторная отправка не нужна.";
+    setGenerationActions();
+    return false;
   };
 
   retryGeneration?.addEventListener("click", () => form.requestSubmit());
@@ -1367,7 +1513,7 @@
       const response = await fetch("/generate/cancel", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body, credentials: "same-origin" });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "Не удалось отменить генерацию");
-      activeGenerationID = "";
+      clearActiveGeneration();
       closeProgressSocket();
       resultTitle.textContent = payload.cancelled ? "Генерация отменена" : "Генерация завершена";
       resultStatus.textContent = payload.message || "Генерация отменена.";
@@ -1385,6 +1531,12 @@
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!selectedChoice() || !selectedGenerationWorkflow() || !model?.value || !positive.value.trim()) return;
+    if (activeGenerationID || activeGenerationRequestID) {
+      result.hidden = false;
+      resultTitle.textContent = "Генерация уже выполняется";
+      resultStatus.textContent = "Сначала дождитесь результата или отмените текущую задачу.";
+      return;
+    }
     if (promptAssistantEnabled?.checked && !promptAssistantApproved) {
       setPromptAssistantState("Перед генерацией подтвердите вариант ассистента или выберите «Оставить мой промт».", "error");
       promptAssistant?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -1394,7 +1546,9 @@
     submit.disabled = true;
     submit.classList.add("is-loading");
     result.hidden = false;
+    activeGenerationRequestID = newGenerationRequestID();
     activeGenerationID = "";
+    persistActiveGeneration();
     setGenerationActions();
     resultTitle.textContent = "Генерация выполняется";
     resultStatus.textContent = "Ставим задачу в очередь ComfyUI...";
@@ -1415,20 +1569,26 @@
       }
       body.set("template_id", selectedChoice()?.dataset.workflowId || "");
       body.set("generation_workflow", selectedGenerationWorkflow()?.dataset.presetId || "");
-	  body.set("assistant_requested", promptAssistantOriginal ? "true" : "false");
-	  body.set("assistant_applied", promptAssistantAction.startsWith("applied") ? "true" : "false");
-	  body.set("assistant_template_used", promptAssistantOriginal ? (promptAssistantTemplate?.value || "") : "");
-	  body.set("assistant_think_used", promptAssistantOriginal && promptAssistantThink?.checked ? "true" : "false");
-	  body.set("assistant_original_prompt", promptAssistantOriginal);
-	  body.set("assistant_suggestion", promptAssistantSuggestion);
+      body.set("client_request_id", activeGenerationRequestID);
+      body.set("assistant_requested", promptAssistantOriginal ? "true" : "false");
+      body.set("assistant_applied", promptAssistantAction.startsWith("applied") ? "true" : "false");
+      body.set("assistant_template_used", promptAssistantOriginal ? (promptAssistantTemplate?.value || "") : "");
+      body.set("assistant_think_used", promptAssistantOriginal && promptAssistantThink?.checked ? "true" : "false");
+      body.set("assistant_original_prompt", promptAssistantOriginal);
+      body.set("assistant_suggestion", promptAssistantSuggestion);
       ["input_image", "input_image_2", "input_image_3", "input_image_4"].forEach((name, index) => {
         body.set(name, uploadedImages.get(index + 1) || "");
       });
       const response = await fetch("/generate/run", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body: new URLSearchParams(body), credentials: "same-origin" });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "Не удалось запустить генерацию");
+      activeGenerationRequestID = payload.request_id || activeGenerationRequestID;
+      if (!payload.prompt_id) {
+        await recoverGeneration(activeGenerationRequestID);
+        return;
+      }
       activeGenerationID = payload.prompt_id;
-      setGenerationActions({ cancel: true });
+      persistActiveGeneration();
       if (payload.state === "queued") {
         setGenerationProgress("В очереди ComfyUI", queuePositionDetail(payload.queue_position, payload.queue_total), null);
       } else if (payload.state === "running") {
@@ -1439,15 +1599,15 @@
       } else if (payload.mining_warning) {
         resultStatus.textContent = payload.mining_warning;
       }
-      refreshQueueOverview();
-      connectProgressSocket(payload.prompt_id);
-      await poll(payload.prompt_id);
+      await monitorGeneration(payload.prompt_id);
     } catch (error) {
-      activeGenerationID = "";
-      setGenerationActions({ retry: true });
-      resultTitle.textContent = "Не удалось выполнить генерацию";
-      resultStatus.textContent = error.message || "Неизвестная ошибка";
-      result.classList.add("has-error");
+      const recovered = await recoverGeneration(activeGenerationRequestID, { attempts: 8 });
+      if (!recovered && !activeGenerationRequestID) {
+        setGenerationActions({ retry: true });
+        resultTitle.textContent = "Не удалось выполнить генерацию";
+        resultStatus.textContent = error.message || "Неизвестная ошибка";
+        result.classList.add("has-error");
+      }
     } finally {
       closeProgressSocket();
       submit.disabled = false;
@@ -1468,5 +1628,19 @@
   calculateResolution();
   syncPromptAssistant();
   refreshQueueOverview();
+  const savedGeneration = storedActiveGeneration();
+  if (savedGeneration?.requestID) {
+    activeGenerationRequestID = savedGeneration.requestID;
+    activeGenerationID = savedGeneration.promptID || "";
+    if (activeGenerationID) {
+      result.hidden = false;
+      runProgress.hidden = false;
+      resultTitle.textContent = "Восстанавливаем генерацию";
+      resultStatus.textContent = "Проверяем сохранённую задачу в Gateway...";
+      monitorGeneration(activeGenerationID);
+    } else {
+      recoverGeneration(activeGenerationRequestID);
+    }
+  }
   window.setInterval(refreshQueueOverview, 5000);
 })();

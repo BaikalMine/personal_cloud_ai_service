@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -1168,5 +1169,25 @@ func TestMiniMaxH3RequiresFirstFrame(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "первый кадр") {
 		t.Fatalf("first frame error = %v", err)
+	}
+}
+
+func TestMiniMaxH3VideoQualityProfilesUseModelCompatibleDimensions(t *testing.T) {
+	for _, quality := range []int{360, 480, 720, 1080, 1440, 2160} {
+		for _, aspect := range []string{"portrait", "landscape", "square"} {
+			input := generationForm{
+				VideoAspect: aspect, VideoQuality: quality, VideoDurationSeconds: 5, VideoSteps: 25,
+				VideoMode: miniMaxH3FrameMode, InputImage: "gateway/first-frame.png",
+			}
+			if err := normalizeMiniMaxH3(&input); err != nil {
+				t.Fatalf("normalize %s/%dp: %v", aspect, quality, err)
+			}
+			if input.Width%32 != 0 || input.Height%32 != 0 {
+				t.Fatalf("%s/%dp produced non-compatible dimensions %dx%d", aspect, quality, input.Width, input.Height)
+			}
+			if input.VideoResolution != aspect+"-"+strconv.Itoa(quality)+"p" {
+				t.Fatalf("video resolution = %q", input.VideoResolution)
+			}
+		}
 	}
 }

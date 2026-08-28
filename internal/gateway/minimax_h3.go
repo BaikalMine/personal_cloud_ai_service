@@ -12,22 +12,40 @@ const (
 	miniMaxH3ReferenceMode  = "references"
 	miniMaxH3VideoFPS       = 24
 	miniMaxH3MinimumSeconds = 5
+	miniMaxH3DefaultQuality = 720
 )
 
 // normalizeMiniMaxH3 keeps the public controls intentionally small while
 // preserving the model's real constraints: dimensions are divisible by 32 and
 // the temporal latent must contain 4 + 17*n frames.
 func normalizeMiniMaxH3(input *generationForm) error {
-	switch input.VideoResolution {
-	case "", "portrait":
-		input.Width, input.Height = 768, 1344
-		input.VideoResolution = "portrait"
-	case "landscape":
-		input.Width, input.Height = 1344, 768
-	case "square":
-		input.Width, input.Height = 1024, 1024
-	default:
-		return errors.New("выберите корректный формат видео")
+	if input.VideoAspect != "" || input.VideoQuality != 0 {
+		if input.VideoAspect == "" {
+			input.VideoAspect = "portrait"
+		}
+		if input.VideoQuality == 0 {
+			input.VideoQuality = miniMaxH3DefaultQuality
+		}
+		width, height, err := miniMaxH3VideoDimensions(input.VideoAspect, input.VideoQuality)
+		if err != nil {
+			return err
+		}
+		input.Width, input.Height = width, height
+		input.VideoResolution = fmt.Sprintf("%s-%dp", input.VideoAspect, input.VideoQuality)
+	} else {
+		// Preserve existing submitted presets while the public UI migrates to
+		// orientation plus one of the standard video-quality profiles.
+		switch input.VideoResolution {
+		case "", "portrait":
+			input.Width, input.Height = 768, 1344
+			input.VideoResolution = "portrait"
+		case "landscape":
+			input.Width, input.Height = 1344, 768
+		case "square":
+			input.Width, input.Height = 1024, 1024
+		default:
+			return errors.New("выберите корректный формат видео")
+		}
 	}
 	if input.VideoDurationSeconds == 0 {
 		input.VideoDurationSeconds = miniMaxH3MinimumSeconds
@@ -68,6 +86,39 @@ func normalizeMiniMaxH3(input *generationForm) error {
 	input.Sampler = "res_multistep"
 	input.Scheduler = "simple"
 	return nil
+}
+
+// miniMaxH3VideoDimensions maps common delivery-quality standards to the
+// nearest MiniMax-compatible frame. MiniMax requires both dimensions to be
+// divisible by 32, so 360p and 2160p use the closest valid dimensions.
+func miniMaxH3VideoDimensions(aspect string, quality int) (int, int, error) {
+	var shortSide, longSide int
+	switch quality {
+	case 360:
+		shortSide, longSide = 352, 640
+	case 480:
+		shortSide, longSide = 480, 864
+	case 720:
+		shortSide, longSide = 704, 1280
+	case 1080:
+		shortSide, longSide = 1088, 1920
+	case 1440:
+		shortSide, longSide = 1440, 2560
+	case 2160:
+		shortSide, longSide = 2176, 3840
+	default:
+		return 0, 0, errors.New("выберите качество видео: 360, 480, 720, 1080, 1440 или 2160")
+	}
+	switch aspect {
+	case "portrait":
+		return shortSide, longSide, nil
+	case "landscape":
+		return longSide, shortSide, nil
+	case "square":
+		return shortSide, shortSide, nil
+	default:
+		return 0, 0, errors.New("выберите ориентацию видео")
+	}
 }
 
 func miniMaxH3FrameCount(seconds int) int {

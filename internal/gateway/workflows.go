@@ -139,6 +139,8 @@ type generationForm struct {
 	Seed                 int64
 	VideoMode            string
 	VideoResolution      string
+	VideoAspect          string
+	VideoQuality         int
 	VideoDurationSeconds int
 	VideoReferenceSize   string
 	VideoSteps           int
@@ -1040,6 +1042,10 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 	if err != nil {
 		return generationForm{}, errors.New("некорректная длительность MiniMax H3")
 	}
+	videoQuality, err := parseInt("video_quality", 0)
+	if err != nil {
+		return generationForm{}, errors.New("некорректное качество MiniMax H3")
+	}
 	cfg, err := parseFloat("cfg", 7)
 	if err != nil {
 		return generationForm{}, errors.New("некорректный CFG")
@@ -1240,7 +1246,7 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 		Negative: strings.TrimSpace(r.Form.Get("negative_prompt")), Width: width, Height: height, Steps: steps,
 		CFG: cfg, Denoise: denoise, Sampler: strings.TrimSpace(r.Form.Get("sampler")),
 		Scheduler: strings.TrimSpace(r.Form.Get("scheduler")), Seed: seed,
-		VideoMode: strings.TrimSpace(r.Form.Get("video_mode")), VideoResolution: strings.TrimSpace(r.Form.Get("video_resolution")),
+		VideoMode: strings.TrimSpace(r.Form.Get("video_mode")), VideoResolution: strings.TrimSpace(r.Form.Get("video_resolution")), VideoAspect: strings.TrimSpace(r.Form.Get("video_aspect")), VideoQuality: videoQuality,
 		VideoDurationSeconds: videoDurationSeconds, VideoReferenceSize: strings.TrimSpace(r.Form.Get("video_reference_size")), VideoSteps: videoSteps,
 		AssistantRequested: r.Form.Get("assistant_requested") == "true", AssistantApplied: r.Form.Get("assistant_applied") == "true",
 		AssistantTemplate: strings.TrimSpace(r.Form.Get("assistant_template_used")), AssistantThink: r.Form.Get("assistant_think_used") == "true",

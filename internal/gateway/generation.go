@@ -3,6 +3,7 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -68,6 +69,7 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 	}
 	page := quick(http.HandlerFunc(a.handleGeneratePage))
 	run := quick(http.HandlerFunc(a.handleGenerateRun))
+	recover := quick(http.HandlerFunc(a.handleRecoverGeneration))
 	promptAssistant := quick(http.HandlerFunc(a.handlePromptAssistant))
 	status := quick(http.HandlerFunc(a.handleGenerateStatus))
 	cancel := quick(http.HandlerFunc(a.handleCancelGeneration))
@@ -81,6 +83,7 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 	mux.Handle("/generate/", page)
 	mux.Handle("/generate/upload/image", upload)
 	mux.Handle("/generate/run", run)
+	mux.Handle("/generate/recover", recover)
 	mux.Handle("/generate/prompt-assistant", promptAssistant)
 	mux.Handle("/generate/status", status)
 	mux.Handle("/generate/cancel", cancel)
@@ -301,14 +304,45 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 		writeGenerationError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	requestID := strings.TrimSpace(r.Form.Get("client_request_id"))
+	if requestID == "" {
+		requestID = newRequestID()
+	}
+	if !validGenerationRequestID(requestID) {
+		writeGenerationError(w, http.StatusBadRequest, "некорректный идентификатор запуска")
+		return
+	}
+	existing, existingPromptID, err := a.store.ClaimGenerationRequest(r.Context(), user.ID, requestID)
+	if err != nil {
+		writeGenerationError(w, http.StatusInternalServerError, "не удалось подготовить восстановление запуска")
+		return
+	}
+	if existing {
+		if existingPromptID == "" {
+			writeJSON(w, http.StatusAccepted, map[string]any{"request_id": requestID, "state": "submitting", "message": "Предыдущий запуск ещё подтверждается. Восстанавливаем состояние."})
+			return
+		}
+		response := a.generationRunResponse(r.Context(), existingPromptID)
+		response["request_id"] = requestID
+		response["message"] = "Восстановлена уже отправленная генерация"
+		writeJSON(w, http.StatusAccepted, response)
+		return
+	}
+	releaseRequest := func() {
+		if releaseErr := a.store.ReleaseGenerationRequest(r.Context(), user.ID, requestID); releaseErr != nil {
+			log.Printf("release failed generation request for user %d: %v", user.ID, releaseErr)
+		}
+	}
 	reservation, err := a.store.ReserveQuickGeneration(r.Context(), user.ID)
 	if err != nil {
+		releaseRequest()
 		status, message := quickGenerationLimitError(err)
 		writeGenerationError(w, status, message)
 		return
 	}
 	miningLease, miningWarning, err := a.pauseMiningForQuickGeneration(r.Context(), user)
 	if err != nil {
+		releaseRequest()
 		if releaseErr := a.store.ReleaseQuickGeneration(r.Context(), reservation); releaseErr != nil {
 			log.Printf("release quick generation reservation for user %d: %v", user.ID, releaseErr)
 		}
@@ -317,6 +351,7 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 	}
 	promptID, err := a.submitComfyPrompt(r.Context(), user.ID, prompt)
 	if err != nil {
+		releaseRequest()
 		if miningLease != nil {
 			a.releaseMiningPause(r.Context(), miningLease.ID)
 		}
@@ -326,23 +361,41 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 		writeGenerationError(w, http.StatusBadGateway, "ComfyUI не принял workflow: "+err.Error())
 		return
 	}
+	if err := a.store.BindGenerationRequestPrompt(r.Context(), user.ID, requestID, promptID); err != nil {
+		log.Printf("bind generation request %s to prompt %s: %v", requestID, promptID, err)
+	}
 	if err := a.attachMiningPauseToGeneration(r.Context(), miningLease, promptID); err != nil {
 		log.Printf("attach mining-pause lease to generation %s: %v", promptID, err)
 	}
 	a.rememberGeneration(promptID, user.ID)
 	a.recordGenerationEvent(r.Context(), user.ID, promptID, definition, input)
-	response := map[string]any{
-		"prompt_id": promptID,
-		"message":   "Генерация поставлена в очередь",
-	}
+	response := a.generationRunResponse(r.Context(), promptID)
+	response["request_id"] = requestID
 	if miningLease != nil && miningLease.ResumeMining {
 		response["mining_paused"] = true
 	}
 	if miningWarning != "" {
 		response["mining_warning"] = miningWarning
 	}
-	if queued, running, position, total, queueErr := a.generationQueueState(r.Context(), promptID); queueErr == nil {
-		response["state"] = "queued"
+	writeJSON(w, http.StatusAccepted, response)
+}
+
+func validGenerationRequestID(value string) bool {
+	if len(value) < 16 || len(value) > 96 {
+		return false
+	}
+	for _, char := range value {
+		if char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || char == '-' || char == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func (a *App) generationRunResponse(ctx context.Context, promptID string) map[string]any {
+	response := map[string]any{"prompt_id": promptID, "message": "Генерация поставлена в очередь", "state": "queued"}
+	if queued, running, position, total, err := a.generationQueueState(ctx, promptID); err == nil {
 		if running {
 			response["state"] = "running"
 		} else if queued {
@@ -350,7 +403,37 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 			response["queue_total"] = total
 		}
 	}
-	writeJSON(w, http.StatusAccepted, response)
+	return response
+}
+
+func (a *App) handleRecoverGeneration(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
+	requestID := strings.TrimSpace(r.URL.Query().Get("request_id"))
+	if !validGenerationRequestID(requestID) {
+		writeGenerationError(w, http.StatusBadRequest, "некорректный идентификатор запуска")
+		return
+	}
+	user := a.currentUser(r)
+	promptID, err := a.store.GenerationRequestPromptID(r.Context(), user.ID, requestID)
+	if errors.Is(err, sql.ErrNoRows) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		writeGenerationError(w, http.StatusInternalServerError, "не удалось восстановить запуск")
+		return
+	}
+	if promptID == "" {
+		writeJSON(w, http.StatusAccepted, map[string]any{"request_id": requestID, "state": "submitting", "message": "Запуск ещё подтверждается. Повторяем проверку."})
+		return
+	}
+	response := a.generationRunResponse(r.Context(), promptID)
+	response["request_id"] = requestID
+	response["message"] = "Генерация восстановлена"
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (a *App) handleCancelGeneration(w http.ResponseWriter, r *http.Request) {
