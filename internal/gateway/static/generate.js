@@ -89,6 +89,7 @@
   const mainPassTitle = document.getElementById("generation-main-pass-title");
   const mainPassDescription = document.getElementById("generation-main-pass-description");
   const preserveOriginalSize = form.elements.preserve_original_size;
+  const preserveOriginalLabel = document.getElementById("generation-preserve-original-label");
   const originalResolution = document.getElementById("generation-original-resolution");
   const sourceMegapixels = form.elements.source_megapixels;
   const fluxUpscaleMode = form.elements.flux_upscale_mode;
@@ -110,6 +111,9 @@
   const previewURLs = new Map();
   const uploadedImages = new Map();
   let primaryImageSize = null;
+
+  const krea2EditMaxBaseMegapixels = 1.5;
+  const krea2EditMaxLongestSide = 1640;
   let progressSocket = null;
   let liveProgressReceived = false;
   let promptAssistantApproved = false;
@@ -224,10 +228,18 @@
     }
     const { width: sourceWidth, height: sourceHeight } = primaryImageSize;
     const sourceMegapixelsValue = sourceWidth * sourceHeight / (1024 * 1024);
-    const scale = Math.min(1, 4096 / Math.max(sourceWidth, sourceHeight));
+    const selected = selectedGenerationWorkflow();
+    const isKreaEdit = selected?.dataset.family === "krea2" && selected?.dataset.templateId === "image-to-image";
+    const maximumPixels = isKreaEdit ? krea2EditMaxBaseMegapixels * 1024 * 1024 : Infinity;
+    const maximumSide = isKreaEdit ? krea2EditMaxLongestSide : 4096;
+    const scale = Math.min(1, maximumSide / Math.max(sourceWidth, sourceHeight), Math.sqrt(maximumPixels / (sourceWidth * sourceHeight)));
     const targetWidth = roundToMultiple(sourceWidth * scale, 8);
     const targetHeight = roundToMultiple(sourceHeight * scale, 8);
     const capped = scale < 1 || targetWidth !== sourceWidth || targetHeight !== sourceHeight;
+    if (isKreaEdit) {
+      originalResolution.textContent = `Исходник: ${sourceWidth} × ${sourceHeight} · ${sourceMegapixelsValue.toFixed(2).replace(".", ",")} Мп. Krea2 сохранит пропорции и обработает ${targetWidth} × ${targetHeight}: безопасный первый проход до 1,5 Мп.`;
+      return;
+    }
     originalResolution.textContent = capped
       ? `Исходник: ${sourceWidth} × ${sourceHeight} · ${sourceMegapixelsValue.toFixed(2).replace(".", ",")} Мп. Для ComfyUI будет использовано ${targetWidth} × ${targetHeight}.`
       : `Исходник: ${sourceWidth} × ${sourceHeight} · ${sourceMegapixelsValue.toFixed(2).replace(".", ",")} Мп. Размер будет сохранён.`;
@@ -235,7 +247,11 @@
 
   const applyOriginalResolution = () => {
     if (!preserveOriginalSize?.checked || !primaryImageSize) return;
-    const scale = Math.min(1, 4096 / Math.max(primaryImageSize.width, primaryImageSize.height));
+    const selected = selectedGenerationWorkflow();
+    const isKreaEdit = selected?.dataset.family === "krea2" && selected?.dataset.templateId === "image-to-image";
+    const maximumPixels = isKreaEdit ? krea2EditMaxBaseMegapixels * 1024 * 1024 : Infinity;
+    const maximumSide = isKreaEdit ? krea2EditMaxLongestSide : 4096;
+    const scale = Math.min(1, maximumSide / Math.max(primaryImageSize.width, primaryImageSize.height), Math.sqrt(maximumPixels / (primaryImageSize.width * primaryImageSize.height)));
     const targetWidth = roundToMultiple(primaryImageSize.width * scale, 8);
     const targetHeight = roundToMultiple(primaryImageSize.height * scale, 8);
     width.value = String(targetWidth);
@@ -243,7 +259,7 @@
     aspect.value = "custom";
     outputMegapixels.value = (targetWidth * targetHeight / (1024 * 1024)).toFixed(2);
     if (sourceMegapixels) sourceMegapixels.value = clamp(targetWidth * targetHeight / (1024 * 1024), 0.25, 16).toFixed(2);
-    if (maxSide) maxSide.value = "4096";
+    if (maxSide) maxSide.value = isKreaEdit ? String(krea2EditMaxLongestSide) : "4096";
     updateOriginalResolution();
     updateResolutionPreview();
   };
@@ -706,6 +722,19 @@
     const isFluxEdit = family === "flux2" && isEdit;
     const isMiniMax = family === "minimax_h3";
     syncPromptAssistant();
+    if (outputMegapixels) {
+      outputMegapixels.max = isKreaEdit ? String(krea2EditMaxBaseMegapixels) : "16";
+      if (isKreaEdit && numericValue(outputMegapixels.value, krea2EditMaxBaseMegapixels) > krea2EditMaxBaseMegapixels) {
+        outputMegapixels.value = String(krea2EditMaxBaseMegapixels);
+      }
+    }
+    if (isKreaEdit) {
+      if (maxSide) maxSide.value = String(krea2EditMaxLongestSide);
+      if (preserveOriginalLabel) preserveOriginalLabel.textContent = "Сохранить пропорции исходного фото в безопасном размере Krea2";
+      applyOriginalResolution();
+    } else if (preserveOriginalLabel) {
+      preserveOriginalLabel.textContent = "Сохранить размер исходного фото";
+    }
     if (isFluxEdit && maxSide?.value === "0") maxSide.value = "2160";
     const setFieldState = (selector, visible) => {
       root.querySelectorAll(selector).forEach((field) => {

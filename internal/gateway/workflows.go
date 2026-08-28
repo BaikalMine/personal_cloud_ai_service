@@ -17,7 +17,11 @@ import (
 //go:embed workflows/*.json
 var workflowFS embed.FS
 
-const maxGenerationLoraSlots = 10
+const (
+	maxGenerationLoraSlots        = 10
+	krea2EditMaxBaseMegapixels    = 1.5
+	krea2EditMaxLongestSidePixels = 1640
+)
 
 type workflowDefinition struct {
 	ID             string                    `json:"id"`
@@ -568,6 +572,7 @@ func (definition workflowDefinition) normalizeAndValidateSpecific(input *generat
 		}
 		normalizeKreaEditDefaults(input)
 		normalizeLUT(input)
+		normalizeKrea2EditResolution(input)
 		if input.PreserveOriginalSize {
 			// The image is already fitted to the original frame, so the regular
 			// final upscale would otherwise change the requested output size.
@@ -640,6 +645,33 @@ func normalizeKreaEditDefaults(input *generationForm) {
 	input.SkinHighlightProtect = 0.75
 	input.SkinMaskSensitivity = 0.55
 	input.SkinMaskFeather = 0.45
+}
+
+// normalizeKrea2EditResolution mirrors the stable first pass from the user's
+// working ComfyUI graph. Krea2 Edit's pixel path grows very quickly with the
+// source frame, so accepting a full-resolution phone image can exhaust 32 GB
+// of VRAM before the optional tiled upscale starts.
+func normalizeKrea2EditResolution(input *generationForm) {
+	maxPixels := krea2EditMaxBaseMegapixels * 1024 * 1024
+	currentPixels := float64(input.Width * input.Height)
+	scale := 1.0
+	if currentPixels > maxPixels {
+		scale = math.Sqrt(maxPixels / currentPixels)
+	}
+	if longest := max(input.Width, input.Height); longest > krea2EditMaxLongestSidePixels {
+		scale = min(scale, float64(krea2EditMaxLongestSidePixels)/float64(longest))
+	}
+	if scale < 1 {
+		input.Width = max(256, int(float64(input.Width)*scale/8)*8)
+		input.Height = max(256, int(float64(input.Height)*scale/8)*8)
+		// The exact source size cannot be kept after safety fitting, so allow the
+		// existing final upscale to restore useful output detail.
+		input.PreserveOriginalSize = false
+	}
+	if input.MaxLongestSide == 0 || input.MaxLongestSide > krea2EditMaxLongestSidePixels {
+		input.MaxLongestSide = krea2EditMaxLongestSidePixels
+	}
+	input.OutputMegapixels = float64(input.Width*input.Height) / (1024 * 1024)
 }
 
 // normalizeLUT keeps LCApplyLUT present in the saved workflows while making

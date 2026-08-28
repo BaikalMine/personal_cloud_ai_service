@@ -358,7 +358,7 @@ func TestFlux2ImageWorkflowPreservesOriginalResolution(t *testing.T) {
 	}
 }
 
-func TestKrea2ImageWorkflowPreservesOriginalResolution(t *testing.T) {
+func TestKrea2ImageWorkflowFitsLargeOriginalToSafeBaseResolution(t *testing.T) {
 	definitions, err := loadWorkflowDefinitions()
 	if err != nil {
 		t.Fatal(err)
@@ -370,8 +370,8 @@ func TestKrea2ImageWorkflowPreservesOriginalResolution(t *testing.T) {
 	prompt, err := definition.buildPrompt(generationForm{
 		ModelName: "Krea2/model.safetensors", ModelFamily: modelFamilyKrea2,
 		TextEncoder: "encoder.safetensors", VAE: "vae.safetensors", IdentityLora: "identity.safetensors",
-		InputImage: "gateway/input.png", Positive: "change the light", Width: 1920, Height: 1080,
-		OutputMegapixels: 1.98, DimensionMultiple: 16, MaxLongestSide: 4096,
+		InputImage: "gateway/input.png", Positive: "change the light", Width: 3016, Height: 3168,
+		OutputMegapixels: 9.1, DimensionMultiple: 16, MaxLongestSide: 4096,
 		Steps: 8, CFG: 1, Denoise: 1, Sampler: "euler", Scheduler: "simple", Seed: 42,
 		EditUseCustomSize: true, PreserveOriginalSize: true, ReferenceBoost: 4, GroundingPixels: 768,
 		UpscaleFactor: 1.5, UpscaleSteps: 4, UpscaleDenoise: 0.15, UpscaleSampler: "deis", UpscaleScheduler: "simple",
@@ -380,10 +380,11 @@ func TestKrea2ImageWorkflowPreservesOriginalResolution(t *testing.T) {
 		t.Fatal(err)
 	}
 	frame := prompt["5"].(map[string]any)["inputs"].(map[string]any)
-	if frame["custom_width"] != 1920 || frame["custom_height"] != 1080 || frame["resolution_source"] != true {
-		t.Fatalf("Krea2 original frame is not preserved: %#v", frame)
+	width, height := frame["custom_width"].(int), frame["custom_height"].(int)
+	if width > krea2EditMaxLongestSidePixels || height > krea2EditMaxLongestSidePixels || width*height > int(krea2EditMaxBaseMegapixels*1024*1024) || frame["max_resolution"] != krea2EditMaxLongestSidePixels || frame["resolution_source"] != true {
+		t.Fatalf("Krea2 frame was not fitted to the safe edit budget: %#v", frame)
 	}
-	if got, want := prompt["14"].(map[string]any)["inputs"].(map[string]any)["upscale_by"], 1.0; got != want {
+	if got, want := prompt["14"].(map[string]any)["inputs"].(map[string]any)["upscale_by"], 1.5; got != want {
 		t.Fatalf("Krea2 upscale factor = %v, want %v", got, want)
 	}
 }
