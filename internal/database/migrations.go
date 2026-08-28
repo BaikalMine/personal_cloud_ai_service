@@ -425,6 +425,14 @@ var migrationCatalog = []migration{
 			`CREATE INDEX IF NOT EXISTS content_events_sensitivity_pending_idx ON content_events(created_at ASC) WHERE sensitivity_classified_at IS NULL`,
 		},
 	},
+	{
+		version: 22,
+		name:    "visual_sensitive_media_classification",
+		statements: []string{
+			`ALTER TABLE content_media ADD COLUMN IF NOT EXISTS visual_sensitivity_classified_at TIMESTAMPTZ NULL`,
+			`CREATE INDEX IF NOT EXISTS content_media_visual_sensitivity_pending_idx ON content_media(created_at ASC) WHERE media_type='image' AND visual_sensitivity_classified_at IS NULL`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

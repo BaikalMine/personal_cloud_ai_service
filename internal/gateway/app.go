@@ -87,21 +87,22 @@ func Run() error {
 	}
 
 	app := &App{
-		cfg:               cfg,
-		tpl:               tpl,
-		loginLimiter:      security.NewLoginLimiter(10*time.Minute, 10),
-		csrfSigner:        security.NewCSRFSigner(cfg.SessionSecret),
-		store:             repository,
-		mining:            mining.NewClient(cfg.MiningAgentURL, cfg.MiningAgentToken),
-		systemMonitor:     mining.NewClient(cfg.SystemMonitorAgentURL, cfg.SystemMonitorAgentToken),
-		promptAssistant:   promptassistant.NewClient(cfg.OllamaUpstream, cfg.PromptAssistantModel),
-		updates:           updates.NewClient(cfg.UpdateAgentURL, cfg.UpdateAgentToken),
-		contentCipher:     contentCipher,
-		mediaCaptureSlots: make(chan struct{}, maxConcurrentMediaCaptures),
-		adminMediaSlots:   make(chan struct{}, maxConcurrentAdminMediaResponses),
-		comfyUploadSlots:  make(chan struct{}, maxConcurrentComfyUploads),
-		generationJobs:    make(map[string]*generationJob),
-		proxyCounts:       map[string]int64{},
+		cfg:                 cfg,
+		tpl:                 tpl,
+		loginLimiter:        security.NewLoginLimiter(10*time.Minute, 10),
+		csrfSigner:          security.NewCSRFSigner(cfg.SessionSecret),
+		store:               repository,
+		mining:              mining.NewClient(cfg.MiningAgentURL, cfg.MiningAgentToken),
+		systemMonitor:       mining.NewClient(cfg.SystemMonitorAgentURL, cfg.SystemMonitorAgentToken),
+		promptAssistant:     promptassistant.NewClient(cfg.OllamaUpstream, cfg.PromptAssistantModel),
+		updates:             updates.NewClient(cfg.UpdateAgentURL, cfg.UpdateAgentToken),
+		contentCipher:       contentCipher,
+		mediaCaptureSlots:   make(chan struct{}, maxConcurrentMediaCaptures),
+		adminMediaSlots:     make(chan struct{}, maxConcurrentAdminMediaResponses),
+		comfyUploadSlots:    make(chan struct{}, maxConcurrentComfyUploads),
+		sensitiveMediaSlots: make(chan struct{}, 1),
+		generationJobs:      make(map[string]*generationJob),
+		proxyCounts:         map[string]int64{},
 	}
 
 	publicSrv := newHTTPServer(cfg.PublicAddr, app.securityHeaders(app.publicMux()))
@@ -109,6 +110,7 @@ func Run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go app.runMaintenance(ctx)
+	app.queueSensitiveMediaClassification()
 
 	errs := make(chan error, 2)
 	go func() {

@@ -52,6 +52,13 @@ type ContentMediaRow struct {
 	PayloadCipher []byte
 }
 
+type PendingSensitiveMedia struct {
+	ID            int64
+	EventID       int64
+	MIMEType      string
+	PayloadCipher []byte
+}
+
 type UserGenerationMedia struct {
 	ID           int64
 	MediaType    string

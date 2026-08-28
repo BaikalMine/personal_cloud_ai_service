@@ -36,22 +36,23 @@ const (
 type Config = config.Config
 
 type App struct {
-	cfg               Config
-	tpl               *Templates
-	loginLimiter      *security.LoginLimiter
-	csrfSigner        *security.CSRFSigner
-	store             *store.Store
-	mining            *mining.Client
-	systemMonitor     *mining.Client
-	promptAssistant   *promptassistant.Client
-	updates           *updates.Client
-	contentCipher     *contentcrypto.Cipher
-	mediaCaptureSlots chan struct{}
-	adminMediaSlots   chan struct{}
-	comfyUploadSlots  chan struct{}
-	generationMu      sync.Mutex
-	miningPauseMu     sync.Mutex
-	generationJobs    map[string]*generationJob
+	cfg                 Config
+	tpl                 *Templates
+	loginLimiter        *security.LoginLimiter
+	csrfSigner          *security.CSRFSigner
+	store               *store.Store
+	mining              *mining.Client
+	systemMonitor       *mining.Client
+	promptAssistant     *promptassistant.Client
+	updates             *updates.Client
+	contentCipher       *contentcrypto.Cipher
+	mediaCaptureSlots   chan struct{}
+	adminMediaSlots     chan struct{}
+	comfyUploadSlots    chan struct{}
+	sensitiveMediaSlots chan struct{}
+	generationMu        sync.Mutex
+	miningPauseMu       sync.Mutex
+	generationJobs      map[string]*generationJob
 
 	requestsTotal atomic.Int64
 	loginFailures atomic.Int64

@@ -77,6 +77,37 @@ func TestEnhanceCanEnableThinking(t *testing.T) {
 	}
 }
 
+func TestClassifyImageSendsImageAndUnloadsModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body chatRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if r.URL.Path != "/api/chat" || body.Model != "test:e4b" || body.Stream || body.Think || body.KeepAlive != "0" {
+			t.Fatalf("unexpected vision request: %#v", body)
+		}
+		if len(body.Messages) != 2 || len(body.Messages[1].Images) != 1 || body.Messages[1].Images[0] != "c2FtcGxl" {
+			t.Fatalf("image was not sent to the vision model: %#v", body.Messages)
+		}
+		if body.Options.NumPredict != 3 || body.Options.Temperature != 0 {
+			t.Fatalf("unexpected vision options: %#v", body.Options)
+		}
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"SENSITIVE."}}`))
+	}))
+	defer server.Close()
+	base, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sensitive, err := NewClient(base, "test:e4b").ClassifyImage(context.Background(), []byte("sample"), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sensitive {
+		t.Fatal("expected sensitive image")
+	}
+}
+
 func TestWorkflowProfilesWorkForBothGenerationModes(t *testing.T) {
 	profiles := []Profile{ProfileWorkflowDefault, ProfilePhotographic, ProfileRealistic, ProfileAnime, ProfileNSFW}
 	for _, profile := range profiles {

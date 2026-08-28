@@ -140,6 +140,53 @@ func (s *Store) InsertContentMedia(ctx context.Context, media domain.ContentMedi
 	return err
 }
 
+func (s *Store) ListPendingVisualSensitiveMedia(ctx context.Context, limit int) ([]domain.PendingSensitiveMedia, error) {
+	limit = boundedLimit(limit, 1, 20)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT m.id,m.event_id,m.mime_type,m.payload_cipher
+		FROM content_media m
+		JOIN content_events e ON e.id=m.event_id
+		WHERE m.media_type='image' AND m.visual_sensitivity_classified_at IS NULL
+		  AND m.expires_at > now() AND e.expires_at > now()
+		ORDER BY m.created_at ASC,m.id ASC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.PendingSensitiveMedia, 0)
+	for rows.Next() {
+		var item domain.PendingSensitiveMedia
+		if err := rows.Scan(&item.ID, &item.EventID, &item.MIMEType, &item.PayloadCipher); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) SetContentMediaVisualSensitive(ctx context.Context, mediaID, eventID int64, sensitive bool) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE content_media
+		SET visual_sensitivity_classified_at=now()
+		WHERE id=$1 AND event_id=$2 AND visual_sensitivity_classified_at IS NULL
+	`, mediaID, eventID); err != nil {
+		return err
+	}
+	if sensitive {
+		if _, err := tx.ExecContext(ctx, `UPDATE content_events SET is_sensitive=TRUE WHERE id=$1`, eventID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *Store) InsertComfyOutputOwnerships(ctx context.Context, userID int64, outputs []domain.ComfyOutputOwnership) error {
 	if len(outputs) == 0 {
 		return nil
@@ -189,7 +236,7 @@ func (s *Store) ListUserGenerationMedia(ctx context.Context, userID int64, limit
 	var media []domain.UserGenerationMedia
 	for rows.Next() {
 		var item domain.UserGenerationMedia
-			if err := rows.Scan(&item.ID, &item.MediaType, &item.MIMEType, &item.OriginalName, &item.CreatedAt, &item.ExpiresAt, &item.Sensitive); err != nil {
+		if err := rows.Scan(&item.ID, &item.MediaType, &item.MIMEType, &item.OriginalName, &item.CreatedAt, &item.ExpiresAt, &item.Sensitive); err != nil {
 			return nil, err
 		}
 		media = append(media, item)

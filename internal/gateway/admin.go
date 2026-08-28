@@ -195,6 +195,7 @@ func (a *App) handleAdminContent(w http.ResponseWriter, r *http.Request) {
 		query = query[:200]
 	}
 	a.classifyPendingSensitiveContent(r.Context())
+	a.queueSensitiveMediaClassification()
 	a.backfillComfyContentMedia(r.Context())
 	rowLimit := 200
 	if query != "" {

@@ -133,6 +133,7 @@ func (a *App) handleGeneratePage(w http.ResponseWriter, r *http.Request) {
 		views = append(views, view)
 	}
 	a.classifyPendingSensitiveContent(r.Context())
+	a.queueSensitiveMediaClassification()
 	recentMedia := a.recentGenerationMedia(r.Context(), user.ID)
 	a.render(w, r, "generate", map[string]any{
 		"Title":                 "Быстрая генерация",
@@ -1225,7 +1226,7 @@ func (a *App) recordGenerationEvent(ctx context.Context, userID int64, promptID 
 		"base_megapixels": input.BaseMegapixels, "lora_strength": input.LoraStrength,
 		"upscale_steps": input.UpscaleSteps, "upscale_denoise": input.UpscaleDenoise,
 		"detail_steps": input.DetailSteps, "detail_denoise": input.DetailDenoise,
-		"input_images": input.imageCount(),
+		"input_images":      input.imageCount(),
 		"sensitive_content": sensitive,
 	}
 	if input.AssistantRequested {

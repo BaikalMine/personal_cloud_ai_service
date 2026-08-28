@@ -228,12 +228,16 @@ func (a *App) persistComfyMedia(ctx context.Context, capture *proxyContentCaptur
 		mimeType = "application/octet-stream"
 	}
 	digest := sha256.Sum256(capture.response.data)
-	return a.store.InsertContentMedia(ctx, domain.ContentMediaRecord{
+	err = a.store.InsertContentMedia(ctx, domain.ContentMediaRecord{
 		EventID: eventID, MediaType: capture.mediaType, MIMEType: mimeType,
 		OriginalName: capture.mediaName, Subfolder: capture.mediaSubfolder, StorageType: capture.mediaStorageType,
 		PayloadCipher: payload, SizeBytes: int64(len(capture.response.data)), ContentHash: hex.EncodeToString(digest[:]),
 		ExpiresAt: time.Now().Add(24 * time.Hour),
 	})
+	if err == nil && capture.mediaType == "image" {
+		a.queueSensitiveMediaClassification()
+	}
+	return err
 }
 
 func parseOpenWebCapture(requestBody, responseBody []byte) (externalID, model, prompt, response, metadata string, err error) {
