@@ -588,7 +588,10 @@
     button.addEventListener("pointerleave", stop);
     button.addEventListener("focusin", start);
     button.addEventListener("focusout", stop);
-    button.addEventListener("click", () => openLightbox(output));
+    button.addEventListener("click", () => {
+      if (window.aiGatewaySensitiveContent?.reveal(button)) return;
+      openLightbox(output);
+    });
   };
 
   const showStep = (step) => {
@@ -1236,9 +1239,11 @@
   const createLibraryCard = (item) => {
     const card = document.createElement("figure");
     card.className = "generation-output generation-library-item";
+    if (item.sensitive) card.classList.add("sensitive-media");
     const isVideo = item.media_type === "video";
     const preview = document.createElement("button");
     preview.className = "generation-output-preview";
+    if (item.sensitive) preview.dataset.sensitiveMedia = "";
     if (isVideo) {
       preview.type = "button";
       preview.classList.add("generation-video-preview");
@@ -1254,6 +1259,12 @@
       play.setAttribute("aria-hidden", "true");
       play.textContent = "▶";
       preview.append(video, play);
+      if (item.sensitive) {
+        const cover = document.createElement("span");
+        cover.className = "sensitive-media-cover";
+        cover.innerHTML = "<b>Контент 18+</b><small>Нажмите, чтобы показать</small>";
+        preview.append(cover);
+      }
       wireVideoPreview(preview, item);
     } else {
       preview.type = "button";
@@ -1266,7 +1277,16 @@
       image.src = item.url;
       image.alt = "Результат генерации";
       preview.append(image);
-      preview.addEventListener("click", () => openLightbox({ filename: item.filename, media_type: "image", url: item.url }));
+      if (item.sensitive) {
+        const cover = document.createElement("span");
+        cover.className = "sensitive-media-cover";
+        cover.innerHTML = "<b>Контент 18+</b><small>Нажмите, чтобы показать</small>";
+        preview.append(cover);
+      }
+      preview.addEventListener("click", () => {
+        if (window.aiGatewaySensitiveContent?.reveal(preview)) return;
+        openLightbox({ filename: item.filename, media_type: "image", url: item.url });
+      });
     }
     const caption = document.createElement("figcaption");
     const filename = document.createElement("span");
@@ -1366,11 +1386,14 @@
   });
 
   root.querySelectorAll("[data-generation-library-item]").forEach((button) => {
-    button.addEventListener("click", () => openLightbox({
+    button.addEventListener("click", () => {
+      if (window.aiGatewaySensitiveContent?.reveal(button)) return;
+      openLightbox({
       filename: button.dataset.filename || "Результат генерации",
       media_type: "image",
       url: button.dataset.url,
-    }));
+      });
+    });
   });
   root.querySelectorAll("[data-generation-library-video]").forEach((button) => {
     wireVideoPreview(button, { filename: button.dataset.filename || "Видео", media_type: "video", url: button.dataset.url });

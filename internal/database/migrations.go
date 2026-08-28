@@ -415,6 +415,16 @@ var migrationCatalog = []migration{
 			`CREATE INDEX IF NOT EXISTS generation_requests_created_at_idx ON generation_requests(created_at DESC)`,
 		},
 	},
+	{
+		version: 21,
+		name:    "sensitive_generation_content",
+		statements: []string{
+			`ALTER TABLE content_events ADD COLUMN IF NOT EXISTS is_sensitive BOOLEAN NOT NULL DEFAULT FALSE`,
+			`ALTER TABLE content_events ADD COLUMN IF NOT EXISTS sensitivity_classified_at TIMESTAMPTZ NULL`,
+			`CREATE INDEX IF NOT EXISTS content_events_sensitive_idx ON content_events(is_sensitive, created_at DESC) WHERE is_sensitive`,
+			`CREATE INDEX IF NOT EXISTS content_events_sensitivity_pending_idx ON content_events(created_at ASC) WHERE sensitivity_classified_at IS NULL`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

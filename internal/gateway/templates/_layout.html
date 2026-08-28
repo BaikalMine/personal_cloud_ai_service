@@ -26,6 +26,7 @@
 	<label class="header-priority-toggle"><input name="enabled" type="checkbox" value="on" {{if .CurrentUser.PauseMiningForQuickGeneration}}checked{{end}}><span class="header-priority-switch" aria-hidden="true"></span><span>Приоритет</span></label>
   </form>
   {{end}}{{end}}
+  <label class="header-sensitive-toggle" title="По умолчанию чувствительные результаты скрыты блюром. Включите, чтобы показывать их в галереях."><input type="checkbox" data-sensitive-toggle><span class="header-sensitive-switch" aria-hidden="true"></span><span>18+</span></label>
   <button class="menu-toggle" type="button" aria-label="Открыть меню" aria-controls="user-navigation" aria-expanded="false"><i></i><i></i><i></i></button>
   <div class="topbar-menu" id="user-navigation">
     <nav class="primary-nav" aria-label="Основная навигация">
@@ -72,6 +73,7 @@
   </nav>
   <div class="admin-actions">
     {{if .CurrentUser}}<div class="admin-account"><span class="account-indicator"></span><span><b>{{.CurrentUser.Username}}</b><small>{{roleLabel .CurrentUser.Role}}</small></span></div>{{end}}
+    <label class="admin-sensitive-toggle"><input type="checkbox" data-sensitive-toggle><span class="header-sensitive-switch" aria-hidden="true"></span><span>Показывать 18+</span></label>
     <a href="{{.PublicBaseURL}}/app">Режим пользователя</a>
     <a href="/account/profile">Профиль</a>
     <a href="/account/password">Сменить пароль</a>

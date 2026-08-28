@@ -42,6 +42,7 @@ type generationMediaView struct {
 	Filename    string `json:"filename"`
 	MediaType   string `json:"media_type"`
 	ExpiresUnix int64  `json:"expires_unix"`
+	Sensitive   bool   `json:"sensitive"`
 }
 
 type generationStatus struct {
@@ -131,6 +132,7 @@ func (a *App) handleGeneratePage(w http.ResponseWriter, r *http.Request) {
 		}
 		views = append(views, view)
 	}
+	a.classifyPendingSensitiveContent(r.Context())
 	recentMedia := a.recentGenerationMedia(r.Context(), user.ID)
 	a.render(w, r, "generate", map[string]any{
 		"Title":                 "Быстрая генерация",
@@ -160,7 +162,7 @@ func (a *App) recentGenerationMedia(ctx context.Context, userID int64) []generat
 	for _, item := range items {
 		views = append(views, generationMediaView{
 			ID: item.ID, URL: "/generate/library/" + strconv.FormatInt(item.ID, 10), Filename: item.OriginalName,
-			MediaType: item.MediaType, ExpiresUnix: item.ExpiresAt.UnixMilli(),
+			MediaType: item.MediaType, ExpiresUnix: item.ExpiresAt.UnixMilli(), Sensitive: item.Sensitive,
 		})
 	}
 	return views
@@ -1215,6 +1217,7 @@ func (a *App) recordGenerationEvent(ctx context.Context, userID int64, promptID 
 	if a.contentCipher == nil || a.store == nil {
 		return
 	}
+	sensitive := isSensitiveGeneration(input)
 	metadataFields := map[string]any{
 		"workflow": definition.ID, "preset": input.PresetID, "model_family": input.ModelFamily,
 		"model": input.ModelName, "width": input.Width, "height": input.Height,
@@ -1223,6 +1226,7 @@ func (a *App) recordGenerationEvent(ctx context.Context, userID int64, promptID 
 		"upscale_steps": input.UpscaleSteps, "upscale_denoise": input.UpscaleDenoise,
 		"detail_steps": input.DetailSteps, "detail_denoise": input.DetailDenoise,
 		"input_images": input.imageCount(),
+		"sensitive_content": sensitive,
 	}
 	if input.AssistantRequested {
 		metadataFields["prompt_assistant"] = map[string]any{
@@ -1246,7 +1250,7 @@ func (a *App) recordGenerationEvent(ctx context.Context, userID int64, promptID 
 		log.Printf("generation metadata encryption: %v", err)
 		return
 	}
-	if _, err := a.store.InsertContentEvent(ctx, domain.ContentEventRecord{UserID: userID, Service: "comfyui", Kind: "comfyui_prompt", ExternalID: promptID, Model: input.ModelName, PromptCipher: promptCipher, ResponseCipher: negativeCipher, MetadataCipher: metadataCipher}); err != nil {
+	if _, err := a.store.InsertContentEvent(ctx, domain.ContentEventRecord{UserID: userID, Service: "comfyui", Kind: "comfyui_prompt", ExternalID: promptID, Model: input.ModelName, PromptCipher: promptCipher, ResponseCipher: negativeCipher, MetadataCipher: metadataCipher, Sensitive: sensitive}); err != nil {
 		log.Printf("store generation event: %v", err)
 	}
 }

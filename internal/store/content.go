@@ -15,11 +15,11 @@ func (s *Store) InsertContentEvent(ctx context.Context, event domain.ContentEven
 	var id int64
 	err := s.db.QueryRowContext(ctx, `
 		INSERT INTO content_events
-			(user_id, service, kind, external_id, model, prompt_cipher, response_cipher, metadata_cipher)
-		VALUES ($1,$2,$3,NULLIF($4,''),$5,$6,$7,$8)
+			(user_id, service, kind, external_id, model, prompt_cipher, response_cipher, metadata_cipher, is_sensitive, sensitivity_classified_at)
+		VALUES ($1,$2,$3,NULLIF($4,''),$5,$6,$7,$8,$9,now())
 		RETURNING id
 	`, event.UserID, event.Service, event.Kind, event.ExternalID, event.Model,
-		event.PromptCipher, event.ResponseCipher, event.MetadataCipher).Scan(&id)
+		event.PromptCipher, event.ResponseCipher, event.MetadataCipher, event.Sensitive).Scan(&id)
 	return id, err
 }
 
@@ -27,7 +27,7 @@ func (s *Store) ListContentEvents(ctx context.Context, limit int, username, serv
 	limit = boundedLimit(limit, 1, 500)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT e.id, e.user_id, u.username, e.service, e.kind, COALESCE(e.external_id,''), e.model,
-		       e.prompt_cipher, e.response_cipher, e.metadata_cipher, COUNT(m.id),
+		       e.prompt_cipher, e.response_cipher, e.metadata_cipher, e.is_sensitive, COUNT(m.id),
 		       e.created_at, e.expires_at
 		FROM content_events e
 		JOIN users u ON u.id = e.user_id
@@ -48,12 +48,45 @@ func (s *Store) ListContentEvents(ctx context.Context, limit int, username, serv
 		var event domain.ContentEventRow
 		if err := rows.Scan(&event.ID, &event.UserID, &event.Username, &event.Service, &event.Kind,
 			&event.ExternalID, &event.Model, &event.PromptCipher, &event.ResponseCipher,
-			&event.MetadataCipher, &event.MediaCount, &event.CreatedAt, &event.ExpiresAt); err != nil {
+			&event.MetadataCipher, &event.Sensitive, &event.MediaCount, &event.CreatedAt, &event.ExpiresAt); err != nil {
 			return nil, err
 		}
 		events = append(events, event)
 	}
 	return events, rows.Err()
+}
+
+func (s *Store) ListUnclassifiedSensitiveContent(ctx context.Context, limit int) ([]domain.ContentEventRow, error) {
+	limit = boundedLimit(limit, 1, 500)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id,prompt_cipher,response_cipher,metadata_cipher
+		FROM content_events
+		WHERE sensitivity_classified_at IS NULL AND expires_at > now()
+		ORDER BY created_at ASC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.ContentEventRow, 0)
+	for rows.Next() {
+		var item domain.ContentEventRow
+		if err := rows.Scan(&item.ID, &item.PromptCipher, &item.ResponseCipher, &item.MetadataCipher); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) SetContentEventSensitive(ctx context.Context, id int64, sensitive bool) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE content_events
+		SET is_sensitive=$2, sensitivity_classified_at=now()
+		WHERE id=$1 AND sensitivity_classified_at IS NULL
+	`, id, sensitive)
+	return err
 }
 
 func (s *Store) ListContentMediaSummaries(ctx context.Context, eventIDs []int64) (map[int64][]domain.ContentMediaSummary, error) {
@@ -141,7 +174,7 @@ func (s *Store) InsertComfyOutputOwnerships(ctx context.Context, userID int64, o
 func (s *Store) ListUserGenerationMedia(ctx context.Context, userID int64, limit int) ([]domain.UserGenerationMedia, error) {
 	limit = boundedLimit(limit, 1, 100)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id,m.media_type,m.mime_type,m.original_name,m.created_at,m.expires_at
+		SELECT m.id,m.media_type,m.mime_type,m.original_name,m.created_at,m.expires_at,e.is_sensitive
 		FROM content_media m
 		JOIN content_events e ON e.id=m.event_id
 		WHERE e.user_id=$1 AND e.service='comfyui' AND e.kind='comfyui_prompt'
@@ -156,7 +189,7 @@ func (s *Store) ListUserGenerationMedia(ctx context.Context, userID int64, limit
 	var media []domain.UserGenerationMedia
 	for rows.Next() {
 		var item domain.UserGenerationMedia
-		if err := rows.Scan(&item.ID, &item.MediaType, &item.MIMEType, &item.OriginalName, &item.CreatedAt, &item.ExpiresAt); err != nil {
+			if err := rows.Scan(&item.ID, &item.MediaType, &item.MIMEType, &item.OriginalName, &item.CreatedAt, &item.ExpiresAt, &item.Sensitive); err != nil {
 			return nil, err
 		}
 		media = append(media, item)

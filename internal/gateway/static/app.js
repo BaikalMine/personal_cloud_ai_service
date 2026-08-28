@@ -66,6 +66,26 @@
     toggle.addEventListener("change", () => form.requestSubmit());
   });
 
+  const sensitiveContentStorageKey = "ai-gateway.show-sensitive-content";
+  const sensitiveToggles = [...document.querySelectorAll("[data-sensitive-toggle]")];
+  const applySensitiveContentPreference = (enabled) => {
+    document.body.classList.toggle("show-sensitive-content", enabled);
+    sensitiveToggles.forEach((toggle) => { toggle.checked = enabled; });
+    try { window.localStorage.setItem(sensitiveContentStorageKey, enabled ? "true" : "false"); } catch (_) {}
+  };
+  let showSensitiveContent = false;
+  try { showSensitiveContent = window.localStorage.getItem(sensitiveContentStorageKey) === "true"; } catch (_) {}
+  applySensitiveContentPreference(showSensitiveContent);
+  sensitiveToggles.forEach((toggle) => toggle.addEventListener("change", () => applySensitiveContentPreference(toggle.checked)));
+  const revealSensitiveMedia = (trigger) => {
+    const media = trigger?.closest?.(".sensitive-media");
+    if (!media || document.body.classList.contains("show-sensitive-content") || media.classList.contains("is-revealed")) return false;
+    media.classList.add("is-revealed");
+    trigger.setAttribute("aria-label", "Контент показан. Нажмите, чтобы открыть результат");
+    return true;
+  };
+  window.aiGatewaySensitiveContent = { reveal: revealSensitiveMedia };
+
   const contentGallery = document.querySelector("[data-admin-content-gallery]");
   const contentDialog = document.getElementById("content-detail-dialog");
   const contentDialogBody = document.getElementById("content-detail-body");
@@ -82,9 +102,13 @@
     contentGallery.addEventListener("click", (event) => {
       const trigger = event.target.closest("[data-content-event-open]");
       if (!trigger) return;
+      if (revealSensitiveMedia(trigger)) return;
       const detail = document.getElementById(`content-event-detail-${trigger.dataset.contentEventOpen}`);
       if (!(detail instanceof HTMLTemplateElement)) return;
       contentDialogBody.replaceChildren(detail.content.cloneNode(true));
+      if (trigger.closest(".sensitive-media")?.classList.contains("is-revealed")) {
+        contentDialogBody.querySelectorAll(".sensitive-media").forEach((media) => media.classList.add("is-revealed"));
+      }
       contentDialogTrigger = trigger;
       contentDialog.hidden = false;
       document.body.classList.add("content-detail-open");

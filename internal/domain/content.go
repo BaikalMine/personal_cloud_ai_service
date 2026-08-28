@@ -11,6 +11,7 @@ type ContentEventRecord struct {
 	PromptCipher   []byte
 	ResponseCipher []byte
 	MetadataCipher []byte
+	Sensitive      bool
 }
 
 type ContentEventRow struct {
@@ -24,6 +25,7 @@ type ContentEventRow struct {
 	PromptCipher   []byte
 	ResponseCipher []byte
 	MetadataCipher []byte
+	Sensitive      bool
 	MediaCount     int64
 	CreatedAt      time.Time
 	ExpiresAt      time.Time
@@ -57,6 +59,7 @@ type UserGenerationMedia struct {
 	OriginalName string
 	CreatedAt    time.Time
 	ExpiresAt    time.Time
+	Sensitive    bool
 }
 
 type ContentMediaSummary struct {

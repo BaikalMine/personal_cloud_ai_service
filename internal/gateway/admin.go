@@ -194,6 +194,7 @@ func (a *App) handleAdminContent(w http.ResponseWriter, r *http.Request) {
 	if len(query) > 200 {
 		query = query[:200]
 	}
+	a.classifyPendingSensitiveContent(r.Context())
 	a.backfillComfyContentMedia(r.Context())
 	rowLimit := 200
 	if query != "" {
@@ -233,6 +234,7 @@ func (a *App) handleAdminContent(w http.ResponseWriter, r *http.Request) {
 			ID: row.ID, UserID: row.UserID, Username: row.Username, Service: row.Service,
 			Kind: row.Kind, ExternalID: row.ExternalID, Model: row.Model, Prompt: prompt,
 			Response: response, Metadata: metadata, Assistant: contentAssistantFromMetadata(metadata), MediaCount: row.MediaCount,
+			Sensitive: row.Sensitive,
 			Media:     mediaByEvent[row.ID],
 			CreatedAt: row.CreatedAt, ExpiresAt: row.ExpiresAt,
 		})

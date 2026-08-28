@@ -151,6 +151,7 @@ type ContentEventView struct {
 	Response   string
 	Metadata   string
 	Assistant  *ContentAssistantView
+	Sensitive  bool
 	MediaCount int64
 	Media      []domain.ContentMediaSummary
 	CreatedAt  time.Time
