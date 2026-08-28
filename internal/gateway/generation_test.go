@@ -381,10 +381,10 @@ func TestKrea2ImageWorkflowFitsLargeOriginalToSafeBaseResolution(t *testing.T) {
 	}
 	frame := prompt["5"].(map[string]any)["inputs"].(map[string]any)
 	width, height := frame["custom_width"].(int), frame["custom_height"].(int)
-	if width > krea2EditMaxLongestSidePixels || height > krea2EditMaxLongestSidePixels || width*height > int(krea2EditMaxBaseMegapixels*1024*1024) || frame["max_resolution"] != krea2EditMaxLongestSidePixels || frame["resolution_source"] != true {
+	if width > krea2EditMaxLongestSidePixels || height > krea2EditMaxLongestSidePixels || float64(width*height) > krea2EditMaxBaseMegapixels*1024*1024 || frame["max_resolution"] != krea2EditMaxLongestSidePixels || frame["resolution_source"] != true {
 		t.Fatalf("Krea2 frame was not fitted to the safe edit budget: %#v", frame)
 	}
-	if got, want := prompt["14"].(map[string]any)["inputs"].(map[string]any)["upscale_by"], 1.5; got != want {
+	if got, want := prompt["14"].(map[string]any)["inputs"].(map[string]any)["upscale_by"], 1.0; got != want {
 		t.Fatalf("Krea2 upscale factor = %v, want %v", got, want)
 	}
 }

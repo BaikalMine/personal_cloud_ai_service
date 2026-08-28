@@ -19,8 +19,8 @@ var workflowFS embed.FS
 
 const (
 	maxGenerationLoraSlots        = 10
-	krea2EditMaxBaseMegapixels    = 1.5
-	krea2EditMaxLongestSidePixels = 1640
+	krea2EditMaxBaseMegapixels    = 4.7
+	krea2EditMaxLongestSidePixels = 4096
 )
 
 type workflowDefinition struct {
@@ -647,10 +647,9 @@ func normalizeKreaEditDefaults(input *generationForm) {
 	input.SkinMaskFeather = 0.45
 }
 
-// normalizeKrea2EditResolution mirrors the stable first pass from the user's
-// working ComfyUI graph. Krea2 Edit's pixel path grows very quickly with the
-// source frame, so accepting a full-resolution phone image can exhaust 32 GB
-// of VRAM before the optional tiled upscale starts.
+// normalizeKrea2EditResolution keeps the source composition while applying a
+// hard 4.7 MP limit. Krea2 Edit's pixel path grows very quickly with the source
+// frame, so accepting a full-resolution phone image can exhaust 32 GB of VRAM.
 func normalizeKrea2EditResolution(input *generationForm) {
 	maxPixels := krea2EditMaxBaseMegapixels * 1024 * 1024
 	currentPixels := float64(input.Width * input.Height)
@@ -664,9 +663,9 @@ func normalizeKrea2EditResolution(input *generationForm) {
 	if scale < 1 {
 		input.Width = max(256, int(float64(input.Width)*scale/8)*8)
 		input.Height = max(256, int(float64(input.Height)*scale/8)*8)
-		// The exact source size cannot be kept after safety fitting, so allow the
-		// existing final upscale to restore useful output detail.
-		input.PreserveOriginalSize = false
+		// Keep the final frame within the same ceiling instead of scaling the
+		// fitted image up again in the optional finishing pass.
+		input.PreserveOriginalSize = true
 	}
 	if input.MaxLongestSide == 0 || input.MaxLongestSide > krea2EditMaxLongestSidePixels {
 		input.MaxLongestSide = krea2EditMaxLongestSidePixels

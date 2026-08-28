@@ -112,8 +112,8 @@
   const uploadedImages = new Map();
   let primaryImageSize = null;
 
-  const krea2EditMaxBaseMegapixels = 1.5;
-  const krea2EditMaxLongestSide = 1640;
+  const krea2EditMaxBaseMegapixels = 4.7;
+  const krea2EditMaxLongestSide = 4096;
   let progressSocket = null;
   let liveProgressReceived = false;
   let promptAssistantApproved = false;
@@ -237,7 +237,7 @@
     const targetHeight = roundToMultiple(sourceHeight * scale, 8);
     const capped = scale < 1 || targetWidth !== sourceWidth || targetHeight !== sourceHeight;
     if (isKreaEdit) {
-      originalResolution.textContent = `Исходник: ${sourceWidth} × ${sourceHeight} · ${sourceMegapixelsValue.toFixed(2).replace(".", ",")} Мп. Krea2 сохранит пропорции и обработает ${targetWidth} × ${targetHeight}: безопасный первый проход до 1,5 Мп.`;
+      originalResolution.textContent = `Исходник: ${sourceWidth} × ${sourceHeight} · ${sourceMegapixelsValue.toFixed(2).replace(".", ",")} Мп. Krea2 сохранит пропорции и обработает ${targetWidth} × ${targetHeight}: предел итогового кадра 4,7 Мп.`;
       return;
     }
     originalResolution.textContent = capped
