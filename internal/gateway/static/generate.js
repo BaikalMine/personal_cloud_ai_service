@@ -861,6 +861,14 @@
     setFieldState(".flux-edit-settings", isFluxEdit);
     setFieldState(".krea-edit-settings", isKreaEdit);
     setFieldState(".lut-workflow-field", isFluxEdit || isKreaEdit);
+    root.querySelectorAll("[data-workflow-guide]").forEach((guide) => {
+      const type = guide.dataset.workflowGuide;
+      guide.hidden = !(
+        (type === "text" && !isEdit && !isMiniMax) ||
+        (type === "krea-edit" && isKreaEdit) ||
+        (type === "flux-edit" && isFluxEdit)
+      );
+    });
     renderLUT();
     setFieldState(".standard-main-settings", !isEdit && !isMiniMax);
     setFieldState(".minimax-video-settings", isMiniMax);

@@ -114,6 +114,35 @@
       <div class="generation-primary-fields" id="generation-quality-field">
         <label>Профиль качества Krea2<select id="generation-quality"><option value="fast">Быстрое · 1,0 Мп</option><option value="balanced" selected>Оптимальное · 1,9 Мп</option><option value="krea-2-5">Детальное · 2,5 Мп</option><option value="krea-3-2">Высокое · 3,2 Мп</option><option value="maximum">Максимальное · 4,0 Мп</option><option value="krea-4-7">Максимум деталей · 4,7 Мп</option></select></label>
       </div>
+      <section class="workflow-guides" aria-label="Мини-гайд по выбранной схеме">
+        <details class="workflow-mini-guide" data-workflow-guide="text" open hidden>
+          <summary>Мини-гайд: генерация из текста</summary>
+          <div class="workflow-mini-guide-grid">
+            <section><strong>Промт задаёт сцену</strong><p>Сначала назовите главный объект, затем действие или позу, окружение, свет и стиль. Один чёткий сюжет даёт более стабильный результат, чем несколько несвязанных идей в одной строке.</p></section>
+            <section><strong>Негативный промт</strong><p>Используйте его для постоянных нежелательных дефектов: размытия, лишних конечностей, текста или водяных знаков. Не повторяйте там то, что уже попросили в позитивном промте.</p></section>
+            <section><strong>Качество и размер</strong><p>Начните с «Оптимального» профиля. Повышайте мегапиксели только для финального кадра: это увеличивает детализацию, время генерации и потребление видеопамяти.</p></section>
+            <section><strong>LoRA и апскейл</strong><p>Подключайте LoRA по одной и начинайте с рекомендованной силы. Апскейл улучшает финальные детали, но не исправляет исходную композицию: сначала добейтесь удачного базового изображения.</p></section>
+          </div>
+        </details>
+        <details class="workflow-mini-guide" data-workflow-guide="krea-edit" open hidden>
+          <summary>Мини-гайд: Krea2 «Фото и промт»</summary>
+          <div class="workflow-mini-guide-grid">
+            <section><strong>Главное фото</strong><p>Первое изображение задаёт лицо, позу, кадр и композицию. Опишите в промте именно изменение: например, замену одежды, фона или материала, а не пересказывайте всё фото.</p></section>
+            <section><strong>Второй референс</strong><p>Добавляйте второе фото, когда нужно перенести внешность, одежду, предмет, стиль или свет. Выберите его роль: так ассистент явно укажет, что брать из image 1 и image 2.</p></section>
+            <section><strong>Сохранение и апскейл</strong><p>«Сохранение исходника» удерживает сходство с первым фото. Оставьте 4 для обычного редактирования; повышайте аккуратно, если Krea2 слишком меняет лицо или композицию. Апскейл добавляет детали после основного прохода.</p></section>
+            <section><strong>Кожа и цвет</strong><p>Начните с профиля Natural. Сильная очистка, сглаживание или цветокоррекция способны убрать фактуру и сделать фото искусственным, поэтому меняйте параметры небольшими шагами.</p></section>
+          </div>
+        </details>
+        <details class="workflow-mini-guide" data-workflow-guide="flux-edit" open hidden>
+          <summary>Мини-гайд: Flux2 «Фото и промт»</summary>
+          <div class="workflow-mini-guide-grid">
+            <section><strong>Точное редактирование</strong><p>Первое фото остаётся базовой сценой. Сформулируйте только нужное изменение и явно попросите сохранить лицо, ракурс, позу, свет и композицию, если менять их не требуется.</p></section>
+            <section><strong>Несколько изображений</strong><p>Используйте дополнительные файлы как референсы для внешности, одежды, предметов, стиля или фона. Карта референсов показывает их номера, а ассистент связывает роль с image 1, image 2 и дальше.</p></section>
+            <section><strong>Размер и семплирование</strong><p>Сохранение исходного размера подходит для ретуши. Изменение кадра используйте, когда нужна новая пропорция. Начните с текущих значений шагов, CFG и Guidance: их повышение не всегда делает результат лучше.</p></section>
+            <section><strong>LoRA и финальный апскейл</strong><p>LoRA усиливает конкретный стиль или деталь, поэтому добавляйте её после удачной базовой правки. Ultimate SD Upscale и SeedVR2 требуют больше времени и VRAM; включайте их для финала, а не для каждой пробы.</p></section>
+          </div>
+        </details>
+      </section>
       <section class="workflow-settings-section minimax-video-settings" hidden>
         <div class="workflow-settings-heading"><div><strong>MiniMax H3 · параметры видео</strong><small>Видео создаётся со звуком. Выберите ориентацию и стандарт качества, а Gateway передаст ближайший размер, совместимый с моделью.</small></div><output class="resolution-preview" id="minimax-video-resolution-preview">704 × 1280 · 720p</output></div>
         <div class="generation-fields">
