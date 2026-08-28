@@ -121,6 +121,9 @@ button, a, input, select { -webkit-tap-highlight-color: transparent; }
 .account-indicator { flex: 0 0 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 0 4px rgba(98, 221, 181, .1); }
 .nav-form { margin: 0; }
 .nav-button { appearance: none; border: 0; background: transparent; cursor: pointer; }
+.nav-button.nav-button-logout { border: 1px solid #754247; background: #2a191c; color: #ffd3cf; box-shadow: inset 0 0 0 1px rgba(255, 183, 176, .04); }
+.nav-button.nav-button-logout:hover, .nav-button.nav-button-logout:focus-visible { border-color: #dd766e; background: #482127; color: #fff0ed; outline: none; }
+.nav-button.nav-button-logout:focus-visible { box-shadow: 0 0 0 3px rgba(221, 118, 110, .24); }
 .header-priority-form { flex: 0 0 auto; margin: 0; }
 .header-priority-toggle { min-height: 40px; display: inline-flex; align-items: center; gap: 8px; margin: 0; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); font-size: 12px; font-weight: 750; cursor: pointer; user-select: none; white-space: nowrap; }
 .header-priority-toggle:hover { border-color: var(--line-strong); color: var(--text); }
@@ -1151,6 +1154,8 @@ td { vertical-align: middle; }
   .primary-nav, .user-menu { align-items: stretch; flex-direction: column; }
   .primary-nav a, .nav-button { justify-content: flex-start; }
   .account-chip { justify-content: flex-start; }
+  .user-menu .nav-form { width: 100%; }
+  .user-menu .nav-button-logout { width: 100%; min-height: 48px; justify-content: center; font-size: 14px; font-weight: 850; }
   .page, .admin-sidebar ~ .page { width: calc(100% - 24px); padding: 24px 0 52px; }
   .hero { align-items: flex-start; flex-direction: column; min-height: 0; gap: 12px; margin-bottom: 18px; padding-bottom: 15px; }
   .hero h1 { font-size: 26px; }

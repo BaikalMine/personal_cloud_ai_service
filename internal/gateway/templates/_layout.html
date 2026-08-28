@@ -39,7 +39,7 @@
     </nav>
     <div class="user-menu">
       {{if .CurrentUser}}<a class="account-chip" href="/account/profile"><span class="account-indicator"></span><span><b>{{.CurrentUser.Username}}</b><small>{{roleLabel .CurrentUser.Role}}</small></span></a>{{end}}
-      <form method="post" action="/logout" class="nav-form"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit" class="nav-button">Выйти</button></form>
+      <form method="post" action="/logout" class="nav-form"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit" class="nav-button nav-button-logout" aria-label="Выйти из аккаунта">Выйти</button></form>
     </div>
   </div>
 </header>
@@ -75,7 +75,7 @@
     <a href="{{.PublicBaseURL}}/app">Режим пользователя</a>
     <a href="/account/profile">Профиль</a>
     <a href="/account/password">Сменить пароль</a>
-    <form method="post" action="/logout" class="nav-form"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit" class="nav-button">Выйти</button></form>
+    <form method="post" action="/logout" class="nav-form"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit" class="nav-button nav-button-logout" aria-label="Выйти из аккаунта">Выйти</button></form>
   </div>
 </aside>
 {{end}}
