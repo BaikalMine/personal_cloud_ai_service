@@ -164,6 +164,32 @@
         target.append(item);
       });
     };
+    const historySeries = [
+      { key: "cpu", label: "ЦП", color: "#56d6ea", value: (metric) => metric.cpu_percent },
+      { key: "memory", label: "ОЗУ", color: "#62ddb5", value: (metric) => metric.memory_total_bytes ? metric.memory_used_bytes * 100 / metric.memory_total_bytes : 0 },
+      { key: "gpu", label: "GPU", color: "#e5b75d", value: (metric) => metric.gpu_available ? metric.gpu_percent : null },
+      { key: "gpu-memory", label: "VRAM", color: "#a78bfa", value: (metric) => metric.gpu_memory_total_bytes ? metric.gpu_memory_used_bytes * 100 / metric.gpu_memory_total_bytes : null },
+    ];
+    const activeHistorySeries = new Set(historySeries.map(({ key }) => key));
+    const chartWidth = 960;
+    const chartHeight = 248;
+    const chartInset = { top: 14, right: 18, bottom: 30, left: 42 };
+    const svgNode = (name, attributes = {}) => {
+      const node = document.createElementNS("http://www.w3.org/2000/svg", name);
+      Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, String(value)));
+      return node;
+    };
+    const compactHistory = (history, maximum = 240) => {
+      if (history.length <= maximum) return history;
+      const step = (history.length - 1) / (maximum - 1);
+      return Array.from({ length: maximum }, (_, index) => history[Math.round(index * step)]);
+    };
+    const historyValue = (metric, series) => {
+      const raw = series.value(metric);
+      return raw === null || raw === undefined ? null : percent(raw);
+    };
+    const historyTime = (value) => new Date(value).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+    const historyDateTime = (value) => new Date(value).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
     const renderHistory = (history) => {
       const chart = systemMonitoring.querySelector("[data-system-history]");
       const caption = systemMonitoring.querySelector("[data-system-history-caption]");
@@ -179,27 +205,98 @@
         if (caption) caption.textContent = "Сбор истории";
         return;
       }
-      const visible = history.slice(-96);
-      visible.forEach((metric) => {
-        const column = document.createElement("span");
-        column.className = "system-history-column";
-        const values = [
-          ["cpu", metric.cpu_percent],
-          ["memory", metric.memory_total_bytes ? metric.memory_used_bytes * 100 / metric.memory_total_bytes : 0],
-          ["gpu", metric.gpu_available ? metric.gpu_percent : 0],
-          ["gpu-memory", metric.gpu_memory_total_bytes ? metric.gpu_memory_used_bytes * 100 / metric.gpu_memory_total_bytes : 0],
-        ];
-        values.forEach(([kind, value]) => {
-          const bar = document.createElement("i");
-          bar.className = kind;
-          bar.style.height = `${Math.max(2, percent(value))}%`;
-          column.append(bar);
-        });
-        column.title = new Date(metric.recorded_at).toLocaleString("ru-RU");
-        chart.append(column);
+      const visible = compactHistory(history);
+      const plotWidth = chartWidth - chartInset.left - chartInset.right;
+      const plotHeight = chartHeight - chartInset.top - chartInset.bottom;
+      const xFor = (index) => chartInset.left + (visible.length > 1 ? index * plotWidth / (visible.length - 1) : 0);
+      const yFor = (value) => chartInset.top + (100 - value) * plotHeight / 100;
+      const svg = svgNode("svg", { viewBox: `0 0 ${chartWidth} ${chartHeight}`, preserveAspectRatio: "none", role: "img", "aria-label": "Линейный график нагрузки сервера" });
+      const grid = svgNode("g", { class: "system-history-grid" });
+      [0, 25, 50, 75, 100].forEach((value) => {
+        const y = yFor(value);
+        grid.append(svgNode("line", { x1: chartInset.left, x2: chartWidth - chartInset.right, y1: y, y2: y }));
+        const label = svgNode("text", { x: chartInset.left - 9, y: y + 4, "text-anchor": "end" });
+        label.textContent = `${value}%`;
+        grid.append(label);
       });
-      if (caption) caption.textContent = `${visible.length} замеров`;
+      const firstTime = svgNode("text", { class: "system-history-time", x: chartInset.left, y: chartHeight - 8, "text-anchor": "start" });
+      firstTime.textContent = historyTime(visible[0].recorded_at);
+      const lastTime = svgNode("text", { class: "system-history-time", x: chartWidth - chartInset.right, y: chartHeight - 8, "text-anchor": "end" });
+      lastTime.textContent = historyTime(visible[visible.length - 1].recorded_at);
+      grid.append(firstTime, lastTime);
+      svg.append(grid);
+      const lines = svgNode("g", { class: "system-history-lines" });
+      historySeries.filter(({ key }) => activeHistorySeries.has(key)).forEach((series) => {
+        let segment = [];
+        const appendSegment = () => {
+          if (segment.length > 1) lines.append(svgNode("polyline", { points: segment.join(" "), stroke: series.color }));
+          segment = [];
+        };
+        visible.forEach((metric, index) => {
+          const value = historyValue(metric, series);
+          if (value === null) {
+            appendSegment();
+            return;
+          }
+          segment.push(`${xFor(index).toFixed(2)},${yFor(value).toFixed(2)}`);
+        });
+        appendSegment();
+      });
+      svg.append(lines);
+      const cursor = svgNode("g", { class: "system-history-cursor", hidden: "hidden" });
+      const cursorLine = svgNode("line", { x1: 0, x2: 0, y1: chartInset.top, y2: chartHeight - chartInset.bottom });
+      cursor.append(cursorLine);
+      svg.append(cursor);
+      const interaction = svgNode("rect", { class: "system-history-hit", x: chartInset.left, y: chartInset.top, width: plotWidth, height: plotHeight });
+      svg.append(interaction);
+      const tooltip = document.createElement("div");
+      tooltip.className = "system-history-tooltip";
+      tooltip.hidden = true;
+      const showPoint = (event) => {
+        const bounds = svg.getBoundingClientRect();
+        const relative = Math.max(chartInset.left / chartWidth, Math.min(1 - chartInset.right / chartWidth, (event.clientX - bounds.left) / bounds.width));
+        const index = Math.round((relative * chartWidth - chartInset.left) * (visible.length - 1) / plotWidth);
+        const metric = visible[Math.max(0, Math.min(visible.length - 1, index))];
+        const x = xFor(index);
+        cursor.removeAttribute("hidden");
+        cursorLine.setAttribute("x1", x);
+        cursorLine.setAttribute("x2", x);
+        tooltip.replaceChildren();
+        const title = document.createElement("strong");
+        title.textContent = historyDateTime(metric.recorded_at);
+        tooltip.append(title);
+        historySeries.filter(({ key }) => activeHistorySeries.has(key)).forEach((series) => {
+          const value = historyValue(metric, series);
+          if (value === null) return;
+          const row = document.createElement("span");
+          row.innerHTML = `<i style="--series-color:${series.color}"></i>${series.label}<b>${Math.round(value)}%</b>`;
+          tooltip.append(row);
+        });
+        tooltip.hidden = false;
+        tooltip.style.left = `${Math.max(8, Math.min(chart.clientWidth - tooltip.offsetWidth - 8, (x / chartWidth) * chart.clientWidth + 12))}px`;
+        tooltip.style.top = "18px";
+      };
+      interaction.addEventListener("pointermove", showPoint);
+      interaction.addEventListener("pointerenter", showPoint);
+      interaction.addEventListener("pointerdown", showPoint);
+      interaction.addEventListener("pointerleave", () => { cursor.setAttribute("hidden", "hidden"); tooltip.hidden = true; });
+      chart.append(svg, tooltip);
+      if (caption) caption.textContent = `${historyDateTime(visible[0].recorded_at)} - ${historyDateTime(visible[visible.length - 1].recorded_at)} · ${history.length} замеров`;
     };
+    systemMonitoring.querySelectorAll("[data-history-series]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const key = button.dataset.historySeries;
+        if (!key) return;
+        if (activeHistorySeries.has(key) && activeHistorySeries.size === 1) return;
+        if (activeHistorySeries.has(key)) activeHistorySeries.delete(key); else activeHistorySeries.add(key);
+        systemMonitoring.querySelectorAll("[data-history-series]").forEach((node) => {
+          const active = activeHistorySeries.has(node.dataset.historySeries);
+          node.classList.toggle("is-active", active);
+          node.setAttribute("aria-pressed", String(active));
+        });
+        renderHistory(systemMonitoring._history || []);
+      });
+    });
     const renderSystem = (overview) => {
       const host = overview.host;
       const status = systemMonitoring.querySelector("[data-system-status]");
@@ -225,7 +322,8 @@
         if (gpuName) gpuName.textContent = host.gpu_name || "Вычисления GPU";
       }
       renderOnlineUsers(overview.online_users || []);
-      renderHistory(overview.history || []);
+      systemMonitoring._history = overview.history || [];
+      renderHistory(systemMonitoring._history);
     };
     const refreshSystem = async () => {
       try {

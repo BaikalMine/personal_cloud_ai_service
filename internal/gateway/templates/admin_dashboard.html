@@ -29,8 +29,13 @@
     <div class="dashboard-grid system-detail-grid">
       <div class="panel span-two">
         <div class="panel-heading"><div><p class="section-kicker">Последние 24 часа</p><h2>Динамика нагрузки</h2></div><span class="muted" data-system-history-caption>Накопление данных...</span></div>
-        <div class="system-history" data-system-history role="img" aria-label="График использования ресурсов"></div>
-        <div class="system-history-legend"><span><i class="cpu"></i>ЦП</span><span><i class="memory"></i>ОЗУ</span><span><i class="gpu"></i>GPU</span><span><i class="gpu-memory"></i>VRAM</span></div>
+        <div class="system-history-toolbar" role="group" aria-label="Показатели на графике нагрузки">
+          <button class="system-history-toggle cpu is-active" type="button" data-history-series="cpu" aria-pressed="true"><i></i>ЦП</button>
+          <button class="system-history-toggle memory is-active" type="button" data-history-series="memory" aria-pressed="true"><i></i>ОЗУ</button>
+          <button class="system-history-toggle gpu is-active" type="button" data-history-series="gpu" aria-pressed="true"><i></i>GPU</button>
+          <button class="system-history-toggle gpu-memory is-active" type="button" data-history-series="gpu-memory" aria-pressed="true"><i></i>VRAM</button>
+        </div>
+        <div class="system-history" data-system-history aria-label="График использования ресурсов"></div>
       </div>
       <div class="panel">
         <div class="panel-heading"><div><p class="section-kicker">Онлайн сейчас</p><h2><span data-online-count>{{formatNumber .Stats.ActiveUsers}}</span> пользователей</h2></div></div>

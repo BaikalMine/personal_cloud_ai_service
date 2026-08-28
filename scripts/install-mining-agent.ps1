@@ -80,8 +80,10 @@ if (-not (Test-Path -LiteralPath $resolvedMiningRoot -PathType Container)) {
 
 $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 if ($existingTask) {
-    Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+    # Stopping an interactive task causes Task Scheduler to tear down every
+    # child process, including the miner console. Disable new starts first;
+    # the agent executable itself is terminated below without its tree.
+    Disable-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue | Out-Null
 }
 
 New-Item -ItemType Directory -Path $InstallDirectory -Force | Out-Null
@@ -95,7 +97,9 @@ $agentProcesses = @(Get-CimInstance Win32_Process -Filter "Name = 'mining-agent.
     Where-Object { $_.ExecutablePath -and $_.ExecutablePath.Equals($targetExecutable, [StringComparison]::OrdinalIgnoreCase) })
 foreach ($agentProcess in $agentProcesses) {
     try {
-        & taskkill.exe /PID $agentProcess.ProcessId /T /F 2>$null | Out-Null
+        # Do not terminate the complete process tree here: an active miner and
+        # its visible console are descendants of a previous agent process.
+        & taskkill.exe /PID $agentProcess.ProcessId /F 2>$null | Out-Null
     } catch {
         # The process may exit between the CIM query and taskkill.
     }
@@ -106,6 +110,10 @@ foreach ($agentProcess in $agentProcesses) {
     }
 }
 Start-Sleep -Milliseconds 400
+
+if ($existingTask) {
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+}
 
 Copy-Item -LiteralPath $sourceExecutable -Destination $targetExecutable -Force
 if (Test-Path -LiteralPath $minerLogPath -PathType Leaf) {

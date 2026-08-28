@@ -27,6 +27,7 @@ import (
 )
 
 const (
+	createNewConsole      = 0x00000010
 	createNewProcessGroup = 0x00000200
 	createNoWindow        = 0x08000000
 	maxScriptBytes        = 64 << 10
@@ -139,7 +140,9 @@ func (c *windowsController) startLocked(ctx context.Context, request mining.Requ
 		return state, err
 	}
 	command.Dir = filepath.Dir(scriptPath)
-	command.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNewProcessGroup | createNoWindow, HideWindow: true}
+	// The visible console is the tracked process itself. This makes a stop
+	// command close the exact console window instead of leaving wrappers behind.
+	command.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNewConsole | createNewProcessGroup, HideWindow: false}
 	if err := command.Start(); err != nil {
 		return state, fmt.Errorf("start mining script: %w", err)
 	}
@@ -206,6 +209,13 @@ func (c *windowsController) stopLocked(ctx context.Context, request mining.Reque
 	if launcherPID > 0 {
 		if err := runTaskkill(ctx, "/PID", strconv.Itoa(launcherPID)); err == nil {
 			stoppedTree = true
+		}
+	}
+	if !stoppedTree {
+		for _, pid := range c.minerConsolePIDs(ctx, managedPIDs, scriptPath) {
+			if err := runTaskkill(ctx, "/PID", strconv.Itoa(pid)); err == nil {
+				stoppedTree = true
+			}
 		}
 	}
 	if !stoppedTree {
@@ -279,14 +289,8 @@ func commandForScript(path, outputLog string) (*exec.Cmd, error) {
 			powerShellQuote(outputLog),
 		)
 		innerEncoded := encodePowerShell(innerScript)
-		launcherScript := fmt.Sprintf(
-			`$ErrorActionPreference = 'Stop'; try { $arguments = @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','%s'); $child = Start-Process -FilePath 'powershell.exe' -ArgumentList $arguments -WorkingDirectory '%s' -WindowStyle Normal -PassThru; $child.WaitForExit(); exit $child.ExitCode } catch { $_ | Out-File -FilePath '%s' -Append; exit 1 }`,
-			innerEncoded,
-			powerShellQuote(filepath.Dir(path)),
-			powerShellQuote(outputLog),
-		)
 		return exec.Command(
-			"powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodePowerShell(launcherScript),
+			"powershell.exe", "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", innerEncoded,
 		), nil
 	default:
 		return nil, errors.New("неподдерживаемый тип скрипта")
@@ -369,6 +373,68 @@ func processIDs(ctx context.Context, processName string) ([]int, error) {
 		}
 	}
 	return pids, nil
+}
+
+type windowsProcess struct {
+	PID         int    `json:"ProcessId"`
+	ParentPID   int    `json:"ParentProcessId"`
+	Name        string `json:"Name"`
+	CommandLine string `json:"CommandLine"`
+}
+
+func windowsProcesses(ctx context.Context) ([]windowsProcess, error) {
+	command := exec.CommandContext(ctx, "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", `@(Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine) | ConvertTo-Json -Compress`)
+	command.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNoWindow, HideWindow: true}
+	output, err := command.Output()
+	if err != nil {
+		return nil, fmt.Errorf("list Windows processes: %w", err)
+	}
+	var processes []windowsProcess
+	if err := json.Unmarshal(output, &processes); err != nil {
+		return nil, fmt.Errorf("decode Windows processes: %w", err)
+	}
+	return processes, nil
+}
+
+// minerConsolePIDs finds only a shell that explicitly references the approved
+// mining script. It is used for a miner that was started manually before the
+// agent began tracking its own launcher PID.
+func (c *windowsController) minerConsolePIDs(ctx context.Context, minerPIDs []int, scriptPath string) []int {
+	processes, err := windowsProcesses(ctx)
+	if err != nil {
+		return nil
+	}
+	byPID := make(map[int]windowsProcess, len(processes))
+	for _, process := range processes {
+		byPID[process.PID] = process
+	}
+	scriptPath = strings.ToLower(scriptPath)
+	scriptName := strings.ToLower(filepath.Base(scriptPath))
+	rootDir := strings.ToLower(c.rootDir)
+	candidates := make(map[int]struct{})
+	for _, minerPID := range minerPIDs {
+		current, exists := byPID[minerPID]
+		for hops := 0; exists && hops < 8 && current.ParentPID > 0; hops++ {
+			parent, found := byPID[current.ParentPID]
+			if !found {
+				break
+			}
+			name := strings.ToLower(parent.Name)
+			commandLine := strings.ToLower(parent.CommandLine)
+			isShell := name == "cmd.exe" || name == "powershell.exe" || name == "pwsh.exe"
+			referencesScript := strings.Contains(commandLine, scriptPath) || (strings.Contains(commandLine, rootDir) && strings.Contains(commandLine, scriptName))
+			if isShell && referencesScript {
+				candidates[parent.PID] = struct{}{}
+				break
+			}
+			current, exists = parent, true
+		}
+	}
+	result := make([]int, 0, len(candidates))
+	for pid := range candidates {
+		result = append(result, pid)
+	}
+	return result
 }
 
 func runTaskkill(ctx context.Context, selector, value string) error {
