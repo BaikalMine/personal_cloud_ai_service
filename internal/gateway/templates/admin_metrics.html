@@ -6,7 +6,7 @@
   <section class="metric-grid metrics-four">
     <article class="metric-card tone-blue"><span>Сегодня</span><strong>{{formatNumber .Stats.RequestsToday}}</strong><small>запросов</small></article>
     <article class="metric-card tone-cyan"><span>За 7 дней</span><strong>{{formatNumber .Stats.Requests7Days}}</strong><small>запросов</small></article>
-    <article class="metric-card tone-indigo"><span>Активные WebSocket</span><strong>{{formatNumber .Stats.ActiveWebSockets}}</strong><small>соединений</small></article>
+    <article class="metric-card tone-indigo"><span>Активные WebSocket-соединения</span><strong>{{formatNumber .Stats.ActiveWebSockets}}</strong><small>сейчас подключено</small></article>
     <article class="metric-card tone-red"><span>Доля ошибок</span><strong>{{.Stats.ErrorRate}}</strong><small>за 7 дней</small></article>
   </section>
   <section class="panel">
@@ -16,7 +16,7 @@
   <section class="panel">
     <div class="panel-heading"><div><p class="section-kicker">30 дней</p><h2>Сервисы</h2></div></div>
     <table><thead><tr><th>Сервис</th><th>Запросы</th><th>Пользователи</th><th>Передано</th><th>Ошибки</th></tr></thead><tbody>
-    {{range .ServiceStats}}<tr><td><a class="service-link" href="/admin/services/{{.Service}}"><i class="service-icon {{.Service}}"></i>{{.Service}}</a></td><td class="numeric">{{formatNumber .Requests}}</td><td class="numeric">{{formatNumber .Users}}</td><td>{{formatBytes .Bytes}}</td><td><span class="error-count {{if gt .Errors 0}}has-errors{{end}}">{{formatNumber .Errors}}</span></td></tr>{{else}}<tr><td colspan="5" class="muted">Нет данных.</td></tr>{{end}}
+    {{range .ServiceStats}}<tr><td data-label="Сервис"><a class="service-link" href="/admin/services/{{.Service}}"><i class="service-icon {{.Service}}"></i>{{.Service}}</a></td><td data-label="Запросы" class="numeric">{{formatNumber .Requests}}</td><td data-label="Пользователи" class="numeric">{{formatNumber .Users}}</td><td data-label="Передано">{{formatBytes .Bytes}}</td><td data-label="Ошибки"><span class="error-count {{if gt .Errors 0}}has-errors{{end}}">{{formatNumber .Errors}}</span></td></tr>{{else}}<tr><td colspan="5" class="muted">Нет данных.</td></tr>{{end}}
     </tbody></table>
   </section>
 </main>

@@ -44,7 +44,8 @@
           <form method="post" class="miner-update-form">
             <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="action" value="update">
             <label>Ссылка на ZIP-релиз<input name="archive_url" type="url" inputmode="url" maxlength="2048" placeholder="https://github.com/.../SRBMiner-Multi-3-5-0-win64.zip" pattern="https://.+" required></label>
-            <p class="miner-update-note">Проверю имя архива и наличие {{.ProcessName}}, сохраню ваши .bat и выполню откат при ошибке запуска.</p>
+            <label>SHA-256 ZIP-архива<input name="archive_sha256" type="text" inputmode="text" maxlength="64" minlength="64" placeholder="64 символа из SHA-256" pattern="[A-Fa-f0-9]{64}" required></label>
+            <p class="miner-update-note">Проверю SHA-256, имя архива и наличие {{.ProcessName}}, сохраню ваши .bat и выполню откат при ошибке запуска.</p>
             <button type="submit" class="ghost" data-confirm="Обновить {{.Name}} из указанного ZIP-архива? Если майнер запущен, он будет перезапущен после проверки новой версии.">Обновить майнер</button>
           </form>
         </details>

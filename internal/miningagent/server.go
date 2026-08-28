@@ -24,6 +24,7 @@ type Controller interface {
 	Start(context.Context, mining.Request) (mining.State, error)
 	Stop(context.Context, mining.Request) (mining.State, error)
 	Update(context.Context, mining.UpdateRequest) (mining.UpdateResult, error)
+	System(context.Context) (mining.SystemMetrics, error)
 }
 
 type Server struct {
@@ -49,7 +50,24 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/v1/start", s.authenticate(http.HandlerFunc(s.handleStart)))
 	mux.Handle("/v1/stop", s.authenticate(http.HandlerFunc(s.handleStop)))
 	mux.Handle("/v1/update", s.authenticate(http.HandlerFunc(s.handleUpdate)))
+	mux.Handle("/v1/system", s.authenticate(http.HandlerFunc(s.handleSystem)))
 	return securityHeaders(mux)
+}
+
+func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	metrics, err := s.controller.System(r.Context())
+	if err != nil {
+		if metrics.Message == "" {
+			metrics.Message = "Не удалось получить метрики Windows."
+		}
+		writeSystem(w, http.StatusServiceUnavailable, metrics)
+		return
+	}
+	writeSystem(w, http.StatusOK, metrics)
 }
 
 func (s *Server) handleScript(w http.ResponseWriter, r *http.Request) {
@@ -126,8 +144,9 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	request.ProcessName = strings.TrimSpace(request.ProcessName)
 	request.MinerName = strings.TrimSpace(request.MinerName)
 	request.ArchiveURL = strings.TrimSpace(request.ArchiveURL)
-	if len(request.ScriptPath) == 0 || len(request.ScriptPath) > 1024 || !validProcessName(request.ProcessName) || len(request.MinerName) > 80 || len(request.ArchiveURL) == 0 || len(request.ArchiveURL) > 2048 {
-		writeUpdate(w, http.StatusBadRequest, mining.UpdateResult{Message: "Проверьте путь скрипта, имя процесса и ссылку на ZIP-архив."})
+	request.ArchiveSHA256 = strings.ToLower(strings.TrimSpace(request.ArchiveSHA256))
+	if len(request.ScriptPath) == 0 || len(request.ScriptPath) > 1024 || !validProcessName(request.ProcessName) || len(request.MinerName) > 80 || len(request.ArchiveURL) == 0 || len(request.ArchiveURL) > 2048 || !validSHA256(request.ArchiveSHA256) {
+		writeUpdate(w, http.StatusBadRequest, mining.UpdateResult{Message: "Проверьте путь скрипта, имя процесса, ссылку на ZIP-архив и SHA-256."})
 		return
 	}
 	result, err := s.controller.Update(r.Context(), request)
@@ -185,6 +204,18 @@ func validProcessName(name string) bool {
 	return processNamePattern.MatchString(name) && !strings.ContainsAny(name, `/\`)
 }
 
+func validSHA256(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, char := range value {
+		if !(char >= '0' && char <= '9' || char >= 'a' && char <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 func stateWithError(state mining.State, err error) mining.State {
 	if state.Message == "" {
 		state.Message = err.Error()
@@ -211,6 +242,13 @@ func writeUpdate(w http.ResponseWriter, status int, result mining.UpdateResult) 
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(result)
+}
+
+func writeSystem(w http.ResponseWriter, status int, metrics mining.SystemMetrics) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(metrics)
 }
 
 func updateWithError(result mining.UpdateResult, err error) mining.UpdateResult {

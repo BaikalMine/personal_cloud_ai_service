@@ -49,8 +49,15 @@
         <input type="hidden" name="csrf" value="{{.CSRF}}">
         <input type="hidden" name="action" value="update_access">
         <label class="service-toggle"><input name="can_use_quick_generation" type="checkbox" {{if .Profile.CanUseQuickGeneration}}checked{{end}}><span><b>Быстрая генерация</b><small>{{if .Profile.CanUseQuickGeneration}}Разрешена без доступа к ComfyUI{{else}}Доступ закрыт{{end}}</small></span></label>
+        <fieldset class="service-access"><legend>Типы быстрой генерации</legend>
+          <label class="service-toggle"><input name="can_generate_text_to_image" type="checkbox" {{if .Profile.CanGenerateTextToImage}}checked{{end}}><span><b>Текст в изображение</b><small>Создание изображения только по текстовому описанию.</small></span></label>
+          <label class="service-toggle"><input name="can_generate_image_to_image" type="checkbox" {{if .Profile.CanGenerateImageToImage}}checked{{end}}><span><b>Фото и промт</b><small>Редактирование и перенос внешности по загруженному фото.</small></span></label>
+          <label class="service-toggle"><input name="can_generate_video" type="checkbox" {{if .Profile.CanGenerateVideo}}checked{{end}}><span><b>Видео</b><small>Сценарий MiniMax H3 с первым кадром и опциональными референсами.</small></span></label>
+        </fieldset>
         <label class="service-toggle"><input name="can_use_comfyui" type="checkbox" {{if .Profile.CanUseComfyUI}}checked{{end}}><span><b>ComfyUI</b><small>{{if .Profile.CanUseComfyUI}}Доступ разрешён{{else}}Доступ закрыт{{end}}</small></span></label>
         <label class="service-toggle"><input name="can_use_openwebui" type="checkbox" {{if .Profile.CanUseOpenWebUI}}checked{{end}}><span><b>OpenWebUI</b><small>{{if .Profile.CanUseOpenWebUI}}Доступ разрешён{{else}}Доступ закрыт{{end}}</small></span></label>
+		<label class="service-toggle"><input name="can_manage_mining" type="checkbox" {{if .Profile.CanManageMining}}checked{{end}}><span><b>Доверенный доступ к майнингу</b><small>{{if .Profile.CanManageMining}}Видит состояние и может запускать или останавливать майнинг{{else}}Майнинг полностью скрыт{{end}}</small></span></label>
+		<label class="service-toggle"><input name="pause_mining_for_quick_generation" type="checkbox" {{if .Profile.PauseMiningForQuickGeneration}}checked{{end}}><span><b>Пул приоритетной генерации</b><small>На время быстрой генерации приостанавливает майнинг и запускает его после завершения.</small></span></label>
         <div class="invite-fields"><label>Суточный лимит быстрых генераций<input name="generation_daily_limit" type="number" min="0" max="100000" value="{{.Profile.GenerationDailyLimit}}"><small class="field-hint">0 = без лимита</small></label><label>Общий лимит быстрых генераций<input name="generation_total_limit" type="number" min="0" max="10000000" value="{{.Profile.GenerationTotalLimit}}"><small class="field-hint">0 = без лимита · использовано: {{.Profile.GenerationTotalUsed}}</small></label></div>
         <button type="submit">Сохранить права</button>
       </form>
@@ -94,7 +101,7 @@
     <section class="panel span-two">
       <div class="panel-heading"><div><p class="section-kicker">Распределение</p><h2>Использование сервисов</h2></div></div>
       <table><thead><tr><th>Сервис</th><th>Запросы</th><th>Передано</th><th>Ошибки</th></tr></thead><tbody>
-      {{range .Stats.ByService}}<tr><td><a class="service-link" href="/admin/services/{{.Service}}"><i class="service-icon {{.Service}}"></i>{{.Service}}</a></td><td class="numeric">{{formatNumber .Requests}}</td><td>{{formatBytes .Bytes}}</td><td><span class="error-count {{if gt .Errors 0}}has-errors{{end}}">{{formatNumber .Errors}}</span></td></tr>{{else}}<tr><td colspan="4" class="muted">Сервисами ещё не пользовались.</td></tr>{{end}}
+      {{range .Stats.ByService}}<tr><td data-label="Сервис"><a class="service-link" href="/admin/services/{{.Service}}"><i class="service-icon {{.Service}}"></i>{{.Service}}</a></td><td data-label="Запросы" class="numeric">{{formatNumber .Requests}}</td><td data-label="Передано">{{formatBytes .Bytes}}</td><td data-label="Ошибки"><span class="error-count {{if gt .Errors 0}}has-errors{{end}}">{{formatNumber .Errors}}</span></td></tr>{{else}}<tr><td colspan="4" class="muted">Сервисами ещё не пользовались.</td></tr>{{end}}
       </tbody></table>
     </section>
 

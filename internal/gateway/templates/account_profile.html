@@ -1,0 +1,24 @@
+{{define "account_profile"}}
+{{template "head" .}}
+{{template "nav" .}}
+<main class="page" id="main-content">
+  <section class="hero"><div><p class="eyebrow">Аккаунт</p><h1>Профиль</h1></div></section>
+  <section class="panel narrow form-panel">
+    <div class="panel-heading"><div><p class="section-kicker">Данные для входа</p><h2>Контактные данные</h2><p class="panel-intro">E-mail можно использовать вместо логина при входе в AI Gateway.</p></div></div>
+    {{if .Error}}<p class="alert">{{.Error}}</p>{{end}}
+    {{if .Success}}<p class="success-box">{{.Success}}</p>{{end}}
+    <form method="post">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      {{if .CanChangeUsername}}
+      <label>Логин<input name="username" value="{{.ProfileUsername}}" autocomplete="username" required minlength="3" maxlength="48" pattern="[A-Za-z0-9._-]+"></label>
+      {{else}}
+      <label>Логин<input value="{{.ProfileUsername}}" readonly aria-readonly="true"></label>
+      {{end}}
+      <label>E-mail<input name="email" type="email" value="{{.ProfileEmail}}" autocomplete="email" maxlength="254" placeholder="name@example.com"></label>
+      <p class="field-hint">E-mail необязателен. Оставьте поле пустым, чтобы удалить адрес из профиля.</p>
+      <button type="submit">Сохранить профиль</button>
+    </form>
+  </section>
+</main>
+</body></html>
+{{end}}

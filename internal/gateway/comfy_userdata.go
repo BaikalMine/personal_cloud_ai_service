@@ -18,9 +18,10 @@ import (
 )
 
 const (
-	maxComfyUserDataFile  = 32 << 20
-	maxComfyUserDataQuota = 256 << 20
-	maxComfySettingsBody  = 2 << 20
+	maxComfyUserDataFile      = 32 << 20
+	maxComfyUserDataQuota     = 256 << 20
+	maxComfySettingsBody      = 2 << 20
+	comfyUserDataCipherPrefix = "aigud1:"
 )
 
 func (a *App) handleComfyUserState(w http.ResponseWriter, r *http.Request, user *User) bool {
@@ -222,6 +223,13 @@ func (a *App) handleComfyUserDataFile(w http.ResponseWriter, r *http.Request, us
 			http.Error(w, "не удалось загрузить файл", http.StatusInternalServerError)
 			return
 		}
+		if strings.HasPrefix(string(payload), comfyUserDataCipherPrefix) {
+			payload, err = a.contentCipher.DecryptBytes(payload[len(comfyUserDataCipherPrefix):])
+			if err != nil {
+				http.Error(w, "не удалось расшифровать файл ComfyUI", http.StatusInternalServerError)
+				return
+			}
+		}
 		contentType := mime.TypeByExtension(path.Ext(source))
 		if contentType == "" || strings.Contains(contentType, "html") || strings.Contains(contentType, "svg") {
 			contentType = "application/octet-stream"
@@ -241,6 +249,12 @@ func (a *App) handleComfyUserDataFile(w http.ResponseWriter, r *http.Request, us
 			http.Error(w, "файл ComfyUI слишком велик", http.StatusRequestEntityTooLarge)
 			return
 		}
+		encrypted, err := a.contentCipher.EncryptBytes(payload)
+		if err != nil {
+			http.Error(w, "не удалось защитить файл ComfyUI", http.StatusInternalServerError)
+			return
+		}
+		payload = append([]byte(comfyUserDataCipherPrefix), encrypted...)
 		overwrite := !strings.EqualFold(r.URL.Query().Get("overwrite"), "false")
 		entry, err := a.store.PutComfyUserData(r.Context(), userID, source, payload, overwrite, maxComfyUserDataQuota)
 		if errors.Is(err, store.ErrComfyDataExists) {

@@ -140,6 +140,11 @@ if ($composeText -notmatch '(?m)^\s*image:\s*\$\{OPENWEBUI_IMAGE\}') {
 Set-EnvValue $openWebUIEnvFile 'OPENWEBUI_IMAGE' $currentOpenWebUIImage
 
 $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+$serviceAccount = if ($existingTask -and -not [string]::IsNullOrWhiteSpace($existingTask.Principal.UserId)) {
+    $existingTask.Principal.UserId
+} else {
+    $identity.Name
+}
 if ($existingTask) {
     Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
@@ -198,13 +203,13 @@ $config = [ordered]@{
 }
 [IO.File]::WriteAllText($configPath, (Convert-ToJsonSafe $config), [Text.UTF8Encoding]::new($false))
 
-$aclGrants = @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F', "$($identity.Name):(OI)(CI)F")
+$aclGrants = @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F', "$serviceAccount:(OI)(CI)F")
 & icacls.exe $InstallDirectory /inheritance:r /grant:r $aclGrants | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Failed to apply the update agent directory ACL.' }
 
 $action = New-ScheduledTaskAction -Execute $targetExecutable -Argument "-config `"$configPath`"" -WorkingDirectory $InstallDirectory
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity.Name
-$taskPrincipal = New-ScheduledTaskPrincipal -UserId $identity.Name -LogonType Interactive -RunLevel Highest
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $serviceAccount
+$taskPrincipal = New-ScheduledTaskPrincipal -UserId $serviceAccount -LogonType Interactive -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $taskPrincipal -Settings $settings -Description 'Windows host agent for AI Access Gateway updates and visible ComfyUI restarts.' | Out-Null
 

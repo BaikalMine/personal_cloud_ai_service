@@ -103,3 +103,22 @@ type AdminStats struct {
 	UsageByService   []ServiceUsage
 	Trend            []ChartPoint
 }
+
+type OnlineUser struct {
+	Username   string    `json:"username"`
+	Role       string    `json:"role"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+	IP         string    `json:"-"`
+}
+
+type HostMetric struct {
+	RecordedAt          time.Time `json:"recorded_at"`
+	CPUPercent          float64   `json:"cpu_percent"`
+	MemoryUsedBytes     int64     `json:"memory_used_bytes"`
+	MemoryTotalBytes    int64     `json:"memory_total_bytes"`
+	GPUAvailable        bool      `json:"gpu_available"`
+	GPUName             string    `json:"gpu_name,omitempty"`
+	GPUPercent          float64   `json:"gpu_percent"`
+	GPUMemoryUsedBytes  int64     `json:"gpu_memory_used_bytes"`
+	GPUMemoryTotalBytes int64     `json:"gpu_memory_total_bytes"`
+}

@@ -7,7 +7,7 @@
       <p class="eyebrow">Рабочее пространство</p>
       <h1>Здравствуйте, {{.CurrentUser.Username}}</h1>
     </div>
-    <div class="hero-actions"><a class="button ghost" href="/account/sessions">Мои сессии</a><a class="button ghost" href="/account/password">Безопасность</a></div>
+    <div class="hero-actions"><a class="button ghost" href="/account/profile">Профиль</a><a class="button ghost" href="/account/sessions">Мои сессии</a><a class="button ghost" href="/account/password">Безопасность</a></div>
   </section>
 
   <section class="grid two service-grid" aria-label="Доступные сервисы">
@@ -28,12 +28,12 @@
     <a class="button" href="/generate">Начать генерацию</a>
   </section>{{end}}
 
-  <section class="panel mining-control {{if .Mining.Running}}is-running{{end}}" aria-labelledby="mining-title">
+  {{if .CanAccessMining}}<section class="panel mining-control {{if .Mining.Running}}is-running{{end}}" aria-labelledby="mining-title">
     <div class="panel-heading mining-heading">
       <div><p class="section-kicker">Вычислительные ресурсы</p><h2 id="mining-title">Майнинг</h2></div>
       <span class="mining-status {{if .Mining.Running}}running{{else if .Mining.Available}}stopped{{else}}unavailable{{end}}"><i></i>{{if .Mining.Running}}Работает{{else if .Mining.Available}}Остановлен{{else}}Недоступен{{end}}</span>
     </div>
-    {{if eq .MiningStatus "started"}}<p class="success-box">Майнинг запущен.</p>{{else if eq .MiningStatus "stopped"}}<p class="success-box">Майнинг остановлен, ресурсы освобождены.</p>{{else if eq .MiningStatus "error"}}<p class="alert">Не удалось изменить состояние майнинга.</p>{{else if eq .MiningStatus "unavailable"}}<p class="alert">Windows-agent управления майнингом недоступен.</p>{{end}}
+    {{if eq .MiningStatus "started"}}<p class="success-box">Майнинг запущен.</p>{{else if eq .MiningStatus "stopped"}}<p class="success-box">Майнинг остановлен, ресурсы освобождены.</p>{{else if eq .MiningStatus "priority_busy"}}<p class="alert">Майнинг временно зарезервирован для приоритетной быстрой генерации. Он будет доступен после её завершения.</p>{{else if eq .MiningStatus "error"}}<p class="alert">Не удалось изменить состояние майнинга.</p>{{else if eq .MiningStatus "unavailable"}}<p class="alert">Windows-agent управления майнингом недоступен.</p>{{end}}
     <div class="mining-control-body">
       <div class="miner-identity">
         {{if .Mining.Active}}
@@ -65,7 +65,7 @@
         {{else}}<p class="muted">{{if .Mining.Script.Message}}{{.Mining.Script.Message}}{{else}}Содержимое скрипта недоступно.{{end}}</p>{{end}}
       </details>
     </div>
-  </section>
+  </section>{{end}}
 
   <section class="metric-grid metrics-four user-metrics" aria-label="Статистика аккаунта">
     <article class="metric-card tone-green"><span>Запросы сегодня</span><strong>{{formatNumber .Stats.TodayRequests}}</strong><small>с начала суток</small></article>

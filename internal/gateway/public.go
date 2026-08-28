@@ -15,12 +15,19 @@ func (a *App) handleApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	activities = prepareUserActivities(activities, 12)
+	canAccessMining := user.CanAccessMining()
+	mining := MiningOverview{}
+	if canAccessMining {
+		mining = a.miningOverview(r.Context(), false)
+	}
 	a.render(w, r, "app", map[string]any{
-		"Title":        "Главная",
-		"Stats":        stats,
-		"Activities":   activities,
-		"Services":     a.serviceStatuses(r.Context()),
-		"Mining":       a.miningOverview(r.Context(), false),
-		"MiningStatus": r.URL.Query().Get("mining"),
+		"Title":           "Главная",
+		"Stats":           stats,
+		"Activities":      activities,
+		"Services":        a.serviceStatuses(r.Context()),
+		"Mining":          mining,
+		"CanAccessMining": canAccessMining,
+		"MiningStatus":    r.URL.Query().Get("mining"),
+		"PriorityStatus":  r.URL.Query().Get("priority"),
 	})
 }

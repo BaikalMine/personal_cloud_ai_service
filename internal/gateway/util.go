@@ -304,3 +304,10 @@ func pct(v any) int {
 	}
 	return 0
 }
+
+func divFloat(numerator, denominator int64) float64 {
+	if denominator <= 0 {
+		return 0
+	}
+	return float64(numerator) * 100 / float64(denominator)
+}

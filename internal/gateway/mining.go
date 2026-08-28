@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -91,6 +92,10 @@ func (a *App) handleMiningToggle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := a.currentUser(r)
+	if user == nil || !user.CanAccessMining() {
+		http.Error(w, "доступ к майнингу не разрешён", http.StatusForbidden)
+		return
+	}
 	overview := a.miningOverview(r.Context(), true)
 	if !overview.Available {
 		http.Redirect(w, r, "/app?mining=unavailable", http.StatusSeeOther)
@@ -105,6 +110,10 @@ func (a *App) handleMiningToggle(w http.ResponseWriter, r *http.Request) {
 		action = "mining_stopped"
 		state, err = a.mining.Stop(r.Context(), mining.Request{ScriptPath: target.ScriptPath, ProcessName: target.ProcessName})
 	} else if overview.Default != nil {
+		if _, leaseErr := a.store.ActiveQuickGenerationMiningLease(r.Context()); leaseErr == nil {
+			http.Redirect(w, r, "/app?mining=priority_busy", http.StatusSeeOther)
+			return
+		}
 		target = overview.Default
 		action = "mining_started"
 		state, err = a.mining.Start(r.Context(), mining.Request{ScriptPath: target.ScriptPath, ProcessName: target.ProcessName})
@@ -160,8 +169,13 @@ func (a *App) handleAdminMining(w http.ResponseWriter, r *http.Request) {
 	switch action {
 	case "update":
 		archiveURL := strings.TrimSpace(r.FormValue("archive_url"))
+		archiveSHA256 := strings.ToLower(strings.TrimSpace(r.FormValue("archive_sha256")))
 		if len(archiveURL) == 0 || len(archiveURL) > 2048 {
 			err = errors.New("укажите HTTPS-ссылку на ZIP-архив обновления")
+			break
+		}
+		if !validArchiveSHA256(archiveSHA256) {
+			err = errors.New("укажите SHA-256 ZIP-архива: 64 шестнадцатеричных символа")
 			break
 		}
 		if a.mining == nil || !a.mining.Configured() {
@@ -169,7 +183,7 @@ func (a *App) handleAdminMining(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		updateResult, updateErr := a.mining.Update(r.Context(), mining.UpdateRequest{
-			ScriptPath: miner.ScriptPath, ProcessName: miner.ProcessName, MinerName: miner.Name, ArchiveURL: archiveURL,
+			ScriptPath: miner.ScriptPath, ProcessName: miner.ProcessName, MinerName: miner.Name, ArchiveURL: archiveURL, ArchiveSHA256: archiveSHA256,
 		})
 		err = updateErr
 		if err != nil && updateResult.Message != "" {
@@ -177,11 +191,15 @@ func (a *App) handleAdminMining(w http.ResponseWriter, r *http.Request) {
 		}
 		if err == nil {
 			a.audit(r.Context(), &user.ID, "miner_updated", "miner", &id, a.clientIP(r), r.UserAgent(), map[string]any{
-				"name": miner.Name, "process_name": miner.ProcessName, "archive_url": archiveURL,
+				"name": miner.Name, "process_name": miner.ProcessName, "archive_url": archiveURL, "archive_sha256": archiveSHA256,
 			})
 			status = "miner-updated"
 		}
 	case "start":
+		if _, leaseErr := a.store.ActiveQuickGenerationMiningLease(r.Context()); leaseErr == nil {
+			a.renderAdminMining(w, r, "Майнинг зарезервирован для приоритетной быстрой генерации. Дождитесь её завершения.", "")
+			return
+		}
 		overview := a.miningOverview(r.Context(), true)
 		if !overview.Available {
 			a.renderAdminMining(w, r, overview.Message, "")
@@ -229,6 +247,14 @@ func (a *App) handleAdminMining(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin/mining?status="+status, http.StatusSeeOther)
 }
 
+func validArchiveSHA256(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
 func (a *App) handleCreateMiner(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(maxMiningFormBytes); err != nil {
 		a.renderAdminMining(w, r, "Форма слишком большая или повреждена.", "")
@@ -271,6 +297,11 @@ func (a *App) handleMinerIcon(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", http.MethodGet)
 		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
+	user := a.currentUser(r)
+	if user == nil || !user.CanAccessMining() {
+		http.Error(w, "доступ к майнингу не разрешён", http.StatusForbidden)
 		return
 	}
 	id, err := strconv.ParseInt(strings.TrimPrefix(r.URL.Path, "/mining/icon/"), 10, 64)

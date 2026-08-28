@@ -79,7 +79,7 @@ func TestClientUsesLongRunningMinerUpdateEndpoint(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatal(err)
 		}
-		if request.ArchiveURL != "https://example.com/miner.zip" || request.MinerName != "Example miner" {
+		if request.ArchiveURL != "https://example.com/miner.zip" || request.MinerName != "Example miner" || request.ArchiveSHA256 != "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" {
 			t.Fatalf("unexpected update request: %+v", request)
 		}
 		_ = json.NewEncoder(w).Encode(UpdateResult{Success: true, PreservedScripts: 3, Message: "ok"})
@@ -88,7 +88,7 @@ func TestClientUsesLongRunningMinerUpdateEndpoint(t *testing.T) {
 	baseURL, _ := url.Parse(server.URL)
 	client := NewClient(baseURL, "test-token")
 	result, err := client.Update(context.Background(), UpdateRequest{
-		ScriptPath: `testdata/mining/start.bat`, ProcessName: "miner.exe", MinerName: "Example miner", ArchiveURL: "https://example.com/miner.zip",
+		ScriptPath: `testdata/mining/start.bat`, ProcessName: "miner.exe", MinerName: "Example miner", ArchiveURL: "https://example.com/miner.zip", ArchiveSHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 	})
 	if err != nil || !result.Success || result.PreservedScripts != 3 {
 		t.Fatalf("result=%+v err=%v", result, err)

@@ -70,3 +70,45 @@ func TestMigrationChecksumIncludesDefinition(t *testing.T) {
 		t.Fatal("checksum must not expose migration SQL")
 	}
 }
+
+func TestQuickGenerationMiningPoolMigration(t *testing.T) {
+	var poolMigration *migration
+	for index := range migrationCatalog {
+		if migrationCatalog[index].version == 16 {
+			poolMigration = &migrationCatalog[index]
+			break
+		}
+	}
+	if poolMigration == nil {
+		t.Fatal("quick generation mining pool migration is missing")
+	}
+	if poolMigration.name != "quick_generation_mining_pool" {
+		t.Fatalf("migration name = %q", poolMigration.name)
+	}
+	sql := strings.Join(poolMigration.statements, "\n")
+	for _, expected := range []string{
+		"pause_mining_for_quick_generation",
+		"quick_generation_mining_leases",
+		"prompt_id TEXT NULL UNIQUE",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("pool migration does not contain %q", expected)
+		}
+	}
+}
+
+func TestPromptAssistantContentAuditMigration(t *testing.T) {
+	var auditMigration *migration
+	for index := range migrationCatalog {
+		if migrationCatalog[index].version == 17 {
+			auditMigration = &migrationCatalog[index]
+			break
+		}
+	}
+	if auditMigration == nil || auditMigration.name != "prompt_assistant_content_audit" {
+		t.Fatal("prompt assistant audit migration is missing")
+	}
+	if sql := strings.Join(auditMigration.statements, "\n"); !strings.Contains(sql, "prompt_assistant") {
+		t.Fatalf("prompt assistant audit migration does not allow the event kind: %s", sql)
+	}
+}

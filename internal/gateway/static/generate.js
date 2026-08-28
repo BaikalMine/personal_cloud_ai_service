@@ -25,8 +25,22 @@
   const workflowNext = document.getElementById("workflow-next");
   const imageSourceFields = document.getElementById("image-source-fields");
   const imageSourceGrid = root.querySelector(".source-image-grid");
+  const miniMaxVideoMode = document.getElementById("minimax-video-mode");
+  const miniMaxVideoModeSelect = document.getElementById("minimax-video-mode-select");
+  const miniMaxVideoModeHint = document.getElementById("minimax-video-mode-hint");
   const workflowNote = document.getElementById("generation-workflow-note");
   const positive = document.getElementById("positive-prompt");
+  const promptAssistant = document.getElementById("prompt-assistant");
+  const promptAssistantEnabled = document.getElementById("prompt-assistant-enabled");
+  const promptAssistantControls = document.getElementById("prompt-assistant-controls");
+  const promptAssistantTemplate = document.getElementById("prompt-assistant-template");
+  const promptAssistantThink = document.getElementById("prompt-assistant-think");
+  const promptAssistantImprove = document.getElementById("prompt-assistant-improve");
+  const promptAssistantState = document.getElementById("prompt-assistant-state");
+  const promptAssistantReview = document.getElementById("prompt-assistant-review");
+  const promptAssistantDraft = document.getElementById("prompt-assistant-draft");
+  const promptAssistantApply = document.getElementById("prompt-assistant-apply");
+  const promptAssistantKeep = document.getElementById("prompt-assistant-keep");
   const model = document.getElementById("generation-model");
   const steps = document.getElementById("generation-steps");
   const cfg = document.getElementById("generation-cfg");
@@ -60,6 +74,9 @@
   const generationQueueTitle = document.getElementById("generation-queue-title");
   const generationQueueDetails = document.getElementById("generation-queue-details");
   const outputGrid = document.getElementById("generation-output-grid");
+  const resultActions = document.getElementById("generation-result-actions");
+  const retryGeneration = document.getElementById("generation-retry");
+  const cancelGeneration = document.getElementById("generation-cancel");
   const editorProfile = document.getElementById("generation-editor-profile");
   const editorProfileTitle = document.getElementById("generation-editor-profile-title");
   const editorProfileDescription = document.getElementById("generation-editor-profile-description");
@@ -80,21 +97,78 @@
   const upscaleFactor = form.elements.upscale_factor;
   const lightbox = document.getElementById("generation-lightbox");
   const lightboxImage = document.getElementById("generation-lightbox-image");
+  const lightboxVideo = document.getElementById("generation-lightbox-video");
   const lightboxName = document.getElementById("generation-lightbox-name");
   const lightboxDownload = document.getElementById("generation-lightbox-download");
+  const fieldHelps = [...root.querySelectorAll(".field-help[data-tooltip]")];
   const panels = [...root.querySelectorAll("[data-step]")];
   const progress = [...root.querySelectorAll("[data-progress]")];
   let currentStep = 1;
   let requiresImage = false;
+  let allowsImages = false;
   let uploadInFlight = false;
   const previewURLs = new Map();
   const uploadedImages = new Map();
   let primaryImageSize = null;
   let progressSocket = null;
   let liveProgressReceived = false;
+  let promptAssistantApproved = false;
+  let promptAssistantOriginal = "";
+  let promptAssistantSuggestion = "";
+  let promptAssistantAction = "";
+  let activeGenerationID = "";
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+  const numericValue = (value, fallback = 0) => {
+    const parsed = Number(String(value).replaceAll(",", "."));
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
   const roundToMultiple = (value, multiple) => Math.max(256, Math.floor(value / multiple) * multiple);
+
+  const setGenerationActions = ({ retry = false, cancel = false } = {}) => {
+    if (!resultActions) return;
+    resultActions.hidden = !retry && !cancel;
+    if (retryGeneration) retryGeneration.hidden = !retry;
+    if (cancelGeneration) cancelGeneration.hidden = !cancel;
+  };
+
+  // Chrome treats a comma in <input type="number"> as an invalid value on
+  // several Russian mobile keyboards. Fractional workflow controls therefore
+  // use text inputs with a decimal keypad; the value is normalized only while
+  // creating the request for ComfyUI.
+  const localizedDecimalInputs = [...form.querySelectorAll('input[type="number"][step]')].filter((field) => {
+    const step = field.getAttribute("step") || "";
+    return step.includes(".") && Number.isFinite(Number(step));
+  });
+  localizedDecimalInputs.forEach((field) => {
+    field.dataset.localizedDecimal = "true";
+    field.type = "text";
+    field.inputMode = "decimal";
+    field.autocomplete = "off";
+
+    const hint = document.createElement("small");
+    hint.className = "localized-decimal-hint";
+    hint.hidden = true;
+    hint.setAttribute("role", "status");
+    field.insertAdjacentElement("afterend", hint);
+    const updateDecimalHint = () => {
+      const value = field.value.trim();
+      const hasComma = value.includes(",");
+      const validNumber = value === "" || /^[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)$/.test(value);
+      const invalid = hasComma || !validNumber;
+      field.classList.toggle("has-localized-decimal-error", invalid);
+      field.setAttribute("aria-invalid", invalid ? "true" : "false");
+      hint.hidden = !invalid;
+      if (hasComma) {
+        hint.textContent = "Используйте точку: например 0.22. Запятая будет исправлена при запуске.";
+      } else if (!validNumber) {
+        hint.textContent = "Введите число, например 0.22.";
+      }
+    };
+    field.addEventListener("input", updateDecimalHint);
+    field.addEventListener("blur", updateDecimalHint);
+    updateDecimalHint();
+  });
 
   const updateOriginalResolution = () => {
     if (!originalResolution) return;
@@ -132,7 +206,7 @@
     const primary = imageSlots[0];
     const file = primary?.input?.files?.[0];
     const previewURL = previewURLs.get(1);
-    const visible = Boolean(requiresImage && file && previewURL);
+    const visible = Boolean((requiresImage || allowsImages) && file && previewURL);
     if (selectedImageSummary) selectedImageSummary.hidden = !visible;
     if (!visible) return;
     if (selectedImagePreview) selectedImagePreview.src = previewURL;
@@ -164,7 +238,7 @@
       return;
     }
     const [ratioWidth, ratioHeight] = aspect.value.split(":").map(Number);
-    const megapixels = clamp(Number(outputMegapixels.value) || 1.9, 0.1, 16);
+    const megapixels = clamp(numericValue(outputMegapixels.value, 1.9), 0.1, 16);
     const multiple = Number(dimensionMultiple.value) || 16;
     const targetPixels = megapixels * 1024 * 1024;
     let nextWidth = roundToMultiple(Math.sqrt(targetPixels * ratioWidth / ratioHeight), multiple);
@@ -301,14 +375,50 @@
     if (!lightbox || lightbox.hidden) return;
     lightbox.hidden = true;
     lightboxImage.removeAttribute("src");
+    if (lightboxVideo) {
+      lightboxVideo.pause();
+      lightboxVideo.removeAttribute("src");
+      lightboxVideo.load();
+    }
     document.body.classList.remove("generation-lightbox-open");
   };
 
+  const closeFieldHelps = (except = null) => {
+    fieldHelps.forEach((help) => {
+      if (help === except) return;
+      help.classList.remove("is-open");
+      help.setAttribute("aria-expanded", "false");
+    });
+  };
+
+  const positionFieldHelp = (help) => {
+    const rect = help.getBoundingClientRect();
+    const tooltipWidth = Math.min(250, Math.max(0, window.innerWidth - 24));
+    const targetCenter = rect.left + rect.width / 2;
+    const boundedCenter = Math.min(window.innerWidth - 12 - tooltipWidth / 2, Math.max(12 + tooltipWidth / 2, targetCenter));
+    help.style.setProperty("--field-help-shift", `${Math.round(boundedCenter - targetCenter)}px`);
+  };
+
+  const downloadURL = (outputURL) => {
+    const url = new URL(outputURL, window.location.origin);
+    url.searchParams.set("download", "1");
+    return url.pathname + url.search;
+  };
+
   const openLightbox = (output) => {
-    if (!lightbox || output.media_type === "video") return;
-    lightboxImage.src = output.url;
+    if (!lightbox) return;
+    const isVideo = output.media_type === "video";
+    lightboxImage.hidden = isVideo;
+    if (lightboxVideo) lightboxVideo.hidden = !isVideo;
+    if (isVideo && lightboxVideo) {
+      lightboxVideo.src = output.url;
+      lightboxVideo.muted = false;
+      lightboxVideo.play().catch(() => {});
+    } else {
+      lightboxImage.src = output.url;
+    }
     lightboxName.textContent = output.filename;
-    lightboxDownload.href = output.url;
+    lightboxDownload.href = downloadURL(output.url);
     lightboxDownload.download = output.filename;
     lightbox.hidden = false;
     document.body.classList.add("generation-lightbox-open");
@@ -316,7 +426,47 @@
   };
 
   lightbox?.querySelectorAll("[data-lightbox-close]").forEach((button) => button.addEventListener("click", closeLightbox));
+  lightboxImage?.addEventListener("click", closeLightbox);
   document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeLightbox(); });
+  fieldHelps.forEach((help) => {
+    help.setAttribute("role", "button");
+    help.setAttribute("aria-expanded", "false");
+    help.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const open = !help.classList.contains("is-open");
+      if (open) positionFieldHelp(help);
+      closeFieldHelps(open ? help : null);
+      help.classList.toggle("is-open", open);
+      help.setAttribute("aria-expanded", String(open));
+    });
+    help.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      help.click();
+    });
+  });
+  document.addEventListener("click", () => closeFieldHelps());
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeFieldHelps(); });
+  window.addEventListener("resize", () => fieldHelps.filter((help) => help.classList.contains("is-open")).forEach(positionFieldHelp));
+
+  const wireVideoPreview = (button, output) => {
+    const video = button?.querySelector("video");
+    if (!video) return;
+    const start = () => {
+      video.muted = true;
+      video.play().catch(() => {});
+    };
+    const stop = () => {
+      video.pause();
+      video.currentTime = 0;
+    };
+    button.addEventListener("pointerenter", start);
+    button.addEventListener("pointerleave", stop);
+    button.addEventListener("focusin", start);
+    button.addEventListener("focusout", stop);
+    button.addEventListener("click", () => openLightbox(output));
+  };
 
   const showStep = (step) => {
     currentStep = step;
@@ -331,7 +481,9 @@
 
   const selectedChoice = () => root.querySelector(".scenario-choice.is-selected");
   const selectedGenerationWorkflow = () => root.querySelector(".generation-workflow-choice.is-selected");
-  const maxInputImages = () => Math.max(1, Number(selectedGenerationWorkflow()?.dataset.maxInputImages || 1));
+  const isMiniMaxSelected = () => selectedGenerationWorkflow()?.dataset.family === "minimax_h3";
+  const maxInputImages = () => Math.max(1, Number(selectedGenerationWorkflow()?.dataset.maxInputImages || (templateID.value === "minimax-h3-video" ? 4 : 1)));
+  const activeMaxInputImages = () => isMiniMaxSelected() && miniMaxVideoModeSelect?.value === "frames" ? Math.min(2, maxInputImages()) : maxInputImages();
 
   const clearImageSlot = (item) => {
     if (!item) return;
@@ -353,7 +505,9 @@
   };
 
   const syncImageSlots = () => {
-    const maximum = requiresImage ? maxInputImages() : 0;
+    const isMiniMax = isMiniMaxSelected() || templateID.value === "minimax-h3-video";
+    const referenceMode = miniMaxVideoModeSelect?.value === "references";
+    const maximum = (requiresImage || allowsImages) ? activeMaxInputImages() : 0;
     const isKrea = selectedGenerationWorkflow()?.dataset.family === "krea2";
     if (imageSourceGrid) imageSourceGrid.dataset.visibleSlots = String(maximum);
     imageSlots.forEach((item) => {
@@ -361,20 +515,30 @@
       item.slot.hidden = !visible;
       if (!visible) clearImageSlot(item);
       if (!item.label) return;
-      if (item.index === 1) item.label.textContent = "Фото 1 · обязательно";
+      if (isMiniMax && referenceMode) item.label.textContent = `Референс ${item.index}${item.index === 1 ? " · обязательно" : " · необязательно"}`;
+      else if (isMiniMax) item.label.textContent = item.index === 1 ? "Первый кадр · обязательно" : "Последний кадр · необязательно";
+      else if (item.index === 1) item.label.textContent = "Фото 1 · обязательно";
       else item.label.textContent = isKrea && item.index === 2 ? "Фото 2 · дополнительное" : `Фото ${item.index} · референс`;
     });
     const note = document.getElementById("image-source-note");
+    if (isMiniMax && note) {
+      note.textContent = referenceMode
+        ? "Добавьте от одного до четырёх фотореференсов. Первый обязательный, остальные появятся по мере добавления."
+        : "Добавьте первый кадр. Второе фото необязательно: оно станет последним кадром ролика.";
+      return;
+    }
     if (note) note.textContent = maximum > 1
       ? `Первое фото обязательно. Можно добавить ещё до ${maximum - 1} ${maximum === 2 ? "референса" : "референсов"}.`
       : "Загрузите исходное фото для редактирования.";
   };
 
   const chooseScenario = (button) => {
+    if (button.disabled) return;
     root.querySelectorAll(".scenario-choice").forEach((item) => item.classList.remove("is-selected"));
     button.classList.add("is-selected");
     templateID.value = button.dataset.workflowId;
     requiresImage = button.dataset.requiresImage === "true";
+    allowsImages = button.dataset.allowsImages === "true";
     generationWorkflowID.value = "";
     root.querySelectorAll(".generation-workflow-choice").forEach((item) => item.classList.remove("is-selected"));
     updateWorkflowCompatibility();
@@ -387,8 +551,9 @@
     const hasWorkflow = Boolean(selected && selected.dataset.available === "true");
     const primary = imageSlots[0];
     const hasImage = Boolean(primary?.input?.files?.[0] || uploadedImages.get(1));
-    workflowNext.disabled = !hasWorkflow || (requiresImage && !hasImage);
-    workflowNext.textContent = requiresImage ? "Загрузить фото и продолжить" : "Продолжить";
+    const needsImage = requiresImage || isMiniMaxSelected();
+    workflowNext.disabled = !hasWorkflow || (needsImage && !hasImage);
+    workflowNext.textContent = needsImage ? "Загрузить фото и продолжить" : "Продолжить";
   };
 
   const updateWorkflowCompatibility = () => {
@@ -398,7 +563,8 @@
       item.hidden = !matches;
       if (matches) visible += 1;
     });
-    if (imageSourceFields) imageSourceFields.hidden = !requiresImage;
+    if (miniMaxVideoMode) miniMaxVideoMode.hidden = templateID.value !== "minimax-h3-video";
+    if (imageSourceFields) imageSourceFields.hidden = !(requiresImage || allowsImages);
     if (workflowNote) workflowNote.hidden = visible > 0;
     syncImageSlots();
     updateWorkflowNext();
@@ -444,6 +610,46 @@
     });
   };
 
+  const setPromptAssistantState = (message, state = "") => {
+    if (!promptAssistantState) return;
+    promptAssistantState.textContent = message;
+    promptAssistantState.dataset.state = state;
+  };
+
+  const resetPromptAssistantReview = () => {
+    promptAssistantApproved = false;
+    promptAssistantOriginal = "";
+    promptAssistantSuggestion = "";
+    promptAssistantAction = "";
+    if (promptAssistantReview) promptAssistantReview.hidden = true;
+    if (promptAssistantDraft) promptAssistantDraft.value = "";
+  };
+
+  const syncPromptAssistant = () => {
+    if (!promptAssistant || !promptAssistantEnabled || !promptAssistantControls || !promptAssistantTemplate) return;
+    const isEdit = templateID.value === "image-to-image";
+    promptAssistant.hidden = !templateID.value;
+    promptAssistantControls.hidden = !promptAssistantEnabled.checked;
+    [...promptAssistantTemplate.options].forEach((option) => {
+      const imageOnly = option.dataset.imageOnly !== undefined;
+      option.hidden = imageOnly && !isEdit;
+      option.disabled = imageOnly && !isEdit;
+    });
+    const selectedAssistantTemplate = promptAssistantTemplate.selectedOptions[0];
+    if (!isEdit && selectedAssistantTemplate?.dataset.imageOnly !== undefined) {
+      promptAssistantTemplate.value = "workflow-default";
+      resetPromptAssistantReview();
+    }
+    if (!promptAssistantEnabled.checked) {
+      resetPromptAssistantReview();
+      setPromptAssistantState("Ассистент выключен. Используется ваш исходный промт.");
+    } else if (!promptAssistantReview?.hidden) {
+      setPromptAssistantState("Проверьте вариант и примените его либо оставьте свой промт.", "review");
+    } else {
+      setPromptAssistantState("Вариант будет создан локальной моделью e4b и затем выгружен из видеопамяти.");
+    }
+  };
+
   const syncWorkflowFields = () => {
     const preset = selectedGenerationWorkflow();
     const family = preset?.dataset.family || model?.selectedOptions?.[0]?.dataset.family || "";
@@ -452,6 +658,8 @@
     const isKreaText = isKrea && !isEdit;
     const isKreaEdit = isKrea && isEdit;
     const isFluxEdit = family === "flux2" && isEdit;
+    const isMiniMax = family === "minimax_h3";
+    syncPromptAssistant();
     if (isFluxEdit && maxSide?.value === "0") maxSide.value = "2160";
     const setFieldState = (selector, visible) => {
       root.querySelectorAll(selector).forEach((field) => {
@@ -463,16 +671,18 @@
     setFieldState(".krea-edit-field", isKreaEdit);
     setFieldState(".flux-edit-field", isFluxEdit);
     root.querySelectorAll(".size-workflow-field").forEach((field) => {
-      field.hidden = Boolean(isEdit && preserveOriginalSize?.checked);
+      field.hidden = Boolean(isMiniMax || (isEdit && preserveOriginalSize?.checked));
     });
     setFieldState(".krea-workflow-field", isKrea);
     setFieldState(".krea-text-workflow-field", isKreaText);
     setFieldState(".flux-edit-settings", isFluxEdit);
     setFieldState(".krea-edit-settings", isKreaEdit);
-    setFieldState(".standard-main-settings", !isEdit);
+    setFieldState(".standard-main-settings", !isEdit && !isMiniMax);
+    setFieldState(".minimax-video-settings", isMiniMax);
+    setFieldState(".minimax-reference-field", isMiniMax && miniMaxVideoModeSelect?.value === "references");
     if (isFluxEdit) syncAdaptiveLoraSlots("flux");
     if (isKreaText) syncAdaptiveLoraSlots("krea");
-    if (qualityField) qualityField.hidden = isEdit;
+    if (qualityField) qualityField.hidden = !isKreaText;
     if (editorProfile) editorProfile.hidden = !isEdit;
     syncSelectedImageSummary();
     if (isFluxEdit) {
@@ -481,17 +691,20 @@
       if (editSourceTitle) editSourceTitle.textContent = "Исходник и референсы Flux2";
       if (editSourceDescription) editSourceDescription.textContent = "Выберите детализацию входных фото. Размер результата меняется только при включённой настройке кадра.";
       if (mainPassTitle) mainPassTitle.textContent = "Параметры Flux2";
-      if (mainPassDescription) mainPassDescription.textContent = "Шаги, guidance, denoise и планировщик оригинального Flux2 workflow.";
+      if (mainPassDescription) mainPassDescription.textContent = "Шаги, сила следования промту, сила перерисовки и планировщик исходной схемы Flux2.";
     } else if (isKreaEdit) {
       if (editorProfileTitle) editorProfileTitle.textContent = "Krea 2: фото и промт";
-      if (editorProfileDescription) editorProfileDescription.textContent = "Основное фото и один дополнительный референс. Krea2 сохраняет идентичность через Identity Edit.";
+      if (editorProfileDescription) editorProfileDescription.textContent = "Основное фото и один дополнительный референс. Krea2 сохраняет внешность по исходному фото.";
       if (editSourceTitle) editSourceTitle.textContent = "Привязка Krea2 к исходнику";
       if (editSourceDescription) editSourceDescription.textContent = "Сила сохранения исходника и анализ фото управляют тем, насколько строго Krea2 держится за оригинал.";
-      if (mainPassTitle) mainPassTitle.textContent = "Параметры Krea2 Identity Edit";
+      if (mainPassTitle) mainPassTitle.textContent = "Параметры Krea2: сохранение внешности";
       if (mainPassDescription) mainPassDescription.textContent = "Параметры редактирования до отдельного качественного апскейла Krea2.";
+    } else if (isMiniMax) {
+      if (mainPassTitle) mainPassTitle.textContent = "MiniMax H3";
+      if (mainPassDescription) mainPassDescription.textContent = "Стабильный граф видео с оригинальными MiniMax VAE, звуком и браузерным H.264-выходом.";
     } else {
       if (mainPassTitle) mainPassTitle.textContent = "Основной проход";
-      if (mainPassDescription) mainPassDescription.textContent = "Параметры основного семплирования выбранного workflow.";
+      if (mainPassDescription) mainPassDescription.textContent = "Параметры основного семплирования выбранной схемы генерации.";
     }
   };
 
@@ -508,20 +721,20 @@
     if (sampler && option.dataset.defaultSampler) sampler.value = option.dataset.defaultSampler;
     if (scheduler && option.dataset.defaultScheduler) scheduler.value = option.dataset.defaultScheduler;
     if (isKrea && !isEdit) {
-      baseMegapixels.value = mode === "fast" ? "0.75" : mode === "maximum" ? "1.5" : "1";
-      outputMegapixels.value = mode === "fast" ? "1" : mode === "maximum" ? "4" : "1.9";
-      upscaleSteps.value = mode === "fast" ? "3" : mode === "maximum" ? "8" : "5";
-      detailSteps.value = mode === "fast" ? "1" : mode === "maximum" ? "3" : "2";
-      detailDenoise.value = mode === "fast" ? "0.02" : mode === "maximum" ? "0.035" : "0.03";
-      if (isEdit) {
-        if (steps) steps.value = mode === "fast" ? "6" : mode === "maximum" ? "12" : "8";
-        if (upscaleSteps) upscaleSteps.value = mode === "fast" ? "3" : mode === "maximum" ? "6" : "4";
-        if (upscaleDenoise) upscaleDenoise.value = mode === "fast" ? "0.12" : mode === "maximum" ? "0.18" : "0.15";
-        if (referenceBoost) referenceBoost.value = "4";
-        if (groundingPixels) groundingPixels.value = mode === "maximum" ? "1024" : "768";
-        if (upscaleFactor) upscaleFactor.value = mode === "fast" ? "1.2" : "1.5";
-        if (maxSide) maxSide.value = mode === "maximum" ? "3072" : "2048";
-      }
+      const kreaProfiles = {
+        fast: { base: "0.75", output: "1", upscaleSteps: "3", detailSteps: "1", detailDenoise: "0.02" },
+        balanced: { base: "1", output: "1.9", upscaleSteps: "5", detailSteps: "2", detailDenoise: "0.03" },
+        "krea-2-5": { base: "1.1", output: "2.5", upscaleSteps: "6", detailSteps: "2", detailDenoise: "0.03" },
+        "krea-3-2": { base: "1.25", output: "3.2", upscaleSteps: "6", detailSteps: "3", detailDenoise: "0.032" },
+        maximum: { base: "1.5", output: "4", upscaleSteps: "8", detailSteps: "3", detailDenoise: "0.035" },
+        "krea-4-7": { base: "1.75", output: "4.7", upscaleSteps: "8", detailSteps: "3", detailDenoise: "0.035" },
+      };
+      const profile = kreaProfiles[mode] || kreaProfiles.balanced;
+      baseMegapixels.value = profile.base;
+      outputMegapixels.value = profile.output;
+      upscaleSteps.value = profile.upscaleSteps;
+      detailSteps.value = profile.detailSteps;
+      detailDenoise.value = profile.detailDenoise;
     }
     if (isFluxEdit) {
       if (steps) steps.value = mode === "fast" ? "16" : mode === "maximum" ? "32" : "25";
@@ -570,6 +783,88 @@
     });
   });
 
+  promptAssistantEnabled?.addEventListener("change", syncPromptAssistant);
+  promptAssistantTemplate?.addEventListener("change", () => {
+    resetPromptAssistantReview();
+    syncPromptAssistant();
+  });
+  promptAssistantThink?.addEventListener("change", () => {
+    resetPromptAssistantReview();
+    syncPromptAssistant();
+  });
+  positive?.addEventListener("input", () => {
+    if (promptAssistantEnabled?.checked && !promptAssistantReview?.hidden) {
+      promptAssistantApproved = false;
+      setPromptAssistantState("Исходный промт изменён. Подготовьте новый вариант или оставьте свой промт.", "review");
+    }
+	if (promptAssistantAction === "applied") promptAssistantAction = "applied_edited";
+  });
+
+  promptAssistantImprove?.addEventListener("click", async () => {
+    const original = positive?.value.trim() || "";
+	promptAssistantOriginal = original;
+	promptAssistantSuggestion = "";
+	promptAssistantAction = "";
+    const mode = templateID.value;
+    if (!original || (mode !== "text-to-image" && mode !== "image-to-image" && mode !== "minimax-h3-video")) {
+      setPromptAssistantState("Сначала выберите схему генерации и введите позитивный промт.", "error");
+      positive?.focus();
+      return;
+    }
+    promptAssistantImprove.disabled = true;
+    promptAssistantImprove.classList.add("is-loading");
+    resetPromptAssistantReview();
+    setPromptAssistantState(promptAssistantThink?.checked ? "Локальная модель e4b обдумывает и дорабатывает промт..." : "Локальная модель e4b дорабатывает промт...", "loading");
+    try {
+      const body = new URLSearchParams({
+        csrf: form.elements.csrf?.value || "",
+        prompt: original,
+        template_id: mode,
+        assistant_template: promptAssistantTemplate?.value || "workflow-default",
+        assistant_think: promptAssistantThink?.checked ? "true" : "false",
+      });
+      const response = await fetch("/generate/prompt-assistant", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+        body,
+        credentials: "same-origin",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.prompt) throw new Error(payload.error || "Не удалось подготовить вариант");
+      promptAssistantDraft.value = payload.prompt;
+	  promptAssistantSuggestion = payload.prompt;
+      promptAssistantReview.hidden = false;
+      setPromptAssistantState(`Вариант подготовлен моделью ${payload.model || "e4b"}. Подтвердите или отредактируйте его.`, "review");
+      promptAssistantDraft.focus({ preventScroll: true });
+    } catch (error) {
+      setPromptAssistantState(error.message || "Не удалось подготовить вариант", "error");
+    } finally {
+      promptAssistantImprove.disabled = false;
+      promptAssistantImprove.classList.remove("is-loading");
+    }
+  });
+
+  promptAssistantApply?.addEventListener("click", () => {
+    const suggestion = promptAssistantDraft?.value.trim() || "";
+    if (!suggestion) {
+      setPromptAssistantState("Вариант ассистента пуст. Отредактируйте его или оставьте свой промт.", "error");
+      return;
+    }
+    positive.value = suggestion;
+    promptAssistantApproved = true;
+	promptAssistantAction = "applied";
+    promptAssistantReview.hidden = true;
+    setPromptAssistantState("Вариант применён. Его можно дополнительно отредактировать перед генерацией.", "approved");
+    positive.focus({ preventScroll: true });
+  });
+
+  promptAssistantKeep?.addEventListener("click", () => {
+    promptAssistantApproved = true;
+	promptAssistantAction = "kept_original";
+    promptAssistantReview.hidden = true;
+    setPromptAssistantState("Оставлен ваш исходный промт. Генерацию можно запускать.", "approved");
+  });
+
   root.querySelectorAll(".scenario-choice").forEach((button) => {
     button.addEventListener("click", () => chooseScenario(button));
   });
@@ -579,6 +874,14 @@
 
   root.querySelectorAll(".generation-back").forEach((button) => {
     button.addEventListener("click", () => showStep(Math.max(1, currentStep - 1)));
+  });
+  miniMaxVideoModeSelect?.addEventListener("change", () => {
+    if (miniMaxVideoModeHint) miniMaxVideoModeHint.textContent = miniMaxVideoModeSelect.value === "references"
+      ? "Первое фото обязательно. Можно добавить ещё до трёх референсов: лица, стиль, предметы или окружение."
+      : "Первый кадр обязателен. Второе фото можно добавить как последний кадр ролика.";
+    syncImageSlots();
+    updateWorkflowNext();
+    syncWorkflowFields();
   });
 
   imageSlots.forEach((item) => {
@@ -623,13 +926,14 @@
 
   workflowNext?.addEventListener("click", async () => {
     if (!generationWorkflowID.value) return;
-    if (!requiresImage) {
+    const requiresPrimary = requiresImage || isMiniMaxSelected();
+    const selectedSlots = imageSlots.filter((item) => item.index <= activeMaxInputImages() && item.input?.files?.[0]);
+    if (!selectedSlots.length && !requiresPrimary) {
       showStep(3);
       positive?.focus({ preventScroll: true });
       return;
     }
-    const selectedSlots = imageSlots.filter((item) => item.index <= maxInputImages() && item.input?.files?.[0]);
-    if (!selectedSlots.some((item) => item.index === 1) || uploadInFlight) return;
+    if ((requiresPrimary && !selectedSlots.some((item) => item.index === 1)) || uploadInFlight) return;
     uploadInFlight = true;
     workflowNext.disabled = true;
     workflowNext.classList.add("is-loading");
@@ -668,16 +972,29 @@
     outputs.forEach((output) => {
       const media = output.media_type === "video" ? document.createElement("video") : document.createElement("img");
       media.src = output.url;
-      media.controls = output.media_type === "video";
+      media.controls = false;
+      media.muted = output.media_type === "video";
+      media.loop = output.media_type === "video";
+      media.playsInline = output.media_type === "video";
+      media.preload = output.media_type === "video" ? "metadata" : "auto";
       media.loading = "lazy";
       media.alt = output.filename;
       const card = document.createElement("figure");
       card.className = "generation-output";
-      const previewLink = document.createElement(output.media_type === "video" ? "div" : "button");
+      const previewLink = document.createElement("button");
       previewLink.className = "generation-output-preview";
-      if (output.media_type !== "video") {
-        previewLink.type = "button";
-        previewLink.title = "Открыть на весь экран";
+      previewLink.type = "button";
+      previewLink.title = output.media_type === "video" ? "Открыть видеоплеер" : "Открыть на весь экран";
+      if (output.media_type === "video") {
+        previewLink.classList.add("generation-video-preview");
+        const play = document.createElement("span");
+        play.className = "generation-video-play";
+        play.setAttribute("aria-hidden", "true");
+        play.textContent = "▶";
+        previewLink.append(media, play);
+        wireVideoPreview(previewLink, output);
+      } else {
+        previewLink.append(media);
         previewLink.addEventListener("click", () => openLightbox(output));
       }
       const caption = document.createElement("figcaption");
@@ -685,10 +1002,9 @@
       filename.textContent = output.filename;
       const download = document.createElement("a");
       download.className = "generation-output-download";
-      download.href = output.url;
+      download.href = downloadURL(output.url);
       download.download = output.filename;
       download.textContent = "Скачать файл";
-      previewLink.append(media);
       caption.append(filename, download);
       card.append(previewLink, caption);
       outputGrid.append(card);
@@ -716,12 +1032,24 @@
     const card = document.createElement("figure");
     card.className = "generation-output generation-library-item";
     const isVideo = item.media_type === "video";
-    const preview = document.createElement(isVideo ? "video" : "button");
+    const preview = document.createElement("button");
     preview.className = "generation-output-preview";
     if (isVideo) {
-      preview.controls = true;
-      preview.preload = "metadata";
-      preview.src = item.url;
+      preview.type = "button";
+      preview.classList.add("generation-video-preview");
+      preview.title = "Открыть видеоплеер";
+      const video = document.createElement("video");
+      video.muted = true;
+      video.loop = true;
+      video.playsInline = true;
+      video.preload = "metadata";
+      video.src = item.url;
+      const play = document.createElement("span");
+      play.className = "generation-video-play";
+      play.setAttribute("aria-hidden", "true");
+      play.textContent = "▶";
+      preview.append(video, play);
+      wireVideoPreview(preview, item);
     } else {
       preview.type = "button";
       preview.dataset.generationLibraryItem = "";
@@ -780,7 +1108,7 @@
       heading.className = "panel-heading";
       heading.innerHTML = "<div><p class=\"section-kicker\">Моя галерея</p><h2>Последние результаты</h2><p class=\"panel-intro\">Результаты доступны в вашем профиле 24 часа, затем удаляются без возможности восстановления.</p></div>";
       const grid = document.createElement("div");
-      grid.className = "generation-output-grid";
+      grid.className = "generation-output-grid generation-library-grid";
       library.append(heading, grid);
       result.insertAdjacentElement("afterend", library);
     }
@@ -839,14 +1167,19 @@
       url: button.dataset.url,
     }));
   });
+  root.querySelectorAll("[data-generation-library-video]").forEach((button) => {
+    wireVideoPreview(button, { filename: button.dataset.filename || "Видео", media_type: "video", url: button.dataset.url });
+  });
   refreshExpiryLabels();
   window.setInterval(refreshExpiryLabels, 30000);
 
   const poll = async (promptID) => {
     const deadline = Date.now() + 10 * 60 * 1000;
     while (Date.now() < deadline) {
+      if (activeGenerationID !== promptID) return;
       const response = await fetch(`/generate/status?prompt_id=${encodeURIComponent(promptID)}`, { credentials: "same-origin" });
       const payload = await response.json().catch(() => ({}));
+      if (activeGenerationID !== promptID) return;
       if (!response.ok) throw new Error(payload.error || "Не удалось получить статус");
       resultStatus.textContent = payload.message || "Проверяем состояние...";
       if (!liveProgressReceived) {
@@ -858,6 +1191,8 @@
         }
       }
       if (payload.state === "completed") {
+        activeGenerationID = "";
+        setGenerationActions();
         resultTitle.textContent = "Готово";
         setGenerationProgress("Готово", "Результат подготовлен", 100);
         renderOutputs(payload.outputs || []);
@@ -865,45 +1200,105 @@
         result.scrollIntoView({ block: "start", behavior: "smooth" });
         return;
       }
-      if (payload.state === "error") throw new Error(payload.message || "ComfyUI завершил генерацию с ошибкой");
+      if (payload.state === "error") {
+        activeGenerationID = "";
+        setGenerationActions({ retry: true });
+        throw new Error(payload.message || "ComfyUI завершил генерацию с ошибкой");
+      }
       await new Promise((resolve) => window.setTimeout(resolve, 2000));
     }
     throw new Error("Генерация выполняется слишком долго. Проверьте результат позже в ComfyUI.");
   };
 
+  retryGeneration?.addEventListener("click", () => form.requestSubmit());
+  cancelGeneration?.addEventListener("click", async () => {
+    const promptID = activeGenerationID;
+    if (!promptID || cancelGeneration.disabled) return;
+    cancelGeneration.disabled = true;
+    cancelGeneration.textContent = "Отменяем...";
+    try {
+      const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", prompt_id: promptID });
+      const response = await fetch("/generate/cancel", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body, credentials: "same-origin" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Не удалось отменить генерацию");
+      activeGenerationID = "";
+      closeProgressSocket();
+      resultTitle.textContent = payload.cancelled ? "Генерация отменена" : "Генерация завершена";
+      resultStatus.textContent = payload.message || "Генерация отменена.";
+      runProgress.hidden = true;
+      setGenerationActions({ retry: true });
+    } catch (error) {
+      resultStatus.textContent = error.message || "Не удалось отменить генерацию";
+      result.classList.add("has-error");
+    } finally {
+      cancelGeneration.disabled = false;
+      cancelGeneration.textContent = "Отменить генерацию";
+    }
+  });
+
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!selectedChoice() || !selectedGenerationWorkflow() || !model?.value || !positive.value.trim()) return;
+    if (promptAssistantEnabled?.checked && !promptAssistantApproved) {
+      setPromptAssistantState("Перед генерацией подтвердите вариант ассистента или выберите «Оставить мой промт».", "error");
+      promptAssistant?.scrollIntoView({ block: "center", behavior: "smooth" });
+      return;
+    }
     const submit = document.getElementById("generation-submit");
     submit.disabled = true;
     submit.classList.add("is-loading");
     result.hidden = false;
+    activeGenerationID = "";
+    setGenerationActions();
     resultTitle.textContent = "Генерация выполняется";
-    resultStatus.textContent = "Ставим workflow в очередь ComfyUI...";
+    resultStatus.textContent = "Ставим задачу в очередь ComfyUI...";
     outputGrid.replaceChildren();
     result.classList.remove("has-error");
     runProgress.hidden = false;
-    setGenerationProgress("Подготовка", "Проверяем параметры workflow", null);
+    setGenerationProgress("Подготовка", "Проверяем параметры схемы генерации", null);
     result.scrollIntoView({ block: "start", behavior: "smooth" });
     try {
       const body = new FormData(form);
+      // Mobile Russian keyboards commonly enter decimal fractions with a comma.
+      // Convert values here as well as on the server before URL encoding them.
+      const numericFieldNames = new Set([...form.querySelectorAll('input[type="number"], input[data-localized-decimal]')].map((field) => field.name));
+      for (const [name, value] of [...body.entries()]) {
+        if (numericFieldNames.has(name) && typeof value === "string") {
+          body.set(name, value.replaceAll(",", "."));
+        }
+      }
       body.set("template_id", selectedChoice()?.dataset.workflowId || "");
       body.set("generation_workflow", selectedGenerationWorkflow()?.dataset.presetId || "");
+	  body.set("assistant_requested", promptAssistantOriginal ? "true" : "false");
+	  body.set("assistant_applied", promptAssistantAction.startsWith("applied") ? "true" : "false");
+	  body.set("assistant_template_used", promptAssistantOriginal ? (promptAssistantTemplate?.value || "") : "");
+	  body.set("assistant_think_used", promptAssistantOriginal && promptAssistantThink?.checked ? "true" : "false");
+	  body.set("assistant_original_prompt", promptAssistantOriginal);
+	  body.set("assistant_suggestion", promptAssistantSuggestion);
       ["input_image", "input_image_2", "input_image_3", "input_image_4"].forEach((name, index) => {
         body.set(name, uploadedImages.get(index + 1) || "");
       });
       const response = await fetch("/generate/run", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body: new URLSearchParams(body), credentials: "same-origin" });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "Не удалось запустить генерацию");
+      activeGenerationID = payload.prompt_id;
+      setGenerationActions({ cancel: true });
       if (payload.state === "queued") {
         setGenerationProgress("В очереди ComfyUI", queuePositionDetail(payload.queue_position, payload.queue_total), null);
       } else if (payload.state === "running") {
         setGenerationProgress("ComfyUI начал генерацию", "Подготавливаем workflow", null);
       }
+      if (payload.mining_paused) {
+        resultStatus.textContent = "Майнинг подтверждённо остановлен на время этой приоритетной генерации.";
+      } else if (payload.mining_warning) {
+        resultStatus.textContent = payload.mining_warning;
+      }
       refreshQueueOverview();
       connectProgressSocket(payload.prompt_id);
       await poll(payload.prompt_id);
     } catch (error) {
+      activeGenerationID = "";
+      setGenerationActions({ retry: true });
       resultTitle.textContent = "Не удалось выполнить генерацию";
       resultStatus.textContent = error.message || "Неизвестная ошибка";
       result.classList.add("has-error");
@@ -925,6 +1320,7 @@
     renderOutputs([{ filename: "AI-Gateway-Krea2_00002_.png", media_type: "image", url: root.dataset.previewOutput }]);
   }
   calculateResolution();
+  syncPromptAssistant();
   refreshQueueOverview();
   window.setInterval(refreshQueueOverview, 5000);
 })();

@@ -28,9 +28,84 @@ func TestGenerateTemplateRenders(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "data-comfy-generation") || !strings.Contains(output.String(), "/static/generate.js") ||
-		!strings.Contains(output.String(), "Krea 2: фото и промт") || !strings.Contains(output.String(), "Diffusion-модель") ||
-		!strings.Contains(output.String(), "generation-editor-profile") {
+		!strings.Contains(output.String(), "Krea 2: фото и промт") || !strings.Contains(output.String(), "Диффузионная модель") ||
+		!strings.Contains(output.String(), "generation-editor-profile") || !strings.Contains(output.String(), "prompt-assistant-template") ||
+		!strings.Contains(output.String(), "Перенос внешности и редактирование") || !strings.Contains(output.String(), "prompt-assistant-think") ||
+		!strings.Contains(output.String(), "Максимум деталей · 4,7 Мп") {
 		t.Fatal("generation template did not render the wizard")
+	}
+}
+
+func TestGenerationDownloadDisposition(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/generate/output?download=1", nil)
+	response := httptest.NewRecorder()
+	setGenerationDownloadDisposition(response, request, `folder\\portrait.png`)
+	if got := response.Header().Get("Content-Disposition"); !strings.Contains(got, `attachment; filename=portrait.png`) {
+		t.Fatalf("Content-Disposition = %q", got)
+	}
+
+	previewRequest := httptest.NewRequest(http.MethodGet, "/generate/output", nil)
+	previewResponse := httptest.NewRecorder()
+	setGenerationDownloadDisposition(previewResponse, previewRequest, "portrait.png")
+	if got := previewResponse.Header().Get("Content-Disposition"); got != "" {
+		t.Fatalf("preview Content-Disposition = %q, want empty", got)
+	}
+}
+
+func TestParseGenerationFloatAcceptsRussianDecimalSeparator(t *testing.T) {
+	for raw, want := range map[string]float64{"0,22": 0.22, "1.5": 1.5, " 4,7 ": 4.7} {
+		got, err := parseGenerationFloat(raw)
+		if err != nil || got != want {
+			t.Fatalf("parseGenerationFloat(%q) = %v, %v; want %v, nil", raw, got, err, want)
+		}
+	}
+}
+
+func TestParseGenerationFormAcceptsCommasInPhotoAndPromptControls(t *testing.T) {
+	form := url.Values{
+		"width":                 {"1024"},
+		"height":                {"1024"},
+		"steps":                 {"20"},
+		"cfg":                   {"1,5"},
+		"denoise":               {"0,75"},
+		"reference_boost":       {"4,25"},
+		"upscale_factor":        {"1,5"},
+		"upscale_denoise":       {"0,15"},
+		"skin_coolness":         {"0,22"},
+		"skin_brightness":       {"0,12"},
+		"skin_texture_preserve": {"0,88"},
+		"post_denoise_edge":     {"0,05"},
+		"lora_model_strength_1": {"0,8"},
+		"lora_clip_strength_1":  {"1,0"},
+		"output_megapixels":     {"1,9"},
+		"source_megapixels":     {"1,5"},
+		"flux_guidance":         {"3,5"},
+		"flux_active_scale":     {"0,8"},
+		"flux_token_whiten":     {"0,25"},
+		"flux_norm_equalize":    {"0,5"},
+		"color_strength":        {"0,6"},
+		"template_id":           {"image-to-image"},
+		"generation_workflow":   {"photoflow-krea2-edit"},
+		"positive_prompt":       {"portrait"},
+		"input_image":           {"gateway/input.png"},
+		"model":                 {"krea2:test"},
+		"skin_preset":           {"Natural"},
+		"lut_name":              {"LC_Crushed_Blacks.cube"},
+		"upscale_sampler":       {"deis"},
+		"upscale_scheduler":     {"simple"},
+		"sampler":               {"euler"},
+		"scheduler":             {"simple"},
+		"seed":                  {"42"},
+	}
+	request := httptest.NewRequest(http.MethodPost, "/generate/run", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	input, err := parseGenerationForm(request)
+	if err != nil {
+		t.Fatalf("parseGenerationForm() error = %v", err)
+	}
+	if input.CFG != 1.5 || input.Denoise != 0.75 || input.ReferenceBoost != 4.25 || input.UpscaleFactor != 1.5 || input.SkinCoolness != 0.22 || input.LoraModel[0] != 0.8 || input.FluxGuidance != 3.5 || input.FluxActiveScale != 0.8 || input.FluxTokenWhiten != 0.25 || input.FluxNormEqualize != 0.5 || input.ColorStrength != 0.6 {
+		t.Fatalf("comma controls were not preserved: %#v", input)
 	}
 }
 
@@ -933,5 +1008,137 @@ func TestGenerationQueueOverviewCountsRunningAndPending(t *testing.T) {
 	}
 	if overview.Running != 1 || overview.Pending != 2 {
 		t.Fatalf("unexpected queue overview: %#v", overview)
+	}
+}
+
+func TestReleaseComfyMemoryWhenQueueIsIdle(t *testing.T) {
+	var freeRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/queue":
+			_, _ = w.Write([]byte(`{"queue_running":[],"queue_pending":[]}`))
+		case "/free":
+			freeRequests++
+			if r.Method != http.MethodPost {
+				t.Fatalf("free method = %s, want POST", r.Method)
+			}
+			if got := r.Header.Get("Authorization"); got != "Basic test-token" {
+				t.Fatalf("authorization = %q", got)
+			}
+			var payload map[string]bool
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			if !payload["unload_models"] || !payload["free_memory"] {
+				t.Fatalf("unexpected free payload: %#v", payload)
+			}
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	upstream, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := &App{cfg: Config{ComfyUIUpstream: upstream, ComfyUIUpstreamAuthHeader: "Basic test-token"}}
+	app.releaseComfyMemoryIfIdle(context.Background())
+	if freeRequests != 1 {
+		t.Fatalf("free requests = %d, want 1", freeRequests)
+	}
+}
+
+func TestReleaseComfyMemoryKeepsQueuedGenerationLoaded(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/queue":
+			_, _ = w.Write([]byte(`{"queue_running":[[1,"running",{},{}]],"queue_pending":[]}`))
+		case "/free":
+			t.Fatal("memory release must not run while a generation is active")
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	upstream, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := &App{cfg: Config{ComfyUIUpstream: upstream}}
+	app.releaseComfyMemoryIfIdle(context.Background())
+}
+
+func TestMiniMaxH3WorkflowBuildsFrameAndReferenceGraphs(t *testing.T) {
+	definitions, err := loadWorkflowDefinitions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition, ok := findWorkflow(definitions, "minimax-h3-video")
+	if !ok || definition.Builder != "minimax_h3" || !definition.AdminOnly {
+		t.Fatalf("MiniMax H3 definition is missing or not restricted: %#v", definition)
+	}
+	base := generationForm{
+		ModelName:      "MiniMax\\MiniMax_H3_FL2VA_pruned_int8_convrot.safetensors",
+		ReferenceModel: "MiniMax\\MiniMax_H3_Ref2VA_pruned_int8_convrot.safetensors",
+		TextEncoder:    "MiniMax\\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+		VAE:            "MiniMax\\minimax_h3_video_vae_fp16.safetensors",
+		AudioVAE:       "MiniMax\\minimax_h3_audio_vae_fp32.safetensors",
+		Positive:       "A dancer turns toward the camera in warm evening light.", InputImage: "gateway/input-1.png", Width: 768, Height: 1344,
+		Steps: 25, CFG: 1, Denoise: 1, Sampler: "res_multistep", Scheduler: "simple", Seed: 42,
+		VideoMode: miniMaxH3FrameMode, VideoResolution: "portrait", VideoDurationSeconds: 5, VideoSteps: 25,
+	}
+	prompt, err := definition.buildPrompt(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame := prompt["7"].(map[string]any)
+	if got, want := frame["class_type"], "MiniMaxH3ImageToVideo"; got != want {
+		t.Fatalf("frame node type = %v, want %v", got, want)
+	}
+	frameInputs := frame["inputs"].(map[string]any)
+	if got, want := frameInputs["length"], 124; got != want {
+		t.Fatalf("five second frame count = %v, want %v", got, want)
+	}
+	if _, ok := frameInputs["first_frame"]; !ok {
+		t.Fatal("first frame is absent")
+	}
+	video := prompt["17"].(map[string]any)["inputs"].(map[string]any)
+	if got, want := video["format"], "video/h264-mp4"; got != want {
+		t.Fatalf("browser video format = %v, want %q", got, want)
+	}
+
+	base.VideoMode = miniMaxH3ReferenceMode
+	base.InputImage = "gateway/input-1.png"
+	base.ReferenceImages = [3]string{"gateway/input-2.png", "gateway/input-3.png"}
+	prompt, err = definition.buildPrompt(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	references := prompt["7"].(map[string]any)
+	if got, want := references["class_type"], "MiniMaxH3ReferenceToVideo"; got != want {
+		t.Fatalf("reference node type = %v, want %v", got, want)
+	}
+	referenceInputs := references["inputs"].(map[string]any)
+	if _, ok := referenceInputs["ref_images.ref_image_2"]; !ok {
+		t.Fatalf("third reference image is absent: %#v", referenceInputs)
+	}
+	if got, want := prompt["1"].(map[string]any)["inputs"].(map[string]any)["unet_name"], base.ReferenceModel; got != want {
+		t.Fatalf("reference model = %v, want %q", got, want)
+	}
+}
+
+func TestMiniMaxH3RequiresFirstFrame(t *testing.T) {
+	definitions, err := loadWorkflowDefinitions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition, _ := findWorkflow(definitions, "minimax-h3-video")
+	_, err = definition.buildPrompt(generationForm{
+		ModelName: "model", ReferenceModel: "reference", TextEncoder: "clip", VAE: "video-vae", AudioVAE: "audio-vae",
+		Positive: "animate", Width: 768, Height: 1344, Steps: 25, CFG: 1, Denoise: 1, Sampler: "res_multistep", Scheduler: "simple",
+		VideoMode: miniMaxH3FrameMode, VideoResolution: "portrait", VideoDurationSeconds: 5, VideoSteps: 25,
+	})
+	if err == nil || !strings.Contains(err.Error(), "первый кадр") {
+		t.Fatalf("first frame error = %v", err)
 	}
 }

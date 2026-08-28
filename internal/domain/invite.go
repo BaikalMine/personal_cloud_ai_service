@@ -7,6 +7,9 @@ type InviteAccess struct {
 	GrantComfyUI         bool
 	GrantOpenWebUI       bool
 	GrantQuickGeneration bool
+	GrantTextToImage     bool
+	GrantImageToImage    bool
+	GrantVideo           bool
 	GenerationDailyLimit int
 	GenerationTotalLimit int64
 }
@@ -21,6 +24,9 @@ type InviteRow struct {
 	GrantComfyUI         bool
 	GrantOpenWebUI       bool
 	GrantQuickGeneration bool
+	GrantTextToImage     bool
+	GrantImageToImage    bool
+	GrantVideo           bool
 	GenerationDailyLimit int
 	GenerationTotalLimit int64
 	Status               string

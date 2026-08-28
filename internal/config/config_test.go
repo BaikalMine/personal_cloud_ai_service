@@ -21,6 +21,8 @@ func TestLoadValidConfiguration(t *testing.T) {
 	t.Setenv("ADMIN_ALLOWED_CIDRS", "10.0.0.0/24,127.0.0.1")
 	t.Setenv("COMFYUI_UPSTREAM", "http://host.docker.internal:8088")
 	t.Setenv("OPENWEBUI_UPSTREAM", "http://host.docker.internal:8089")
+	t.Setenv("OLLAMA_UPSTREAM", "http://host.docker.internal:11434")
+	t.Setenv("PROMPT_ASSISTANT_MODEL", "huihui_ai/gemma-4-abliterated:e4b")
 
 	cfg, err := Load()
 	if err != nil {
@@ -40,6 +42,9 @@ func TestLoadValidConfiguration(t *testing.T) {
 	}
 	if len(cfg.TrustedProxies) != 2 || len(cfg.AdminAllowedNetworks) != 2 {
 		t.Fatal("network allow-lists were not parsed")
+	}
+	if cfg.OllamaUpstream == nil || cfg.OllamaUpstream.Host != "host.docker.internal:11434" || cfg.PromptAssistantModel != "huihui_ai/gemma-4-abliterated:e4b" {
+		t.Fatalf("prompt assistant config was not parsed: %+v", cfg)
 	}
 }
 

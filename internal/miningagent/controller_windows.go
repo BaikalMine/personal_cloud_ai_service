@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -34,11 +35,22 @@ const (
 type windowsController struct {
 	rootDir   string
 	outputLog string
+	stateFile string
 
-	mu         sync.Mutex
-	managedPID int
-	scriptPath string
-	startedAt  time.Time
+	mu                 sync.Mutex
+	managedPID         int
+	managedProcessName string
+	managedPIDs        []int
+	scriptPath         string
+	startedAt          time.Time
+}
+
+type managedMinerState struct {
+	ProcessName string    `json:"process_name"`
+	PIDs        []int     `json:"pids"`
+	LauncherPID int       `json:"launcher_pid,omitempty"`
+	ScriptPath  string    `json:"script_path"`
+	StartedAt   time.Time `json:"started_at"`
 }
 
 func NewController(rootDir, outputLog string) (Controller, error) {
@@ -46,7 +58,13 @@ func NewController(rootDir, outputLog string) (Controller, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mining root: %w", err)
 	}
-	return &windowsController{rootDir: root, outputLog: outputLog}, nil
+	controller := &windowsController{
+		rootDir:   root,
+		outputLog: outputLog,
+		stateFile: filepath.Join(filepath.Dir(outputLog), "managed-miner.json"),
+	}
+	controller.restoreManagedState()
+	return controller, nil
 }
 
 func (c *windowsController) State(ctx context.Context, processName string) (mining.State, error) {
@@ -144,6 +162,7 @@ func (c *windowsController) startLocked(ctx context.Context, request mining.Requ
 		state, probeErr := c.stateLocked(probeCtx, request.ProcessName)
 		cancel()
 		if probeErr == nil && state.Running {
+			c.setManagedLocked(request.ProcessName, state.PIDs, scriptPath, time.Now())
 			state.Message = "Майнинг запущен."
 			return state, nil
 		}
@@ -167,30 +186,49 @@ func (c *windowsController) stopLocked(ctx context.Context, request mining.Reque
 	if err != nil {
 		return state, err
 	}
-	if !state.Running {
-		if c.managedPID > 0 {
-			_ = runTaskkill(ctx, "/PID", strconv.Itoa(c.managedPID))
-			c.resetManagedLocked()
-		}
-		state.Message = "Майнинг уже остановлен."
-		return state, nil
-	}
-	if c.managedPID > 0 {
-		_ = runTaskkill(ctx, "/PID", strconv.Itoa(c.managedPID))
-	}
-	if err := runTaskkill(ctx, "/IM", request.ProcessName); err != nil {
-		probe, probeErr := c.stateLocked(ctx, request.ProcessName)
-		if probeErr != nil || probe.Running {
-			return probe, fmt.Errorf("stop miner: %w", err)
-		}
-	}
-	c.resetManagedLocked()
-	state, err = c.stateLocked(ctx, request.ProcessName)
+	scriptPath, err := c.allowedScript(request.ScriptPath)
 	if err != nil {
 		return state, err
 	}
-	state.Message = "Майнинг остановлен."
-	return state, nil
+	managedPIDs := c.managedPIDsForLocked(request.ProcessName, state.PIDs)
+	if len(managedPIDs) == 0 && state.Running {
+		// Stop is an explicit operator action for a stored Gateway profile. Capture
+		// only the matching current PIDs, never all processes with the same image name.
+		c.setManagedLocked(request.ProcessName, state.PIDs, scriptPath, time.Now())
+		managedPIDs = append([]int(nil), state.PIDs...)
+	}
+	if len(managedPIDs) == 0 {
+		state.Message = "Майнинг уже остановлен."
+		return state, nil
+	}
+	launcherPID := c.managedPID
+	stoppedTree := false
+	if launcherPID > 0 {
+		if err := runTaskkill(ctx, "/PID", strconv.Itoa(launcherPID)); err == nil {
+			stoppedTree = true
+		}
+	}
+	if !stoppedTree {
+		for _, pid := range managedPIDs {
+			if err := runTaskkill(ctx, "/PID", strconv.Itoa(pid)); err != nil {
+				return state, fmt.Errorf("stop managed miner: %w", err)
+			}
+		}
+	}
+	c.resetManagedLocked()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		state, err = c.stateLocked(ctx, request.ProcessName)
+		if err != nil {
+			return state, err
+		}
+		if !state.Running {
+			state.Message = "Майнинг остановлен."
+			return state, nil
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	return state, errors.New("майнер не завершился после команды остановки")
 }
 
 func (c *windowsController) stateLocked(ctx context.Context, processName string) (mining.State, error) {
@@ -366,6 +404,83 @@ func (c *windowsController) prepareOutputLog() error {
 
 func (c *windowsController) resetManagedLocked() {
 	c.managedPID = 0
+	c.managedProcessName = ""
+	c.managedPIDs = nil
 	c.scriptPath = ""
 	c.startedAt = time.Time{}
+	_ = os.Remove(c.stateFile)
+}
+
+func (c *windowsController) setManagedLocked(processName string, pids []int, scriptPath string, startedAt time.Time) {
+	unique := make([]int, 0, len(pids))
+	seen := make(map[int]struct{}, len(pids))
+	for _, pid := range pids {
+		if pid <= 0 {
+			continue
+		}
+		if _, exists := seen[pid]; exists {
+			continue
+		}
+		seen[pid] = struct{}{}
+		unique = append(unique, pid)
+	}
+	if len(unique) == 0 {
+		return
+	}
+	c.managedProcessName = processName
+	c.managedPIDs = unique
+	c.scriptPath = scriptPath
+	c.startedAt = startedAt
+	payload, err := json.Marshal(managedMinerState{
+		ProcessName: processName,
+		PIDs:        unique,
+		LauncherPID: c.managedPID,
+		ScriptPath:  scriptPath,
+		StartedAt:   startedAt,
+	})
+	if err != nil {
+		return
+	}
+	temporary := c.stateFile + ".tmp"
+	if err := os.WriteFile(temporary, payload, 0o600); err == nil {
+		_ = os.Rename(temporary, c.stateFile)
+	}
+}
+
+func (c *windowsController) restoreManagedState() {
+	payload, err := os.ReadFile(c.stateFile)
+	if err != nil {
+		return
+	}
+	var state managedMinerState
+	if json.Unmarshal(payload, &state) != nil || !validProcessName(state.ProcessName) || len(state.PIDs) == 0 {
+		_ = os.Remove(c.stateFile)
+		return
+	}
+	if _, err := c.allowedScript(state.ScriptPath); err != nil {
+		_ = os.Remove(c.stateFile)
+		return
+	}
+	c.managedPID = state.LauncherPID
+	c.setManagedLocked(state.ProcessName, state.PIDs, state.ScriptPath, state.StartedAt)
+}
+
+func (c *windowsController) managedPIDsForLocked(processName string, runningPIDs []int) []int {
+	if !strings.EqualFold(c.managedProcessName, processName) || len(c.managedPIDs) == 0 {
+		return nil
+	}
+	running := make(map[int]struct{}, len(runningPIDs))
+	for _, pid := range runningPIDs {
+		running[pid] = struct{}{}
+	}
+	matched := make([]int, 0, len(c.managedPIDs))
+	for _, pid := range c.managedPIDs {
+		if _, ok := running[pid]; ok {
+			matched = append(matched, pid)
+		}
+	}
+	if len(matched) == 0 {
+		c.resetManagedLocked()
+	}
+	return matched
 }

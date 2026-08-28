@@ -36,7 +36,17 @@ if ([string]::IsNullOrWhiteSpace($Token)) {
 if ([string]::IsNullOrWhiteSpace($Token)) {
     $existingConfigPath = Join-Path $InstallDirectory 'config.json'
     if (Test-Path -LiteralPath $existingConfigPath -PathType Leaf) {
-        $Token = (Get-Content -LiteralPath $existingConfigPath -Raw | ConvertFrom-Json).token
+        # Windows PowerShell 5 reads BOM-less UTF-8 as the legacy code page.
+        # Read explicitly so an existing Cyrillic mining root survives an update.
+        $existingConfig = [IO.File]::ReadAllText($existingConfigPath, [Text.UTF8Encoding]::new($false)) | ConvertFrom-Json
+        $Token = $existingConfig.token
+        $defaultMiningRoot = Join-Path $env:USERPROFILE 'AI-Mining'
+        if ($MiningRoot -eq $defaultMiningRoot -and -not [string]::IsNullOrWhiteSpace($existingConfig.mining_root)) {
+            $MiningRoot = $existingConfig.mining_root
+        }
+        if ($ListenAddress -eq ':8092' -and -not [string]::IsNullOrWhiteSpace($existingConfig.listen_address)) {
+            $ListenAddress = $existingConfig.listen_address
+        }
     }
 }
 if ([string]::IsNullOrWhiteSpace($Token) -and $GenerateToken) {

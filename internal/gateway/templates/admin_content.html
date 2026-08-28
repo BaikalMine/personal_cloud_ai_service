@@ -10,39 +10,50 @@
     <div><span>Показано</span><strong>{{.Overview.Total}}</strong></div>
     <div><span>ComfyUI</span><strong>{{.Overview.ComfyUI}}</strong></div>
     <div><span>OpenWebUI</span><strong>{{.Overview.OpenWebUI}}</strong></div>
+    <div><span>Ollama</span><strong>{{.Overview.Ollama}}</strong></div>
     <div><span>С медиа</span><strong>{{.Overview.WithMedia}}</strong></div>
   </section>
   <form class="content-filters" method="get" action="/admin/content">
     <div class="content-filter-fields">
       <label>Пользователь<input name="user" value="{{.Username}}" placeholder="Логин"></label>
-      <label>Сервис<select name="service"><option value="">Все сервисы</option><option value="comfyui" {{if eq .Service "comfyui"}}selected{{end}}>ComfyUI</option><option value="openwebui" {{if eq .Service "openwebui"}}selected{{end}}>OpenWebUI</option></select></label>
+      <label>Сервис<select name="service"><option value="">Все сервисы</option><option value="comfyui" {{if eq .Service "comfyui"}}selected{{end}}>ComfyUI</option><option value="openwebui" {{if eq .Service "openwebui"}}selected{{end}}>OpenWebUI</option><option value="ollama" {{if eq .Service "ollama"}}selected{{end}}>Ollama · промт-ассистент</option></select></label>
       <label class="content-search">Поиск<input name="q" value="{{.Query}}" placeholder="Промпт, ответ, модель, seed"></label>
     </div>
     <div class="content-filter-actions"><button type="submit">Показать</button>{{if or .Username .Service .Query}}<a class="button ghost" href="/admin/content">Сбросить</a>{{end}}</div>
   </form>
-  <div class="content-list-heading"><strong>События</strong><span>{{if .Overview.Total}}Показаны последние {{.Overview.Total}}{{else}}Новых записей пока нет{{end}}</span></div>
-  <section class="content-feed">
+  <div class="content-list-heading"><strong>События</strong><span>{{if .Overview.Total}}Нажмите на карточку, чтобы открыть полную запись{{else}}Новых записей пока нет{{end}}</span></div>
+  <section class="content-gallery" data-admin-content-gallery>
     {{range .Events}}
-    <article class="content-event">
-      <header>
-        <div class="content-event-title"><div class="content-identity"><a href="/admin/users/{{.UserID}}">{{.Username}}</a><span class="badge {{if eq .Service "comfyui"}}content-service-comfy{{else}}content-service-openweb{{end}}">{{if eq .Service "comfyui"}}ComfyUI{{else}}OpenWebUI{{end}}</span></div>{{if .Model}}<span class="content-model">{{.Model}}</span>{{end}}</div>
-        <div class="content-time"><time>{{formatTime .CreatedAt}}</time><span>хранится до {{formatTime .ExpiresAt}}</span></div>
-      </header>
-      <div class="content-columns">
-        <section><div class="content-block-heading"><h2>Запрос</h2><button type="button" class="content-copy" data-copy-target="#content-prompt-{{.ID}}">Копировать</button></div><pre id="content-prompt-{{.ID}}">{{.Prompt}}</pre></section>
-        <section><div class="content-block-heading"><h2>{{if eq .Service "comfyui"}}Негативный промт{{else}}Ответ{{end}}</h2>{{if .Response}}<button type="button" class="content-copy" data-copy-target="#content-response-{{.ID}}">Копировать</button>{{end}}</div><pre id="content-response-{{.ID}}" {{if not .Response}}class="content-empty"{{end}}>{{if .Response}}{{.Response}}{{else}}{{if eq .Service "comfyui"}}Не задан{{else}}Ответ не зафиксирован{{end}}{{end}}</pre></section>
-      </div>
-      {{if .Media}}<div class="content-media"><div class="content-media-heading"><strong>Результаты генерации</strong><span>{{.MediaCount}} файл(а)</span></div><div class="content-media-grid">{{range .Media}}{{if eq .MediaType "video"}}<video controls preload="none" src="/admin/content/media/{{.ID}}"></video>{{else}}<a href="/admin/content/media/{{.ID}}" target="_blank" rel="noopener"><img loading="lazy" src="/admin/content/media/{{.ID}}" alt="Результат генерации"></a>{{end}}{{end}}</div></div>{{end}}
-      <footer>
-        {{if .ExternalID}}<span>Идентификатор <code>{{.ExternalID}}</code></span>{{end}}
-        {{if .Metadata}}<details><summary>Технические данные</summary><code>{{.Metadata}}</code></details>{{end}}
-        {{if gt .MediaCount 0}}<span class="badge ok">Медиа: {{.MediaCount}}</span>{{end}}
-      </footer>
+    {{$event := .}}
+    <article class="content-gallery-card">
+      <button class="content-gallery-preview" type="button" data-content-event-open="{{.ID}}" aria-label="Открыть запись пользователя {{.Username}}">
+        {{if .Media}}
+          {{$preview := index .Media 0}}
+          {{if eq $preview.MediaType "video"}}<video muted loop playsinline preload="metadata" src="/admin/content/media/{{$preview.ID}}?raw=1"></video><span class="content-gallery-play" aria-hidden="true">&#9654;</span>{{else}}<img loading="lazy" src="/admin/content/media/{{$preview.ID}}?raw=1" alt="Результат генерации пользователя {{.Username}}">{{end}}
+          {{if gt .MediaCount 1}}<span class="content-gallery-count">+{{.MediaCount}}</span>{{end}}
+        {{else}}
+          <span class="content-text-preview"><small>{{if eq .Service "ollama"}}Помощь ассистента{{else if eq .Service "openwebui"}}Диалог с локальной моделью{{else}}Промт генерации{{end}}</small><strong>{{.Prompt}}</strong>{{if .Response}}<em>{{if eq .Service "ollama"}}Вариант ассистента сохранён{{else}}Ответ сохранён{{end}}</em>{{end}}</span>
+        {{end}}
+      </button>
+      <div class="content-gallery-meta"><div><a href="/admin/users/{{.UserID}}">{{.Username}}</a><span class="badge {{if eq .Service "comfyui"}}content-service-comfy{{else if eq .Service "ollama"}}content-service-ollama{{else}}content-service-openweb{{end}}">{{if eq .Service "comfyui"}}ComfyUI{{else if eq .Service "ollama"}}Ассистент{{else}}OpenWebUI{{end}}</span></div><time>{{formatTime .CreatedAt}}</time></div>
+      {{if .Model}}<span class="content-gallery-model">{{.Model}}</span>{{end}}
     </article>
+    <template id="content-event-detail-{{.ID}}">
+      <article class="content-detail">
+        <header class="content-detail-header"><div><p class="section-kicker">{{if eq .Service "comfyui"}}ComfyUI · генерация{{else if eq .Service "ollama"}}Локальная модель · помощь ассистента{{else}}OpenWebUI · диалог{{end}}</p><h2>{{.Username}}</h2>{{if .Model}}<span>{{.Model}}</span>{{end}}</div><div><time>{{formatTime .CreatedAt}}</time><small>Запись хранится до {{formatTime .ExpiresAt}}</small></div></header>
+        {{if .Media}}<section class="content-detail-media"><div class="content-detail-heading"><h3>Результат</h3><span>{{.MediaCount}} файл(а)</span></div><div class="content-detail-media-grid">{{range .Media}}{{if eq .MediaType "video"}}<video controls playsinline preload="metadata" src="/admin/content/media/{{.ID}}?raw=1"></video>{{else}}<img loading="lazy" src="/admin/content/media/{{.ID}}?raw=1" alt="Результат генерации">{{end}}{{end}}</div></section>{{end}}
+        <section class="content-detail-section"><div class="content-block-heading"><h3>{{if eq .Service "ollama"}}Исходный промт для ассистента{{else}}Исходный промт пользователя{{end}}</h3><button type="button" class="content-copy" data-copy-target="#content-detail-prompt-{{.ID}}">Копировать</button></div><pre id="content-detail-prompt-{{.ID}}">{{.Prompt}}</pre></section>
+        <section class="content-detail-section"><div class="content-block-heading"><h3>{{if eq .Service "comfyui"}}Негативный промт{{else if eq .Service "ollama"}}Что написал ассистент{{else}}Ответ модели{{end}}</h3>{{if .Response}}<button type="button" class="content-copy" data-copy-target="#content-detail-response-{{.ID}}">Копировать</button>{{end}}</div><pre id="content-detail-response-{{.ID}}" {{if not .Response}}class="content-empty"{{end}}>{{if .Response}}{{.Response}}{{else}}{{if eq .Service "comfyui"}}Не задан{{else}}Ответ не зафиксирован{{end}}{{end}}</pre></section>
+        {{with .Assistant}}<section class="content-detail-section content-assistant-detail"><div class="content-block-heading"><h3>Помощь ассистента</h3><span class="badge {{if .Applied}}ok{{end}}">{{if .Applied}}Вариант применён{{else}}Вариант не применён{{end}}</span></div><dl class="content-assistant-facts"><div><dt>Шаблон</dt><dd>{{if .Template}}{{.Template}}{{else}}Не указан{{end}}</dd></div><div><dt>Think</dt><dd>{{if .Think}}Включён{{else}}Выключен{{end}}</dd></div></dl><div class="content-assistant-copy"><div class="content-block-heading"><h3>Начальный промт ассистенту</h3><button type="button" class="content-copy" data-copy-target="#content-assistant-original-{{$event.ID}}">Копировать</button></div><pre id="content-assistant-original-{{$event.ID}}">{{.OriginalPrompt}}</pre></div><div class="content-assistant-copy"><div class="content-block-heading"><h3>Что написал ассистент</h3><button type="button" class="content-copy" data-copy-target="#content-assistant-suggestion-{{$event.ID}}">Копировать</button></div><pre id="content-assistant-suggestion-{{$event.ID}}">{{.Suggestion}}</pre></div></section>{{end}}
+        {{if .Metadata}}<section class="content-detail-section"><div class="content-block-heading"><h3>{{if eq .Service "ollama"}}Режим и шаблон ассистента{{else}}Настройки и технические данные{{end}}</h3><button type="button" class="content-copy" data-copy-target="#content-detail-metadata-{{.ID}}">Копировать</button></div><pre id="content-detail-metadata-{{.ID}}" class="content-metadata">{{.Metadata}}</pre></section>{{end}}
+        <footer class="content-detail-footer">{{if .ExternalID}}<span>Идентификатор <code>{{.ExternalID}}</code></span>{{end}}{{if gt .MediaCount 0}}<span class="badge ok">Медиа: {{.MediaCount}}</span>{{end}}</footer>
+      </article>
+    </template>
     {{else}}
     <div class="empty-state"><strong>Записей не найдено</strong><span>Измените фильтры или дождитесь новых запросов.</span></div>
     {{end}}
   </section>
 </main>
+<div class="content-detail-dialog" id="content-detail-dialog" hidden role="dialog" aria-modal="true" aria-label="Полная запись AI-контента"><button class="content-detail-backdrop" type="button" data-content-detail-close aria-label="Закрыть просмотр"></button><div class="content-detail-window"><div class="content-detail-toolbar"><span>AI-контент</span><button class="content-detail-close" type="button" data-content-detail-close aria-label="Закрыть просмотр">&#10005;</button></div><div class="content-detail-body" id="content-detail-body"></div></div></div>
 </body></html>
 {{end}}

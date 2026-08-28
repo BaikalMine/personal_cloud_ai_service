@@ -14,7 +14,35 @@
     <article class="metric-card tone-cyan"><span>Запросы за 7 дней</span><strong>{{formatNumber .Stats.Requests7Days}}</strong><small>все сервисы</small></article>
     <article class="metric-card tone-red"><span>Доля ошибок</span><strong>{{.Stats.ErrorRate}}</strong><small>за 7 дней</small></article>
     <article class="metric-card tone-amber"><span>Среднее время ответа</span><strong>{{formatDuration .Stats.AverageDuration}}</strong><small>за 7 дней</small></article>
-    <article class="metric-card tone-indigo"><span>Активные WebSocket</span><strong>{{formatNumber .Stats.ActiveWebSockets}}</strong><small>прямо сейчас</small></article>
+    <article class="metric-card tone-indigo"><span>Активные WebSocket-соединения</span><strong>{{formatNumber .Stats.ActiveWebSockets}}</strong><small>прямо сейчас</small></article>
+  </section>
+  <section class="system-monitoring" data-system-monitoring aria-live="polite">
+    <div class="panel system-monitoring-head">
+      <div class="panel-heading"><div><p class="section-kicker">Windows-хост</p><h2>Ресурсы сервера</h2><p class="muted">Обновление каждые 10 секунд. История хранится 7 дней.</p></div><span class="system-status {{if .System.AgentAvailable}}online{{else}}offline{{end}}" data-system-status>{{if .System.AgentAvailable}}Данные получены{{else}}Агент недоступен{{end}}</span></div>
+      <div class="system-gauges" data-system-gauges>
+        <article class="system-gauge-card"><div class="system-gauge tone-cyan" data-gauge="cpu" style="--value:{{if .System.Host}}{{printf "%.1f" .System.Host.CPUPercent}}{{else}}0{{end}}"><div><strong data-gauge-value="cpu">{{if .System.Host}}{{printf "%.0f" .System.Host.CPUPercent}}{{else}}-{{end}}%</strong><small>ЦП</small></div></div><p>Нагрузка процессора</p></article>
+        <article class="system-gauge-card"><div class="system-gauge tone-mint" data-gauge="memory" style="--value:{{if and .System.Host (gt .System.Host.MemoryTotalBytes 0)}}{{printf "%.1f" (divFloat .System.Host.MemoryUsedBytes .System.Host.MemoryTotalBytes)}}{{else}}0{{end}}"><div><strong data-gauge-value="memory">{{if .System.Host}}{{formatBytes .System.Host.MemoryUsedBytes}}{{else}}-{{end}}</strong><small data-gauge-detail="memory">{{if .System.Host}}из {{formatBytes .System.Host.MemoryTotalBytes}}{{end}}</small></div></div><p>Оперативная память</p></article>
+        <article class="system-gauge-card"><div class="system-gauge tone-amber" data-gauge="gpu" style="--value:{{if and .System.Host .System.Host.GPUAvailable}}{{printf "%.1f" .System.Host.GPUPercent}}{{else}}0{{end}}"><div><strong data-gauge-value="gpu">{{if and .System.Host .System.Host.GPUAvailable}}{{printf "%.0f" .System.Host.GPUPercent}}{{else}}-{{end}}%</strong><small>GPU</small></div></div><p data-gpu-name>{{if and .System.Host .System.Host.GPUAvailable}}{{.System.Host.GPUName}}{{else}}Вычисления GPU{{end}}</p></article>
+        <article class="system-gauge-card"><div class="system-gauge tone-violet" data-gauge="gpu_memory" style="--value:{{if and .System.Host (gt .System.Host.GPUMemoryTotalBytes 0)}}{{printf "%.1f" (divFloat .System.Host.GPUMemoryUsedBytes .System.Host.GPUMemoryTotalBytes)}}{{else}}0{{end}}"><div><strong data-gauge-value="gpu_memory">{{if and .System.Host .System.Host.GPUAvailable}}{{formatBytes .System.Host.GPUMemoryUsedBytes}}{{else}}-{{end}}</strong><small data-gauge-detail="gpu_memory">{{if and .System.Host .System.Host.GPUAvailable}}из {{formatBytes .System.Host.GPUMemoryTotalBytes}}{{end}}</small></div></div><p>Видеопамять</p></article>
+      </div>
+    </div>
+    <div class="dashboard-grid system-detail-grid">
+      <div class="panel span-two">
+        <div class="panel-heading"><div><p class="section-kicker">Последние 24 часа</p><h2>Динамика нагрузки</h2></div><span class="muted" data-system-history-caption>Накопление данных...</span></div>
+        <div class="system-history" data-system-history role="img" aria-label="График использования ресурсов"></div>
+        <div class="system-history-legend"><span><i class="cpu"></i>ЦП</span><span><i class="memory"></i>ОЗУ</span><span><i class="gpu"></i>GPU</span><span><i class="gpu-memory"></i>VRAM</span></div>
+      </div>
+      <div class="panel">
+        <div class="panel-heading"><div><p class="section-kicker">Онлайн сейчас</p><h2><span data-online-count>{{formatNumber .Stats.ActiveUsers}}</span> пользователей</h2></div></div>
+        <div class="online-users" data-online-users>{{range .System.OnlineUsers}}<div class="online-user"><i></i><div><strong>{{.Username}}</strong><small>{{roleLabel .Role}} · активен {{formatTime .LastSeenAt}}</small></div></div>{{else}}<p class="muted">Нет активных сессий за последние 5 минут.</p>{{end}}</div>
+      </div>
+    </div>
+    <div class="metric-grid metrics-four system-storage-grid">
+      <article class="metric-card tone-blue"><span>Размер базы данных</span><strong data-database-size>{{formatBytes .System.DatabaseBytes}}</strong><small>PostgreSQL Gateway</small></article>
+      <article class="metric-card tone-green"><span>Пользователи онлайн</span><strong data-online-count>{{formatNumber .Stats.ActiveUsers}}</strong><small>за последние 5 минут</small></article>
+      <article class="metric-card tone-cyan"><span>Записей мониторинга</span><strong data-history-count>{{formatNumber (len .System.History)}}</strong><small>за последние 24 часа</small></article>
+      <article class="metric-card tone-amber"><span>Состояние агента</span><strong data-agent-state>{{if .System.AgentAvailable}}готов{{else}}ожидание{{end}}</strong><small data-agent-message>{{if .System.AgentMessage}}{{.System.AgentMessage}}{{else}}локальный Windows-агент{{end}}</small></article>
+    </div>
   </section>
   <section class="dashboard-grid">
     <div class="panel span-two">
@@ -28,7 +56,7 @@
     <div class="panel span-two">
       <div class="panel-heading"><div><p class="section-kicker">30 дней</p><h2>Использование сервисов</h2></div></div>
       <table><thead><tr><th>Сервис</th><th>Запросы</th><th>Пользователи</th><th>Передано</th><th>Ошибки</th></tr></thead><tbody>
-      {{range .Stats.UsageByService}}<tr><td><a class="service-link" href="/admin/services/{{.Service}}"><i class="service-icon {{.Service}}"></i>{{.Service}}</a></td><td class="numeric">{{formatNumber .Requests}}</td><td class="numeric">{{formatNumber .Users}}</td><td>{{formatBytes .Bytes}}</td><td><span class="error-count {{if gt .Errors 0}}has-errors{{end}}">{{formatNumber .Errors}}</span></td></tr>{{else}}<tr><td class="muted" colspan="5">Нет данных</td></tr>{{end}}
+      {{range .Stats.UsageByService}}<tr><td data-label="Сервис"><a class="service-link" href="/admin/services/{{.Service}}"><i class="service-icon {{.Service}}"></i>{{.Service}}</a></td><td data-label="Запросы" class="numeric">{{formatNumber .Requests}}</td><td data-label="Пользователи" class="numeric">{{formatNumber .Users}}</td><td data-label="Передано">{{formatBytes .Bytes}}</td><td data-label="Ошибки"><span class="error-count {{if gt .Errors 0}}has-errors{{end}}">{{formatNumber .Errors}}</span></td></tr>{{else}}<tr><td class="muted" colspan="5">Нет данных</td></tr>{{end}}
       </tbody></table>
     </div>
     <div class="panel">

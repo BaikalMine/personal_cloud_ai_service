@@ -18,6 +18,12 @@
     <a class="brand-mark" href="/app" aria-label="Главная AI Gateway">AI</a>
     <a class="brand" href="/app"><b>AI Gateway</b><span>Рабочее пространство</span></a>
   </div>
+  {{if .CurrentUser}}{{if eq .CurrentUser.Role "admin"}}
+  <form method="post" action="/account/quick-generation-priority" class="header-priority-form" data-quick-generation-priority title="При включении быстрая генерация временно приостанавливает майнинг для вашей учётной записи.">
+	<input type="hidden" name="csrf" value="{{.CSRF}}">
+	<label class="header-priority-toggle"><input name="enabled" type="checkbox" value="on" {{if .CurrentUser.PauseMiningForQuickGeneration}}checked{{end}}><span class="header-priority-switch" aria-hidden="true"></span><span>Приоритет</span></label>
+  </form>
+  {{end}}{{end}}
   <button class="menu-toggle" type="button" aria-label="Открыть меню" aria-controls="user-navigation" aria-expanded="false"><i></i><i></i><i></i></button>
   <div class="topbar-menu" id="user-navigation">
     <nav class="primary-nav" aria-label="Основная навигация">
@@ -25,11 +31,12 @@
       {{if .CurrentUser}}{{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseQuickGeneration}}<a href="/generate">Быстрая генерация</a>{{end}}{{end}}
       {{if .CurrentUser}}{{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseComfyUI}}<a href="/comfyui/" target="_blank" rel="noopener">ComfyUI</a>{{end}}{{end}}
       {{if .CurrentUser}}{{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseOpenWebUI}}<a href="/openwebui/" target="_blank" rel="noopener">OpenWebUI</a>{{end}}{{end}}
+      <a href="/account/profile">Профиль</a>
       <a href="/account/sessions">Сессии</a>
       {{if .CurrentUser}}{{if eq .CurrentUser.Role "admin"}}<a href="{{.AdminBaseURL}}/admin">Администрирование</a>{{end}}{{end}}
     </nav>
     <div class="user-menu">
-      {{if .CurrentUser}}<a class="account-chip" href="/account/password"><span class="account-indicator"></span><span><b>{{.CurrentUser.Username}}</b><small>{{roleLabel .CurrentUser.Role}}</small></span></a>{{end}}
+      {{if .CurrentUser}}<a class="account-chip" href="/account/profile"><span class="account-indicator"></span><span><b>{{.CurrentUser.Username}}</b><small>{{roleLabel .CurrentUser.Role}}</small></span></a>{{end}}
       <form method="post" action="/logout" class="nav-form"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit" class="nav-button">Выйти</button></form>
     </div>
   </div>
@@ -64,6 +71,7 @@
   <div class="admin-actions">
     {{if .CurrentUser}}<div class="admin-account"><span class="account-indicator"></span><span><b>{{.CurrentUser.Username}}</b><small>{{roleLabel .CurrentUser.Role}}</small></span></div>{{end}}
     <a href="{{.PublicBaseURL}}/app">Режим пользователя</a>
+    <a href="/account/profile">Профиль</a>
     <a href="/account/password">Сменить пароль</a>
     <form method="post" action="/logout" class="nav-form"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit" class="nav-button">Выйти</button></form>
   </div>

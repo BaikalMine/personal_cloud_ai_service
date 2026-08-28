@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"mime/multipart"
 	"net"
 	"net/http"
@@ -176,26 +177,27 @@ func TestRewriteLocationAddsGatewayPrefix(t *testing.T) {
 	}
 }
 
-func TestCookieSecureAllowsLoopbackHTTPOnly(t *testing.T) {
-	a := &App{cfg: Config{CookieSecure: true}}
+func TestCookieSecureUsesPublicDomainOnly(t *testing.T) {
+	publicURL, err := url.Parse("https://ai.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &App{cfg: Config{CookieSecure: true, PublicURL: publicURL}}
 	local := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8090/login", nil)
-	local.RemoteAddr = "127.0.0.1:50000"
 	if got := a.sessionCookie(local, "token").Secure; got {
-		t.Fatal("loopback HTTP cookie must not be Secure")
+		t.Fatal("loopback LAN cookie must allow direct HTTP access")
 	}
 	lan := httptest.NewRequest(http.MethodGet, "http://10.0.0.42:8090/login", nil)
-	lan.RemoteAddr = "10.0.0.108:50000"
 	if got := a.sessionCookie(lan, "token").Secure; got {
-		t.Fatal("private LAN HTTP cookie must not be Secure")
+		t.Fatal("private LAN cookie must allow direct HTTP access")
 	}
-	spoofedHost := httptest.NewRequest(http.MethodGet, "http://10.0.0.42:8090/login", nil)
-	spoofedHost.RemoteAddr = "203.0.113.10:50000"
-	if got := a.sessionCookie(spoofedHost, "token").Secure; !got {
-		t.Fatal("public HTTP client must not disable Secure by spoofing a private Host")
-	}
-	public := httptest.NewRequest(http.MethodGet, "https://ai.example/login", nil)
+	public := httptest.NewRequest(http.MethodGet, "http://ai.example/login", nil)
 	if got := a.sessionCookie(public, "token").Secure; !got {
-		t.Fatal("public HTTPS cookie must be Secure")
+		t.Fatal("public-domain cookie must remain Secure")
+	}
+	publicWithPort := httptest.NewRequest(http.MethodGet, "http://ai.example:8090/login", nil)
+	if got := a.sessionCookie(publicWithPort, "token").Secure; !got {
+		t.Fatal("public-domain cookie with port must remain Secure")
 	}
 }
 
@@ -222,6 +224,39 @@ func TestLogoutRequiresPost(t *testing.T) {
 	if got := response.Header().Get("Allow"); got != http.MethodPost {
 		t.Fatalf("Allow = %q, want POST", got)
 	}
+}
+
+func TestAccountQuickGenerationPriorityRequiresAdminPostAndCSRF(t *testing.T) {
+	app := &App{csrfSigner: security.NewCSRFSigner("priority-csrf-secret")}
+
+	t.Run("GET is rejected", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodGet, "/account/quick-generation-priority", nil)
+		response := httptest.NewRecorder()
+		app.handleAccountQuickGenerationPriority(response, request)
+		if response.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("status = %d, want %d", response.Code, http.StatusMethodNotAllowed)
+		}
+	})
+
+	t.Run("regular user is rejected", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodPost, "/account/quick-generation-priority", nil)
+		request = request.WithContext(context.WithValue(request.Context(), userCtxKey, &User{ID: 7, Role: "user"}))
+		response := httptest.NewRecorder()
+		app.handleAccountQuickGenerationPriority(response, request)
+		if response.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want %d", response.Code, http.StatusForbidden)
+		}
+	})
+
+	t.Run("administrator without CSRF is rejected", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodPost, "/account/quick-generation-priority", nil)
+		request = request.WithContext(context.WithValue(request.Context(), userCtxKey, &User{ID: 1, Role: "admin"}))
+		response := httptest.NewRecorder()
+		app.handleAccountQuickGenerationPriority(response, request)
+		if response.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want %d", response.Code, http.StatusForbidden)
+		}
+	})
 }
 
 func TestSafeAdminMediaType(t *testing.T) {

@@ -14,6 +14,12 @@ func (a *App) runMaintenance(ctx context.Context) {
 	a.backfillComfyContentMedia(backfillCtx)
 	a.backfillContentMediaHashes(backfillCtx)
 	backfillCancel()
+	miningPauseCtx, miningPauseCancel := context.WithTimeout(ctx, 15*time.Second)
+	a.refreshQuickGenerationMiningLeases(miningPauseCtx)
+	miningPauseCancel()
+	metricCtx, metricCancel := context.WithTimeout(ctx, 8*time.Second)
+	a.captureHostMetric(metricCtx)
+	metricCancel()
 	ticker := time.NewTicker(maintenanceInterval)
 	defer ticker.Stop()
 	generationTicker := time.NewTicker(generationRefreshInterval)
@@ -25,7 +31,11 @@ func (a *App) runMaintenance(ctx context.Context) {
 		case <-generationTicker.C:
 			refreshCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			a.refreshTrackedGenerationStatuses(refreshCtx)
+			a.refreshQuickGenerationMiningLeases(refreshCtx)
 			cancel()
+			metricCtx, metricCancel := context.WithTimeout(ctx, 8*time.Second)
+			a.captureHostMetric(metricCtx)
+			metricCancel()
 		case <-ticker.C:
 			backfillCtx, backfillCancel := context.WithTimeout(ctx, 2*time.Minute)
 			a.backfillComfyContentMedia(backfillCtx)
@@ -54,14 +64,18 @@ func (a *App) runMaintenance(ctx context.Context) {
 				log.Printf("deleted %d expired sessions", deleted)
 			}
 			deletedContent, err := a.store.DeleteExpiredContent(cleanupCtx)
-			cancel()
 			if err != nil {
+				cancel()
 				log.Printf("delete expired content: %v", err)
 				continue
 			}
 			if deletedContent > 0 {
 				log.Printf("deleted %d expired content events", deletedContent)
 			}
+			if _, err := a.store.DeleteHostMetricsBefore(cleanupCtx, time.Now().Add(-hostMetricRetention)); err != nil {
+				log.Printf("delete expired host metrics: %v", err)
+			}
+			cancel()
 		}
 	}
 }

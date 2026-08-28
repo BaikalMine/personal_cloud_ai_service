@@ -27,10 +27,14 @@ type Config struct {
 	AdminAddr                 string
 	ComfyUIUpstream           *url.URL
 	OpenWebUIUpstream         *url.URL
+	OllamaUpstream            *url.URL
+	PromptAssistantModel      string
 	ComfyUIUpstreamAuthHeader string
 	OpenWebUIUpstreamAuth     string
 	MiningAgentURL            *url.URL
 	MiningAgentToken          string
+	SystemMonitorAgentURL     *url.URL
+	SystemMonitorAgentToken   string
 	UpdateAgentURL            *url.URL
 	UpdateAgentToken          string
 	TrustedProxies            []*net.IPNet
@@ -58,9 +62,21 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("OPENWEBUI_UPSTREAM: %w", err)
 	}
+	ollama, err := parseUpstream(env("OLLAMA_UPSTREAM", "http://host.docker.internal:11434"))
+	if err != nil {
+		return Config{}, fmt.Errorf("OLLAMA_UPSTREAM: %w", err)
+	}
+	promptAssistantModel := strings.TrimSpace(env("PROMPT_ASSISTANT_MODEL", "huihui_ai/gemma-4-abliterated:e4b"))
+	if promptAssistantModel == "" || len(promptAssistantModel) > 256 {
+		return Config{}, fmt.Errorf("PROMPT_ASSISTANT_MODEL must contain between 1 and 256 characters")
+	}
 	miningAgentURL, err := parseBaseURL(env("MINING_AGENT_URL", "http://host.docker.internal:8092"))
 	if err != nil {
 		return Config{}, fmt.Errorf("MINING_AGENT_URL: %w", err)
+	}
+	systemMonitorAgentURL, err := parseBaseURL(env("SYSTEM_MONITOR_AGENT_URL", "http://host.docker.internal:8094"))
+	if err != nil {
+		return Config{}, fmt.Errorf("SYSTEM_MONITOR_AGENT_URL: %w", err)
 	}
 	updateAgentURL, err := parseBaseURL(env("UPDATE_AGENT_URL", "http://host.docker.internal:8093"))
 	if err != nil {
@@ -112,6 +128,7 @@ func Load() (Config, error) {
 	adminPassword := requiredEnv("ADMIN_PASSWORD")
 	sessionSecret := requiredEnv("SESSION_SECRET")
 	miningAgentToken := requiredEnv("MINING_AGENT_TOKEN")
+	systemMonitorAgentToken := strings.TrimSpace(env("SYSTEM_MONITOR_AGENT_TOKEN", miningAgentToken))
 	updateAgentToken := requiredEnv("UPDATE_AGENT_TOKEN")
 	if databaseURL == "" {
 		return Config{}, fmt.Errorf("DATABASE_URL is required")
@@ -127,6 +144,9 @@ func Load() (Config, error) {
 	}
 	if miningAgentToken != "" && len(miningAgentToken) < 32 {
 		return Config{}, fmt.Errorf("MINING_AGENT_TOKEN must be at least 32 characters when configured")
+	}
+	if systemMonitorAgentToken != "" && len(systemMonitorAgentToken) < 32 {
+		return Config{}, fmt.Errorf("SYSTEM_MONITOR_AGENT_TOKEN must be at least 32 characters when configured")
 	}
 	if updateAgentToken != "" && len(updateAgentToken) < 32 {
 		return Config{}, fmt.Errorf("UPDATE_AGENT_TOKEN must be at least 32 characters when configured")
@@ -159,10 +179,14 @@ func Load() (Config, error) {
 		AdminAddr:                 env("ADMIN_ADDR", ":8091"),
 		ComfyUIUpstream:           comfy,
 		OpenWebUIUpstream:         openWebUI,
+		OllamaUpstream:            ollama,
+		PromptAssistantModel:      promptAssistantModel,
 		ComfyUIUpstreamAuthHeader: comfyAuth,
 		OpenWebUIUpstreamAuth:     openWebUIAuth,
 		MiningAgentURL:            miningAgentURL,
 		MiningAgentToken:          miningAgentToken,
+		SystemMonitorAgentURL:     systemMonitorAgentURL,
+		SystemMonitorAgentToken:   systemMonitorAgentToken,
 		UpdateAgentURL:            updateAgentURL,
 		UpdateAgentToken:          updateAgentToken,
 		TrustedProxies:            trustedProxies,

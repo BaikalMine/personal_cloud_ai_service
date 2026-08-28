@@ -5,6 +5,8 @@ package miningagent
 import (
 	"archive/zip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -46,7 +48,7 @@ func (c *windowsController) Update(ctx context.Context, request mining.UpdateReq
 		return result, errors.New("обновление требует отдельной папки майнера внутри корня майнинга")
 	}
 
-	archivePath, archiveName, err := downloadMinerArchive(ctx, request.ArchiveURL)
+	archivePath, archiveName, err := downloadMinerArchive(ctx, request.ArchiveURL, request.ArchiveSHA256)
 	if err != nil {
 		return result, err
 	}
@@ -120,7 +122,7 @@ func (c *windowsController) Update(ctx context.Context, request mining.UpdateReq
 	return result, nil
 }
 
-func downloadMinerArchive(ctx context.Context, rawURL string) (string, string, error) {
+func downloadMinerArchive(ctx context.Context, rawURL, expectedSHA256 string) (string, string, error) {
 	parsed, err := validateArchiveURL(rawURL)
 	if err != nil {
 		return "", "", err
@@ -166,12 +168,16 @@ func downloadMinerArchive(ctx context.Context, rawURL string) (string, string, e
 			_ = os.Remove(temporaryPath)
 		}
 	}()
-	written, err := io.Copy(temporary, io.LimitReader(response.Body, maxMinerArchiveBytes+1))
+	digest := sha256.New()
+	written, err := io.Copy(io.MultiWriter(temporary, digest), io.LimitReader(response.Body, maxMinerArchiveBytes+1))
 	if err != nil {
 		return "", "", fmt.Errorf("сохранение архива: %w", err)
 	}
 	if written > maxMinerArchiveBytes {
 		return "", "", errors.New("архив майнера больше 1 ГБ")
+	}
+	if actual := hex.EncodeToString(digest.Sum(nil)); !strings.EqualFold(actual, expectedSHA256) {
+		return "", "", errors.New("SHA-256 скачанного архива не совпадает с указанным")
 	}
 	if err := temporary.Close(); err != nil {
 		return "", "", fmt.Errorf("закрытие временного архива: %w", err)

@@ -14,6 +14,7 @@ import (
 	contentcrypto "ai-access-gateway/internal/content"
 	"ai-access-gateway/internal/domain"
 	"ai-access-gateway/internal/mining"
+	"ai-access-gateway/internal/promptassistant"
 	"ai-access-gateway/internal/security"
 	"ai-access-gateway/internal/store"
 	"ai-access-gateway/internal/updates"
@@ -41,12 +42,15 @@ type App struct {
 	csrfSigner        *security.CSRFSigner
 	store             *store.Store
 	mining            *mining.Client
+	systemMonitor     *mining.Client
+	promptAssistant   *promptassistant.Client
 	updates           *updates.Client
 	contentCipher     *contentcrypto.Cipher
 	mediaCaptureSlots chan struct{}
 	adminMediaSlots   chan struct{}
 	comfyUploadSlots  chan struct{}
 	generationMu      sync.Mutex
+	miningPauseMu     sync.Mutex
 	generationJobs    map[string]*generationJob
 
 	requestsTotal atomic.Int64
@@ -88,6 +92,19 @@ type ServiceStatus struct {
 type TopUser = domain.TopUser
 
 type AdminStats = domain.AdminStats
+
+type OnlineUser = domain.OnlineUser
+
+type HostMetric = domain.HostMetric
+
+type SystemOverview struct {
+	DatabaseBytes  int64        `json:"database_bytes"`
+	OnlineUsers    []OnlineUser `json:"online_users"`
+	Host           *HostMetric  `json:"host,omitempty"`
+	History        []HostMetric `json:"history"`
+	AgentAvailable bool         `json:"agent_available"`
+	AgentMessage   string       `json:"agent_message,omitempty"`
+}
 
 type UserRow = domain.UserRow
 
@@ -133,16 +150,26 @@ type ContentEventView struct {
 	Prompt     string
 	Response   string
 	Metadata   string
+	Assistant  *ContentAssistantView
 	MediaCount int64
 	Media      []domain.ContentMediaSummary
 	CreatedAt  time.Time
 	ExpiresAt  time.Time
 }
 
+type ContentAssistantView struct {
+	Applied        bool
+	Template       string
+	Think          bool
+	OriginalPrompt string
+	Suggestion     string
+}
+
 type ContentOverview struct {
 	Total     int
 	ComfyUI   int
 	OpenWebUI int
+	Ollama    int
 	WithMedia int
 }
 

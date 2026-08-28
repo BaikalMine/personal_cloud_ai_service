@@ -14,7 +14,7 @@
 
   <section class="generation-progress" aria-label="Шаги генерации">
     <span class="generation-step is-active" data-progress="1"><b>1</b><span>Сценарий</span></span>
-    <i></i><span class="generation-step" data-progress="2"><b>2</b><span>Workflow</span></span>
+    <i></i><span class="generation-step" data-progress="2"><b>2</b><span>Схема генерации</span></span>
     <i></i><span class="generation-step" data-progress="3"><b>3</b><span>Промт и параметры</span></span>
   </section>
 
@@ -30,12 +30,12 @@
     <input type="hidden" name="input_image_4" id="input-image-4">
 
     <section class="generation-panel is-visible" data-step="1">
-      <div class="panel-heading"><div><p class="section-kicker">Шаг 1 из 3</p><h2>Что будем делать?</h2><p class="panel-intro">Сначала выберите сценарий, затем подходящий готовый workflow.</p></div></div>
+      <div class="panel-heading"><div><p class="section-kicker">Шаг 1 из 3</p><h2>Что будем делать?</h2><p class="panel-intro">Сначала выберите сценарий, затем подходящую готовую схему генерации.</p></div></div>
       <div class="workflow-choices">
         {{range .Workflows}}
-        <button class="workflow-choice scenario-choice" type="button" data-workflow-id="{{.ID}}" data-requires-image="{{.RequiresImage}}">
-          <span class="workflow-choice-icon">{{if .RequiresImage}}IMG{{else}}TXT{{end}}</span>
-          <span><strong>{{.Name}}</strong><small>{{.Description}}</small></span>
+        <button class="workflow-choice scenario-choice" type="button" data-workflow-id="{{.ID}}" data-requires-image="{{.RequiresImage}}" data-allows-images="{{.AllowsImages}}" {{if .Restricted}}disabled{{end}}>
+          <span class="workflow-choice-icon">{{if .AllowsImages}}VID{{else if .RequiresImage}}IMG{{else}}TXT{{end}}</span>
+          <span><strong>{{.Name}}</strong><small>{{.Description}}</small>{{if .Restriction}}<small class="workflow-access-note">{{.Restriction}}</small>{{end}}</span>
           <span class="workflow-choice-check" aria-hidden="true">&#10003;</span>
         </button>
         {{end}}
@@ -43,17 +43,20 @@
     </section>
 
     <section class="generation-panel" data-step="2">
-      <div class="panel-heading"><div><p class="section-kicker">Шаг 2 из 3</p><h2>Выберите workflow</h2><p class="panel-intro">Для быстрой генерации Gateway вручную ограничивает модели проверенным белым списком каждого workflow.</p></div></div>
+      <div class="panel-heading"><div><p class="section-kicker">Шаг 2 из 3</p><h2>Выберите схему генерации</h2><p class="panel-intro">Для быстрой генерации Gateway использует проверенный список моделей для каждой схемы.</p></div></div>
       <div class="workflow-choices generation-workflow-choices">
         {{range .GenerationPresets}}
-        <button class="workflow-choice generation-workflow-choice" type="button" data-preset-id="{{.ID}}" data-template-id="{{.TemplateID}}" data-family="{{.Family}}" data-default-model-id="{{.ModelID}}" data-available="{{.Available}}" data-default-steps="{{.DefaultSteps}}" data-default-cfg="{{.DefaultCFG}}" data-default-sampler="{{.DefaultSampler}}" data-default-scheduler="{{.DefaultScheduler}}" data-default-lora-strength="{{.LoraStrength}}" data-requires-image="{{.RequiresImage}}" data-max-input-images="{{.MaxInputImages}}" {{if not .Available}}disabled{{end}}>
+        <button class="workflow-choice generation-workflow-choice" type="button" data-preset-id="{{.ID}}" data-template-id="{{.TemplateID}}" data-family="{{.Family}}" data-default-model-id="{{.ModelID}}" data-available="{{if and .Available (not .Restricted)}}true{{else}}false{{end}}" data-default-steps="{{.DefaultSteps}}" data-default-cfg="{{.DefaultCFG}}" data-default-sampler="{{.DefaultSampler}}" data-default-scheduler="{{.DefaultScheduler}}" data-default-lora-strength="{{.LoraStrength}}" data-requires-image="{{.RequiresImage}}" data-allows-images="{{.AllowsImages}}" data-max-input-images="{{.MaxInputImages}}" {{if or (not .Available) .Restricted}}disabled{{end}}>
           <span class="workflow-choice-icon">WF</span>
-          <span><strong>{{.Name}}</strong><small>{{.Description}}</small><small class="workflow-bound-model">Разрешённых diffusion-моделей: {{.ModelCount}}{{if .MaxInputImages}} · фото: до {{.MaxInputImages}}{{end}}{{if .Reason}} · {{.Reason}}{{end}}</small></span>
+          <span><strong>{{.Name}}</strong><small>{{.Description}}</small><small class="workflow-bound-model">Доступных диффузионных моделей: {{.ModelCount}}{{if .MaxInputImages}} · фото: до {{.MaxInputImages}}{{end}}{{if .Reason}} · {{.Reason}}{{end}}{{if .Restriction}} · {{.Restriction}}{{end}}</small></span>
           <span class="workflow-choice-check" aria-hidden="true">&#10003;</span>
         </button>
         {{end}}
       </div>
-      <p class="generation-model-note" id="generation-workflow-note" hidden>Для выбранного сценария пока нет готового workflow.</p>
+      <p class="generation-model-note" id="generation-workflow-note" hidden>Для выбранного сценария пока нет готовой схемы генерации.</p>
+      <section class="minimax-video-mode" id="minimax-video-mode" hidden>
+        <label>Режим MiniMax H3<select name="video_mode" id="minimax-video-mode-select"><option value="frames">Первый кадр и опциональный последний</option><option value="references">Первый кадр и до трёх референсов</option></select><small class="field-hint" id="minimax-video-mode-hint">Первый кадр обязателен. Второй можно добавить как последний кадр ролика.</small></label>
+      </section>
       <div id="image-source-fields" hidden>
         <p class="image-source-note" id="image-source-note">Первое фото обязательно. Дополнительные файлы используются как референсы.</p>
         <div class="source-image-grid">
@@ -79,21 +82,43 @@
     </section>
 
     <section class="generation-panel" data-step="3">
-      <div class="panel-heading"><div><p class="section-kicker">Шаг 3 из 3</p><h2>Промт и настройки</h2><p class="panel-intro">Промт и параметры workflow остаются на одном экране.</p></div></div>
+      <div class="panel-heading"><div><p class="section-kicker">Шаг 3 из 3</p><h2>Промт и настройки</h2><p class="panel-intro">Промт и параметры схемы генерации остаются на одном экране.</p></div></div>
       <div class="generation-prompt-fields">
         <label>Позитивный промт<textarea name="positive_prompt" id="positive-prompt" rows="6" maxlength="4000" placeholder="Например: портрет в мягком вечернем свете, высокая детализация" required></textarea></label>
         <label>Негативный промт<textarea name="negative_prompt" id="negative-prompt" rows="6" maxlength="4000" placeholder="Например: blurry, low quality, deformed hands"></textarea></label>
       </div>
+      <section class="prompt-assistant" id="prompt-assistant" aria-live="polite">
+        <label class="prompt-assistant-toggle"><input type="checkbox" id="prompt-assistant-enabled"><span><strong>Промт-ассистент</strong><small>Локальная модель подготовит вариант, но генерация начнётся только после вашего подтверждения.</small></span></label>
+        <div class="prompt-assistant-controls" id="prompt-assistant-controls" hidden>
+          <label>Шаблон ассистента<select id="prompt-assistant-template"><option value="workflow-default">Универсальный</option><option value="photographic">Редакционная фотография</option><option value="realistic">Естественный реализм</option><option value="anime">Иллюстрация и аниме</option><option value="nsfw">NSFW (Контент для взрослых)</option><option value="flux-edit" data-image-only>Перенос внешности и редактирование</option></select></label>
+          <label class="prompt-assistant-think"><input type="checkbox" id="prompt-assistant-think"><span>Режим рассуждений</span></label>
+          <button type="button" class="button ghost" id="prompt-assistant-improve">Подготовить вариант</button>
+          <p class="prompt-assistant-state" id="prompt-assistant-state">Вариант будет создан локальной моделью e4b и затем выгружен из видеопамяти.</p>
+          <div class="prompt-assistant-review" id="prompt-assistant-review" hidden>
+            <label>Вариант ассистента<textarea id="prompt-assistant-draft" rows="7" maxlength="4000"></textarea><small>Проверьте и при необходимости отредактируйте текст перед применением.</small></label>
+            <div class="prompt-assistant-actions"><button type="button" class="button" id="prompt-assistant-apply">Применить в промт</button><button type="button" class="button ghost" id="prompt-assistant-keep">Оставить мой промт</button></div>
+          </div>
+        </div>
+      </section>
       <section class="generation-editor-profile" id="generation-editor-profile" hidden aria-live="polite"><span class="workflow-choice-icon">IMG</span><div><strong id="generation-editor-profile-title"></strong><small id="generation-editor-profile-description"></small></div></section>
       <section class="generation-selected-image" id="generation-selected-image" hidden aria-live="polite"><img id="generation-selected-image-preview" alt="Выбранное основное фото"><div><span>Основное фото</span><strong id="generation-selected-image-name"></strong><small id="generation-selected-image-details"></small></div></section>
-      <label>Diffusion-модель
+      <label>Диффузионная модель
         <select name="model" id="generation-model" required><option value="">Выберите модель</option>{{range .QuickModels}}<option value="{{.ID}}" data-family="{{.Family}}" data-available="{{.Available}}" data-default-steps="{{.DefaultSteps}}" data-default-cfg="{{.DefaultCFG}}" data-default-sampler="{{.DefaultSampler}}" data-default-scheduler="{{.DefaultScheduler}}" data-default-lora-strength="{{.LoraStrength}}" {{if not .Available}}disabled{{end}}>{{.DisplayName}}{{if .Reason}} — {{.Reason}}{{end}}</option>{{end}}</select>
-        <small class="field-hint">Список вручную ограничен моделями, проверенными для выбранного workflow.</small>
+        <small class="field-hint">Список ограничен моделями, проверенными для выбранной схемы.</small>
       </label>
       <div class="generation-primary-fields" id="generation-quality-field">
-        <label>Профиль качества<select id="generation-quality"><option value="balanced">Оптимальное · 1,9 Мп</option><option value="fast">Быстрое · 1,0 Мп</option><option value="maximum">Максимальное · 4,0 Мп</option></select></label>
+        <label>Профиль качества Krea2<select id="generation-quality"><option value="fast">Быстрое · 1,0 Мп</option><option value="balanced" selected>Оптимальное · 1,9 Мп</option><option value="krea-2-5">Детальное · 2,5 Мп</option><option value="krea-3-2">Высокое · 3,2 Мп</option><option value="maximum">Максимальное · 4,0 Мп</option><option value="krea-4-7">Максимум деталей · 4,7 Мп</option></select></label>
       </div>
-      <details class="generation-advanced" open><summary>Параметры workflow</summary><div class="workflow-settings">
+      <section class="workflow-settings-section minimax-video-settings" hidden>
+        <div class="workflow-settings-heading"><div><strong>MiniMax H3 · параметры видео</strong><small>Видео создаётся со звуком. Размеры заранее подобраны под модель и кратны 32 пикселям.</small></div></div>
+        <div class="generation-fields">
+          <label>Формат кадра<select name="video_resolution" id="minimax-video-resolution"><option value="portrait">9:16 · портрет · 768 × 1344</option><option value="landscape">16:9 · горизонтально · 1344 × 768</option><option value="square">1:1 · квадрат · 1024 × 1024</option></select></label>
+          <label>Длительность<select name="video_duration_seconds" id="minimax-video-duration"><option value="5">5 секунд</option><option value="10">10 секунд</option><option value="15">15 секунд</option></select></label>
+          <label>Шаги<input name="video_steps" id="minimax-video-steps" type="number" min="20" max="25" value="25"></label>
+          <label class="minimax-reference-field">Размер референсов<select name="video_reference_size" id="minimax-video-reference-size"><option value="match">По размеру кадра</option><option value="max">Максимальная детализация</option></select></label>
+        </div>
+      </section>
+      <details class="generation-advanced" open><summary>Параметры схемы генерации</summary><div class="workflow-settings">
         <section class="workflow-settings-section image-edit-field">
           <div class="workflow-settings-heading"><div><strong id="generation-edit-source-title">Привязка к исходному фото</strong><small id="generation-edit-source-description">Редактор получает оригинал напрямую: промт меняет только то, что вы попросили.</small></div></div>
           <div class="generation-fields">
@@ -118,19 +143,19 @@
           </div>
         </section>
         <section class="workflow-settings-section flux-edit-settings" data-workflow-panel="flux2">
-          <div class="workflow-settings-heading"><div><strong>Flux2 · семплирование</strong><small>Параметры LCSamplerConfigureSimplePipeOut из workflow Flux2 Редактирование.</small></div></div>
+          <div class="workflow-settings-heading"><div><strong>Flux2 · семплирование</strong><small>Параметры LCSamplerConfigureSimplePipeOut из схемы Flux2 Редактирование.</small></div></div>
           <div class="generation-fields">
             <label>Шаги<input name="steps" type="number" min="1" max="100" value="25"></label>
             <label>Шаги detailer<input name="flux_detailer_steps" type="number" min="0" max="100" value="25"></label>
-            <label>Denoise<input name="denoise" type="number" min="0.05" max="1" step="0.01" value="0.9"></label>
+            <label>Сила перерисовки<input name="denoise" type="number" min="0.05" max="1" step="0.01" value="0.9"></label>
             <label>CFG<input name="cfg" type="number" min="1" max="30" step="0.1" value="1"></label>
             <label>Сэмплер<select name="sampler"><option value="euler" selected>Euler</option><option value="euler_ancestral">Euler Ancestral</option><option value="dpmpp_2m">DPM++ 2M</option><option value="deis">DEIS</option></select></label>
             <label>Планировщик<select name="scheduler"><option value="normal" selected>Normal</option><option value="simple">Simple</option><option value="beta">Beta</option><option value="karras">Karras</option><option value="sgm_uniform">SGM Uniform</option><option value="exponential">Exponential</option></select></label>
-            <label>Seed<input name="seed" type="number" min="-1" value="-1"><small class="field-hint">-1 = случайный</small></label>
+            <label>Случайное число (seed)<input name="seed" type="number" min="-1" value="-1"><small class="field-hint">-1 = случайный</small></label>
           </div>
         </section>
         <section class="workflow-settings-section flux-edit-settings" data-workflow-panel="flux2">
-          <div class="workflow-settings-heading"><div><strong>Flux2 · conditioning</strong><small>Отдельные параметры Flux Guidance и Flux2 Klein Enhancer из исходного workflow.</small></div></div>
+          <div class="workflow-settings-heading"><div><strong>Flux2 · обработка промта</strong><small>Отдельные параметры Flux Guidance и Flux2 Klein Enhancer из исходной схемы.</small></div></div>
           <div class="generation-fields">
             <label>Flux Guidance<input name="flux_guidance" type="number" min="0" max="10" step="0.1" value="4"></label>
             <label>Active scale<input name="flux_active_scale" type="number" min="0" max="10" step="0.05" value="1"></label>
@@ -139,13 +164,13 @@
           </div>
         </section>
         <section class="workflow-settings-section flux-edit-settings" data-workflow-panel="flux2">
-          <div class="workflow-settings-heading"><div><strong>Flux2 · финальный апскейл</strong><small>Выберите необязательные ветки из исходного workflow. При двух проходах сначала используется Ultimate SD Upscale, затем SeedVR2.</small></div></div>
+          <div class="workflow-settings-heading"><div><strong>Flux2 · финальный апскейл</strong><small>Выберите необязательные ветки из исходной схемы. При двух проходах сначала используется Ultimate SD Upscale, затем SeedVR2.</small></div></div>
           <div class="generation-fields">
             <label>Апскейл после Flux2<select name="flux_upscale_mode" id="generation-flux-upscale-mode"><option value="none" selected>Без апскейла</option><option value="ultimate">Ultimate SD Upscale · 1,5×</option><option value="seedvr2">SeedVR2 · 2×</option><option value="both">Оба по очереди · 1,5× и 2×</option></select><small class="field-hint">SeedVR2 использует 7B-модель и ограничивает длинную сторону 4098 px.</small></label>
           </div>
         </section>
         <section class="workflow-settings-section flux-edit-settings" data-workflow-panel="flux2">
-          <div class="workflow-settings-heading"><div><strong>Flux2 · LoRA</strong><small>Совместимые LoRA из папки Flux2 подключаются в оригинальный Power LoRA Loader workflow.</small></div></div>
+          <div class="workflow-settings-heading"><div><strong>Flux2 · LoRA</strong><small>Совместимые LoRA из папки Flux2 подключаются в оригинальный Power LoRA Loader.</small></div></div>
           <div class="lora-list">
             <div class="lora-row flux-lora-row" data-lora-slots="flux"><span class="lora-number">1</span><label>LoRA<select name="lora_1" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .FluxLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label>Сила<input name="lora_model_strength_1" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label></div>
             <div class="lora-row flux-lora-row" data-lora-slots="flux" hidden><span class="lora-number">2</span><label>LoRA<select name="lora_2" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .FluxLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label>Сила<input name="lora_model_strength_2" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label></div>
@@ -160,7 +185,7 @@
           </div>
         </section>
         <section class="workflow-settings-section flux-edit-settings" data-workflow-panel="flux2">
-          <div class="workflow-settings-heading"><div><strong>Flux2 · кадр</strong><small>Параметры LCAspectRatioPipeOut из исходного workflow перед редактированием.</small></div></div>
+          <div class="workflow-settings-heading"><div><strong>Flux2 · кадр</strong><small>Параметры LCAspectRatioPipeOut из исходной схемы перед редактированием.</small></div></div>
           <div class="generation-fields">
             <label>Пресет кадра<select name="edit_aspect_preset"><option value="custom" selected>Свой размер</option><option value="Instagram Portrait - 1080x1350">Instagram Portrait</option><option value="Instagram Square - 1080x1080">Instagram Square</option><option value="Instagram Landscape - 1080x608">Instagram Landscape</option><option value="Instagram Stories/Reels - 1080x1920">Stories / Reels</option><option value="3:4 - 896x1152">3:4</option><option value="4:3 - 1152x896">4:3</option><option value="9:16 - 768x1344">9:16</option><option value="16:9 - 1344x768">16:9</option></select></label>
             <label>Ресайз<select name="edit_resize_method"><option value="lanczos" selected>Lanczos</option><option value="bicubic">Bicubic</option><option value="bilinear">Bilinear</option><option value="area">Area</option><option value="nearest-exact">Nearest exact</option></select></label>
@@ -171,7 +196,7 @@
           </div>
         </section>
         <section class="workflow-settings-section krea-edit-settings" data-workflow-panel="krea2">
-          <div class="workflow-settings-heading"><div><strong>Krea2 Identity Edit · основной проход</strong><small>Значения KSampler из вашего workflow: 20 шагов, CFG 8, Euler, Simple.</small></div></div>
+          <div class="workflow-settings-heading"><div><strong>Krea2 · основной проход</strong><small>Значения KSampler из вашей схемы: 20 шагов, CFG 8, Euler, Simple.</small></div></div>
           <div class="generation-fields">
             <label>Шаги<input name="steps" type="number" min="1" max="100" value="20"></label>
             <label>CFG<input name="cfg" type="number" min="1" max="30" step="0.1" value="8"></label>
@@ -205,7 +230,7 @@
           </div>
         </section>
         <section class="workflow-settings-section standard-main-settings">
-          <div class="workflow-settings-heading"><div><strong id="generation-main-pass-title">Основной проход</strong><small id="generation-main-pass-description">Параметры основного семплирования выбранного workflow.</small></div></div>
+          <div class="workflow-settings-heading"><div><strong id="generation-main-pass-title">Основной проход</strong><small id="generation-main-pass-description">Параметры основного семплирования выбранной схемы генерации.</small></div></div>
           <div class="generation-fields">
             <label>Шаги<input name="steps" id="generation-steps" type="number" min="1" max="100" value="25"></label>
             <label>CFG <span class="field-help" tabindex="0" data-tooltip="Сила следования промту. Слишком высокое значение может сделать результат неестественным.">?</span><input name="cfg" id="generation-cfg" type="number" min="1" max="30" step="0.5" value="7"></label>
@@ -232,7 +257,7 @@
           </div>
         </section>
         <section class="workflow-settings-section krea-workflow-field">
-          <div class="workflow-settings-heading"><div><strong>Апскейл <span class="field-help" tabindex="0" data-tooltip="Увеличивает картинку до итогового разрешения и добавляет детали. Авто denoise подбирает мягкую силу изменения по размеру кадра.">?</span></strong><small>Второй проход после масштабирования изображения.</small></div><label class="setting-toggle krea-text-workflow-field"><input name="upscale_auto_denoise" id="generation-auto-denoise" type="checkbox" value="true" checked><span>Авто denoise</span></label></div>
+          <div class="workflow-settings-heading"><div><strong>Апскейл <span class="field-help" tabindex="0" data-tooltip="Увеличивает картинку до итогового разрешения и добавляет детали. Автоматическая сила перерисовки подбирает мягкое значение по размеру кадра.">?</span></strong><small>Второй проход после масштабирования изображения.</small></div><label class="setting-toggle krea-text-workflow-field"><input name="upscale_auto_denoise" id="generation-auto-denoise" type="checkbox" value="true" checked><span>Автонастройка перерисовки</span></label></div>
           <div class="generation-fields"><label>Шаги<input name="upscale_steps" id="generation-upscale-steps" type="number" min="1" max="12" value="5"></label><label>Сэмплер<select name="upscale_sampler" id="generation-upscale-sampler"><option value="euler_ancestral" selected>Euler Ancestral</option><option value="euler">Euler</option><option value="dpmpp_2m">DPM++ 2M</option><option value="dpmpp_2m_sde">DPM++ 2M SDE</option></select></label><label>Denoise <span class="field-help" tabindex="0" data-tooltip="Насколько апскейл может изменить исходный результат. Низкое значение сохраняет композицию, высокое сильнее перерисовывает её.">?</span><input name="upscale_denoise" id="generation-upscale-denoise" type="number" min="0.01" max="0.5" step="0.01" value="0.18"></label></div>
         </section>
         <section class="workflow-settings-section krea-text-workflow-field">
@@ -256,14 +281,18 @@
       <div class="generation-run-progress-track" role="progressbar" id="generation-progressbar" aria-label="Ход генерации" aria-valuemin="0" aria-valuemax="100"><span id="generation-progressbar-fill"></span></div>
     </div>
     <div class="generation-output-grid" id="generation-output-grid"></div>
+    <div class="generation-result-actions" id="generation-result-actions" hidden>
+      <button type="button" class="button ghost" id="generation-retry">Повторить</button>
+      <button type="button" class="button danger" id="generation-cancel">Отменить генерацию</button>
+    </div>
   </section>
   {{if .RecentGenerationMedia}}
   <section class="generation-library panel" id="my-results">
     <div class="panel-heading"><div><p class="section-kicker">Моя галерея</p><h2>Последние результаты</h2><p class="panel-intro">Результаты доступны в вашем профиле 24 часа, затем удаляются без возможности восстановления.</p></div></div>
-    <div class="generation-output-grid">
+    <div class="generation-output-grid generation-library-grid">
       {{range .RecentGenerationMedia}}
       <figure class="generation-output generation-library-item">
-        {{if eq .MediaType "video"}}<video controls preload="metadata" src="{{.URL}}"></video>{{else}}<button class="generation-output-preview" type="button" data-generation-library-item data-url="{{.URL}}" data-filename="{{.Filename}}"><img loading="lazy" src="{{.URL}}" alt="Результат генерации"></button>{{end}}
+        {{if eq .MediaType "video"}}<button class="generation-output-preview generation-video-preview" type="button" data-generation-library-video data-url="{{.URL}}" data-filename="{{.Filename}}" title="Открыть видеоплеер"><video muted loop playsinline preload="metadata" src="{{.URL}}"></video><span class="generation-video-play" aria-hidden="true">▶</span></button>{{else}}<button class="generation-output-preview" type="button" data-generation-library-item data-url="{{.URL}}" data-filename="{{.Filename}}"><img loading="lazy" src="{{.URL}}" alt="Результат генерации"></button>{{end}}
         <figcaption><span>{{.Filename}}</span><div class="generation-card-actions"><time class="generation-expiry" data-generation-expiry="{{.ExpiresUnix}}">Вычисляем срок хранения</time><form method="post" action="/generate/library/hide" data-generation-hide-form><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="media_id" value="{{.ID}}"><button class="generation-hide" type="submit">Убрать из моей галереи</button></form></div></figcaption>
       </figure>
       {{end}}
@@ -275,6 +304,7 @@
     <div class="generation-lightbox-window">
       <div class="generation-lightbox-toolbar"><span id="generation-lightbox-name"></span><a class="button generation-lightbox-download" id="generation-lightbox-download" download>Скачать оригинал</a><button class="generation-lightbox-close" type="button" data-lightbox-close aria-label="Закрыть">&#10005;</button></div>
       <img id="generation-lightbox-image" alt="Результат генерации в полном размере">
+      <video id="generation-lightbox-video" controls playsinline hidden></video>
     </div>
   </div>
 </main>

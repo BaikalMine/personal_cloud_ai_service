@@ -15,6 +15,7 @@ const (
 	modelFamilyCheckpoint = "checkpoint"
 	modelFamilyKrea2      = "krea2"
 	modelFamilyFlux2      = "flux2"
+	modelFamilyMiniMaxH3  = "minimax_h3"
 )
 
 type generationModel struct {
@@ -26,6 +27,8 @@ type generationModel struct {
 	Reason           string
 	TextEncoder      string
 	VAE              string
+	AudioVAE         string
+	ReferenceModel   string
 	Lora             string
 	LoraStrength     float64
 	IdentityLora     string
@@ -74,6 +77,10 @@ type generationPreset struct {
 	Available        bool
 	Reason           string
 	RequiresImage    bool
+	AllowsImages     bool
+	AdminOnly        bool
+	Restricted       bool
+	Restriction      string
 	MaxInputImages   int
 	DefaultSteps     int
 	DefaultCFG       float64
@@ -173,8 +180,20 @@ func buildGenerationModelCatalog(info map[string]comfyNodeInfo) generationModelC
 		func(name string) bool { return strings.EqualFold(name, "full_encoder_small_decoder.safetensors") },
 		func(name string) bool { return strings.EqualFold(name, "flux2-vae.safetensors") },
 	)
+	miniMaxEncoder := firstMatchingModel(encoders,
+		func(name string) bool {
+			return strings.EqualFold(name, "MiniMax\\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors")
+		},
+		func(name string) bool {
+			value := strings.ToLower(name)
+			return strings.Contains(value, "minimax") && strings.Contains(value, "qwen")
+		},
+	)
+	miniMaxVideoVAE := exactModel(vaes, "MiniMax\\minimax_h3_video_vae_fp16.safetensors")
+	miniMaxAudioVAE := exactModel(vaes, "MiniMax\\minimax_h3_audio_vae_fp32.safetensors")
+	miniMaxReferenceModel := exactModel(diffusion, "MiniMax\\MiniMax_H3_Ref2VA_pruned_int8_convrot.safetensors")
 
-	var kreaModels, fluxModels []generationModel
+	var kreaModels, fluxModels, miniMaxModels []generationModel
 	for _, name := range diffusion {
 		lower := strings.ToLower(name)
 		switch {
@@ -203,6 +222,18 @@ func buildGenerationModelCatalog(info map[string]comfyNodeInfo) generationModelC
 				model.Reason = missingGenerationDependencies(fluxEncoder, fluxVAE, "Qwen3 8B text encoder", "Flux 2 VAE")
 			}
 			fluxModels = append(fluxModels, model)
+		case strings.Contains(lower, "minimax_h3_fl2va"):
+			model := generationModel{
+				ID: generationModelID(modelFamilyMiniMaxH3, name), Name: name, DisplayName: "MiniMax H3 FL2VA", Family: modelFamilyMiniMaxH3,
+				TextEncoder: miniMaxEncoder, VAE: miniMaxVideoVAE, AudioVAE: miniMaxAudioVAE, ReferenceModel: miniMaxReferenceModel,
+				DefaultSteps: 25, DefaultCFG: 1, DefaultSampler: "res_multistep", DefaultScheduler: "simple",
+			}
+			model.Available = miniMaxEncoder != "" && miniMaxVideoVAE != "" && miniMaxAudioVAE != "" && miniMaxReferenceModel != "" && hasGenerationNodes(info,
+				"MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo", "MiniMaxH3SigmaShift", "MiniMaxH3MemoryEfficientSageAttentionPatch", "VHS_VideoCombine")
+			if !model.Available {
+				model.Reason = missingGenerationDependencies(miniMaxEncoder, miniMaxVideoVAE, "MiniMax H3 Qwen3-VL encoder", "MiniMax H3 video VAE")
+			}
+			miniMaxModels = append(miniMaxModels, model)
 		}
 	}
 	if len(kreaModels) > 0 {
@@ -210,6 +241,9 @@ func buildGenerationModelCatalog(info map[string]comfyNodeInfo) generationModelC
 	}
 	if len(fluxModels) > 0 {
 		catalog.Groups = append(catalog.Groups, generationModelGroup{Name: "Flux 2", Models: fluxModels})
+	}
+	if len(miniMaxModels) > 0 {
+		catalog.Groups = append(catalog.Groups, generationModelGroup{Name: "MiniMax H3", Models: miniMaxModels})
 	}
 	for _, group := range catalog.Groups {
 		for _, model := range group.Models {
@@ -338,7 +372,7 @@ func buildGenerationPresets(catalog generationModelCatalog) []generationPreset {
 			}
 		}
 	}
-	presets := make([]generationPreset, 0, 3)
+	presets := make([]generationPreset, 0, 4)
 	if krea != nil {
 		preset := presetFromModel("photoflow-krea2", "text-to-image", "PhotoFlow Krea2",
 			"Двухэтапная генерация Krea2 с апскейлом и финальной детализацией.", *krea, false)
@@ -346,7 +380,7 @@ func buildGenerationPresets(catalog generationModelCatalog) []generationPreset {
 		presets = append(presets, preset)
 		if krea.SupportsImage {
 			edit := presetFromModel("photoflow-krea2-edit", "image-to-image", "Krea 2: редактирование",
-				"Identity Edit: сохраняет исходное фото и точно применяет инструкцию с качественным апскейлом.", *krea, true)
+				"Сохраняет внешность на исходном фото и точно применяет инструкцию с качественным апскейлом.", *krea, true)
 			// This is a separate workflow from text PhotoFlow. Its saved KSampler
 			// uses 20 steps, CFG 8, Euler and Simple.
 			edit.DefaultSteps = 20
@@ -360,9 +394,33 @@ func buildGenerationPresets(catalog generationModelCatalog) []generationPreset {
 	}
 	if flux != nil {
 		preset := presetFromModel("photoflow-flux2-edit", "image-to-image", "Flux2 Редактирование",
-			"Редактирование исходного изображения через совместимый workflow Flux 2.", *flux, true)
+			"Редактирование исходного изображения через совместимую схему Flux 2.", *flux, true)
 		preset.ModelCount = fluxCount
 		preset.MaxInputImages = 4
+		presets = append(presets, preset)
+	}
+	var miniMax *generationModel
+	for _, group := range catalog.Groups {
+		for index := range group.Models {
+			model := group.Models[index]
+			if model.Family != modelFamilyMiniMaxH3 {
+				continue
+			}
+			copy := model
+			miniMax = &copy
+			break
+		}
+		if miniMax != nil {
+			break
+		}
+	}
+	if miniMax != nil {
+		preset := presetFromModel("minimax-h3-video", "minimax-h3-video", "MiniMax H3: видео",
+			"Текст в видео, первый и последний кадр или до четырёх референсов. Звук создаётся вместе с видео.", *miniMax, false)
+		preset.ModelCount = 1
+		preset.MaxInputImages = 4
+		preset.AllowsImages = true
+		preset.AdminOnly = true
 		presets = append(presets, preset)
 	}
 	return presets
@@ -381,7 +439,7 @@ func quickGenerationModels(catalog generationModelCatalog) []generationModel {
 	var models []generationModel
 	for _, group := range catalog.Groups {
 		for _, model := range group.Models {
-			if model.Available && (model.Family == modelFamilyKrea2 || model.Family == modelFamilyFlux2) {
+			if model.Available && (model.Family == modelFamilyKrea2 || model.Family == modelFamilyFlux2 || model.Family == modelFamilyMiniMaxH3) {
 				models = append(models, model)
 			}
 		}

@@ -20,11 +20,15 @@ var workflowFS embed.FS
 const maxGenerationLoraSlots = 10
 
 type workflowDefinition struct {
-	ID            string                    `json:"id"`
-	Name          string                    `json:"name"`
-	Description   string                    `json:"description"`
-	RequiresImage bool                      `json:"requires_image"`
-	Nodes         map[string]map[string]any `json:"nodes"`
+	ID             string                    `json:"id"`
+	Name           string                    `json:"name"`
+	Description    string                    `json:"description"`
+	RequiresImage  bool                      `json:"requires_image"`
+	AllowsImages   bool                      `json:"allows_images"`
+	MaxInputImages int                       `json:"max_input_images"`
+	AdminOnly      bool                      `json:"admin_only"`
+	Builder        string                    `json:"builder"`
+	Nodes          map[string]map[string]any `json:"nodes"`
 }
 
 type workflowView struct {
@@ -32,6 +36,9 @@ type workflowView struct {
 	Name          string
 	Description   string
 	RequiresImage bool
+	AllowsImages  bool
+	Restricted    bool
+	Restriction   string
 }
 
 type generationForm struct {
@@ -42,6 +49,8 @@ type generationForm struct {
 	ModelFamily          string
 	TextEncoder          string
 	VAE                  string
+	AudioVAE             string
+	ReferenceModel       string
 	Lora                 string
 	LoraStrength         float64
 	IdentityLora         string
@@ -123,6 +132,17 @@ type generationForm struct {
 	Sampler              string
 	Scheduler            string
 	Seed                 int64
+	VideoMode            string
+	VideoResolution      string
+	VideoDurationSeconds int
+	VideoReferenceSize   string
+	VideoSteps           int
+	AssistantRequested   bool
+	AssistantApplied     bool
+	AssistantTemplate    string
+	AssistantThink       bool
+	AssistantOriginal    string
+	AssistantSuggestion  string
 }
 
 func (input generationForm) imageCount() int {
@@ -166,7 +186,7 @@ func loadWorkflowDefinitions() ([]workflowDefinition, error) {
 		if err := json.Unmarshal(body, &definition); err != nil {
 			return nil, fmt.Errorf("workflow %s: %w", path, err)
 		}
-		if definition.ID == "" || definition.Name == "" || len(definition.Nodes) == 0 {
+		if definition.ID == "" || definition.Name == "" || (len(definition.Nodes) == 0 && definition.Builder == "") {
 			return nil, fmt.Errorf("workflow %s is incomplete", path)
 		}
 		definitions = append(definitions, definition)
@@ -186,6 +206,9 @@ func findWorkflow(definitions []workflowDefinition, id string) (workflowDefiniti
 func (definition workflowDefinition) buildPrompt(input generationForm) (map[string]any, error) {
 	if err := definition.normalizeAndValidate(&input); err != nil {
 		return nil, err
+	}
+	if definition.Builder == "minimax_h3" {
+		return buildMiniMaxH3Prompt(input)
 	}
 	cloned, err := cloneWorkflowNodes(definition.Nodes)
 	if err != nil {
@@ -405,6 +428,9 @@ func (definition workflowDefinition) normalizeAndValidate(input *generationForm)
 		}
 	}
 	if definition.RequiresImage && strings.TrimSpace(input.InputImage) == "" {
+		if definition.ID == "minimax-h3-video" {
+			return errors.New("для MiniMax H3 добавьте первый кадр")
+		}
 		return errors.New("для этого workflow нужно добавить фото")
 	}
 	if strings.TrimSpace(input.ModelName) == "" {
@@ -467,6 +493,8 @@ func (definition workflowDefinition) normalizeAndValidate(input *generationForm)
 
 func (definition workflowDefinition) normalizeAndValidateSpecific(input *generationForm) error {
 	switch definition.ID {
+	case "minimax-h3-video":
+		return normalizeMiniMaxH3(input)
 	case "image-to-image-flux2":
 		// LCAspectRatioPipeOut uses 0 as a no-clamp value in its public UI, but
 		// its Flux2 latent path rounds that value down to a zero-sized latent.
@@ -912,6 +940,12 @@ func randomSeed() (int64, error) {
 	return value.Int64(), nil
 }
 
+// parseGenerationFloat accepts the comma decimal separator commonly used by
+// Russian mobile keyboards as well as the dot required by workflow JSON.
+func parseGenerationFloat(value string) (float64, error) {
+	return strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(value), ",", "."), 64)
+}
+
 func parseGenerationForm(r *http.Request) (generationForm, error) {
 	if err := r.ParseForm(); err != nil {
 		return generationForm{}, err
@@ -928,7 +962,7 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 		if value == "" {
 			return fallback, nil
 		}
-		return strconv.ParseFloat(value, 64)
+		return parseGenerationFloat(value)
 	}
 	width, err := parseInt("width", 1024)
 	if err != nil {
@@ -941,6 +975,14 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 	steps, err := parseInt("steps", 25)
 	if err != nil {
 		return generationForm{}, errors.New("некорректное число шагов")
+	}
+	videoSteps, err := parseInt("video_steps", 25)
+	if err != nil {
+		return generationForm{}, errors.New("некорректное число шагов MiniMax H3")
+	}
+	videoDurationSeconds, err := parseInt("video_duration_seconds", miniMaxH3MinimumSeconds)
+	if err != nil {
+		return generationForm{}, errors.New("некорректная длительность MiniMax H3")
 	}
 	cfg, err := parseFloat("cfg", 7)
 	if err != nil {
@@ -1142,6 +1184,11 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 		Negative: strings.TrimSpace(r.Form.Get("negative_prompt")), Width: width, Height: height, Steps: steps,
 		CFG: cfg, Denoise: denoise, Sampler: strings.TrimSpace(r.Form.Get("sampler")),
 		Scheduler: strings.TrimSpace(r.Form.Get("scheduler")), Seed: seed,
+		VideoMode: strings.TrimSpace(r.Form.Get("video_mode")), VideoResolution: strings.TrimSpace(r.Form.Get("video_resolution")),
+		VideoDurationSeconds: videoDurationSeconds, VideoReferenceSize: strings.TrimSpace(r.Form.Get("video_reference_size")), VideoSteps: videoSteps,
+		AssistantRequested: r.Form.Get("assistant_requested") == "true", AssistantApplied: r.Form.Get("assistant_applied") == "true",
+		AssistantTemplate: strings.TrimSpace(r.Form.Get("assistant_template_used")), AssistantThink: r.Form.Get("assistant_think_used") == "true",
+		AssistantOriginal: strings.TrimSpace(r.Form.Get("assistant_original_prompt")), AssistantSuggestion: strings.TrimSpace(r.Form.Get("assistant_suggestion")),
 		AspectRatio: strings.TrimSpace(r.Form.Get("aspect_ratio")), OutputMegapixels: outputMegapixels,
 		DimensionMultiple: dimensionMultiple, MaxLongestSide: maxLongestSide,
 		BaseMegapixels: baseMegapixels, LoraNames: loraNames, LoraModel: loraModel, LoraClip: loraClip,

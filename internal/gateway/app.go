@@ -20,6 +20,7 @@ import (
 	contentcrypto "ai-access-gateway/internal/content"
 	"ai-access-gateway/internal/database"
 	"ai-access-gateway/internal/mining"
+	"ai-access-gateway/internal/promptassistant"
 	"ai-access-gateway/internal/security"
 	"ai-access-gateway/internal/store"
 	"ai-access-gateway/internal/updates"
@@ -92,6 +93,8 @@ func Run() error {
 		csrfSigner:        security.NewCSRFSigner(cfg.SessionSecret),
 		store:             repository,
 		mining:            mining.NewClient(cfg.MiningAgentURL, cfg.MiningAgentToken),
+		systemMonitor:     mining.NewClient(cfg.SystemMonitorAgentURL, cfg.SystemMonitorAgentToken),
+		promptAssistant:   promptassistant.NewClient(cfg.OllamaUpstream, cfg.PromptAssistantModel),
 		updates:           updates.NewClient(cfg.UpdateAgentURL, cfg.UpdateAgentToken),
 		contentCipher:     contentCipher,
 		mediaCaptureSlots: make(chan struct{}, maxConcurrentMediaCaptures),
@@ -147,6 +150,7 @@ func ParseTemplates() (*Templates, error) {
 		"formatNumber":       formatNumber,
 		"formatDuration":     formatDuration,
 		"pct":                pct,
+		"divFloat":           divFloat,
 		"roleLabel":          roleLabel,
 		"inviteStatusLabel":  inviteStatusLabel,
 		"auditActionLabel":   auditActionLabel,
@@ -178,10 +182,17 @@ func (a *App) publicMux() http.Handler {
 	mux.HandleFunc("/logout", a.handleLogout)
 	mux.HandleFunc("/invite/", a.handleInvite)
 	mux.Handle("/app", a.requireAuth(http.HandlerFunc(a.handleApp)))
+	mux.Handle("/account/profile", a.requireAuth(http.HandlerFunc(a.handleAccountProfile)))
 	mux.Handle("/account/password", a.requireAuth(http.HandlerFunc(a.handleAccountPassword)))
+	mux.Handle("/account/quick-generation-priority", a.requireAuth(http.HandlerFunc(a.handleAccountQuickGenerationPriority)))
 	mux.Handle("/account/sessions", a.requireAuth(http.HandlerFunc(a.handleAccountSessions)))
 	mux.Handle("/mining/toggle", a.requireAuth(http.HandlerFunc(a.handleMiningToggle)))
 	mux.Handle("/mining/icon/", a.requireAuth(http.HandlerFunc(a.handleMinerIcon)))
+	// Administration is served through the same HTTPS edge as the user portal.
+	// The private listener remains available only for local diagnostics.
+	mux.Handle("/metrics", a.adminLANOnly(http.HandlerFunc(a.handlePrometheusMetrics)))
+	mux.Handle("/admin", a.requireAdmin(http.HandlerFunc(a.handleAdminDashboard)))
+	mux.Handle("/admin/", a.requireAdmin(http.HandlerFunc(a.handleAdminRoutes)))
 	a.registerGenerationRoutes(mux)
 	a.registerServiceRoutes(mux)
 	return mux
@@ -209,6 +220,7 @@ func (a *App) adminMux() http.Handler {
 	mux.HandleFunc("/healthz", a.handleHealthz)
 	mux.HandleFunc("/login", a.handleLogin)
 	mux.HandleFunc("/logout", a.handleLogout)
+	mux.Handle("/account/profile", a.requireAuth(http.HandlerFunc(a.handleAccountProfile)))
 	mux.Handle("/account/password", a.requireAuth(http.HandlerFunc(a.handleAccountPassword)))
 	mux.Handle("/account/sessions", a.requireAuth(http.HandlerFunc(a.handleAccountSessions)))
 	mux.Handle("/mining/toggle", a.requireAuth(http.HandlerFunc(a.handleMiningToggle)))

@@ -271,25 +271,14 @@ func (a *App) sessionCookie(r *http.Request, token string) *http.Cookie {
 }
 
 func (a *App) cookieSecure(r *http.Request) bool {
-	if !a.cfg.CookieSecure {
+	if !a.cfg.CookieSecure || a.cfg.PublicURL == nil {
 		return false
 	}
-	if a.requestProto(r) == "https" {
-		return true
+	host, _, err := net.SplitHostPort(r.Host)
+	if err != nil {
+		host = r.Host
 	}
-	host := r.Host
-	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
-		host = parsedHost
-	}
-	host = strings.Trim(host, "[]")
-	hostIP := net.ParseIP(host)
-	clientIP := net.ParseIP(a.clientIP(r))
-	localHost := strings.EqualFold(host, "localhost") || hostIP != nil && (hostIP.IsLoopback() || hostIP.IsPrivate())
-	localClient := clientIP != nil && (clientIP.IsLoopback() || clientIP.IsPrivate())
-	if localHost && localClient {
-		return false
-	}
-	return true
+	return strings.EqualFold(strings.TrimSuffix(host, "."), a.cfg.PublicURL.Hostname())
 }
 
 func validateCredentials(username, email, password string) string {

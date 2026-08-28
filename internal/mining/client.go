@@ -33,10 +33,11 @@ type Request struct {
 }
 
 type UpdateRequest struct {
-	ScriptPath  string `json:"script_path"`
-	ProcessName string `json:"process_name"`
-	MinerName   string `json:"miner_name,omitempty"`
-	ArchiveURL  string `json:"archive_url"`
+	ScriptPath    string `json:"script_path"`
+	ProcessName   string `json:"process_name"`
+	MinerName     string `json:"miner_name,omitempty"`
+	ArchiveURL    string `json:"archive_url"`
+	ArchiveSHA256 string `json:"archive_sha256"`
 }
 
 type UpdateResult struct {
@@ -54,6 +55,21 @@ type Script struct {
 	Content string `json:"content,omitempty"`
 	SHA256  string `json:"sha256,omitempty"`
 	Message string `json:"message,omitempty"`
+}
+
+// SystemMetrics is a read-only snapshot of the Windows host. It deliberately
+// contains only aggregate utilization data: no processes, paths, or commands.
+type SystemMetrics struct {
+	CollectedAt         time.Time `json:"collected_at"`
+	CPUPercent          float64   `json:"cpu_percent"`
+	MemoryUsedBytes     int64     `json:"memory_used_bytes"`
+	MemoryTotalBytes    int64     `json:"memory_total_bytes"`
+	GPUAvailable        bool      `json:"gpu_available"`
+	GPUName             string    `json:"gpu_name,omitempty"`
+	GPUPercent          float64   `json:"gpu_percent"`
+	GPUMemoryUsedBytes  int64     `json:"gpu_memory_used_bytes"`
+	GPUMemoryTotalBytes int64     `json:"gpu_memory_total_bytes"`
+	Message             string    `json:"message,omitempty"`
 }
 
 type Client struct {
@@ -95,6 +111,35 @@ func (c *Client) State(ctx context.Context, processName string) (State, error) {
 	query.Set("process_name", processName)
 	target.RawQuery = query.Encode()
 	return c.do(ctx, http.MethodGet, target, nil)
+}
+
+func (c *Client) System(ctx context.Context) (SystemMetrics, error) {
+	if !c.Configured() {
+		return SystemMetrics{Message: "Windows-агент недоступен."}, ErrUnavailable
+	}
+	target := c.resolve("/v1/system")
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
+	if err != nil {
+		return SystemMetrics{}, err
+	}
+	request.Header.Set("Authorization", "Bearer "+c.token)
+	request.Header.Set("Accept", "application/json")
+	response, err := c.http.Do(request)
+	if err != nil {
+		return SystemMetrics{Message: "Windows-агент недоступен."}, fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	defer response.Body.Close()
+	var metrics SystemMetrics
+	if err := json.NewDecoder(io.LimitReader(response.Body, maxResponseBytes)).Decode(&metrics); err != nil {
+		return SystemMetrics{}, fmt.Errorf("decode mining system response: %w", err)
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		if metrics.Message == "" {
+			metrics.Message = "Windows-агент не отдал метрики."
+		}
+		return metrics, fmt.Errorf("mining agent returned %s", response.Status)
+	}
+	return metrics, nil
 }
 
 func (c *Client) Start(ctx context.Context, request Request) (State, error) {

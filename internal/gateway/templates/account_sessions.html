@@ -18,13 +18,13 @@
       <tbody>
       {{range .Sessions}}
         <tr>
-          <td>{{if .Current}}<span class="badge ok">текущая</span>{{else}}#{{.ID}}{{end}}</td>
-          <td><code>{{.IP}}</code></td>
-          <td>{{formatTime .CreatedAt}}</td>
-          <td>{{formatTime .LastSeenAt}}</td>
-          <td>{{formatTime .ExpiresAt}}</td>
-          <td class="path">{{.UserAgent}}</td>
-          <td>{{if not .Current}}<div class="table-actions"><form method="post" action="/account/sessions"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="action" value="revoke"><input type="hidden" name="session_id" value="{{.ID}}"><button class="action-button danger" type="submit" data-confirm="Завершить эту сессию?"><span class="action-icon" aria-hidden="true">&#215;</span>Завершить</button></form></div>{{end}}</td>
+          <td data-label="Сессия">{{if .Current}}<span class="badge ok">текущая</span>{{else}}#{{.ID}}{{end}}</td>
+          <td data-label="IP"><code>{{.IP}}</code></td>
+          <td data-label="Создана">{{formatTime .CreatedAt}}</td>
+          <td data-label="Активность">{{formatTime .LastSeenAt}}</td>
+          <td data-label="Истекает">{{formatTime .ExpiresAt}}</td>
+          <td data-label="Устройство" class="path">{{.UserAgent}}</td>
+          <td data-label="Действия">{{if not .Current}}<div class="table-actions"><form method="post" action="/account/sessions"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="action" value="revoke"><input type="hidden" name="session_id" value="{{.ID}}"><button class="action-button danger" type="submit" data-confirm="Завершить эту сессию?"><span class="action-icon" aria-hidden="true">&#215;</span>Завершить</button></form></div>{{end}}</td>
         </tr>
       {{else}}<tr><td colspan="7" class="muted">Активных сессий нет.</td></tr>{{end}}
       </tbody>

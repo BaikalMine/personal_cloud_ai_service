@@ -336,6 +336,70 @@ var migrationCatalog = []migration{
 			`ALTER TABLE invites ADD CONSTRAINT invites_generation_limits_valid CHECK (generation_daily_limit >= 0 AND generation_total_limit >= 0)`,
 		},
 	},
+	{
+		version: 15,
+		name:    "trusted_mining_access",
+		statements: []string{
+			`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_manage_mining BOOLEAN NOT NULL DEFAULT FALSE`,
+		},
+	},
+	{
+		version: 16,
+		name:    "quick_generation_mining_pool",
+		statements: []string{
+			`ALTER TABLE users ADD COLUMN IF NOT EXISTS pause_mining_for_quick_generation BOOLEAN NOT NULL DEFAULT FALSE`,
+			`CREATE TABLE IF NOT EXISTS quick_generation_mining_leases (
+				id TEXT PRIMARY KEY CHECK (char_length(id) BETWEEN 1 AND 128),
+				prompt_id TEXT NULL UNIQUE CHECK (prompt_id IS NULL OR char_length(prompt_id) BETWEEN 1 AND 128),
+				user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				miner_id BIGINT NOT NULL REFERENCES miners(id) ON DELETE RESTRICT,
+				script_path TEXT NOT NULL CHECK (char_length(script_path) BETWEEN 1 AND 1024),
+				process_name TEXT NOT NULL CHECK (char_length(process_name) BETWEEN 1 AND 128),
+				resume_mining BOOLEAN NOT NULL DEFAULT TRUE,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`CREATE INDEX IF NOT EXISTS quick_generation_mining_leases_created_idx ON quick_generation_mining_leases(created_at)`,
+		},
+	},
+	{
+		version: 17,
+		name:    "prompt_assistant_content_audit",
+		statements: []string{
+			`ALTER TABLE content_events DROP CONSTRAINT IF EXISTS content_events_kind_check`,
+			`ALTER TABLE content_events ADD CONSTRAINT content_events_kind_check CHECK (kind IN ('comfyui_prompt','openwebui_chat','prompt_assistant'))`,
+		},
+	},
+	{
+		version: 18,
+		name:    "host_monitoring_history",
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS host_metrics (
+				id BIGSERIAL PRIMARY KEY,
+				recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				cpu_percent DOUBLE PRECISION NOT NULL CHECK (cpu_percent >= 0 AND cpu_percent <= 100),
+				memory_used_bytes BIGINT NOT NULL CHECK (memory_used_bytes >= 0),
+				memory_total_bytes BIGINT NOT NULL CHECK (memory_total_bytes >= 0),
+				gpu_available BOOLEAN NOT NULL DEFAULT FALSE,
+				gpu_name TEXT NOT NULL DEFAULT '',
+				gpu_percent DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (gpu_percent >= 0 AND gpu_percent <= 100),
+				gpu_memory_used_bytes BIGINT NOT NULL DEFAULT 0 CHECK (gpu_memory_used_bytes >= 0),
+				gpu_memory_total_bytes BIGINT NOT NULL DEFAULT 0 CHECK (gpu_memory_total_bytes >= 0)
+			)`,
+			`CREATE INDEX IF NOT EXISTS host_metrics_recorded_at_idx ON host_metrics(recorded_at DESC)`,
+		},
+	},
+	{
+		version: 19,
+		name:    "quick_generation_type_access",
+		statements: []string{
+			`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_generate_text_to_image BOOLEAN NOT NULL DEFAULT TRUE`,
+			`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_generate_image_to_image BOOLEAN NOT NULL DEFAULT FALSE`,
+			`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_generate_video BOOLEAN NOT NULL DEFAULT FALSE`,
+			`ALTER TABLE invites ADD COLUMN IF NOT EXISTS grant_text_to_image BOOLEAN NOT NULL DEFAULT TRUE`,
+			`ALTER TABLE invites ADD COLUMN IF NOT EXISTS grant_image_to_image BOOLEAN NOT NULL DEFAULT FALSE`,
+			`ALTER TABLE invites ADD COLUMN IF NOT EXISTS grant_video BOOLEAN NOT NULL DEFAULT FALSE`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

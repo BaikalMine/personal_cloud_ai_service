@@ -1,7 +1,7 @@
 {
   "id": "image-to-image-krea2",
   "name": "Krea 2: фото и промт",
-  "description": "Редактирование фотографии с Identity Edit, привязкой к исходнику и финальным качественным апскейлом.",
+  "description": "Редактирование фотографии с сохранением внешности, привязкой к исходнику и финальным качественным апскейлом.",
   "requires_image": true,
   "nodes": {
     "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "{{diffusion_model}}", "weight_dtype": "default"}},

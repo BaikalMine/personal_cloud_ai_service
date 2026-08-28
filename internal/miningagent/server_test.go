@@ -37,6 +37,10 @@ func (f *fakeController) Update(_ context.Context, request mining.UpdateRequest)
 	return mining.UpdateResult{ArchiveName: request.ArchiveURL, PreservedScripts: 2}, nil
 }
 
+func (f *fakeController) System(context.Context) (mining.SystemMetrics, error) {
+	return mining.SystemMetrics{CPUPercent: 23, MemoryUsedBytes: 12 << 30, MemoryTotalBytes: 32 << 30, GPUAvailable: true, GPUPercent: 41, GPUMemoryUsedBytes: 8 << 30, GPUMemoryTotalBytes: 16 << 30}, nil
+}
+
 func TestServerRequiresToken(t *testing.T) {
 	agent, err := NewServer("01234567890123456789012345678901", &fakeController{})
 	if err != nil {
@@ -82,7 +86,7 @@ func TestServerReturnsAuthenticatedScript(t *testing.T) {
 
 func TestServerReturnsAuthenticatedMinerUpdate(t *testing.T) {
 	agent, _ := NewServer("01234567890123456789012345678901", &fakeController{})
-	request := httptest.NewRequest(http.MethodPost, "/v1/update", strings.NewReader(`{"script_path":"C:\\Mining\\start.bat","process_name":"miner.exe","archive_url":"https://example.com/miner.zip"}`))
+	request := httptest.NewRequest(http.MethodPost, "/v1/update", strings.NewReader(`{"script_path":"C:\\Mining\\start.bat","process_name":"miner.exe","archive_url":"https://example.com/miner.zip","archive_sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}`))
 	request.Header.Set("Authorization", "Bearer 01234567890123456789012345678901")
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
@@ -93,5 +97,20 @@ func TestServerReturnsAuthenticatedMinerUpdate(t *testing.T) {
 	}
 	if response.Code != http.StatusOK || !result.Success || result.PreservedScripts != 2 {
 		t.Fatalf("status=%d result=%+v", response.Code, result)
+	}
+}
+
+func TestServerReturnsAuthenticatedSystemMetrics(t *testing.T) {
+	agent, _ := NewServer("01234567890123456789012345678901", &fakeController{})
+	request := httptest.NewRequest(http.MethodGet, "/v1/system", nil)
+	request.Header.Set("Authorization", "Bearer 01234567890123456789012345678901")
+	response := httptest.NewRecorder()
+	agent.Handler().ServeHTTP(response, request)
+	var metrics mining.SystemMetrics
+	if err := json.NewDecoder(response.Body).Decode(&metrics); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusOK || metrics.CPUPercent != 23 || !metrics.GPUAvailable {
+		t.Fatalf("status=%d metrics=%+v", response.Code, metrics)
 	}
 }

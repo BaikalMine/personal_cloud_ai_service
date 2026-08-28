@@ -23,6 +23,22 @@ func TestUserCanUseService(t *testing.T) {
 	}
 }
 
+func TestUserCanUseQuickGenerationType(t *testing.T) {
+	user := User{CanUseQuickGeneration: true, CanGenerateTextToImage: true}
+	if !user.CanUseQuickGenerationType("text-to-image") {
+		t.Fatal("text-to-image must be allowed")
+	}
+	if user.CanUseQuickGenerationType("image-to-image") || user.CanUseQuickGenerationType("minimax-h3-video") {
+		t.Fatal("disabled quick generation types must stay forbidden")
+	}
+	admin := User{Role: "admin"}
+	for _, templateID := range []string{"text-to-image", "image-to-image", "minimax-h3-video"} {
+		if !admin.CanUseQuickGenerationType(templateID) {
+			t.Fatalf("administrator must access %s", templateID)
+		}
+	}
+}
+
 func TestUserIsLocked(t *testing.T) {
 	now := time.Now()
 	if (User{}).IsLocked(now) {

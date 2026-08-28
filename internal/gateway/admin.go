@@ -3,6 +3,7 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"mime"
@@ -29,9 +30,15 @@ func (a *App) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ошибка базы данных", http.StatusInternalServerError)
 		return
 	}
+	system, err := a.systemOverview(r.Context())
+	if err != nil {
+		http.Error(w, "ошибка системной статистики", http.StatusInternalServerError)
+		return
+	}
 	a.render(w, r, "admin_dashboard", map[string]any{
 		"Title":    "Администрирование",
 		"Stats":    stats,
+		"System":   system,
 		"Services": a.serviceStatuses(r.Context()),
 	})
 }
@@ -53,6 +60,8 @@ func (a *App) handleAdminRoutes(w http.ResponseWriter, r *http.Request) {
 		a.handleAdminSessionAction(w, r, strings.TrimPrefix(path, "sessions/"))
 	case path == "metrics":
 		a.handleAdminMetricsPage(w, r)
+	case path == "system/overview":
+		a.handleAdminSystemOverview(w, r)
 	case path == "mining":
 		a.handleAdminMining(w, r)
 	case path == "updates":
@@ -68,6 +77,22 @@ func (a *App) handleAdminRoutes(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (a *App) handleAdminSystemOverview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
+	overview, err := a.systemOverview(r.Context())
+	if err != nil {
+		http.Error(w, "ошибка системной статистики", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(overview)
 }
 
 func (a *App) handleAdminUpdates(w http.ResponseWriter, r *http.Request) {
@@ -162,7 +187,7 @@ func (a *App) handleAdminContent(w http.ResponseWriter, r *http.Request) {
 		username = username[:80]
 	}
 	service := strings.TrimSpace(r.URL.Query().Get("service"))
-	if service != "comfyui" && service != "openwebui" {
+	if service != "comfyui" && service != "openwebui" && service != "ollama" {
 		service = ""
 	}
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
@@ -207,7 +232,7 @@ func (a *App) handleAdminContent(w http.ResponseWriter, r *http.Request) {
 		events = append(events, ContentEventView{
 			ID: row.ID, UserID: row.UserID, Username: row.Username, Service: row.Service,
 			Kind: row.Kind, ExternalID: row.ExternalID, Model: row.Model, Prompt: prompt,
-			Response: response, Metadata: metadata, MediaCount: row.MediaCount,
+			Response: response, Metadata: metadata, Assistant: contentAssistantFromMetadata(metadata), MediaCount: row.MediaCount,
 			Media:     mediaByEvent[row.ID],
 			CreatedAt: row.CreatedAt, ExpiresAt: row.ExpiresAt,
 		})
@@ -217,6 +242,8 @@ func (a *App) handleAdminContent(w http.ResponseWriter, r *http.Request) {
 			overview.ComfyUI++
 		case "openwebui":
 			overview.OpenWebUI++
+		case "ollama":
+			overview.Ollama++
 		}
 		if row.MediaCount > 0 {
 			overview.WithMedia++
@@ -229,6 +256,26 @@ func (a *App) handleAdminContent(w http.ResponseWriter, r *http.Request) {
 		"Title": "AI-контент пользователей", "Events": events,
 		"Username": username, "Service": service, "Query": query, "Overview": overview,
 	})
+}
+
+func contentAssistantFromMetadata(metadata string) *ContentAssistantView {
+	var payload struct {
+		PromptAssistant *struct {
+			Requested      bool   `json:"requested"`
+			Applied        bool   `json:"applied"`
+			Template       string `json:"template"`
+			Think          bool   `json:"think"`
+			OriginalPrompt string `json:"original_prompt"`
+			Suggestion     string `json:"suggestion"`
+		} `json:"prompt_assistant"`
+	}
+	if err := json.Unmarshal([]byte(metadata), &payload); err != nil || payload.PromptAssistant == nil || !payload.PromptAssistant.Requested {
+		return nil
+	}
+	return &ContentAssistantView{
+		Applied: payload.PromptAssistant.Applied, Template: payload.PromptAssistant.Template, Think: payload.PromptAssistant.Think,
+		OriginalPrompt: payload.PromptAssistant.OriginalPrompt, Suggestion: payload.PromptAssistant.Suggestion,
+	}
 }
 
 func (a *App) backfillComfyContentMedia(ctx context.Context) {
@@ -255,16 +302,21 @@ func (a *App) handleAdminContentMedia(w http.ResponseWriter, r *http.Request, ra
 		http.NotFound(w, r)
 		return
 	}
-	select {
-	case a.adminMediaSlots <- struct{}{}:
-		defer func() { <-a.adminMediaSlots }()
-	default:
-		http.Error(w, "слишком много одновременных запросов медиа", http.StatusTooManyRequests)
+	release := a.acquireAdminMediaSlot(r.Context())
+	if release == nil {
 		return
 	}
+	defer release()
 	media, err := a.store.ContentMediaByID(r.Context(), id)
 	if err != nil {
 		http.NotFound(w, r)
+		return
+	}
+	if wantsAdminMediaViewer(r) {
+		a.render(w, r, "admin_media_viewer", map[string]any{
+			"Title": "Просмотр результата", "MediaID": media.ID, "MediaType": media.MediaType,
+			"Filename": media.OriginalName,
+		})
 		return
 	}
 	payload, err := a.contentCipher.DecryptBytes(media.PayloadCipher)
@@ -274,7 +326,7 @@ func (a *App) handleAdminContentMedia(w http.ResponseWriter, r *http.Request, ra
 	}
 	contentType, inline := safeAdminMediaType(media.MediaType, media.MIMEType)
 	disposition := "attachment"
-	if inline {
+	if inline && r.URL.Query().Get("download") != "1" {
 		disposition = "inline"
 	}
 	filename := filepath.Base(strings.ReplaceAll(media.OriginalName, "\\", "/"))
@@ -288,6 +340,27 @@ func (a *App) handleAdminContentMedia(w http.ResponseWriter, r *http.Request, ra
 	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
 	w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 	http.ServeContent(w, r, filename, time.Time{}, bytes.NewReader(payload))
+}
+
+// acquireAdminMediaSlot queues thumbnail requests instead of rejecting the
+// browser's normal parallel image loading with a random 429 response.
+func (a *App) acquireAdminMediaSlot(ctx context.Context) func() {
+	if a.adminMediaSlots == nil {
+		return func() {}
+	}
+	select {
+	case a.adminMediaSlots <- struct{}{}:
+		return func() { <-a.adminMediaSlots }
+	case <-ctx.Done():
+		return nil
+	}
+}
+
+func wantsAdminMediaViewer(r *http.Request) bool {
+	if r.URL.Query().Get("raw") == "1" || r.URL.Query().Get("download") == "1" {
+		return false
+	}
+	return r.Header.Get("Sec-Fetch-Dest") == "document" || strings.Contains(r.Header.Get("Accept"), "text/html")
 }
 
 func safeAdminMediaType(mediaType, rawMIME string) (string, bool) {
@@ -408,18 +481,24 @@ func (a *App) handleAdminUserDetail(w http.ResponseWriter, r *http.Request, rest
 			comfyUI := r.Form.Get("can_use_comfyui") == "on"
 			openWebUI := r.Form.Get("can_use_openwebui") == "on"
 			quickGeneration := r.Form.Get("can_use_quick_generation") == "on"
+			textToImage := quickGeneration && r.Form.Get("can_generate_text_to_image") == "on"
+			imageToImage := quickGeneration && r.Form.Get("can_generate_image_to_image") == "on"
+			video := quickGeneration && r.Form.Get("can_generate_video") == "on"
+			quickGeneration = quickGeneration && (textToImage || imageToImage || video)
+			manageMining := r.Form.Get("can_manage_mining") == "on"
+			pauseMiningForQuickGeneration := quickGeneration && r.Form.Get("pause_mining_for_quick_generation") == "on"
 			dailyLimit, totalLimit, limitErr := parseGenerationLimits(r)
 			if limitErr != nil {
 				http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?access=invalid_limits", id), http.StatusFound)
 				return
 			}
-			updated, err := a.store.SetServiceAccess(r.Context(), id, comfyUI, openWebUI, quickGeneration, dailyLimit, totalLimit)
+			updated, err := a.store.SetServiceAccess(r.Context(), id, comfyUI, openWebUI, quickGeneration, textToImage, imageToImage, video, manageMining, pauseMiningForQuickGeneration, dailyLimit, totalLimit)
 			if err != nil {
 				http.Error(w, "не удалось обновить права доступа", http.StatusInternalServerError)
 				return
 			}
 			if updated {
-				a.audit(r.Context(), &actor.ID, "user_service_access_updated", "user", &id, a.clientIP(r), r.UserAgent(), map[string]any{"comfyui": comfyUI, "openwebui": openWebUI, "quick_generation": quickGeneration, "generation_daily_limit": dailyLimit, "generation_total_limit": totalLimit})
+				a.audit(r.Context(), &actor.ID, "user_service_access_updated", "user", &id, a.clientIP(r), r.UserAgent(), map[string]any{"comfyui": comfyUI, "openwebui": openWebUI, "quick_generation": quickGeneration, "text_to_image": textToImage, "image_to_image": imageToImage, "video": video, "manage_mining": manageMining, "pause_mining_for_quick_generation": pauseMiningForQuickGeneration, "generation_daily_limit": dailyLimit, "generation_total_limit": totalLimit})
 			}
 			http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?access=changed", id), http.StatusFound)
 			return
@@ -505,6 +584,14 @@ func (a *App) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
 		grantComfyUI := r.Form.Get("grant_comfyui") == "on"
 		grantOpenWebUI := r.Form.Get("grant_openwebui") == "on"
 		grantQuickGeneration := r.Form.Get("grant_quick_generation") == "on"
+		grantTextToImage := grantQuickGeneration && r.Form.Get("grant_text_to_image") == "on"
+		grantImageToImage := grantQuickGeneration && r.Form.Get("grant_image_to_image") == "on"
+		grantVideo := grantQuickGeneration && r.Form.Get("grant_video") == "on"
+		if grantQuickGeneration && !grantTextToImage && !grantImageToImage && !grantVideo {
+			invites, _ := a.store.ListInvites(r.Context(), 200)
+			a.render(w, r, "admin_invites", map[string]any{"Title": "Приглашения", "Invites": invites, "Error": "Для быстрой генерации выберите хотя бы один сценарий."})
+			return
+		}
 		dailyLimit, totalLimit, limitErr := parseGenerationLimits(r)
 		if limitErr != nil {
 			invites, _ := a.store.ListInvites(r.Context(), 200)
@@ -529,6 +616,9 @@ func (a *App) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
 			GrantComfyUI:         grantComfyUI,
 			GrantOpenWebUI:       grantOpenWebUI,
 			GrantQuickGeneration: grantQuickGeneration,
+			GrantTextToImage:     grantTextToImage,
+			GrantImageToImage:    grantImageToImage,
+			GrantVideo:           grantVideo,
 			GenerationDailyLimit: dailyLimit,
 			GenerationTotalLimit: totalLimit,
 		})
@@ -536,7 +626,7 @@ func (a *App) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "ошибка базы данных", http.StatusInternalServerError)
 			return
 		}
-		a.audit(r.Context(), &actor.ID, "invite_created", "invite", &id, a.clientIP(r), r.UserAgent(), map[string]any{"max_uses": maxUses, "expires_at": expiresAt, "grant_comfyui": grantComfyUI, "grant_openwebui": grantOpenWebUI, "grant_quick_generation": grantQuickGeneration, "generation_daily_limit": dailyLimit, "generation_total_limit": totalLimit})
+		a.audit(r.Context(), &actor.ID, "invite_created", "invite", &id, a.clientIP(r), r.UserAgent(), map[string]any{"max_uses": maxUses, "expires_at": expiresAt, "grant_comfyui": grantComfyUI, "grant_openwebui": grantOpenWebUI, "grant_quick_generation": grantQuickGeneration, "text_to_image": grantTextToImage, "image_to_image": grantImageToImage, "video": grantVideo, "generation_daily_limit": dailyLimit, "generation_total_limit": totalLimit})
 		invites, _ := a.store.ListInvites(r.Context(), 200)
 		a.render(w, r, "admin_invites", map[string]any{
 			"Title":      "Приглашения",
