@@ -170,6 +170,52 @@
     updateDecimalHint();
   });
 
+  const lutControl = root.querySelector("[data-lut-control]");
+  const lutEnabled = root.querySelector("[data-lut-enabled]");
+  const lutOptions = root.querySelector("[data-lut-options]");
+  const lutName = root.querySelector("[data-lut-name]");
+  const lutStrength = root.querySelector("[data-lut-strength]");
+  const lutStrengthOutput = root.querySelector("[data-lut-strength-output]");
+  const lutExplanation = root.querySelector("[data-lut-explanation]");
+  const lutProfiles = {
+    "LC_Crushed_Blacks.cube": { strength: 0.18, description: "Плотнее делает тёмные участки и добавляет сдержанный плёночный контраст. Хорош для портретов, вечернего света и драматичного настроения; начинайте с 18%." },
+    "LC Highlights_Protection.cube": { strength: 0.2, description: "Смягчает яркие области и сохраняет больше деталей в светах. Полезен для оконного, дневного и контрастного света, когда кожа или небо выглядят слишком выбеленными." },
+    "Cool_Natural_Breeze.cube": { strength: 0.16, description: "Немного охлаждает тени и оставляет спокойный, естественный баланс. Подходит для чистого современного портрета и предметов, если не нужна агрессивная стилизация." },
+    "street.cube": { strength: 0.28, description: "Добавляет более заметный городской контраст и цветовой акцент. Уместен для fashion, улицы и клипового настроения; на лице обычно достаточно 20-30%." },
+  };
+  const renderLUT = ({ applyRecommendation = false } = {}) => {
+    if (!lutControl || !lutEnabled || !lutOptions || !lutName || !lutStrength || !lutStrengthOutput || !lutExplanation) return;
+    const enabled = lutEnabled.checked;
+    const profile = lutProfiles[lutName.value] || lutProfiles["LC_Crushed_Blacks.cube"];
+    if (enabled && applyRecommendation) lutStrength.value = String(profile.strength);
+    lutOptions.hidden = !enabled;
+    lutName.disabled = !enabled;
+    lutStrength.disabled = !enabled;
+    root.querySelectorAll("[data-lut-strength-preset]").forEach((button) => { button.disabled = !enabled; });
+    if (!enabled) {
+      lutExplanation.textContent = "Выключено: финальный кадр сохранит цвета, полученные после генерации и обработки, без общей тонировки. Включайте LUT только когда нужен единый художественный цветовой стиль.";
+      return;
+    }
+    const strength = clamp(numericValue(lutStrength.value, profile.strength), 0, 0.7);
+    lutStrength.value = strength.toFixed(2);
+    lutStrengthOutput.textContent = `${Math.round(strength * 100)}%`;
+    lutExplanation.textContent = profile.description;
+    root.querySelectorAll("[data-lut-strength-preset]").forEach((button) => {
+      button.classList.toggle("is-active", Math.abs(numericValue(button.dataset.lutStrengthPreset) - strength) < 0.005);
+    });
+  };
+  lutEnabled?.addEventListener("change", () => renderLUT({ applyRecommendation: lutEnabled.checked }));
+  lutName?.addEventListener("change", () => renderLUT({ applyRecommendation: true }));
+  lutStrength?.addEventListener("input", () => renderLUT());
+  root.querySelectorAll("[data-lut-strength-preset]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!lutStrength || button.disabled) return;
+      lutStrength.value = button.dataset.lutStrengthPreset || lutStrength.value;
+      renderLUT();
+    });
+  });
+  renderLUT();
+
   const updateOriginalResolution = () => {
     if (!originalResolution) return;
     if (!primaryImageSize) {
@@ -677,6 +723,8 @@
     setFieldState(".krea-text-workflow-field", isKreaText);
     setFieldState(".flux-edit-settings", isFluxEdit);
     setFieldState(".krea-edit-settings", isKreaEdit);
+    setFieldState(".lut-workflow-field", isFluxEdit || isKreaEdit);
+    renderLUT();
     setFieldState(".standard-main-settings", !isEdit && !isMiniMax);
     setFieldState(".minimax-video-settings", isMiniMax);
     setFieldState(".minimax-reference-field", isMiniMax && miniMaxVideoModeSelect?.value === "references");

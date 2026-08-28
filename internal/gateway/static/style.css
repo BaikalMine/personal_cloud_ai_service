@@ -826,6 +826,9 @@ textarea:focus { outline: 2px solid rgba(85,199,216,.22); border-color: var(--cy
 .workflow-settings-heading strong, .workflow-settings-heading small { display: block; }
 .workflow-settings-heading strong { color: var(--text); font-size: 14px; }
 .workflow-settings-heading small { margin-top: 3px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.lut-control { display: grid; gap: 12px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.lut-control-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }.lut-control-heading > div { display: grid; gap: 3px; }.lut-control-heading strong { color: var(--text); }.lut-control-heading small, .lut-explanation { max-width: 860px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }.lut-explanation { min-height: 38px; padding-left: 12px; border-left: 2px solid var(--cyan); }.lut-options { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(220px, .8fr) minmax(250px, .9fr); gap: 12px; align-items: end; }.lut-options label { display: grid; gap: 6px; color: var(--text-soft); font-size: 12px; font-weight: 750; }.lut-options output { float: right; color: var(--mint); font-variant-numeric: tabular-nums; }.lut-options input[type="range"] { width: 100%; accent-color: var(--mint); }.lut-strength-presets { display: flex; flex-wrap: wrap; gap: 7px; padding-bottom: 1px; }.lut-strength-presets button { min-height: 34px; padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: 5px; background: transparent; color: var(--text-soft); font-size: 11px; font-weight: 800; }.lut-strength-presets button:hover, .lut-strength-presets button:focus-visible, .lut-strength-presets button.is-active { border-color: var(--mint); background: #14352c; color: #b8f3dd; outline: none; }.lut-strength-presets button:disabled { opacity: .45; cursor: not-allowed; }
+.lut-guide { border-top: 1px solid var(--line); color: var(--text-soft); }.lut-guide summary { padding: 12px 0 3px; color: var(--text); cursor: pointer; font-size: 12px; font-weight: 800; }.lut-guide summary::marker { color: var(--mint); }.lut-guide-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 22px; padding: 9px 0 4px; }.lut-guide-grid section { padding: 10px 0; border-top: 1px solid rgba(65, 73, 70, .55); }.lut-guide-grid strong { color: var(--mint); font-size: 11px; }.lut-guide-grid p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }.lut-guide-grid b { color: var(--text-soft); font-weight: 800; }
 .resolution-preview { flex: 0 0 auto; padding: 7px 10px; border: 1px solid #356d60; border-radius: 5px; background: #112821; color: var(--mint); font-size: 12px; font-weight: 800; }
 /* Keep the six resolution controls in two complete rows on wide monitors. */
 .generation-fields-resolution { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -949,8 +952,9 @@ textarea:focus { outline: 2px solid rgba(85,199,216,.22); border-color: var(--cy
 	.workflow-choices, .generation-primary-fields, .generation-prompt-fields, .generation-fields, .generation-output-grid, .prompt-assistant-controls { grid-template-columns: 1fr; }
 	.prompt-assistant-controls > button { width: 100%; }
 	.workflow-settings-section { padding: 14px 10px; }
-	.workflow-settings-heading { align-items: flex-start; flex-direction: column; }
-	.resolution-preview, .setting-toggle { width: 100%; }
+  .workflow-settings-heading { align-items: flex-start; flex-direction: column; }
+  .lut-control-heading { align-items: stretch; flex-direction: column; }.lut-options, .lut-guide-grid { grid-template-columns: 1fr; }.lut-strength-presets button { flex: 1 1 0; }
+  .resolution-preview, .setting-toggle { width: 100%; }
 	.lora-row { grid-template-columns: 28px minmax(0, 1fr) minmax(76px, .42fr); align-items: end; }
 	.lora-row label:nth-of-type(1) { grid-column: 2 / -1; }
 	.lora-row label:nth-of-type(2) { grid-column: 2; }

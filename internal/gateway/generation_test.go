@@ -273,6 +273,7 @@ func TestFlux2ImageWorkflowUsesReferenceLatent(t *testing.T) {
 		InputImage: "gateway/gateway-0123456789abcdef01234567/input.png",
 		Positive:   "replace the background", Negative: "artifacts", Width: 1024, Height: 768,
 		Steps: 20, CFG: 5, Denoise: 0.7, Seed: 42,
+		LUTName: "street.cube", LUTStrength: 0.28, LUTEnabled: true,
 		LoraNames: [maxGenerationLoraSlots]string{"Flux2\\klein_snofs_v1_4.safetensors", "", "", "", "", "", "", "", "", "Flux2\\final-style.safetensors"}, LoraModel: [maxGenerationLoraSlots]float64{0.75, 0, 0, 0, 0, 0, 0, 0, 0, 0.4},
 	})
 	if err != nil {
@@ -297,6 +298,10 @@ func TestFlux2ImageWorkflowUsesReferenceLatent(t *testing.T) {
 	sampler := prompt["1328"].(map[string]any)["inputs"].(map[string]any)
 	if got, want := sampler["scheduler"], "normal"; got != want {
 		t.Fatalf("Flux2 scheduler = %v, want %q", got, want)
+	}
+	lut := prompt["1430"].(map[string]any)["inputs"].(map[string]any)
+	if lut["image"].([]any)[0] != "1362" || lut["lut_name"] != "street.cube" || lut["strength"] != 0.28 {
+		t.Fatalf("Flux2 LUT is not connected to final image: %#v", lut)
 	}
 	lora := prompt["539"].(map[string]any)["inputs"].(map[string]any)["lora_1"].(map[string]any)
 	if got, want := lora["lora"], "Flux2\\klein_snofs_v1_4.safetensors"; got != want {
@@ -654,6 +659,28 @@ func TestKrea2ImageWorkflowBindsDedicatedUpscaleAndPostProcessingControls(t *tes
 	lut := prompt["18"].(map[string]any)["inputs"].(map[string]any)
 	if got, want := lut["lut_name"], "street.cube"; got != want {
 		t.Fatalf("LUT = %v, want %q", got, want)
+	}
+}
+
+func TestNormalizeLUTMakesColorGradingOptional(t *testing.T) {
+	disabled := generationForm{}
+	normalizeLUT(&disabled)
+	if disabled.LUTEnabled || disabled.LUTStrength != 0 || disabled.LUTName != "LC_Crushed_Blacks.cube" {
+		t.Fatalf("disabled LUT = %#v", disabled)
+	}
+	legacy := generationForm{LUTName: "street.cube", LUTStrength: 0.4}
+	normalizeLUT(&legacy)
+	if !legacy.LUTEnabled || legacy.LUTStrength != 0.4 {
+		t.Fatalf("legacy LUT = %#v", legacy)
+	}
+}
+
+func TestKreaEditDefaultsDoNotEnableLUT(t *testing.T) {
+	input := generationForm{}
+	normalizeKreaEditDefaults(&input)
+	normalizeLUT(&input)
+	if input.LUTEnabled || input.LUTStrength != 0 || input.LUTName != "LC_Crushed_Blacks.cube" {
+		t.Fatalf("Krea2 defaults enabled LUT: %#v", input)
 	}
 }
 

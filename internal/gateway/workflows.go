@@ -120,6 +120,7 @@ type generationForm struct {
 	AdjustSharpness      float64
 	LUTName              string
 	LUTStrength          float64
+	LUTEnabled           bool
 	InputImage           string
 	ReferenceImages      [3]string
 	Positive             string
@@ -496,6 +497,7 @@ func (definition workflowDefinition) normalizeAndValidateSpecific(input *generat
 	case "minimax-h3-video":
 		return normalizeMiniMaxH3(input)
 	case "image-to-image-flux2":
+		normalizeLUT(input)
 		// LCAspectRatioPipeOut uses 0 as a no-clamp value in its public UI, but
 		// its Flux2 latent path rounds that value down to a zero-sized latent.
 		// The original working workflow uses 2160, so keep that safe ceiling when
@@ -539,6 +541,9 @@ func (definition workflowDefinition) normalizeAndValidateSpecific(input *generat
 		if !allowedFlux2UpscaleMode(input.FluxUpscaleMode) {
 			return errors.New("некорректный режим апскейла Flux2")
 		}
+		if !allowedLUT(input.LUTName) || input.LUTStrength < 0 || input.LUTStrength > 1 {
+			return errors.New("некорректные параметры LUT для Flux2")
+		}
 		if input.imageCount() > 4 {
 			return errors.New("Flux2: фото и промт поддерживает до четырёх изображений")
 		}
@@ -562,6 +567,7 @@ func (definition workflowDefinition) normalizeAndValidateSpecific(input *generat
 			input.UpscaleScheduler = "simple"
 		}
 		normalizeKreaEditDefaults(input)
+		normalizeLUT(input)
 		if input.PreserveOriginalSize {
 			// The image is already fitted to the original frame, so the regular
 			// final upscale would otherwise change the requested output size.
@@ -585,7 +591,7 @@ func (definition workflowDefinition) normalizeAndValidateSpecific(input *generat
 		if !allowedKreaSkinPreset(input.SkinPreset) || input.SkinStrength < 0 || input.SkinStrength > 2 || input.SkinCoolness < 0 || input.SkinCoolness > 1 || input.SkinBrightness < 0 || input.SkinBrightness > 1 || input.SkinRosy < -0.3 || input.SkinRosy > 0.5 || input.SkinEvenness < 0 || input.SkinEvenness > 1 || input.SkinShadowLift < 0 || input.SkinShadowLift > 1 || input.SkinSmooth < 0 || input.SkinSmooth > 1 || input.SkinTexturePreserve < 0 || input.SkinTexturePreserve > 1 || input.SkinSaturation < -0.5 || input.SkinSaturation > 0.5 || input.SkinHighlightProtect < 0 || input.SkinHighlightProtect > 1 || input.SkinMaskSensitivity < 0 || input.SkinMaskSensitivity > 1 || input.SkinMaskFeather < 0 || input.SkinMaskFeather > 1 {
 			return errors.New("некорректные параметры обработки кожи Krea2")
 		}
-		if !allowedKreaLUT(input.LUTName) || input.LUTStrength < 0 || input.LUTStrength > 1 || input.AdjustHue < -1 || input.AdjustHue > 1 || input.AdjustSaturation < -1 || input.AdjustSaturation > 1 || input.AdjustBrightness < -1 || input.AdjustBrightness > 1 || input.AdjustContrast < -1 || input.AdjustContrast > 1 || input.AdjustSharpness < -1 || input.AdjustSharpness > 1 {
+		if !allowedLUT(input.LUTName) || input.LUTStrength < 0 || input.LUTStrength > 1 || input.AdjustHue < -1 || input.AdjustHue > 1 || input.AdjustSaturation < -1 || input.AdjustSaturation > 1 || input.AdjustBrightness < -1 || input.AdjustBrightness > 1 || input.AdjustContrast < -1 || input.AdjustContrast > 1 || input.AdjustSharpness < -1 || input.AdjustSharpness > 1 {
 			return errors.New("некорректные параметры тона Krea2")
 		}
 		if input.imageCount() > 2 {
@@ -634,8 +640,25 @@ func normalizeKreaEditDefaults(input *generationForm) {
 	input.SkinHighlightProtect = 0.75
 	input.SkinMaskSensitivity = 0.55
 	input.SkinMaskFeather = 0.45
-	input.LUTName = "LC_Crushed_Blacks.cube"
-	input.LUTStrength = 0.23
+}
+
+// normalizeLUT keeps LCApplyLUT present in the saved workflows while making
+// its color transform truly optional. An empty profile means no grading; the
+// node receives a known profile and zero strength. Older callers that submit a
+// profile and a non-zero strength keep their previous behavior.
+func normalizeLUT(input *generationForm) {
+	if strings.TrimSpace(input.LUTName) == "" {
+		input.LUTName = "LC_Crushed_Blacks.cube"
+		input.LUTStrength = 0
+		input.LUTEnabled = false
+		return
+	}
+	if !input.LUTEnabled && input.LUTStrength > 0 {
+		input.LUTEnabled = true
+	}
+	if !input.LUTEnabled {
+		input.LUTStrength = 0
+	}
 }
 
 func normalizeKreaTextWorkflow(input *generationForm) {
@@ -746,6 +769,8 @@ func (definition workflowDefinition) workflowValues(input generationForm) map[st
 		values["edit_proportion"] = input.EditProportion
 		values["edit_crop_location"] = input.EditCropLocation
 		values["edit_pad_color"] = input.EditPadColor
+		values["lut_name"] = input.LUTName
+		values["lut_strength"] = input.LUTStrength
 	case "image-to-image-krea2":
 		values["identity_lora"] = input.IdentityLora
 		values["reference_boost"] = input.ReferenceBoost
@@ -1205,7 +1230,7 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 		UpscaleCFG: upscaleCFG, UpscaleScheduler: strings.TrimSpace(r.Form.Get("upscale_scheduler")),
 		PostDenoiseBlur: postDenoiseBlur, PostDenoiseEdge: postDenoiseEdge, PostDenoiseRadius: postDenoiseRadius, PostDenoiseStrength: postDenoiseStrength,
 		SkinPreset: strings.TrimSpace(r.Form.Get("skin_preset")), SkinStrength: skinStrength, SkinCoolness: skinCoolness, SkinBrightness: skinBrightness, SkinRosy: skinRosy, SkinEvenness: skinEvenness, SkinShadowLift: skinShadowLift, SkinSmooth: skinSmooth, SkinTexturePreserve: skinTexture, SkinSaturation: skinSaturation, SkinHighlightProtect: skinHighlight, SkinMaskSensitivity: skinMaskSensitivity, SkinMaskFeather: skinMaskFeather,
-		AdjustHue: adjustHue, AdjustSaturation: adjustSaturation, AdjustBrightness: adjustBrightness, AdjustContrast: adjustContrast, AdjustSharpness: adjustSharpness, LUTName: strings.TrimSpace(r.Form.Get("lut_name")), LUTStrength: lutStrength,
+		AdjustHue: adjustHue, AdjustSaturation: adjustSaturation, AdjustBrightness: adjustBrightness, AdjustContrast: adjustContrast, AdjustSharpness: adjustSharpness, LUTName: strings.TrimSpace(r.Form.Get("lut_name")), LUTStrength: lutStrength, LUTEnabled: r.Form.Get("lut_enabled") == "true",
 		ReferenceImages: [3]string{
 			strings.TrimSpace(r.Form.Get("input_image_2")),
 			strings.TrimSpace(r.Form.Get("input_image_3")),
@@ -1250,7 +1275,7 @@ func allowedKreaSkinPreset(value string) bool {
 	}
 }
 
-func allowedKreaLUT(value string) bool {
+func allowedLUT(value string) bool {
 	switch value {
 	case "LC_Crushed_Blacks.cube", "LC Highlights_Protection.cube", "Cool_Natural_Breeze.cube", "street.cube":
 		return true
