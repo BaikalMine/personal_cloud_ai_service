@@ -28,6 +28,7 @@ type Config struct {
 	ComfyUIUpstream           *url.URL
 	OpenWebUIUpstream         *url.URL
 	OllamaUpstream            *url.URL
+	ContentModeratorUpstream  *url.URL
 	PromptAssistantModel      string
 	ComfyUIUpstreamAuthHeader string
 	OpenWebUIUpstreamAuth     string
@@ -65,6 +66,10 @@ func Load() (Config, error) {
 	ollama, err := parseUpstream(env("OLLAMA_UPSTREAM", "http://host.docker.internal:11434"))
 	if err != nil {
 		return Config{}, fmt.Errorf("OLLAMA_UPSTREAM: %w", err)
+	}
+	contentModerator, err := parseUpstream(env("CONTENT_MODERATOR_UPSTREAM", "http://content-moderator:8080"))
+	if err != nil {
+		return Config{}, fmt.Errorf("CONTENT_MODERATOR_UPSTREAM: %w", err)
 	}
 	promptAssistantModel := strings.TrimSpace(env("PROMPT_ASSISTANT_MODEL", "huihui_ai/gemma-4-abliterated:e4b"))
 	if promptAssistantModel == "" || len(promptAssistantModel) > 256 {
@@ -180,6 +185,7 @@ func Load() (Config, error) {
 		ComfyUIUpstream:           comfy,
 		OpenWebUIUpstream:         openWebUI,
 		OllamaUpstream:            ollama,
+		ContentModeratorUpstream:  contentModerator,
 		PromptAssistantModel:      promptAssistantModel,
 		ComfyUIUpstreamAuthHeader: comfyAuth,
 		OpenWebUIUpstreamAuth:     openWebUIAuth,

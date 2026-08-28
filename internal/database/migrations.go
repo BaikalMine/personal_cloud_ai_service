@@ -433,6 +433,41 @@ var migrationCatalog = []migration{
 			`CREATE INDEX IF NOT EXISTS content_media_visual_sensitivity_pending_idx ON content_media(created_at ASC) WHERE media_type='image' AND visual_sensitivity_classified_at IS NULL`,
 		},
 	},
+	{
+		version: 23,
+		name:    "recheck_live_media_with_strict_visual_policy",
+		statements: []string{
+			`UPDATE content_media SET visual_sensitivity_classified_at=NULL WHERE media_type='image' AND expires_at > now()`,
+		},
+	},
+	{
+		version: 24,
+		name:    "recheck_live_content_with_expanded_sensitive_terms",
+		statements: []string{
+			`UPDATE content_events SET sensitivity_classified_at=NULL WHERE expires_at > now()`,
+		},
+	},
+	{
+		version: 25,
+		name:    "recheck_live_media_with_dedicated_nsfw_classifier",
+		statements: []string{
+			`UPDATE content_media SET visual_sensitivity_classified_at=NULL WHERE media_type='image' AND expires_at > now()`,
+		},
+	},
+	{
+		version: 26,
+		name:    "recheck_live_media_with_high_recall_nsfw_threshold",
+		statements: []string{
+			`UPDATE content_media SET visual_sensitivity_classified_at=NULL WHERE media_type='image' AND expires_at > now()`,
+		},
+	},
+	{
+		version: 27,
+		name:    "recheck_live_media_with_balanced_nsfw_threshold",
+		statements: []string{
+			`UPDATE content_media SET visual_sensitivity_classified_at=NULL WHERE media_type='image' AND expires_at > now()`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

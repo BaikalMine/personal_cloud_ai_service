@@ -231,11 +231,18 @@ func (a *App) handleAdminContent(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
+		visualPending := false
+		for _, media := range mediaByEvent[row.ID] {
+			if media.VisualPending {
+				visualPending = true
+				break
+			}
+		}
 		events = append(events, ContentEventView{
 			ID: row.ID, UserID: row.UserID, Username: row.Username, Service: row.Service,
 			Kind: row.Kind, ExternalID: row.ExternalID, Model: row.Model, Prompt: prompt,
 			Response: response, Metadata: metadata, Assistant: contentAssistantFromMetadata(metadata), MediaCount: row.MediaCount,
-			Sensitive: row.Sensitive,
+			Sensitive: row.Sensitive || visualPending, VisualPending: visualPending,
 			Media:     mediaByEvent[row.ID],
 			CreatedAt: row.CreatedAt, ExpiresAt: row.ExpiresAt,
 		})

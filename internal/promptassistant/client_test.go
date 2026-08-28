@@ -3,6 +3,7 @@ package promptassistant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -105,6 +106,17 @@ func TestClassifyImageSendsImageAndUnloadsModel(t *testing.T) {
 	}
 	if !sensitive {
 		t.Fatal("expected sensitive image")
+	}
+}
+
+func TestClassifyImageRejectsUnsupportedMedia(t *testing.T) {
+	base, err := url.Parse("http://127.0.0.1:11434")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewClient(base, "test:e4b").ClassifyImage(context.Background(), []byte("sample"), "image/gif")
+	if !errors.Is(err, ErrUnsupportedImage) {
+		t.Fatalf("expected unsupported image error, got %v", err)
 	}
 }
 

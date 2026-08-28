@@ -9,10 +9,13 @@ import (
 // sensitiveContentTerms deliberately stay narrow: the flag is a privacy
 // curtain for clearly adult prompts, not a judgement about ordinary content.
 var sensitiveContentTerms = []string{
-	"nsfw", "18+", "xxx", "porn", "pornographic", "erotic", "explicit sex",
-	"nude", "nudity", "naked", "topless", "lingerie", "fetish", "intimate", "genitals",
-	"nipples", "breasts", "penis", "vagina", "обнажен", "обнажён", "голая", "голый",
-	"нагота", "эрот", "порно", "секс", "интим", "фетиш", "соски", "генитал",
+	"nsfw", "18+", "xxx", "porn", "pornographic", "erotic", "explicit sex", "sexualized",
+	"nude", "nudity", "naked", "topless", "lingerie", "underwear", "thong", "g-string",
+	"fetish", "intimate", "genitals", "nipples", "breasts", "penis", "vagina", "masturbat",
+	"orgasm", "cum", "seductive", "sensual", "provocative", "boudoir", "pin-up", "see-through",
+	"transparent dress", "wet t-shirt", "bare chest", "обнажен", "обнажён", "голая", "голый",
+	"нагота", "эрот", "порно", "секс", "интим", "фетиш", "соски", "генитал", "белье",
+	"бельё", "стринги", "прозрачн", "откровенн", "соблазнительн", "сексуальн", "эротич",
 }
 
 func isSensitiveGeneration(input generationForm) bool {

@@ -20,6 +20,7 @@ import (
 	contentcrypto "ai-access-gateway/internal/content"
 	"ai-access-gateway/internal/database"
 	"ai-access-gateway/internal/mining"
+	"ai-access-gateway/internal/moderation"
 	"ai-access-gateway/internal/promptassistant"
 	"ai-access-gateway/internal/security"
 	"ai-access-gateway/internal/store"
@@ -95,6 +96,7 @@ func Run() error {
 		mining:              mining.NewClient(cfg.MiningAgentURL, cfg.MiningAgentToken),
 		systemMonitor:       mining.NewClient(cfg.SystemMonitorAgentURL, cfg.SystemMonitorAgentToken),
 		promptAssistant:     promptassistant.NewClient(cfg.OllamaUpstream, cfg.PromptAssistantModel),
+		contentModerator:    moderation.NewClient(cfg.ContentModeratorUpstream),
 		updates:             updates.NewClient(cfg.UpdateAgentURL, cfg.UpdateAgentToken),
 		contentCipher:       contentCipher,
 		mediaCaptureSlots:   make(chan struct{}, maxConcurrentMediaCaptures),
@@ -110,6 +112,11 @@ func Run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go app.runMaintenance(ctx)
+	go func() {
+		classificationCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		app.classifyPendingSensitiveContent(classificationCtx)
+	}()
 	app.queueSensitiveMediaClassification()
 
 	errs := make(chan error, 2)

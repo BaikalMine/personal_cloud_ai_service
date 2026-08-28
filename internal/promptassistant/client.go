@@ -17,8 +17,10 @@ import (
 const (
 	maxPromptBytes   = 16 << 10
 	maxResponseBytes = 32 << 10
-	maxImageBytes    = 8 << 20
+	maxImageBytes    = 32 << 20
 )
+
+var ErrUnsupportedImage = errors.New("изображение не поддерживается локальной vision-проверкой")
 
 type Client struct {
 	baseURL *url.URL
@@ -148,12 +150,12 @@ func (c *Client) ClassifyImage(ctx context.Context, image []byte, mimeType strin
 		return false, errors.New("локальная vision-модель не настроена")
 	}
 	if len(image) == 0 || len(image) > maxImageBytes {
-		return false, errors.New("изображение имеет недопустимый размер для проверки")
+		return false, fmt.Errorf("%w: недопустимый размер", ErrUnsupportedImage)
 	}
 	switch strings.ToLower(strings.TrimSpace(mimeType)) {
 	case "image/jpeg", "image/png", "image/webp":
 	default:
-		return false, errors.New("формат изображения не поддерживается проверкой")
+		return false, fmt.Errorf("%w: формат %q", ErrUnsupportedImage, mimeType)
 	}
 
 	target := *c.baseURL
@@ -163,7 +165,7 @@ func (c *Client) ClassifyImage(ctx context.Context, image []byte, mimeType strin
 	payload := chatRequest{
 		Model: c.model,
 		Messages: []Message{
-			{Role: "system", Content: "You are a conservative local image privacy classifier. Reply with exactly one word: SENSITIVE or SAFE. Reply SENSITIVE only when the image visibly contains nudity, exposed intimate body parts, explicit sexual activity, or clearly sexualized adult imagery that should be hidden behind an 18+ privacy curtain. Reply SAFE for ordinary portraits, non-sexual clothing, swimwear, art without visible nudity, or when you are uncertain. Do not infer age, identity, or sexual content from appearance alone."},
+			{Role: "system", Content: "You are a strict local 18+ privacy classifier. Reply with exactly one word: SENSITIVE or SAFE. The privacy curtain is not a moral judgement: choose SENSITIVE whenever the image visibly contains nudity, exposed breasts, buttocks or intimate body parts, explicit sexual activity, fetish context, erotic lingerie, an intentionally sexualized pose or framing, implied nudity, or clearly adult erotic imagery. Prefer SENSITIVE whenever the sexual intent is plausible from visible context; this protects viewers from accidental exposure. Reply SAFE only for clearly non-sexual content such as ordinary portraits, everyday clothing, neutral fashion, landscapes, ordinary beach or sport scenes, and non-erotic art. Do not infer age, identity, or sexual content from a person's appearance alone."},
 			{Role: "user", Content: "Classify this image.", Images: []string{base64.StdEncoding.EncodeToString(image)}},
 		},
 		Stream:    false,

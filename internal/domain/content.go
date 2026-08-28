@@ -60,19 +60,21 @@ type PendingSensitiveMedia struct {
 }
 
 type UserGenerationMedia struct {
-	ID           int64
-	MediaType    string
-	MIMEType     string
-	OriginalName string
-	CreatedAt    time.Time
-	ExpiresAt    time.Time
-	Sensitive    bool
+	ID            int64
+	MediaType     string
+	MIMEType      string
+	OriginalName  string
+	CreatedAt     time.Time
+	ExpiresAt     time.Time
+	Sensitive     bool
+	VisualPending bool
 }
 
 type ContentMediaSummary struct {
-	ID        int64
-	EventID   int64
-	MediaType string
+	ID            int64
+	EventID       int64
+	MediaType     string
+	VisualPending bool
 }
 
 type ComfyOutputOwnership struct {

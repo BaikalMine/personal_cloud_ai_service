@@ -14,6 +14,7 @@ import (
 	contentcrypto "ai-access-gateway/internal/content"
 	"ai-access-gateway/internal/domain"
 	"ai-access-gateway/internal/mining"
+	"ai-access-gateway/internal/moderation"
 	"ai-access-gateway/internal/promptassistant"
 	"ai-access-gateway/internal/security"
 	"ai-access-gateway/internal/store"
@@ -44,6 +45,7 @@ type App struct {
 	mining              *mining.Client
 	systemMonitor       *mining.Client
 	promptAssistant     *promptassistant.Client
+	contentModerator    *moderation.Client
 	updates             *updates.Client
 	contentCipher       *contentcrypto.Cipher
 	mediaCaptureSlots   chan struct{}
@@ -141,22 +143,23 @@ type UpdateOverview struct {
 }
 
 type ContentEventView struct {
-	ID         int64
-	UserID     int64
-	Username   string
-	Service    string
-	Kind       string
-	ExternalID string
-	Model      string
-	Prompt     string
-	Response   string
-	Metadata   string
-	Assistant  *ContentAssistantView
-	Sensitive  bool
-	MediaCount int64
-	Media      []domain.ContentMediaSummary
-	CreatedAt  time.Time
-	ExpiresAt  time.Time
+	ID            int64
+	UserID        int64
+	Username      string
+	Service       string
+	Kind          string
+	ExternalID    string
+	Model         string
+	Prompt        string
+	Response      string
+	Metadata      string
+	Assistant     *ContentAssistantView
+	Sensitive     bool
+	VisualPending bool
+	MediaCount    int64
+	Media         []domain.ContentMediaSummary
+	CreatedAt     time.Time
+	ExpiresAt     time.Time
 }
 
 type ContentAssistantView struct {

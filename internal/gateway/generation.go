@@ -163,7 +163,7 @@ func (a *App) recentGenerationMedia(ctx context.Context, userID int64) []generat
 	for _, item := range items {
 		views = append(views, generationMediaView{
 			ID: item.ID, URL: "/generate/library/" + strconv.FormatInt(item.ID, 10), Filename: item.OriginalName,
-			MediaType: item.MediaType, ExpiresUnix: item.ExpiresAt.UnixMilli(), Sensitive: item.Sensitive,
+			MediaType: item.MediaType, ExpiresUnix: item.ExpiresAt.UnixMilli(), Sensitive: item.Sensitive || item.VisualPending,
 		})
 	}
 	return views

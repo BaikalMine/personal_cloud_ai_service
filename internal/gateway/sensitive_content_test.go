@@ -7,6 +7,8 @@ func TestSensitiveGenerationDetection(t *testing.T) {
 		{Positive: "cinematic adult portrait", AssistantTemplate: "nsfw"},
 		{Positive: "an explicit erotic portrait"},
 		{Positive: "обнажённая художественная фигура в студии"},
+		{Positive: "a seductive boudoir portrait in transparent dress"},
+		{Positive: "откровенный портрет в белье"},
 	} {
 		if !isSensitiveGeneration(input) {
 			t.Fatalf("expected sensitive generation for %#v", input)

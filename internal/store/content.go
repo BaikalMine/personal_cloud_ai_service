@@ -95,7 +95,7 @@ func (s *Store) ListContentMediaSummaries(ctx context.Context, eventIDs []int64)
 		return result, nil
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id,event_id,media_type
+		SELECT id,event_id,media_type,(media_type='image' AND visual_sensitivity_classified_at IS NULL)
 		FROM content_media
 		WHERE event_id = ANY($1) AND expires_at > now()
 		ORDER BY event_id,created_at,id
@@ -107,7 +107,7 @@ func (s *Store) ListContentMediaSummaries(ctx context.Context, eventIDs []int64)
 	defer rows.Close()
 	for rows.Next() {
 		var media domain.ContentMediaSummary
-		if err := rows.Scan(&media.ID, &media.EventID, &media.MediaType); err != nil {
+		if err := rows.Scan(&media.ID, &media.EventID, &media.MediaType, &media.VisualPending); err != nil {
 			return nil, err
 		}
 		result[media.EventID] = append(result[media.EventID], media)
@@ -221,7 +221,8 @@ func (s *Store) InsertComfyOutputOwnerships(ctx context.Context, userID int64, o
 func (s *Store) ListUserGenerationMedia(ctx context.Context, userID int64, limit int) ([]domain.UserGenerationMedia, error) {
 	limit = boundedLimit(limit, 1, 100)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id,m.media_type,m.mime_type,m.original_name,m.created_at,m.expires_at,e.is_sensitive
+		SELECT m.id,m.media_type,m.mime_type,m.original_name,m.created_at,m.expires_at,e.is_sensitive,
+		       (m.media_type='image' AND m.visual_sensitivity_classified_at IS NULL)
 		FROM content_media m
 		JOIN content_events e ON e.id=m.event_id
 		WHERE e.user_id=$1 AND e.service='comfyui' AND e.kind='comfyui_prompt'
@@ -236,7 +237,7 @@ func (s *Store) ListUserGenerationMedia(ctx context.Context, userID int64, limit
 	var media []domain.UserGenerationMedia
 	for rows.Next() {
 		var item domain.UserGenerationMedia
-		if err := rows.Scan(&item.ID, &item.MediaType, &item.MIMEType, &item.OriginalName, &item.CreatedAt, &item.ExpiresAt, &item.Sensitive); err != nil {
+		if err := rows.Scan(&item.ID, &item.MediaType, &item.MIMEType, &item.OriginalName, &item.CreatedAt, &item.ExpiresAt, &item.Sensitive, &item.VisualPending); err != nil {
 			return nil, err
 		}
 		media = append(media, item)
