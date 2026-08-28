@@ -21,6 +21,7 @@
     state: slot.querySelector("[data-image-state]"),
     remove: slot.querySelector("[data-remove-image]"),
     label: slot.querySelector("[data-image-slot-label]"),
+    role: slot.querySelector("[data-image-role]"),
   }));
   const workflowNext = document.getElementById("workflow-next");
   const imageSourceFields = document.getElementById("image-source-fields");
@@ -84,6 +85,8 @@
   const selectedImagePreview = document.getElementById("generation-selected-image-preview");
   const selectedImageName = document.getElementById("generation-selected-image-name");
   const selectedImageDetails = document.getElementById("generation-selected-image-details");
+  const referenceMap = document.getElementById("generation-reference-map");
+  const referenceMapList = document.getElementById("generation-reference-map-list");
   const editSourceTitle = document.getElementById("generation-edit-source-title");
   const editSourceDescription = document.getElementById("generation-edit-source-description");
   const mainPassTitle = document.getElementById("generation-main-pass-title");
@@ -123,6 +126,15 @@
   let activeGenerationID = "";
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+  const referenceRoleLabels = {
+    base_scene: "Основной кадр и композиция",
+    identity: "Внешность и лицо",
+    wardrobe_object: "Одежда, предмет или материал",
+    pose_composition: "Поза и ракурс",
+    style: "Стиль, свет и цвет",
+    background: "Фон и окружение",
+    details: "Текст и мелкие детали",
+  };
   const numericValue = (value, fallback = 0) => {
     const parsed = Number(String(value).replaceAll(",", "."));
     return Number.isFinite(parsed) ? parsed : fallback;
@@ -547,6 +559,41 @@
   const maxInputImages = () => Math.max(1, Number(selectedGenerationWorkflow()?.dataset.maxInputImages || (templateID.value === "minimax-h3-video" ? 4 : 1)));
   const activeMaxInputImages = () => isMiniMaxSelected() && miniMaxVideoModeSelect?.value === "frames" ? Math.min(2, maxInputImages()) : maxInputImages();
 
+  const promptAssistantReferences = () => {
+    if (templateID.value !== "image-to-image") return [];
+    return imageSlots
+      .filter((item) => item.index <= activeMaxInputImages() && item.input?.files?.[0])
+      .map((item) => ({ number: item.index, role: item.role?.value || "base_scene" }));
+  };
+
+  const syncReferenceMap = () => {
+    if (!referenceMap || !referenceMapList) return;
+    const references = promptAssistantReferences();
+    referenceMap.hidden = references.length === 0;
+    referenceMapList.replaceChildren();
+    references.forEach((reference) => {
+      const item = imageSlots.find((slot) => slot.index === reference.number);
+      if (item?.role && item.index === 1) item.role.value = "base_scene";
+      const card = document.createElement("div");
+      card.className = "generation-reference-map-item";
+      const preview = previewURLs.get(reference.number);
+      if (preview) {
+        const image = document.createElement("img");
+        image.src = preview;
+        image.alt = `Изображение ${reference.number}`;
+        card.append(image);
+      }
+      const details = document.createElement("span");
+      const number = document.createElement("b");
+      number.textContent = `Изображение ${reference.number}`;
+      const role = document.createElement("em");
+      role.textContent = referenceRoleLabels[reference.role] || "Референс";
+      details.append(number, role);
+      card.append(details);
+      referenceMapList.append(card);
+    });
+  };
+
   const clearImageSlot = (item) => {
     if (!item) return;
     const oldURL = previewURLs.get(item.index);
@@ -564,10 +611,12 @@
     if (item.preview) item.preview.hidden = true;
     if (item.name) item.name.textContent = "";
     if (item.state) item.state.textContent = "Готово к загрузке";
+    syncReferenceMap();
   };
 
   const syncImageSlots = () => {
     const isMiniMax = isMiniMaxSelected() || templateID.value === "minimax-h3-video";
+    const isImageEdit = templateID.value === "image-to-image";
     const referenceMode = miniMaxVideoModeSelect?.value === "references";
     const maximum = (requiresImage || allowsImages) ? activeMaxInputImages() : 0;
     const isKrea = selectedGenerationWorkflow()?.dataset.family === "krea2";
@@ -581,17 +630,27 @@
       else if (isMiniMax) item.label.textContent = item.index === 1 ? "Первый кадр · обязательно" : "Последний кадр · необязательно";
       else if (item.index === 1) item.label.textContent = "Фото 1 · обязательно";
       else item.label.textContent = isKrea && item.index === 2 ? "Фото 2 · дополнительное" : `Фото ${item.index} · референс`;
+      const roleControl = item.role?.closest(".image-reference-role");
+      if (roleControl) roleControl.hidden = !isImageEdit;
+      if (item.role) {
+        if (item.index === 1) item.role.value = "base_scene";
+        item.role.disabled = !isImageEdit || item.index === 1;
+      }
     });
     const note = document.getElementById("image-source-note");
     if (isMiniMax && note) {
       note.textContent = referenceMode
         ? "Добавьте от одного до четырёх фотореференсов. Первый обязательный, остальные появятся по мере добавления."
         : "Добавьте первый кадр. Второе фото необязательно: оно станет последним кадром ролика.";
+      syncReferenceMap();
       return;
     }
     if (note) note.textContent = maximum > 1
-      ? `Первое фото обязательно. Можно добавить ещё до ${maximum - 1} ${maximum === 2 ? "референса" : "референсов"}.`
+      ? isImageEdit
+        ? `Фото 1 задаёт базовую сцену. Для каждого референса выберите роль, чтобы ассистент точно связал image 1–4 в промте.`
+        : `Первое фото обязательно. Можно добавить ещё до ${maximum - 1} ${maximum === 2 ? "референса" : "референсов"}.`
       : "Загрузите исходное фото для редактирования.";
+    syncReferenceMap();
   };
 
   const chooseScenario = (button) => {
@@ -900,6 +959,9 @@
         assistant_template: promptAssistantTemplate?.value || "workflow-default",
         assistant_think: promptAssistantThink?.checked ? "true" : "false",
       });
+      promptAssistantReferences().forEach((reference) => {
+        body.set(`image_role_${reference.number}`, reference.role);
+      });
       const response = await fetch("/generate/prompt-assistant", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
@@ -971,6 +1033,7 @@
       if (inputImages[item.index - 1]) inputImages[item.index - 1].value = "";
       if (!file) {
         if (item.preview) item.preview.hidden = true;
+        syncReferenceMap();
         updateWorkflowNext();
         return;
       }
@@ -993,11 +1056,17 @@
       if (item.state) item.state.textContent = "Готово к загрузке";
       if (item.preview) item.preview.hidden = false;
       syncSelectedImageSummary();
+      syncReferenceMap();
       updateWorkflowNext();
     });
     item.remove?.addEventListener("click", () => {
       clearImageSlot(item);
       updateWorkflowNext();
+    });
+    item.role?.addEventListener("change", () => {
+      if (item.index === 1) item.role.value = "base_scene";
+      syncReferenceMap();
+      if (promptAssistantEnabled?.checked) resetPromptAssistantReview();
     });
   });
 

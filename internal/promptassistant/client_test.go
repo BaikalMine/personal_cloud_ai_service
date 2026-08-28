@@ -22,7 +22,7 @@ func TestEnhanceSendsFlux2EditInstructionAndUnloadsModel(t *testing.T) {
 		if body.Model != "test:e4b" || body.Stream || body.Think || body.KeepAlive != "0" || len(body.Messages) != 2 {
 			t.Fatalf("unexpected body: %#v", body)
 		}
-		if !strings.Contains(body.Messages[0].Content, "image editing") || body.Messages[1].Content != "change the jacket" {
+		if !strings.Contains(body.Messages[0].Content, "image editing") || !strings.Contains(body.Messages[0].Content, "image 1: the base scene") || !strings.Contains(body.Messages[0].Content, "image 2: the person") || body.Messages[1].Content != "change the jacket" {
 			t.Fatalf("wrong prompt-assistant context: %#v", body.Messages)
 		}
 		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"<think>draft</think> Keep the same person in a red jacket."}}`))
@@ -33,7 +33,10 @@ func TestEnhanceSendsFlux2EditInstructionAndUnloadsModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := NewClient(base, "test:e4b")
-	result, err := client.Enhance(context.Background(), ModeImageToImage, ProfileFluxEdit, "change the jacket", false)
+	result, err := client.Enhance(context.Background(), ModeImageToImage, ProfileFluxEdit, "change the jacket", []ImageReference{
+		{Number: 1, Role: ImageReferenceBaseScene},
+		{Number: 2, Role: ImageReferenceIdentity},
+	}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +47,7 @@ func TestEnhanceSendsFlux2EditInstructionAndUnloadsModel(t *testing.T) {
 
 func TestEnhanceRejectsEmptyPrompt(t *testing.T) {
 	client := NewClient(nil, "test:e4b")
-	if _, err := client.Enhance(context.Background(), ModeTextToImage, ProfileWorkflowDefault, " ", false); err == nil {
+	if _, err := client.Enhance(context.Background(), ModeTextToImage, ProfileWorkflowDefault, " ", nil, false); err == nil {
 		t.Fatal("expected empty prompt error")
 	}
 }
@@ -65,7 +68,7 @@ func TestEnhanceCanEnableThinking(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := NewClient(base, "test:e4b").Enhance(context.Background(), ModeTextToImage, ProfileAnime, "hero portrait", true)
+	result, err := NewClient(base, "test:e4b").Enhance(context.Background(), ModeTextToImage, ProfileAnime, "hero portrait", nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}

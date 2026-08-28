@@ -771,6 +771,8 @@ code { color: var(--cyan); }
 .source-image-grid[data-visible-slots="2"] { grid-template-columns: repeat(2, minmax(220px, 360px)); }
 .source-image-card { width: 100%; min-width: 0; }
 .source-image-card[hidden] { display: none; }
+.image-reference-role { display: grid; gap: 5px; margin: 9px 0 0; color: var(--muted); font-size: 11px; font-weight: 750; }
+.image-reference-role select { min-width: 0; min-height: 36px; padding: 7px 30px 7px 9px; font-size: 12px; }
 .upload-slot-label { color: var(--mint); font-size: 11px; font-weight: 850; }
 .upload-icon { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid var(--cyan); border-radius: 50%; color: var(--cyan); font-size: 25px; font-weight: 400; }
 .upload-preview { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-raised); }
@@ -849,6 +851,16 @@ textarea:focus { outline: 2px solid rgba(85,199,216,.22); border-color: var(--cy
 .generation-selected-image strong, .generation-selected-image small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .generation-selected-image strong { color: var(--text); font-size: 13px; }
 .generation-selected-image small { color: var(--muted); font-size: 12px; }
+.generation-reference-map { display: grid; gap: 11px; margin: 14px 0; padding: 12px; border: 1px solid #315361; border-radius: 7px; background: #112025; }
+.generation-reference-map > div:first-child { display: grid; gap: 3px; }
+.generation-reference-map strong { color: var(--text); font-size: 13px; }
+.generation-reference-map small { color: var(--muted); font-size: 12px; line-height: 1.35; }
+.generation-reference-map-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.generation-reference-map-item { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-input); }
+.generation-reference-map-item img { width: 36px; height: 36px; flex: 0 0 auto; object-fit: cover; border-radius: 3px; background: var(--surface); }
+.generation-reference-map-item span { min-width: 0; display: grid; gap: 2px; }
+.generation-reference-map-item b { color: var(--mint); font-size: 10px; text-transform: uppercase; }
+.generation-reference-map-item em { overflow: hidden; color: var(--text); font-size: 11px; font-style: normal; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .lora-list { display: grid; gap: 8px; }
 .lora-row { min-width: 0; display: grid; grid-template-columns: 28px minmax(220px, 1fr) 105px 105px; align-items: end; gap: 9px; }
 .flux-lora-row { grid-template-columns: 28px minmax(220px, 1fr) 105px; }
@@ -952,7 +964,7 @@ textarea:focus { outline: 2px solid rgba(85,199,216,.22); border-color: var(--cy
 	.generation-progress { gap: 4px; }
 	.generation-step { flex-direction: column; gap: 3px; font-size: 9px; }
 	.generation-step b { width: 25px; height: 25px; }
-	.workflow-choices, .generation-primary-fields, .generation-prompt-fields, .generation-fields, .generation-output-grid, .prompt-assistant-controls { grid-template-columns: 1fr; }
+	.workflow-choices, .generation-primary-fields, .generation-prompt-fields, .generation-fields, .generation-output-grid, .prompt-assistant-controls, .generation-reference-map-list { grid-template-columns: 1fr; }
 	.prompt-assistant-controls > button { width: 100%; }
 	.workflow-settings-section { padding: 14px 10px; }
   .workflow-settings-heading { align-items: flex-start; flex-direction: column; }

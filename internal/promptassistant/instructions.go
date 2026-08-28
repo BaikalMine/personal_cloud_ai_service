@@ -1,6 +1,10 @@
 package promptassistant
 
-import "strings"
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
 
 // Mode selects the workflow context used to refine a user's prompt.
 type Mode string
@@ -20,6 +24,25 @@ const (
 
 // Profile selects a user-facing assistant template.
 type Profile string
+
+// ImageReference describes the role a user assigned to a numbered image in an
+// image-editing request. The prompt assistant receives roles, not image bytes.
+type ImageReference struct {
+	Number int
+	Role   ImageReferenceRole
+}
+
+type ImageReferenceRole string
+
+const (
+	ImageReferenceBaseScene       ImageReferenceRole = "base_scene"
+	ImageReferenceIdentity        ImageReferenceRole = "identity"
+	ImageReferenceWardrobeObject  ImageReferenceRole = "wardrobe_object"
+	ImageReferencePoseComposition ImageReferenceRole = "pose_composition"
+	ImageReferenceStyle           ImageReferenceRole = "style"
+	ImageReferenceBackground      ImageReferenceRole = "background"
+	ImageReferenceDetails         ImageReferenceRole = "details"
+)
 
 const sharedInstruction = `You are an expert prompt engineer for image-generation models. Rewrite the user's prompt as one cohesive, high-quality English prompt paragraph.
 
@@ -78,7 +101,64 @@ func ValidProfile(mode Mode, profile Profile) bool {
 	}
 }
 
+func ValidImageReferenceRole(role ImageReferenceRole) bool {
+	switch role {
+	case ImageReferenceBaseScene, ImageReferenceIdentity, ImageReferenceWardrobeObject,
+		ImageReferencePoseComposition, ImageReferenceStyle, ImageReferenceBackground,
+		ImageReferenceDetails:
+		return true
+	default:
+		return false
+	}
+}
+
+func referenceRoleInstruction(role ImageReferenceRole) string {
+	switch role {
+	case ImageReferenceBaseScene:
+		return "the base scene, primary subject, composition, and framing to preserve"
+	case ImageReferenceIdentity:
+		return "the person or character's identity, face, body features, hair, and overall appearance to transfer"
+	case ImageReferenceWardrobeObject:
+		return "the wardrobe, object, material, accessory, or product details to transfer"
+	case ImageReferencePoseComposition:
+		return "the pose, camera angle, framing, and composition to use as a reference"
+	case ImageReferenceStyle:
+		return "the visual style, lighting, color treatment, and atmosphere to borrow"
+	case ImageReferenceBackground:
+		return "the setting, environment, and background details to use"
+	case ImageReferenceDetails:
+		return "small details, visible text, textures, or accents to preserve or transfer"
+	default:
+		return "a supporting visual reference"
+	}
+}
+
+func referenceMapInstruction(references []ImageReference) string {
+	if len(references) == 0 {
+		return ""
+	}
+	ordered := append([]ImageReference(nil), references...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Number < ordered[j].Number })
+	lines := make([]string, 0, len(ordered))
+	for _, reference := range ordered {
+		if reference.Number < 1 || reference.Number > 4 || !ValidImageReferenceRole(reference.Role) {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("- image %d: %s", reference.Number, referenceRoleInstruction(reference.Role)))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "\n\nThe user has provided this ordered reference map:\n" + strings.Join(lines, "\n") + `
+
+You receive the declared roles, not visual analysis of the image files. Never claim to see unmentioned details. When the user's request combines, preserves, or transfers a reference, explicitly use the corresponding phrase "image 1", "image 2", "image 3", or "image 4" in the final prompt. Keep image 1 as the base unless the user explicitly directs otherwise; take only the stated role from each additional image and do not merge unrelated features.`
+}
+
 func SystemPrompt(mode Mode, profile Profile) string {
+	return SystemPromptWithReferences(mode, profile, nil)
+}
+
+func SystemPromptWithReferences(mode Mode, profile Profile, references []ImageReference) string {
 	prompt := sharedInstruction
 	if mode == ModeTextToVideo {
 		prompt = videoInstruction
@@ -100,6 +180,9 @@ func SystemPrompt(mode Mode, profile Profile) string {
 	}
 	if mode == ModeImageToImage && profile != ProfileFluxEdit {
 		prompt += workflowEditInstruction
+	}
+	if mode == ModeImageToImage {
+		prompt += referenceMapInstruction(references)
 	}
 	return strings.TrimSpace(prompt)
 }

@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -43,6 +44,11 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 		writeGenerationError(w, http.StatusBadRequest, "неизвестный шаблон промт-ассистента")
 		return
 	}
+	references, err := promptAssistantImageReferences(r, mode)
+	if err != nil {
+		writeGenerationError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	thinkValue := r.Form.Get("assistant_think")
 	if thinkValue != "" && thinkValue != "true" && thinkValue != "false" {
 		writeGenerationError(w, http.StatusBadRequest, "некорректное значение режима рассуждений")
@@ -68,13 +74,13 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 95*time.Second)
 	defer cancel()
-	result, err := a.promptAssistant.Enhance(ctx, mode, profile, prompt, think)
+	result, err := a.promptAssistant.Enhance(ctx, mode, profile, prompt, references, think)
 	if err != nil {
 		log.Printf("prompt assistant: %v", err)
 		writeGenerationError(w, http.StatusBadGateway, "не удалось получить вариант от локальной модели")
 		return
 	}
-	a.recordPromptAssistantEvent(ctx, user.ID, mode, profile, prompt, result, think)
+	a.recordPromptAssistantEvent(ctx, user.ID, mode, profile, prompt, result, references, think)
 	response := map[string]any{"prompt": result, "model": a.cfg.PromptAssistantModel}
 	if miningWarning != "" {
 		response["mining_warning"] = miningWarning
@@ -85,13 +91,31 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-func (a *App) recordPromptAssistantEvent(ctx context.Context, userID int64, mode promptassistant.Mode, profile promptassistant.Profile, prompt, result string, think bool) {
+func promptAssistantImageReferences(r *http.Request, mode promptassistant.Mode) ([]promptassistant.ImageReference, error) {
+	if mode != promptassistant.ModeImageToImage {
+		return nil, nil
+	}
+	references := make([]promptassistant.ImageReference, 0, 4)
+	for number := 1; number <= 4; number++ {
+		role := promptassistant.ImageReferenceRole(strings.TrimSpace(r.Form.Get(fmt.Sprintf("image_role_%d", number))))
+		if role == "" {
+			continue
+		}
+		if !promptassistant.ValidImageReferenceRole(role) {
+			return nil, fmt.Errorf("некорректная роль для изображения %d", number)
+		}
+		references = append(references, promptassistant.ImageReference{Number: number, Role: role})
+	}
+	return references, nil
+}
+
+func (a *App) recordPromptAssistantEvent(ctx context.Context, userID int64, mode promptassistant.Mode, profile promptassistant.Profile, prompt, result string, references []promptassistant.ImageReference, think bool) {
 	if a.store == nil || a.contentCipher == nil {
 		return
 	}
 	metadata, err := json.Marshal(map[string]any{
 		"workflow": string(mode), "template": string(profile), "think": think, "session": "single_request", "keep_alive": "0",
-		"purpose": "quick_generation_prompt_assistant",
+		"purpose": "quick_generation_prompt_assistant", "image_references": references,
 	})
 	if err != nil {
 		return

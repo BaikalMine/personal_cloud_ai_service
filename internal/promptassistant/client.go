@@ -67,7 +67,7 @@ func (c *Client) Configured() bool {
 	return c != nil && c.baseURL != nil && c.model != ""
 }
 
-func (c *Client) Enhance(ctx context.Context, mode Mode, profile Profile, prompt string, think bool) (string, error) {
+func (c *Client) Enhance(ctx context.Context, mode Mode, profile Profile, prompt string, references []ImageReference, think bool) (string, error) {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return "", errors.New("введите исходный промт")
@@ -88,7 +88,7 @@ func (c *Client) Enhance(ctx context.Context, mode Mode, profile Profile, prompt
 	payload := chatRequest{
 		Model: c.model,
 		Messages: []Message{
-			{Role: "system", Content: SystemPrompt(mode, profile)},
+			{Role: "system", Content: SystemPromptWithReferences(mode, profile, references)},
 			{Role: "user", Content: prompt},
 		},
 		Stream:    false,
