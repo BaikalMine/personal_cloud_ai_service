@@ -156,6 +156,7 @@ func TestEnhanceVideoUsesMiniMaxContextForReferenceAudio(t *testing.T) {
 		system := body.Messages[0].Content
 		if !strings.Contains(system, "Ref2VA with 3 declared image reference") ||
 			!strings.Contains(system, "<Audio 1> reference is attached") ||
+			!strings.Contains(system, "<Video 1> reference is attached") ||
 			!strings.Contains(system, "<Picture 1> (image 1): the base scene") ||
 			!strings.Contains(system, "<Picture 2> (image 2): the person or character's identity") ||
 			!strings.Contains(system, "at least three concrete visible attributes") ||
@@ -171,8 +172,33 @@ func TestEnhanceVideoUsesMiniMaxContextForReferenceAudio(t *testing.T) {
 		t.Fatal(err)
 	}
 	references := []ImageReference{{Number: 1, Role: ImageReferenceBaseScene, MIMEType: "image/png", Image: []byte("image-1")}, {Number: 2, Role: ImageReferenceIdentity, MIMEType: "image/webp", Image: []byte("image-2")}}
-	result, err := NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3, "a dancer turns", references, VideoContext{Mode: "references", DurationSeconds: 10, ImageCount: 3, AudioReference: true}, false)
+	result, err := NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3, "a dancer turns", references, VideoContext{Mode: "references", DurationSeconds: 10, ImageCount: 3, AudioReference: true, VideoReference: true}, false)
 	if err != nil || result != "summary: a concise video." {
+		t.Fatalf("result = %q, err = %v", result, err)
+	}
+}
+
+func TestEnhanceVideoUsesT2VAStructureWithoutImages(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body chatRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		system := body.Messages[0].Content
+		if !strings.Contains(system, "selected mode is T2VA") ||
+			!strings.Contains(system, "There is no opening or closing picture") ||
+			!strings.Contains(system, "60-second video") {
+			t.Fatalf("wrong T2VA context: %s", system)
+		}
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"A complete text-to-video prompt."}}`))
+	}))
+	defer server.Close()
+	base, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3, "a distant storm approaches", nil, VideoContext{Mode: "frames", DurationSeconds: 60, ImageCount: 0}, false)
+	if err != nil || result != "A complete text-to-video prompt." {
 		t.Fatalf("result = %q, err = %v", result, err)
 	}
 }

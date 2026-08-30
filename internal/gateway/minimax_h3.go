@@ -6,6 +6,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 const (
@@ -39,8 +40,8 @@ func normalizeMiniMaxH3(input *generationForm) error {
 	if input.VideoDurationSeconds == 0 {
 		input.VideoDurationSeconds = miniMaxH3MinimumSeconds
 	}
-	if input.VideoDurationSeconds != 5 && input.VideoDurationSeconds != 10 && input.VideoDurationSeconds != 15 {
-		return errors.New("длительность MiniMax H3 может быть 5, 10 или 15 секунд")
+	if input.VideoDurationSeconds < miniMaxH3MinimumSeconds || input.VideoDurationSeconds > 60 {
+		return errors.New("длительность MiniMax H3 должна быть от 5 до 60 секунд")
 	}
 	if input.VideoReferenceOnly {
 		input.VideoMode = miniMaxH3ReferenceMode
@@ -74,6 +75,41 @@ func normalizeMiniMaxH3(input *generationForm) error {
 	}
 	if strings.TrimSpace(input.InputAudio) != "" && input.VideoMode != miniMaxH3ReferenceMode {
 		return errors.New("аудиореференс MiniMax H3 доступен только в режиме референсов")
+	}
+	if strings.TrimSpace(input.InputVideo) != "" && input.VideoMode != miniMaxH3ReferenceMode {
+		return errors.New("видеореференс MiniMax H3 доступен только в режиме референсов")
+	}
+	if input.VideoReferenceAudio && strings.TrimSpace(input.InputVideo) == "" {
+		return errors.New("сначала добавьте видеореференс, чтобы использовать его звук")
+	}
+	if input.VideoReferenceDuration == 0 {
+		input.VideoReferenceDuration = 5
+	}
+	if input.VideoReferenceDuration < 1 || input.VideoReferenceDuration > 15 || input.VideoReferenceStart < 0 || input.VideoReferenceStart > 600 {
+		return errors.New("выберите фрагмент видеореференса: от 1 до 15 секунд, начало от 0 до 600 секунд")
+	}
+	if input.VideoAspect == "" {
+		input.VideoAspect = "9:16"
+	}
+	if _, _, err := miniMaxH3AspectDimensions(input.VideoAspect); err != nil {
+		return err
+	}
+	if input.VideoResizeMethod == "" {
+		input.VideoResizeMethod = "nearest-exact"
+	}
+	if input.VideoProportion == "" {
+		input.VideoProportion = "crop"
+	}
+	if input.VideoCropLocation == "" {
+		input.VideoCropLocation = "center"
+	}
+	if input.VideoPadColor == "" {
+		input.VideoPadColor = "0, 0, 0"
+	}
+	if !miniMaxH3Allowed(input.VideoResizeMethod, "nearest-exact", "bicubic", "bilinear", "lanczos", "area", "nvidia_rtx_vsr") ||
+		!miniMaxH3Allowed(input.VideoProportion, "crop", "stretch", "resize", "pad", "total_pixels") ||
+		!miniMaxH3Allowed(input.VideoCropLocation, "center", "top", "bottom", "left", "right") || len(input.VideoPadColor) > 32 {
+		return errors.New("некорректные параметры подготовки кадров MiniMax H3")
 	}
 	if input.VideoReferenceSize == "" {
 		input.VideoReferenceSize = "match"
@@ -136,7 +172,7 @@ func normalizeMiniMaxH3(input *generationForm) error {
 		return errors.New("некорректные параметры H3 Memory Optimization")
 	}
 	if input.VideoSparseBudget == 0 {
-		input.VideoSparseBudget = 0.15
+		input.VideoSparseBudget = 0.30
 	}
 	if input.VideoSparseSchedule == "" {
 		input.VideoSparseSchedule = "Hold"
@@ -229,11 +265,8 @@ func normalizeMiniMaxH3(input *generationForm) error {
 	if input.VideoOutputCRF == 0 {
 		input.VideoOutputCRF = 19
 	}
-	if input.VideoOutputCRF < 0 || input.VideoOutputCRF > 100 {
-		return errors.New("CRF видео должен быть от 0 до 100")
-	}
-	if strings.TrimSpace(input.InputImage) == "" {
-		return errors.New("для MiniMax H3 добавьте первый кадр")
+	if input.VideoOutputCRF < 0 || input.VideoOutputCRF > 51 {
+		return errors.New("CRF видео должен быть от 0 до 51")
 	}
 	if input.VideoMode == miniMaxH3FrameMode && input.imageCount() > 2 {
 		return errors.New("MiniMax H3 поддерживает первый и последний кадр: до двух фото")
@@ -241,6 +274,13 @@ func normalizeMiniMaxH3(input *generationForm) error {
 	if input.VideoMode == miniMaxH3ReferenceMode && input.imageCount() > 4 {
 		return errors.New("MiniMax H3 поддерживает до четырёх фото-референсов")
 	}
+	if input.VideoMode == miniMaxH3ReferenceMode && input.imageCount() == 0 && strings.TrimSpace(input.InputAudio) == "" && strings.TrimSpace(input.InputVideo) == "" {
+		return errors.New("для режима референсов добавьте фото, видео или аудио")
+	}
+	if input.VideoColorMatch && input.imageCount() == 0 {
+		return errors.New("для ColorMatch добавьте хотя бы одно фото")
+	}
+	input.VideoFilename = miniMaxH3FilenamePrefix(input.VideoFilename)
 	if err := validateMiniMaxH3ResourceBudget(*input); err != nil {
 		return err
 	}
@@ -261,9 +301,9 @@ func miniMaxH3Allowed(value string, allowed ...string) bool {
 	return false
 }
 
-// miniMaxH3VideoDimensions scales the first reference frame to a requested
-// delivery quality while keeping its aspect ratio. Both dimensions are rounded
-// to the model's required multiple of 32.
+// miniMaxH3VideoDimensions mirrors AspectRatioSimplifier: quality is the
+// maximum longer side, small sources are not enlarged, and dimensions are
+// aligned down so the selected maximum is never exceeded.
 func miniMaxH3VideoDimensions(sourceWidth, sourceHeight, quality int) (int, int, error) {
 	if sourceWidth <= 0 || sourceHeight <= 0 {
 		return 0, 0, errors.New("не удалось определить размер первого референса")
@@ -271,10 +311,18 @@ func miniMaxH3VideoDimensions(sourceWidth, sourceHeight, quality int) (int, int,
 	if quality != 480 && quality != 720 && quality != 1080 && quality != 1440 {
 		return 0, 0, errors.New("выберите качество видео: 480, 720, 1080 или 1440")
 	}
-	shortSide := min(sourceWidth, sourceHeight)
-	scale := float64(quality) / float64(shortSide)
-	width := miniMaxH3RoundToMultiple(float64(sourceWidth) * scale)
-	height := miniMaxH3RoundToMultiple(float64(sourceHeight) * scale)
+	longSide := max(sourceWidth, sourceHeight)
+	scaledWidth, scaledHeight := sourceWidth, sourceHeight
+	if longSide > quality {
+		scale := float64(quality) / float64(longSide)
+		// AspectRatioSimplifier rounds the clamped image size first and only
+		// then aligns it to divisible_by. Keeping that order also avoids an
+		// exact 480 target becoming 479.999... and dropping to 448.
+		scaledWidth = max(1, int(math.Round(float64(sourceWidth)*scale)))
+		scaledHeight = max(1, int(math.Round(float64(sourceHeight)*scale)))
+	}
+	width := miniMaxH3FloorToMultiple(float64(scaledWidth))
+	height := miniMaxH3FloorToMultiple(float64(scaledHeight))
 	fitScale := 1.0
 	if longest := max(width, height); longest > miniMaxH3MaxDimension {
 		fitScale = min(fitScale, float64(miniMaxH3MaxDimension)/float64(longest))
@@ -286,22 +334,62 @@ func miniMaxH3VideoDimensions(sourceWidth, sourceHeight, quality int) (int, int,
 		width = miniMaxH3FloorToMultiple(float64(width) * fitScale)
 		height = miniMaxH3FloorToMultiple(float64(height) * fitScale)
 	}
-	if width < 256 || height < 256 {
-		return 0, 0, errors.New("референс слишком вытянут для безопасной генерации MiniMax H3")
+	if width < 32 || height < 32 {
+		return 0, 0, errors.New("кадр слишком вытянут для MiniMax H3")
 	}
 	return width, height, nil
 }
 
-func miniMaxH3RoundToMultiple(value float64) int {
-	rounded := int(math.Round(value/32.0)) * 32
-	if rounded < 256 {
-		return 256
-	}
-	return rounded
+func miniMaxH3FloorToMultiple(value float64) int {
+	return max(32, int(math.Floor(value/32.0))*32)
 }
 
-func miniMaxH3FloorToMultiple(value float64) int {
-	return int(math.Floor(value/32.0)) * 32
+func miniMaxH3AspectDimensions(aspect string) (int, int, error) {
+	switch strings.TrimSpace(aspect) {
+	case "1:1":
+		return 1080, 1080, nil
+	case "4:5":
+		return 1080, 1350, nil
+	case "16:9":
+		return 1344, 768, nil
+	case "9:16", "":
+		return 1080, 1920, nil
+	case "4:1":
+		return 1600, 400, nil
+	case "2:3":
+		return 832, 1248, nil
+	case "3:2":
+		return 1248, 832, nil
+	case "3:4":
+		return 896, 1152, nil
+	case "4:3":
+		return 1152, 896, nil
+	case "21:9":
+		return 1536, 640, nil
+	default:
+		return 0, 0, errors.New("выберите корректное соотношение сторон MiniMax H3")
+	}
+}
+
+func miniMaxH3FilenamePrefix(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "AI-Gateway-MiniMaxH3"
+	}
+	var cleaned strings.Builder
+	for _, char := range value {
+		if unicode.IsLetter(char) || unicode.IsDigit(char) || char == '-' || char == '_' || char == ' ' {
+			cleaned.WriteRune(char)
+		}
+		if cleaned.Len() >= 80 {
+			break
+		}
+	}
+	result := strings.TrimSpace(cleaned.String())
+	if result == "" {
+		return "AI-Gateway-MiniMaxH3"
+	}
+	return result
 }
 
 func validateMiniMaxH3ResourceBudget(input generationForm) error {
@@ -403,7 +491,7 @@ func buildMiniMaxH3Prompt(input generationForm) (map[string]any, error) {
 	} else {
 		nodes["11"] = miniMaxH3Node("KSamplerSelect", map[string]any{"sampler_name": input.Sampler})
 	}
-	miniMaxH3ApplyLoras(nodes, input, modelNodeID)
+	clipInput := miniMaxH3ApplyLoras(nodes, input, modelNodeID)
 
 	images := input.images()
 	rawImages := make([]string, len(images))
@@ -420,14 +508,14 @@ func buildMiniMaxH3Prompt(input generationForm) (map[string]any, error) {
 		nodes[resizeID] = miniMaxH3Node("LCImageMaskResize", map[string]any{
 			"image": []any{nodeID, 0}, "match_aspect_ratio": false, "aspect_ratio": "custom",
 			"custom_width": input.Width, "custom_height": input.Height, "upscale_by": "none",
-			"multiplier": 1.0, "megapixels": 1.0, "upscale_method": "lanczos",
-			"proportion": "crop", "crop_location": "center", "divisible_by": 32,
+			"multiplier": 1.0, "megapixels": 1.0, "upscale_method": input.VideoResizeMethod,
+			"proportion": input.VideoProportion, "crop_location": input.VideoCropLocation, "pad_color": input.VideoPadColor, "divisible_by": 32,
 		})
 		preparedFrames[index] = resizeID
 	}
 	if input.VideoMode == miniMaxH3ReferenceMode {
 		inputs := map[string]any{
-			"clip": []any{"2", 0}, "vae": []any{"3", 0}, "audio_vae": []any{"4", 0},
+			"clip": clipInput, "vae": []any{"3", 0}, "audio_vae": []any{"4", 0},
 			"prompt": input.Positive, "width": input.Width, "height": input.Height,
 			"length": miniMaxH3FrameCount(input.VideoDurationSeconds), "ref_image_size": input.VideoReferenceSize,
 		}
@@ -441,10 +529,21 @@ func buildMiniMaxH3Prompt(input generationForm) (map[string]any, error) {
 			nodes["41"] = miniMaxH3Node("TrimAudioDuration", map[string]any{"audio": []any{"40", 0}, "start_index": input.VideoAudioStart, "duration": float64(input.VideoDurationSeconds)})
 			inputs["ref_audios.ref_audio_0"] = []any{"41", 0}
 		}
+		if video := strings.TrimSpace(input.InputVideo); video != "" {
+			nodes["42"] = miniMaxH3Node("VHS_LoadVideo", map[string]any{
+				"video": video, "force_rate": miniMaxH3VideoFPS, "custom_width": 0, "custom_height": 0,
+				"frame_load_cap":    input.VideoReferenceDuration * miniMaxH3VideoFPS,
+				"skip_first_frames": int(math.Round(input.VideoReferenceStart * miniMaxH3VideoFPS)), "select_every_nth": 1, "format": "None",
+			})
+			inputs["ref_videos.ref_video_0"] = []any{"42", 0}
+			if input.VideoReferenceAudio {
+				inputs["ref_video_audios.ref_video_audio_0"] = []any{"42", 2}
+			}
+		}
 		nodes["7"] = miniMaxH3Node("MiniMaxH3ReferenceToVideo", inputs)
 	} else {
 		inputs := map[string]any{
-			"clip": []any{"2", 0}, "vae": []any{"3", 0}, "prompt": input.Positive,
+			"clip": clipInput, "vae": []any{"3", 0}, "prompt": input.Positive,
 			"width": input.Width, "height": input.Height, "length": miniMaxH3FrameCount(input.VideoDurationSeconds),
 		}
 		if len(images) > 0 {
@@ -507,11 +606,11 @@ func buildMiniMaxH3Prompt(input generationForm) (map[string]any, error) {
 		nodes["27"] = miniMaxH3Node("ImageSharpenKJ", sharpenInputs)
 		videoNodeID = "27"
 	}
-	nodes["17"] = miniMaxH3Node("VHS_VideoCombine", map[string]any{"images": []any{videoNodeID, 0}, "audio": []any{"16", 0}, "frame_rate": frameRate, "loop_count": 0, "filename_prefix": "AI-Gateway-MiniMaxH3", "format": "video/h264-mp4", "pingpong": false, "save_output": true, "pix_fmt": "yuv420p", "crf": input.VideoOutputCRF, "save_metadata": true})
+	nodes["17"] = miniMaxH3Node("VHS_VideoCombine", map[string]any{"images": []any{videoNodeID, 0}, "audio": []any{"16", 0}, "frame_rate": frameRate, "loop_count": 0, "filename_prefix": input.VideoFilename, "format": "video/h264-mp4", "pingpong": false, "save_output": true, "pix_fmt": "yuv420p", "crf": input.VideoOutputCRF, "save_metadata": true})
 	return nodes, nil
 }
 
-func miniMaxH3ApplyLoras(nodes map[string]any, input generationForm, modelNodeID string) {
+func miniMaxH3ApplyLoras(nodes map[string]any, input generationForm, modelNodeID string) []any {
 	lastStack := ""
 	for offset := 0; offset < len(input.LoraNames); offset += 3 {
 		hasLora := false
@@ -553,8 +652,9 @@ func miniMaxH3ApplyLoras(nodes map[string]any, input generationForm, modelNodeID
 	if lastStack == "" {
 		delete(nodes, "8")
 		nodes["9"].(map[string]any)["inputs"].(map[string]any)["model"] = []any{modelNodeID, 0}
-		return
+		return []any{"2", 0}
 	}
 	nodes["8"] = miniMaxH3Node("CR Apply LoRA Stack", map[string]any{"model": []any{modelNodeID, 0}, "clip": []any{"2", 0}, "lora_stack": []any{lastStack, 0}})
 	nodes["9"].(map[string]any)["inputs"].(map[string]any)["model"] = []any{"8", 0}
+	return []any{"8", 1}
 }

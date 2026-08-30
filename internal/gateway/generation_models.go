@@ -241,7 +241,7 @@ func buildGenerationModelCatalog(info map[string]comfyNodeInfo) generationModelC
 			}
 			model.Available = miniMaxEncoder != "" && miniMaxVideoVAE != "" && miniMaxAudioVAE != "" && miniMaxReferenceModel != "" && hasGenerationNodes(info,
 				"MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo", "MiniMaxH3SigmaShift", "MiniMaxH3MemoryEfficientSageAttentionPatch", "MiniMaxH3TurboLoRA", "MiniMaxH3TurboSampler",
-				"H3MemoryOptimization", "H3AIMDOResidencyLimiter", "H3SparseAttentionAdvanced", "LCImageMaskResize", "LCVRAMCacheClear", "ImageSharpenKJ", "CR LoRA Stack", "CR Apply LoRA Stack", "VHS_VideoCombine")
+				"H3MemoryOptimization", "H3AIMDOResidencyLimiter", "H3SparseAttentionAdvanced", "LCImageMaskResize", "LCVRAMCacheClear", "ImageSharpenKJ", "CR LoRA Stack", "CR Apply LoRA Stack", "VHS_LoadVideo", "VHS_VideoCombine")
 			if !model.Available {
 				model.Reason = missingMiniMaxH3Dependencies(miniMaxEncoder, miniMaxVideoVAE, miniMaxAudioVAE, miniMaxReferenceModel)
 			}
@@ -255,7 +255,7 @@ func buildGenerationModelCatalog(info map[string]comfyNodeInfo) generationModelC
 			}
 			model.Available = miniMaxEncoder != "" && miniMaxVideoVAE != "" && miniMaxAudioVAE != "" && hasGenerationNodes(info,
 				"MiniMaxH3ReferenceToVideo", "MiniMaxH3SigmaShift", "MiniMaxH3MemoryEfficientSageAttentionPatch",
-				"H3MemoryOptimization", "H3AIMDOResidencyLimiter", "H3SparseAttentionAdvanced", "LCVRAMCacheClear", "ImageSharpenKJ", "CR LoRA Stack", "CR Apply LoRA Stack", "VHS_VideoCombine")
+				"H3MemoryOptimization", "H3AIMDOResidencyLimiter", "H3SparseAttentionAdvanced", "LCVRAMCacheClear", "ImageSharpenKJ", "CR LoRA Stack", "CR Apply LoRA Stack", "VHS_LoadVideo", "VHS_VideoCombine")
 			if !model.Available {
 				model.Reason = missingMiniMaxH3Dependencies(miniMaxEncoder, miniMaxVideoVAE, miniMaxAudioVAE, name)
 			}

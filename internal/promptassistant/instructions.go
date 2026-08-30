@@ -33,6 +33,7 @@ type VideoContext struct {
 	DurationSeconds int
 	ImageCount      int
 	AudioReference  bool
+	VideoReference  bool
 }
 
 // ImageReference describes the role a user assigned to a numbered image in an
@@ -268,17 +269,21 @@ Inspect every attached picture before writing. In retention_analysis, identify e
 
 func miniMaxH3FormatInstruction(context VideoContext) string {
 	duration := context.DurationSeconds
-	if duration != 5 && duration != 10 && duration != 15 {
+	if duration < 5 || duration > 60 {
 		duration = 5
 	}
 	imageCount := context.ImageCount
-	if imageCount < 1 {
-		imageCount = 1
+	if imageCount < 0 {
+		imageCount = 0
 	}
 	if context.Mode == "references" {
 		audioReference := "No standalone audio reference is attached."
 		if context.AudioReference {
 			audioReference = "One standalone <Audio 1> reference is attached. State only the audio role explicitly requested by the user; never claim to hear or transcribe its contents."
+		}
+		videoReference := "No <Video 1> reference is attached."
+		if context.VideoReference {
+			videoReference = "One <Video 1> reference is attached. Use the exact <Video 1> identifier when the user's request assigns it a motion, scene, or timing role; never claim to inspect details that are not supplied in the user's text."
 		}
 		return fmt.Sprintf(`The selected mode is Ref2VA with %d declared image reference(s). Use exactly this structure:
 
@@ -289,7 +294,7 @@ summary:
 [reference generation] one concise chronological summary.
 
 retention_analysis:
-State what each supplied <Picture N> contributes, without claiming unseen details. %s
+State what each supplied <Picture N> contributes, without claiming unseen details. %s %s
 
 detailed_description:
 Write the full %d-second chronological shot description.
@@ -298,7 +303,7 @@ overall_soundscape:
 Describe ambience and synchronized physical sounds only.
 
 non_diegetic_music:
-N/A unless requested.`, imageCount, audioReference, duration)
+N/A unless requested.`, imageCount, audioReference, videoReference, duration)
 	}
 	if imageCount >= 2 {
 		return fmt.Sprintf(`The selected mode is FL2VA. Picture 1 is the exact opening frame and Picture 2 is the exact final frame. Begin exactly with:
@@ -307,6 +312,13 @@ How the reference pictures align with the target video — Picture 1 (from Shot 
 
 Then write these fields in order:
 integrated_multimodal_description: a complete chronological path that reaches Picture 2 exactly.
+overall_soundscape: ambience and synchronized physical sounds only.
+non_diegetic_music: N/A unless requested.`, duration)
+	}
+	if imageCount == 0 {
+		return fmt.Sprintf(`The selected mode is T2VA. There is no opening or closing picture. Do not use <Picture N> identifiers. Write these fields in order:
+
+integrated_multimodal_description: a complete chronological %d-second video described purely from the user's text, with a stable opening anchor, continuous physically coherent action, and a final hold.
 overall_soundscape: ambience and synchronized physical sounds only.
 non_diegetic_music: N/A unless requested.`, duration)
 	}

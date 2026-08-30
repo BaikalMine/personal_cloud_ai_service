@@ -153,15 +153,15 @@ func promptAssistantVideoContext(r *http.Request, mode promptassistant.Mode) (pr
 	duration := 5
 	if raw := strings.TrimSpace(r.Form.Get("video_duration_seconds")); raw != "" {
 		value, err := strconv.Atoi(raw)
-		if err != nil || (value != 5 && value != 10 && value != 15) {
-			return promptassistant.VideoContext{}, fmt.Errorf("длительность MiniMax H3 может быть 5, 10 или 15 секунд")
+		if err != nil || value < miniMaxH3MinimumSeconds || value > 60 {
+			return promptassistant.VideoContext{}, fmt.Errorf("длительность MiniMax H3 должна быть от 5 до 60 секунд")
 		}
 		duration = value
 	}
-	imageCount := 1
+	imageCount := 0
 	if raw := strings.TrimSpace(r.Form.Get("video_image_count")); raw != "" {
 		value, err := strconv.Atoi(raw)
-		if err != nil || value < 1 || value > 4 {
+		if err != nil || value < 0 || value > 4 {
 			return promptassistant.VideoContext{}, fmt.Errorf("некорректное количество фото MiniMax H3")
 		}
 		imageCount = value
@@ -177,7 +177,18 @@ func promptAssistantVideoContext(r *http.Request, mode promptassistant.Mode) (pr
 	if audioReference && videoMode != "references" {
 		return promptassistant.VideoContext{}, fmt.Errorf("аудиореференс MiniMax H3 доступен только в режиме референсов")
 	}
-	return promptassistant.VideoContext{Mode: videoMode, DurationSeconds: duration, ImageCount: imageCount, AudioReference: audioReference}, nil
+	videoValue := strings.TrimSpace(r.Form.Get("video_has_video"))
+	if videoValue != "" && videoValue != "true" && videoValue != "false" {
+		return promptassistant.VideoContext{}, fmt.Errorf("некорректное значение видеореференса MiniMax H3")
+	}
+	videoReference := videoValue == "true"
+	if videoReference && videoMode != "references" {
+		return promptassistant.VideoContext{}, fmt.Errorf("видеореференс MiniMax H3 доступен только в режиме референсов")
+	}
+	if videoMode == "references" && imageCount == 0 && !audioReference && !videoReference {
+		return promptassistant.VideoContext{}, fmt.Errorf("для режима референсов добавьте фото, видео или аудио")
+	}
+	return promptassistant.VideoContext{Mode: videoMode, DurationSeconds: duration, ImageCount: imageCount, AudioReference: audioReference, VideoReference: videoReference}, nil
 }
 
 func (a *App) promptAssistantImageReferences(ctx context.Context, userID int64, r *http.Request, mode promptassistant.Mode) ([]promptassistant.ImageReference, error) {

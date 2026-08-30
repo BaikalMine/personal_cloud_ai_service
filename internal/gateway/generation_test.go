@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	"image/png"
 	"io"
 	"math"
 	"mime/multipart"
@@ -1003,7 +1005,7 @@ func TestGenerationModelCatalogDiscoversMiniMaxH3V4AndErosMax(t *testing.T) {
 		"LoraLoader":{"input":{"required":{"lora_name":[["MiniMaxH3\\motion.safetensors","MiniMaxH3\\minimax_h3_turbo_v4_step600_ema.safetensors"]]}}},
 		"MiniMaxH3ImageToVideo":{},"MiniMaxH3ReferenceToVideo":{},"MiniMaxH3SigmaShift":{},"MiniMaxH3MemoryEfficientSageAttentionPatch":{},
 		"MiniMaxH3TurboLoRA":{},"MiniMaxH3TurboSampler":{},"H3MemoryOptimization":{},"H3AIMDOResidencyLimiter":{},"H3SparseAttentionAdvanced":{},
-		"LCImageMaskResize":{},"LCVRAMCacheClear":{},"ImageSharpenKJ":{},"CR LoRA Stack":{},"CR Apply LoRA Stack":{},"VHS_VideoCombine":{}
+		"LCImageMaskResize":{},"LCVRAMCacheClear":{},"ImageSharpenKJ":{},"CR LoRA Stack":{},"CR Apply LoRA Stack":{},"VHS_LoadVideo":{},"VHS_VideoCombine":{}
 	}`
 	if err := json.Unmarshal([]byte(fixture), &info); err != nil {
 		t.Fatal(err)
@@ -1416,6 +1418,9 @@ func TestMiniMaxH3WorkflowBuildsFrameAndReferenceGraphs(t *testing.T) {
 	if got, want := prompt["9"].(map[string]any)["inputs"].(map[string]any)["model"], []any{"8", 0}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("optional LoRA model path = %#v, want %#v", got, want)
 	}
+	if got, want := prompt["7"].(map[string]any)["inputs"].(map[string]any)["clip"], []any{"8", 1}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("optional LoRA CLIP path = %#v, want %#v", got, want)
+	}
 
 	base.VideoMode = miniMaxH3ReferenceMode
 	base.InputImage = "gateway/input-1.png"
@@ -1455,6 +1460,34 @@ func TestMiniMaxH3WorkflowBuildsFrameAndReferenceGraphs(t *testing.T) {
 	}
 	if got, want := prompt["41"].(map[string]any)["class_type"], "TrimAudioDuration"; got != want {
 		t.Fatalf("audio trim = %v, want %q", got, want)
+	}
+	base.InputVideo = "gateway/reference-video.mp4"
+	base.VideoReferenceStart = 1.5
+	base.VideoReferenceDuration = 4
+	base.VideoReferenceAudio = true
+	prompt, err = definition.buildPrompt(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	referenceInputs = prompt["7"].(map[string]any)["inputs"].(map[string]any)
+	if got, want := referenceInputs["ref_videos.ref_video_0"], []any{"42", 0}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("video reference = %#v, want %#v", got, want)
+	}
+	if got, want := referenceInputs["ref_video_audios.ref_video_audio_0"], []any{"42", 2}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("video audio reference = %#v, want %#v", got, want)
+	}
+	loader := prompt["42"].(map[string]any)["inputs"].(map[string]any)
+	if got := loader["custom_width"]; got != 0 {
+		t.Fatalf("video reference width = %v, want native size", got)
+	}
+	if got := loader["custom_height"]; got != 0 {
+		t.Fatalf("video reference height = %v, want native size", got)
+	}
+	if got, want := loader["frame_load_cap"], 96; got != want {
+		t.Fatalf("video reference frame cap = %v, want %d", got, want)
+	}
+	if got, want := loader["skip_first_frames"], 36; got != want {
+		t.Fatalf("video reference skip = %v, want %d", got, want)
 	}
 }
 
@@ -1561,19 +1594,23 @@ func TestMiniMaxH3WorkflowBuildsOptionalPostProcessing(t *testing.T) {
 	}
 }
 
-func TestMiniMaxH3RequiresFirstFrame(t *testing.T) {
+func TestMiniMaxH3SupportsTextToVideoWithoutFirstFrame(t *testing.T) {
 	definitions, err := loadWorkflowDefinitions()
 	if err != nil {
 		t.Fatal(err)
 	}
 	definition, _ := findWorkflow(definitions, "minimax-h3-video")
-	_, err = definition.buildPrompt(generationForm{
+	prompt, err := definition.buildPrompt(generationForm{
 		ModelName: "model", ReferenceModel: "reference", TextEncoder: "clip", VAE: "video-vae", AudioVAE: "audio-vae",
 		Positive: "animate", Width: 768, Height: 1344, Steps: 25, CFG: 1, Denoise: 1, Sampler: "res_multistep", Scheduler: "simple",
 		VideoMode: miniMaxH3FrameMode, VideoResolution: "portrait", VideoDurationSeconds: 5, VideoSteps: 25,
 	})
-	if err == nil || !strings.Contains(err.Error(), "первый кадр") {
-		t.Fatalf("first frame error = %v", err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs := prompt["7"].(map[string]any)["inputs"].(map[string]any)
+	if _, exists := inputs["first_frame"]; exists {
+		t.Fatalf("text-to-video unexpectedly contains a first frame: %#v", inputs)
 	}
 }
 
@@ -1618,6 +1655,33 @@ func TestMiniMaxH3VideoQualityPreservesReferenceAspect(t *testing.T) {
 	}
 }
 
+func TestMiniMaxH3AlwaysUsesFirstPictureAspect(t *testing.T) {
+	var body bytes.Buffer
+	if err := png.Encode(&body, image.NewGray(image.Rect(0, 0, 352, 480))); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/view" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(body.Bytes())
+	}))
+	defer server.Close()
+	upstream, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := &App{cfg: Config{ComfyUIUpstream: upstream}}
+	input := generationForm{InputImage: "gateway/first.png", VideoAspect: "16:9", VideoQuality: 480}
+	if err := app.resolveMiniMaxH3ReferenceDimensions(context.Background(), &input); err != nil {
+		t.Fatal(err)
+	}
+	if input.Width != 352 || input.Height != 480 {
+		t.Fatalf("first picture aspect was replaced by the manual preset: %dx%d", input.Width, input.Height)
+	}
+}
+
 func TestMiniMaxH3VideoDimensionsBoundExtremeReferences(t *testing.T) {
 	width, height, err := miniMaxH3VideoDimensions(6000, 2000, 1440)
 	if err != nil {
@@ -1628,6 +1692,23 @@ func TestMiniMaxH3VideoDimensionsBoundExtremeReferences(t *testing.T) {
 	}
 	if got := float64(width) / float64(height); math.Abs(got-3) > 0.04 {
 		t.Fatalf("aspect ratio changed: %.3f", got)
+	}
+}
+
+func TestMiniMaxH3VideoQualityClampsLongSide(t *testing.T) {
+	width, height, err := miniMaxH3VideoDimensions(1408, 1872, 480)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if width != 352 || height != 480 {
+		t.Fatalf("480 max-resolution dimensions = %dx%d, want 352x480", width, height)
+	}
+	width, height, err = miniMaxH3VideoDimensions(352, 480, 1440)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if width != 352 || height != 480 {
+		t.Fatalf("small source was unexpectedly enlarged to %dx%d", width, height)
 	}
 }
 

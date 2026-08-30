@@ -1,8 +1,8 @@
 {
   "id": "minimax-h3-video",
   "name": "MiniMax H3: видео",
-  "description": "Видео по первому кадру, с опциональным последним кадром или дополнительными фотореференсами.",
-  "requires_image": true,
+  "description": "Видео из текста, по ключевым кадрам или по фото-, видео- и аудиореференсам.",
+  "requires_image": false,
   "allows_images": true,
   "max_input_images": 4,
   "admin_only": false,

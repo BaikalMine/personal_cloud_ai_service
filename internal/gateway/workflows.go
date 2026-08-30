@@ -128,6 +128,7 @@ type generationForm struct {
 	InputImage             string
 	ReferenceImages        [3]string
 	InputAudio             string
+	InputVideo             string
 	Positive               string
 	Negative               string
 	Width                  int
@@ -141,9 +142,19 @@ type generationForm struct {
 	VideoMode              string
 	VideoResolution        string
 	VideoAspect            string
+	VideoUseSourceAspect   bool
+	VideoSwapDimensions    bool
+	VideoResizeMethod      string
+	VideoProportion        string
+	VideoCropLocation      string
+	VideoPadColor          string
 	VideoQuality           int
 	VideoDurationSeconds   int
 	VideoReferenceSize     string
+	VideoReferenceStart    float64
+	VideoReferenceDuration int
+	VideoReferenceAudio    bool
+	VideoFilename          string
 	VideoSteps             int
 	VideoTurbo             bool
 	VideoIntegratedTurbo   bool
@@ -498,13 +509,16 @@ func (definition workflowDefinition) normalizeAndValidate(input *generationForm)
 		return errors.New("промт слишком длинный")
 	}
 	minimumDimension := 256
+	if definition.ID == "minimax-h3-video" {
+		minimumDimension = 32
+	}
 	if (definition.ID == "image-to-image-flux2" || definition.ID == "image-to-image-krea2") && input.PreserveOriginalSize {
 		minimumDimension = 16
 	}
 	if input.Width < minimumDimension || input.Width > 4096 || input.Width%8 != 0 || input.Height < minimumDimension || input.Height > 4096 || input.Height%8 != 0 {
 		return fmt.Errorf("ширина и высота должны быть от %d до 4096 и кратны 8", minimumDimension)
 	}
-	if input.OutputMegapixels < 0.1 || input.OutputMegapixels > 16 {
+	if (definition.ID != "minimax-h3-video" && input.OutputMegapixels < 0.1) || input.OutputMegapixels > 16 {
 		return errors.New("итоговое разрешение должно быть от 0.1 до 16 мегапикселей")
 	}
 	if input.MaxLongestSide < 0 || input.MaxLongestSide > 4096 || input.MaxLongestSide%8 != 0 {
@@ -1098,6 +1112,10 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 	if err != nil {
 		return generationForm{}, errors.New("некорректное качество MiniMax H3")
 	}
+	videoReferenceDuration, err := parseInt("video_reference_duration", 5)
+	if err != nil {
+		return generationForm{}, errors.New("некорректная длительность видеореференса MiniMax H3")
+	}
 	cfg, err := parseFloat("cfg", 7)
 	if err != nil {
 		return generationForm{}, errors.New("некорректный CFG")
@@ -1250,6 +1268,10 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 	if err != nil {
 		return generationForm{}, errors.New("некорректное смещение аудио")
 	}
+	videoReferenceStart, err := parseFloat("video_reference_start", 0)
+	if err != nil {
+		return generationForm{}, errors.New("некорректное начало видеореференса")
+	}
 	videoOutputCRF, err := parseInt("video_output_crf", 19)
 	if err != nil {
 		return generationForm{}, errors.New("некорректное качество видео CRF")
@@ -1366,12 +1388,14 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 	}
 	return generationForm{
 		TemplateID: strings.TrimSpace(r.Form.Get("template_id")), PresetID: strings.TrimSpace(r.Form.Get("generation_workflow")), ModelID: strings.TrimSpace(r.Form.Get("model")),
-		InputImage: strings.TrimSpace(r.Form.Get("input_image")), InputAudio: strings.TrimSpace(r.Form.Get("input_audio")), Positive: strings.TrimSpace(r.Form.Get("positive_prompt")),
+		InputImage: strings.TrimSpace(r.Form.Get("input_image")), InputAudio: strings.TrimSpace(r.Form.Get("input_audio")), InputVideo: strings.TrimSpace(r.Form.Get("input_video")), Positive: strings.TrimSpace(r.Form.Get("positive_prompt")),
 		Negative: strings.TrimSpace(r.Form.Get("negative_prompt")), Width: width, Height: height, Steps: steps,
 		CFG: cfg, Denoise: denoise, Sampler: strings.TrimSpace(r.Form.Get("sampler")),
 		Scheduler: strings.TrimSpace(r.Form.Get("scheduler")), Seed: seed,
-		VideoMode: strings.TrimSpace(r.Form.Get("video_mode")), VideoResolution: strings.TrimSpace(r.Form.Get("video_resolution")), VideoAspect: strings.TrimSpace(r.Form.Get("video_aspect")), VideoQuality: videoQuality,
-		VideoDurationSeconds: videoDurationSeconds, VideoReferenceSize: strings.TrimSpace(r.Form.Get("video_reference_size")), VideoSteps: videoSteps, VideoTurbo: r.Form.Get("video_turbo") == "true",
+		VideoMode: strings.TrimSpace(r.Form.Get("video_mode")), VideoResolution: strings.TrimSpace(r.Form.Get("video_resolution")), VideoAspect: strings.TrimSpace(r.Form.Get("video_aspect")),
+		VideoUseSourceAspect: r.Form.Get("video_use_source_aspect") == "true", VideoSwapDimensions: r.Form.Get("video_swap_dimensions") == "true",
+		VideoResizeMethod: strings.TrimSpace(r.Form.Get("video_resize_method")), VideoProportion: strings.TrimSpace(r.Form.Get("video_proportion")), VideoCropLocation: strings.TrimSpace(r.Form.Get("video_crop_location")), VideoPadColor: strings.TrimSpace(r.Form.Get("video_pad_color")), VideoQuality: videoQuality,
+		VideoDurationSeconds: videoDurationSeconds, VideoReferenceSize: strings.TrimSpace(r.Form.Get("video_reference_size")), VideoReferenceStart: videoReferenceStart, VideoReferenceDuration: videoReferenceDuration, VideoReferenceAudio: r.Form.Get("video_reference_audio") == "true", VideoFilename: strings.TrimSpace(r.Form.Get("video_filename")), VideoSteps: videoSteps, VideoTurbo: r.Form.Get("video_turbo") == "true",
 		VideoSampler: strings.TrimSpace(r.Form.Get("video_sampler")), VideoScheduler: strings.TrimSpace(r.Form.Get("video_scheduler")), VideoShiftVideo: videoShiftVideo, VideoShiftAudio: videoShiftAudio,
 		VideoSageAttention: r.Form.Get("video_sage_attention") == "true", VideoClearVRAM: r.Form.Get("video_clear_vram") == "true",
 		VideoMemoryOptimize: r.Form.Get("video_memory_optimize") == "true", VideoMemoryMLP: strings.TrimSpace(r.Form.Get("video_memory_mlp")), VideoMemoryChunkRows: videoMemoryChunkRows,

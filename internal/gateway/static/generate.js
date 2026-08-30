@@ -3,8 +3,6 @@
   if (!root) return;
 
   const workflowGuides = root.querySelector(".workflow-guides");
-  const workflowContextGuides = root.querySelector(".workflow-context-guides");
-  if (workflowGuides && workflowContextGuides) workflowContextGuides.replaceWith(workflowGuides);
 
   const form = document.getElementById("generation-form");
   const templateID = document.getElementById("template-id");
@@ -16,6 +14,7 @@
     document.getElementById("input-image-4"),
   ];
   const inputAudio = document.getElementById("input-audio");
+  const inputVideo = document.getElementById("input-video");
   const imageSlots = [...root.querySelectorAll("[data-image-slot]")].map((slot) => ({
     slot,
     index: Number(slot.dataset.imageSlot),
@@ -32,15 +31,28 @@
   const imageSourceFields = document.getElementById("image-source-fields");
   const imageSourceGrid = root.querySelector(".source-image-grid");
   const miniMaxVideoMode = document.getElementById("minimax-video-mode");
-  const miniMaxVideoModeSelect = document.getElementById("minimax-video-mode-select");
+  const miniMaxVideoModeInputs = [...root.querySelectorAll('input[name="video_mode"]')];
+  const miniMaxVideoModeSelect = form.elements.video_mode;
   const miniMaxVideoModeHint = document.getElementById("minimax-video-mode-hint");
+  const miniMaxReferenceMedia = document.getElementById("minimax-reference-media");
   const miniMaxAudioReference = document.getElementById("minimax-audio-reference");
   const miniMaxAudioFile = document.getElementById("minimax-audio-file");
   const miniMaxAudioPreview = document.getElementById("minimax-audio-preview");
   const miniMaxAudioName = document.getElementById("minimax-audio-name");
   const miniMaxAudioState = document.getElementById("minimax-audio-state");
   const miniMaxAudioRemove = document.getElementById("minimax-audio-remove");
+  const miniMaxVideoReference = document.getElementById("minimax-video-reference");
+  const miniMaxVideoFile = document.getElementById("minimax-video-file");
+  const miniMaxVideoPreview = document.getElementById("minimax-video-preview");
+  const miniMaxVideoPreviewMedia = document.getElementById("minimax-video-preview-media");
+  const miniMaxVideoName = document.getElementById("minimax-video-name");
+  const miniMaxVideoState = document.getElementById("minimax-video-state");
+  const miniMaxVideoRemove = document.getElementById("minimax-video-remove");
   const miniMaxVideoQuality = document.getElementById("minimax-video-quality");
+  const miniMaxVideoAspect = document.getElementById("minimax-video-aspect");
+  const miniMaxUseSourceAspect = document.getElementById("minimax-use-source-aspect");
+  const miniMaxVideoSwap = document.getElementById("minimax-video-swap");
+  const miniMaxSourceAspectControl = document.getElementById("minimax-source-aspect-control");
   const miniMaxVideoSteps = document.getElementById("minimax-video-steps");
   const miniMaxVideoTurbo = document.getElementById("minimax-video-turbo");
   const miniMaxVideoTurboControl = document.getElementById("minimax-video-turbo-control");
@@ -55,6 +67,10 @@
   const miniMaxVideoSharpenMethod = document.getElementById("minimax-video-sharpen-method");
   const workflowNote = document.getElementById("generation-workflow-note");
   const positive = document.getElementById("positive-prompt");
+  const positivePromptLabel = document.getElementById("generation-positive-prompt-label");
+  const negativePrompt = document.getElementById("negative-prompt");
+  const negativePromptField = document.getElementById("generation-negative-prompt-field");
+  const generationPromptFields = root.querySelector(".generation-prompt-fields");
   const promptAssistant = document.getElementById("prompt-assistant");
   const promptAssistantEnabled = document.getElementById("prompt-assistant-enabled");
   const promptAssistantControls = document.getElementById("prompt-assistant-controls");
@@ -161,6 +177,8 @@
   const selectedImages = new Map();
   const uploadedImages = new Map();
   let uploadedAudio = "";
+  let uploadedVideo = "";
+  let videoPreviewURL = "";
   let primaryImageSize = null;
 
   const krea2EditMaxBaseMegapixels = 4.7;
@@ -194,14 +212,30 @@
     const parsed = Number(String(value).replaceAll(",", "."));
     return Number.isFinite(parsed) ? parsed : fallback;
   };
+  const miniMaxMode = () => miniMaxVideoModeSelect?.value || "frames";
+  const setMiniMaxMode = (value) => {
+    const target = miniMaxVideoModeInputs.find((input) => input.value === value && !input.disabled);
+    if (target) target.checked = true;
+  };
+  const miniMaxAspectDimensions = () => {
+    const presets = {
+      "1:1": [1080, 1080], "4:5": [1080, 1350], "16:9": [1344, 768], "9:16": [1080, 1920],
+      "4:1": [1600, 400], "2:3": [832, 1248], "3:2": [1248, 832], "3:4": [896, 1152],
+      "4:3": [1152, 896], "21:9": [1536, 640],
+    };
+    const source = primaryImageSize
+      ? [primaryImageSize.width, primaryImageSize.height]
+      : (presets[miniMaxVideoAspect?.value || "9:16"] || presets["9:16"]);
+    return miniMaxVideoSwap?.checked ? [source[1], source[0]] : source;
+  };
   const syncMiniMaxVideoProfile = ({ applyModelDefaults = false } = {}) => {
     const option = model?.selectedOptions?.[0];
     const integratedTurbo = option?.dataset.videoIntegratedTurbo === "true";
     const referenceOnly = option?.dataset.videoReferenceOnly === "true";
-    const frameOption = miniMaxVideoModeSelect?.querySelector('option[value="frames"]');
+    const frameOption = miniMaxVideoModeInputs.find((input) => input.value === "frames");
     if (frameOption) frameOption.disabled = referenceOnly;
-    if (referenceOnly && miniMaxVideoModeSelect?.value !== "references") {
-      miniMaxVideoModeSelect.value = "references";
+    if (referenceOnly && miniMaxMode() !== "references") {
+      setMiniMaxMode("references");
       syncImageSlots();
       syncMiniMaxAudioReference();
     }
@@ -237,19 +271,17 @@
       miniMaxVideoSampler.disabled = integratedTurbo || turbo;
     }
     if (miniMaxVideoModeHint && referenceOnly) {
-      miniMaxVideoModeHint.textContent = "Eros Max использует reference-путь даже с одним фото. Можно добавить ещё до трёх референсов.";
+      miniMaxVideoModeHint.textContent = "Eros Max использует только REF2VA. Добавьте фото, видео или аудио как референс.";
     }
     if (!miniMaxVideoResolutionPreview) return;
     const quality = Number(miniMaxVideoQuality?.value);
-    if (!primaryImageSize || !quality) {
-      miniMaxVideoResolutionPreview.textContent = "Выберите первое фото";
-      return;
-    }
-    const scale = quality / Math.max(1, Math.min(primaryImageSize.width, primaryImageSize.height));
-    const multiple = (value) => Math.max(256, Math.round(value / 32) * 32);
-    const targetWidth = multiple(primaryImageSize.width * scale);
-    const targetHeight = multiple(primaryImageSize.height * scale);
-    miniMaxVideoResolutionPreview.textContent = `${targetWidth} × ${targetHeight} · ${quality}p · пропорции фото`;
+    const [sourceWidth, sourceHeight] = miniMaxAspectDimensions();
+    const scale = Math.min(1, quality / Math.max(1, sourceWidth, sourceHeight));
+    const multiple = (value) => Math.max(32, Math.floor(value / 32) * 32);
+    const targetWidth = multiple(sourceWidth * scale);
+    const targetHeight = multiple(sourceHeight * scale);
+    const sourceLabel = primaryImageSize ? "пропорции Фото 1" : `формат ${miniMaxVideoAspect?.value || "9:16"}`;
+    miniMaxVideoResolutionPreview.textContent = `${targetWidth} × ${targetHeight} · ${sourceLabel}`;
   };
 
   const syncMiniMaxSharpenFields = () => {
@@ -752,17 +784,22 @@
   const selectedGenerationWorkflow = () => root.querySelector(".generation-workflow-choice.is-selected");
   const isMiniMaxSelected = () => selectedGenerationWorkflow()?.dataset.family === "minimax_h3";
   const maxInputImages = () => Math.max(1, Number(selectedGenerationWorkflow()?.dataset.maxInputImages || (templateID.value === "minimax-h3-video" ? 4 : 1)));
-  const activeMaxInputImages = () => isMiniMaxSelected() && miniMaxVideoModeSelect?.value === "frames" ? Math.min(2, maxInputImages()) : maxInputImages();
+  const activeMaxInputImages = () => isMiniMaxSelected() && miniMaxMode() === "frames" ? Math.min(2, maxInputImages()) : maxInputImages();
 
-  const miniMaxAudioIsAvailable = () => isMiniMaxSelected() && miniMaxVideoModeSelect?.value === "references";
+  const miniMaxReferencesAreAvailable = () => isMiniMaxSelected() && miniMaxMode() === "references";
+  const miniMaxAudioIsAvailable = () => miniMaxReferencesAreAvailable();
 
   const syncMiniMaxAudioReference = () => {
     const available = miniMaxAudioIsAvailable();
+    if (miniMaxReferenceMedia) miniMaxReferenceMedia.hidden = !available;
     if (miniMaxAudioReference) miniMaxAudioReference.hidden = !available;
+    if (miniMaxVideoReference) miniMaxVideoReference.hidden = !available;
     if (inputAudio) inputAudio.value = available ? uploadedAudio : "";
+    if (inputVideo) inputVideo.value = available ? uploadedVideo : "";
   };
 
   const hasPendingMiniMaxAudio = () => miniMaxAudioIsAvailable() && Boolean(miniMaxAudioFile?.files?.[0]) && !uploadedAudio;
+  const hasPendingMiniMaxVideo = () => miniMaxReferencesAreAvailable() && Boolean(miniMaxVideoFile?.files?.[0]) && !uploadedVideo;
 
   const clearMiniMaxAudio = () => {
     if (miniMaxAudioFile) miniMaxAudioFile.value = "";
@@ -773,8 +810,20 @@
     if (miniMaxAudioPreview) miniMaxAudioPreview.hidden = true;
   };
 
+  const clearMiniMaxVideo = () => {
+    if (miniMaxVideoFile) miniMaxVideoFile.value = "";
+    uploadedVideo = "";
+    if (inputVideo) inputVideo.value = "";
+    if (videoPreviewURL) URL.revokeObjectURL(videoPreviewURL);
+    videoPreviewURL = "";
+    if (miniMaxVideoPreviewMedia) miniMaxVideoPreviewMedia.removeAttribute("src");
+    if (miniMaxVideoName) miniMaxVideoName.textContent = "";
+    if (miniMaxVideoState) miniMaxVideoState.textContent = "Готово к загрузке";
+    if (miniMaxVideoPreview) miniMaxVideoPreview.hidden = true;
+  };
+
   const promptAssistantReferences = () => {
-    if (templateID.value !== "image-to-image") return [];
+    if (templateID.value !== "image-to-image" && !(isMiniMaxSelected() && miniMaxMode() === "references")) return [];
     return imageSlots
       .filter((item) => item.index <= activeMaxInputImages() && selectedImageFile(item))
       .map((item) => ({ number: item.index, role: item.role?.value || "base_scene" }));
@@ -833,7 +882,7 @@
   const syncImageSlots = () => {
     const isMiniMax = isMiniMaxSelected() || templateID.value === "minimax-h3-video";
     const isImageEdit = templateID.value === "image-to-image";
-    const referenceMode = miniMaxVideoModeSelect?.value === "references";
+    const referenceMode = miniMaxMode() === "references";
     const maximum = (requiresImage || allowsImages) ? activeMaxInputImages() : 0;
     const isKrea = selectedGenerationWorkflow()?.dataset.family === "krea2";
     if (imageSourceGrid) imageSourceGrid.dataset.visibleSlots = String(maximum);
@@ -842,22 +891,22 @@
       item.slot.hidden = !visible;
       if (!visible) clearImageSlot(item);
       if (!item.label) return;
-      if (isMiniMax && referenceMode) item.label.textContent = `Референс ${item.index}${item.index === 1 ? " · обязательно" : " · необязательно"}`;
-      else if (isMiniMax) item.label.textContent = item.index === 1 ? "Первый кадр · обязательно" : "Последний кадр · необязательно";
+      if (isMiniMax && referenceMode) item.label.textContent = `Референс ${item.index} · необязательно`;
+      else if (isMiniMax) item.label.textContent = item.index === 1 ? "Первый кадр · необязательно" : "Последний кадр · необязательно";
       else if (item.index === 1) item.label.textContent = "Фото 1 · обязательно";
       else item.label.textContent = isKrea && item.index === 2 ? "Фото 2 · дополнительное" : `Фото ${item.index} · референс`;
       const roleControl = item.role?.closest(".image-reference-role");
-      if (roleControl) roleControl.hidden = !isImageEdit;
+      if (roleControl) roleControl.hidden = !(isImageEdit || (isMiniMax && referenceMode));
       if (item.role) {
         if (item.index === 1) item.role.value = "base_scene";
-        item.role.disabled = !isImageEdit || item.index === 1;
+        item.role.disabled = !(isImageEdit || (isMiniMax && referenceMode)) || item.index === 1;
       }
     });
     const note = document.getElementById("image-source-note");
     if (isMiniMax && note) {
       note.textContent = referenceMode
-        ? "Добавьте от одного до четырёх фотореференсов. Первый обязательный, остальные появятся по мере добавления."
-        : "Добавьте первый кадр. Второе фото необязательно: оно станет последним кадром ролика.";
+        ? "Добавьте любой набор референсов: до четырёх фото, видео и/или аудио. Для каждого фото можно указать его роль."
+        : "Фото необязательны: без них работает текст в видео. Фото 1 задаёт первый кадр, Фото 2 — последний.";
       syncReferenceMap();
       syncMiniMaxAudioReference();
       return;
@@ -890,14 +939,16 @@
     const hasWorkflow = Boolean(selected && selected.dataset.available === "true");
     const primary = imageSlots[0];
     const hasImage = Boolean(selectedImageFile(primary) || uploadedImages.get(1));
-    const needsImage = requiresImage || isMiniMaxSelected();
+    const needsImage = requiresImage;
+    const needsReference = isMiniMaxSelected() && miniMaxMode() === "references";
+    const hasReference = hasImage || imageSlots.some((item) => selectedImageFile(item) || uploadedImages.get(item.index)) || Boolean(miniMaxAudioFile?.files?.[0] || uploadedAudio || miniMaxVideoFile?.files?.[0] || uploadedVideo);
     const hasPendingUploads = imageSlots.some((item) => (
       item.index <= activeMaxInputImages()
       && Boolean(selectedImageFile(item))
       && !uploadedImages.get(item.index)
-    )) || hasPendingMiniMaxAudio();
-    workflowNext.disabled = !hasWorkflow || (needsImage && !hasImage);
-    if (!needsImage) {
+    )) || hasPendingMiniMaxAudio() || hasPendingMiniMaxVideo();
+    workflowNext.disabled = !hasWorkflow || (needsImage && !hasImage) || (needsReference && !hasReference);
+    if (!needsImage && !hasPendingUploads) {
       workflowNext.textContent = "Продолжить";
     } else if (hasPendingUploads) {
       workflowNext.textContent = "Загрузить в ComfyUI и продолжить";
@@ -934,7 +985,12 @@
 
   const setNamedControlValue = (name, value) => {
     const control = form.elements.namedItem(name);
-    if (!control || typeof control === "object" && "length" in control && !control.tagName) return;
+    if (!control) return;
+    if (typeof control === "object" && "length" in control && !control.tagName) {
+      const option = [...control].find((item) => item.value === value);
+      if (option) option.checked = true;
+      return;
+    }
     if (control.type === "checkbox") {
       control.checked = value === "true" || value === "on" || value === "1";
       return;
@@ -959,8 +1015,9 @@
     syncMiniMaxVideoProfile();
     syncMiniMaxSharpenFields();
     if (openStep) {
-      const needsImage = selectedChoice()?.dataset.requiresImage === "true" || selectedGenerationWorkflow()?.dataset.family === "minimax_h3";
-      showStep(needsImage && !uploadedImages.get(1) ? 2 : 3);
+      const needsImage = selectedChoice()?.dataset.requiresImage === "true";
+      const needsReference = selectedGenerationWorkflow()?.dataset.family === "minimax_h3" && miniMaxMode() === "references";
+      showStep((needsImage && !uploadedImages.get(1)) || (needsReference && !uploadedImages.size && !uploadedAudio && !uploadedVideo) ? 2 : 3);
     }
     return Boolean(selectedChoice() && selectedGenerationWorkflow());
   };
@@ -1072,8 +1129,10 @@
       if (visible) return;
       const select = row.querySelector(".generation-lora-select");
       const strength = row.querySelector(".generation-lora-model");
+      const clipStrength = row.querySelector(".generation-lora-clip");
       if (select) select.value = "";
       if (strength) strength.value = "0";
+      if (clipStrength) clipStrength.value = "1";
     });
   };
 
@@ -1202,10 +1261,18 @@
         (type === "video" && isMiniMax)
       );
     });
+    if (workflowGuides) {
+      workflowGuides.hidden = ![...workflowGuides.querySelectorAll("[data-workflow-guide]")].some((guide) => !guide.hidden);
+    }
     renderLUT();
     setFieldState(".standard-main-settings", !isEdit && !isMiniMax);
     setFieldState(".minimax-video-settings", isMiniMax);
-    setFieldState(".minimax-reference-field", isMiniMax && miniMaxVideoModeSelect?.value === "references");
+    setFieldState(".minimax-reference-field", isMiniMax && miniMaxMode() === "references");
+    const hideNegativePrompt = isMiniMax || isKreaText;
+    if (negativePromptField) negativePromptField.hidden = hideNegativePrompt;
+    if (negativePrompt) negativePrompt.disabled = hideNegativePrompt;
+    if (generationPromptFields) generationPromptFields.classList.toggle("is-single", hideNegativePrompt);
+    if (positivePromptLabel) positivePromptLabel.textContent = isMiniMax ? "Промт видео" : isKreaText ? "Промт" : "Позитивный промт";
     if (isMiniMax) {
       syncMiniMaxVideoProfile();
       syncMiniMaxSharpenFields();
@@ -1364,10 +1431,11 @@
         assistant_think: promptAssistantThink?.checked ? "true" : "false",
       });
       if (mode === "minimax-h3-video") {
-        body.set("video_mode", miniMaxVideoModeSelect?.value || "frames");
+        body.set("video_mode", miniMaxMode());
         body.set("video_duration_seconds", form.elements.video_duration_seconds?.value || "5");
-        body.set("video_image_count", String([...uploadedImages.keys()].filter((index) => index <= activeMaxInputImages()).length || 1));
+        body.set("video_image_count", String([...uploadedImages.keys()].filter((index) => index <= activeMaxInputImages()).length));
         body.set("video_has_audio", miniMaxAudioIsAvailable() && uploadedAudio ? "true" : "false");
+        body.set("video_has_video", miniMaxReferencesAreAvailable() && uploadedVideo ? "true" : "false");
       }
       inputImages.forEach((input, index) => {
         if (input?.value) body.set(index === 0 ? "input_image" : `input_image_${index + 1}`, input.value);
@@ -1427,19 +1495,20 @@
   root.querySelectorAll(".generation-back").forEach((button) => {
     button.addEventListener("click", () => showStep(Math.max(1, currentStep - 1)));
   });
-  miniMaxVideoModeSelect?.addEventListener("change", () => {
+  const handleMiniMaxModeChange = () => {
     const referenceOnly = model?.selectedOptions?.[0]?.dataset.videoReferenceOnly === "true";
-    if (referenceOnly && miniMaxVideoModeSelect.value !== "references") miniMaxVideoModeSelect.value = "references";
-    if (miniMaxVideoModeHint) miniMaxVideoModeHint.textContent = miniMaxVideoModeSelect.value === "references"
+    if (referenceOnly && miniMaxMode() !== "references") setMiniMaxMode("references");
+    if (miniMaxVideoModeHint) miniMaxVideoModeHint.textContent = miniMaxMode() === "references"
       ? referenceOnly
-        ? "Eros Max использует reference-путь даже с одним фото. Можно добавить ещё до трёх референсов."
-        : "Первое фото обязательно. Можно добавить ещё до трёх референсов: лица, стиль, предметы или окружение."
-      : "Первый кадр обязателен. Второе фото можно добавить как последний кадр ролика.";
+        ? "Eros Max использует только REF2VA. Добавьте фото, видео или аудио как референс."
+        : "Фото, видео и звук здесь служат смысловыми ориентирами, а не фиксированными кадрами."
+      : "Без фото работает T2VA. Фото 1 задаёт точный первый кадр, Фото 2 — точный последний.";
     syncImageSlots();
     syncMiniMaxAudioReference();
     updateWorkflowNext();
     syncWorkflowFields();
-  });
+  };
+  miniMaxVideoModeInputs.forEach((input) => input.addEventListener("change", handleMiniMaxModeChange));
 
   miniMaxAudioFile?.addEventListener("change", () => {
     const file = miniMaxAudioFile.files?.[0];
@@ -1466,6 +1535,37 @@
     clearMiniMaxAudio();
     updateWorkflowNext();
   });
+  miniMaxVideoFile?.addEventListener("change", () => {
+    const file = miniMaxVideoFile.files?.[0];
+    uploadedVideo = "";
+    if (inputVideo) inputVideo.value = "";
+    if (videoPreviewURL) URL.revokeObjectURL(videoPreviewURL);
+    videoPreviewURL = "";
+    if (miniMaxVideoPreviewMedia) miniMaxVideoPreviewMedia.removeAttribute("src");
+    if (!file) {
+      if (miniMaxVideoPreview) miniMaxVideoPreview.hidden = true;
+      updateWorkflowNext();
+      return;
+    }
+    if (file.size > 512 * 1024 * 1024) {
+      if (miniMaxVideoState) miniMaxVideoState.textContent = "Видеофайл должен быть не больше 512 МБ";
+      if (miniMaxVideoPreview) miniMaxVideoPreview.hidden = false;
+      updateWorkflowNext();
+      return;
+    }
+    try {
+      videoPreviewURL = URL.createObjectURL(file);
+      if (miniMaxVideoPreviewMedia) miniMaxVideoPreviewMedia.src = videoPreviewURL;
+    } catch (_) {}
+    if (miniMaxVideoName) miniMaxVideoName.textContent = file.name;
+    if (miniMaxVideoState) miniMaxVideoState.textContent = "Видео выбрано. Оно загрузится перед продолжением.";
+    if (miniMaxVideoPreview) miniMaxVideoPreview.hidden = false;
+    updateWorkflowNext();
+  });
+  miniMaxVideoRemove?.addEventListener("click", () => {
+    clearMiniMaxVideo();
+    updateWorkflowNext();
+  });
   miniMaxVideoQuality?.addEventListener("change", () => {
     syncMiniMaxVideoProfile();
     syncGenerationSummary();
@@ -1474,6 +1574,10 @@
     syncMiniMaxVideoProfile();
     syncGenerationSummary();
   });
+  [miniMaxVideoAspect, miniMaxUseSourceAspect, miniMaxVideoSwap, form.elements.video_duration_seconds].forEach((control) => control?.addEventListener("change", () => {
+    syncMiniMaxVideoProfile();
+    syncGenerationSummary();
+  }));
   miniMaxVideoSharpenMethod?.addEventListener("change", syncMiniMaxSharpenFields);
 
   const handleImageSelection = (item) => {
@@ -1543,9 +1647,12 @@
 
   workflowNext?.addEventListener("click", async () => {
     if (!generationWorkflowID.value) return;
-    const requiresPrimary = requiresImage || isMiniMaxSelected();
+    const requiresPrimary = requiresImage;
+    const requiresReference = isMiniMaxSelected() && miniMaxMode() === "references";
     const selectedSlots = imageSlots.filter((item) => item.index <= activeMaxInputImages() && selectedImageFile(item));
-    if (!selectedSlots.length && !requiresPrimary) {
+    const selectedReferenceMedia = Boolean(selectedSlots.length || miniMaxAudioFile?.files?.[0] || uploadedAudio || miniMaxVideoFile?.files?.[0] || uploadedVideo);
+    if (requiresReference && !selectedReferenceMedia) return;
+    if (!selectedSlots.length && !requiresPrimary && !hasPendingMiniMaxAudio() && !hasPendingMiniMaxVideo()) {
       showStep(3);
       positive?.focus({ preventScroll: true });
       return;
@@ -1553,7 +1660,8 @@
     if ((requiresPrimary && !selectedSlots.some((item) => item.index === 1)) || uploadInFlight) return;
     const pendingSlots = selectedSlots.filter((item) => !uploadedImages.get(item.index));
     const pendingAudio = hasPendingMiniMaxAudio();
-    if (!pendingSlots.length && !pendingAudio) {
+    const pendingVideo = hasPendingMiniMaxVideo();
+    if (!pendingSlots.length && !pendingAudio && !pendingVideo) {
       showStep(3);
       positive?.focus({ preventScroll: true });
       return;
@@ -1592,12 +1700,27 @@
         syncMiniMaxAudioReference();
         if (miniMaxAudioState) miniMaxAudioState.textContent = "Загружено в вашу сессию";
       }
+      if (pendingVideo && miniMaxVideoFile?.files?.[0]) {
+        if (miniMaxVideoState) miniMaxVideoState.textContent = "Загружаем видео в вашу сессию...";
+        const body = new FormData();
+        const file = miniMaxVideoFile.files[0];
+        body.append("image", file, file.name);
+        body.append("type", "input");
+        body.append("overwrite", "true");
+        const response = await fetch("/generate/upload/video", { method: "POST", body, credentials: "same-origin" });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.name) throw new Error(payload.error || "ComfyUI не принял видеореференс");
+        uploadedVideo = [payload.subfolder, payload.name].filter(Boolean).join("/");
+        syncMiniMaxAudioReference();
+        if (miniMaxVideoState) miniMaxVideoState.textContent = "Загружено в вашу сессию";
+      }
       showStep(3);
       positive?.focus({ preventScroll: true });
     } catch (error) {
       const failed = pendingSlots.find((item) => !uploadedImages.get(item.index));
       if (failed?.state) failed.state.textContent = error.message || "Не удалось загрузить фото";
       if (pendingAudio && miniMaxAudioState && !uploadedAudio) miniMaxAudioState.textContent = error.message || "Не удалось загрузить аудио";
+      if (pendingVideo && miniMaxVideoState && !uploadedVideo) miniMaxVideoState.textContent = error.message || "Не удалось загрузить видео";
       updateWorkflowNext();
     } finally {
       uploadInFlight = false;
@@ -1847,6 +1970,8 @@
     body.set("assistant_suggestion", promptAssistantSuggestion);
     ["input_image", "input_image_2", "input_image_3", "input_image_4"].forEach((name, index) => body.set(name, uploadedImages.get(index + 1) || ""));
     body.set("input_audio", miniMaxAudioIsAvailable() ? uploadedAudio : "");
+    body.set("input_video", miniMaxReferencesAreAvailable() ? uploadedVideo : "");
+    body.set("video_reference_audio", miniMaxReferencesAreAvailable() && uploadedVideo && form.elements.video_reference_audio?.checked ? "true" : "false");
     return new URLSearchParams(body);
   };
 

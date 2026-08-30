@@ -98,13 +98,13 @@ func main() {
 		"Workflows": []map[string]any{
 			{"ID": "text-to-image", "Name": "Текст в изображение", "Description": "Создаёт изображение по вашему описанию.", "RequiresImage": false},
 			{"ID": "image-to-image", "Name": "Фото и промт", "Description": "Перерисовывает загруженное фото.", "RequiresImage": true},
-			{"ID": "minimax-h3-video", "Name": "Видео", "Description": "Создаёт ролик по первому кадру и описанию.", "RequiresImage": true},
+			{"ID": "minimax-h3-video", "Name": "Видео", "Description": "Создаёт ролик из текста, кадров или референсов.", "RequiresImage": false, "AllowsImages": true},
 		},
 		"GenerationPresets": []map[string]any{
 			{"ID": "photoflow-krea2", "TemplateID": "text-to-image", "Name": "PhotoFlow Krea2", "Description": "Двухэтапная генерация с апскейлом и детализацией.", "Family": "krea2", "Available": true, "ModelID": "krea2:test", "ModelCount": 2, "DefaultSteps": 8, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "LoraStrength": 0.8},
 			{"ID": "photoflow-krea2-edit", "TemplateID": "image-to-image", "Name": "Krea 2: редактирование", "Description": "Редактирование первого фото с опциональным вторым референсом.", "Family": "krea2", "Available": true, "ModelID": "krea2:test", "ModelCount": 2, "DefaultSteps": 8, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "LoraStrength": 0.8, "RequiresImage": true, "AllowsImages": true, "MaxInputImages": 2},
 			{"ID": "photoflow-flux2-edit", "TemplateID": "image-to-image", "Name": "Flux2 Редактирование", "Description": "Редактирование исходного изображения через совместимую схему Flux 2.", "Family": "flux2", "Available": true, "ModelID": "flux2:test", "ModelCount": 1, "DefaultSteps": 20, "DefaultCFG": 5, "DefaultSampler": "euler", "DefaultScheduler": "normal", "RequiresImage": true},
-			{"ID": "minimax-h3-video", "TemplateID": "minimax-h3-video", "Name": "MiniMaxH3 Видео", "Description": "Ролик по первому кадру с дополнительным последним кадром или референсами.", "Family": "minimax_h3", "Available": true, "ModelID": "minimax:h3", "ModelCount": 2, "DefaultSteps": 25, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "RequiresImage": true, "AllowsImages": true, "MaxInputImages": 4},
+			{"ID": "minimax-h3-video", "TemplateID": "minimax-h3-video", "Name": "MiniMaxH3 Видео", "Description": "Текст в видео, ключевые кадры или мультимодальные референсы.", "Family": "minimax_h3", "Available": true, "ModelID": "minimax:h3", "ModelCount": 2, "DefaultSteps": 25, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "RequiresImage": false, "AllowsImages": true, "MaxInputImages": 4},
 		},
 		"QuickModels": []map[string]any{
 			{"ID": "krea2:test", "DisplayName": "Krea2 / Raw INT8 Mixed", "Family": "krea2", "Available": true, "DefaultSteps": 8, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "LoraStrength": 0.8},

@@ -80,8 +80,8 @@ func (c *Client) Enhance(ctx context.Context, mode Mode, profile Profile, prompt
 	return c.enhance(ctx, mode, profile, prompt, references, VideoContext{}, think)
 }
 
-// EnhanceVideo uses the MiniMax H3 workflow facts to select a compatible
-// Context-IR structure without giving the local LLM any image bytes.
+// EnhanceVideo uses the MiniMax H3 workflow facts and attached image
+// references to select a compatible Context-IR structure.
 func (c *Client) EnhanceVideo(ctx context.Context, mode Mode, profile Profile, prompt string, references []ImageReference, video VideoContext, think bool) (string, error) {
 	return c.enhance(ctx, mode, profile, prompt, references, video, think)
 }

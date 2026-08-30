@@ -104,10 +104,12 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 	hideLibrary := quick(http.HandlerFunc(a.handleHideGenerationLibraryMedia))
 	upload := quick(a.requireQuickGenerationTypes([]string{"image-to-image", "minimax-h3-video"}, a.quickGenerationUploadHandler()))
 	uploadAudio := quick(a.requireQuickGenerationTypes([]string{"minimax-h3-video"}, a.quickGenerationAudioUploadHandler()))
+	uploadVideo := quick(a.requireQuickGenerationTypes([]string{"minimax-h3-video"}, a.quickGenerationVideoUploadHandler()))
 	mux.Handle("/generate", page)
 	mux.Handle("/generate/", page)
 	mux.Handle("/generate/upload/image", upload)
 	mux.Handle("/generate/upload/audio", uploadAudio)
+	mux.Handle("/generate/upload/video", uploadVideo)
 	mux.Handle("/generate/run", run)
 	mux.Handle("/generate/recover", recover)
 	mux.Handle("/generate/prompt-assistant", promptAssistant)
@@ -522,6 +524,14 @@ func (a *App) prepareGeneration(ctx context.Context, user *User, input generatio
 			return generationPreparation{}, err
 		}
 	}
+	if strings.TrimSpace(input.InputVideo) != "" {
+		if model.Family != modelFamilyMiniMaxH3 {
+			return generationPreparation{}, errors.New("видеореференс доступен только для MiniMax H3")
+		}
+		if err := a.validateGenerationVideo(input.InputVideo, user.ID); err != nil {
+			return generationPreparation{}, err
+		}
+	}
 	prompt, err := definition.buildPrompt(input)
 	if err != nil {
 		return generationPreparation{}, err
@@ -702,6 +712,10 @@ func (a *App) quickGenerationUploadHandler() http.Handler {
 
 func (a *App) quickGenerationAudioUploadHandler() http.Handler {
 	return a.quickGenerationUploadHandlerWithLimit(32 << 20)
+}
+
+func (a *App) quickGenerationVideoUploadHandler() http.Handler {
+	return a.quickGenerationUploadHandlerWithLimit(512 << 20)
 }
 
 func (a *App) quickGenerationUploadHandlerWithLimit(maxBody int64) http.Handler {
@@ -1473,22 +1487,39 @@ func (a *App) fetchGenerationInputImage(ctx context.Context, value string) ([]by
 	return body, contentType, nil
 }
 
-// resolveMiniMaxH3ReferenceDimensions makes the first uploaded frame the
-// source of truth for the video aspect ratio. The quality selector controls
-// only the shorter side and never crops the reference composition.
+// resolveMiniMaxH3ReferenceDimensions follows AspectRatioSimplifier: the
+// source image wins when requested, while max_resolution clamps the longer
+// side and all dimensions are aligned down to 32 pixels.
 func (a *App) resolveMiniMaxH3ReferenceDimensions(ctx context.Context, input *generationForm) error {
-	if strings.TrimSpace(input.InputImage) == "" {
-		return errors.New("для MiniMax H3 добавьте первый кадр")
+	quality := input.VideoQuality
+	if quality == 0 {
+		quality = miniMaxH3DefaultQuality
 	}
-	body, _, err := a.fetchGenerationInputImage(ctx, input.InputImage)
-	if err != nil {
-		return errors.New("не удалось прочитать первый референс MiniMax H3")
+	width, height := 0, 0
+	// MiniMax H3 always inherits the first picture's aspect ratio. Manual
+	// presets are only a fallback for text-only or non-image reference runs.
+	useSource := strings.TrimSpace(input.InputImage) != ""
+	if useSource {
+		body, _, err := a.fetchGenerationInputImage(ctx, input.InputImage)
+		if err != nil {
+			return errors.New("не удалось прочитать первый референс MiniMax H3")
+		}
+		width, height, err = generationImageDimensions(body)
+		if err != nil {
+			return errors.New("не удалось определить разрешение первого референса MiniMax H3")
+		}
+	} else {
+		var err error
+		width, height, err = miniMaxH3AspectDimensions(input.VideoAspect)
+		if err != nil {
+			return err
+		}
 	}
-	width, height, err := generationImageDimensions(body)
-	if err != nil {
-		return errors.New("не удалось определить разрешение первого референса MiniMax H3")
+	if input.VideoSwapDimensions {
+		width, height = height, width
 	}
-	input.Width, input.Height, err = miniMaxH3VideoDimensions(width, height, input.VideoQuality)
+	var err error
+	input.Width, input.Height, err = miniMaxH3VideoDimensions(width, height, quality)
 	return err
 }
 
@@ -1702,6 +1733,10 @@ func (a *App) validateGenerationAudio(value string, userID int64) error {
 	return a.validateGenerationAsset(value, userID, "аудиореференс")
 }
 
+func (a *App) validateGenerationVideo(value string, userID int64) error {
+	return a.validateGenerationAsset(value, userID, "видеореференс")
+}
+
 func (a *App) validateGenerationAsset(value string, userID int64, label string) error {
 	normalized, err := normalizeComfyDataPath(value, false)
 	if err != nil {
@@ -1795,8 +1830,11 @@ func generationAuditMetadata(definition workflowDefinition, input generationForm
 	case "minimax-h3-video":
 		metadata["minimax_h3"] = map[string]any{
 			"mode": input.VideoMode, "resolution": input.VideoResolution, "quality": input.VideoQuality,
+			"aspect": input.VideoAspect, "source_aspect": input.VideoUseSourceAspect, "swap_dimensions": input.VideoSwapDimensions,
+			"frame_fit":        map[string]any{"method": input.VideoResizeMethod, "proportion": input.VideoProportion, "crop": input.VideoCropLocation, "pad_color": input.VideoPadColor},
 			"duration_seconds": input.VideoDurationSeconds, "reference_size": input.VideoReferenceSize,
-			"steps": input.VideoSteps, "turbo": input.VideoTurbo, "integrated_turbo": input.VideoIntegratedTurbo, "sampler": input.VideoSampler, "scheduler": input.VideoScheduler,
+			"video_reference": map[string]any{"attached": strings.TrimSpace(input.InputVideo) != "", "start": input.VideoReferenceStart, "duration": input.VideoReferenceDuration, "use_audio": input.VideoReferenceAudio},
+			"steps":           input.VideoSteps, "turbo": input.VideoTurbo, "integrated_turbo": input.VideoIntegratedTurbo, "sampler": input.VideoSampler, "scheduler": input.VideoScheduler,
 			"shift_video": input.VideoShiftVideo, "shift_audio": input.VideoShiftAudio,
 			"sage_attention": input.VideoSageAttention, "clear_vram": input.VideoClearVRAM,
 			"memory_optimization": map[string]any{"enabled": input.VideoMemoryOptimize, "mlp": input.VideoMemoryMLP, "chunk_rows": input.VideoMemoryChunkRows, "precision": input.VideoMemoryPrecision, "qkv_streaming": input.VideoMemoryQKV, "attention_memory": input.VideoMemoryAttention},
@@ -1806,7 +1844,7 @@ func generationAuditMetadata(definition workflowDefinition, input generationForm
 			"rtx":                 map[string]any{"enabled": input.VideoRTXEnabled, "scale": input.VideoRTXScale, "quality": input.VideoRTXQuality},
 			"color_match":         map[string]any{"enabled": input.VideoColorMatch, "method": input.VideoColorMethod, "strength": input.VideoColorStrength},
 			"sharpen":             map[string]any{"enabled": input.VideoSharpenEnabled, "method": input.VideoSharpenMethod, "strength": input.VideoSharpenStrength, "radius": input.VideoSharpenRadius, "threshold": input.VideoSharpenThreshold, "iterations": input.VideoSharpenIterations},
-			"audio_start":         input.VideoAudioStart, "output_crf": input.VideoOutputCRF,
+			"audio_start":         input.VideoAudioStart, "output_crf": input.VideoOutputCRF, "filename": input.VideoFilename,
 		}
 	}
 	if input.AssistantRequested {
