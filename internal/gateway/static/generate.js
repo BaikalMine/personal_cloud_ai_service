@@ -270,6 +270,20 @@
   };
   const roundToMultiple = (value, multiple, minimum = 256) => Math.max(minimum, Math.floor(value / multiple) * multiple);
   const pause = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+  const pauseWithCountdown = async (milliseconds, update, isActive = () => true) => {
+    const retryAt = Date.now() + milliseconds;
+    let shownSeconds = -1;
+    while (isActive()) {
+      const remaining = retryAt - Date.now();
+      if (remaining <= 0) return;
+      const seconds = Math.ceil(remaining / 1000);
+      if (seconds !== shownSeconds) {
+        shownSeconds = seconds;
+        update(seconds);
+      }
+      await pause(Math.min(250, remaining));
+    }
+  };
   const newGenerationRequestID = () => window.crypto?.randomUUID?.() || `generation-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`;
   const persistActiveGeneration = () => {
     if (!activeGenerationRequestID) return;
@@ -2162,9 +2176,12 @@
         failedAttempts += 1;
         if (activeGenerationID !== promptID) return;
         const retryAfter = Math.min(15000, 2000 * failedAttempts);
-        resultStatus.textContent = `Связь с Gateway временно потеряна. Повторяем проверку через ${Math.ceil(retryAfter / 1000)} сек.`;
         setGenerationProgress("Восстанавливаем связь", "Генерация в ComfyUI не отменена", null);
-        await pause(retryAfter);
+        await pauseWithCountdown(
+          retryAfter,
+          (seconds) => { resultStatus.textContent = `Связь с Gateway временно потеряна. Повторяем проверку через ${seconds} сек.`; },
+          () => activeGenerationID === promptID,
+        );
         continue;
       }
       await pause(2000);
@@ -2231,9 +2248,12 @@
         // The request id remains in local storage, so a page reload can continue recovery.
       }
       const retryAfter = Math.min(15000, 1500 * (attempt + 1));
-      resultStatus.textContent = `Подтверждаем запуск в Gateway. Повторяем через ${Math.ceil(retryAfter / 1000)} сек.`;
       setGenerationProgress("Восстанавливаем запуск", "ComfyUI не получит дубликат задачи", null);
-      await pause(retryAfter);
+      await pauseWithCountdown(
+        retryAfter,
+        (seconds) => { resultStatus.textContent = `Подтверждаем запуск в Gateway. Повторяем через ${seconds} сек.`; },
+        () => activeGenerationRequestID === requestID,
+      );
     }
     resultTitle.textContent = "Статус запуска ещё уточняется";
     resultStatus.textContent = "Попробуем снова автоматически после обновления страницы. Повторная отправка не нужна.";
