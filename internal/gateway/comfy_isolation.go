@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"path/filepath"
 	"sort"
@@ -17,7 +18,27 @@ import (
 	"ai-access-gateway/internal/domain"
 )
 
-const maxComfyControlBody = 1 << 20
+const (
+	maxComfyControlBody            = 1 << 20
+	maxComfyQueueEntries           = 12
+	maxComfyQueueEntriesPerUser    = 2
+	maxComfyPromptNodes            = 768
+	maxComfyPromptSamplers         = 24
+	maxComfyPromptOutputs          = 32
+	maxComfyPromptBatch            = 32
+	maxComfyPromptSteps            = 250
+	maxComfyPromptFrames           = 3600
+	maxComfyPromptDimension        = 16384
+	maxComfyPromptPixelFrames      = int64(8_000_000_000)
+	maxComfyPromptAdmissionWaiters = 8
+)
+
+var errComfyPromptAdmission = errors.New("ComfyUI prompt admission limit reached")
+
+type comfyPromptNode struct {
+	ClassType string         `json:"class_type"`
+	Inputs    map[string]any `json:"inputs"`
+}
 
 // enforceComfyPromptSafety applies the same server-side policy to jobs queued
 // through the full ComfyUI interface. The body is restored unchanged so later
@@ -39,13 +60,15 @@ func (a *App) enforceComfyPromptSafety(r *http.Request) error {
 	r.Header.Set("Content-Length", strconv.Itoa(len(body)))
 
 	var document struct {
-		Prompt map[string]struct {
-			ClassType string         `json:"class_type"`
-			Inputs    map[string]any `json:"inputs"`
-		} `json:"prompt"`
+		Prompt map[string]comfyPromptNode `json:"prompt"`
 	}
 	if err := json.Unmarshal(body, &document); err != nil {
 		return err
+	}
+	if user := a.currentUser(r); user == nil || user.Role != "admin" {
+		if err := validateComfyPromptWorkload(document.Prompt); err != nil {
+			return err
+		}
 	}
 	for _, node := range document.Prompt {
 		for _, value := range comfyPromptTextInputs(node.ClassType, node.Inputs) {
@@ -55,6 +78,103 @@ func (a *App) enforceComfyPromptSafety(r *http.Request) error {
 		}
 	}
 	return nil
+}
+
+func validateComfyPromptWorkload(prompt map[string]comfyPromptNode) error {
+	if len(prompt) == 0 || len(prompt) > maxComfyPromptNodes {
+		return fmt.Errorf("ComfyUI prompt node count must be between 1 and %d", maxComfyPromptNodes)
+	}
+	var samplers, outputs int
+	var pixelFrames int64
+	for _, node := range prompt {
+		classType := strings.ToLower(strings.TrimSpace(node.ClassType))
+		if classType == "" {
+			return errors.New("ComfyUI prompt contains a node without class_type")
+		}
+		if strings.Contains(classType, "sampler") {
+			samplers++
+		}
+		if strings.Contains(classType, "save") || strings.Contains(classType, "preview") {
+			outputs++
+		}
+		width, err := comfyNumericInput(node.Inputs, "width")
+		if err != nil {
+			return err
+		}
+		height, err := comfyNumericInput(node.Inputs, "height")
+		if err != nil {
+			return err
+		}
+		batch, err := comfyNumericInput(node.Inputs, "batch_size")
+		if err != nil {
+			return err
+		}
+		steps, err := comfyNumericInput(node.Inputs, "steps")
+		if err != nil {
+			return err
+		}
+		frameCount, err := comfyNumericInput(node.Inputs, "frames")
+		if err != nil {
+			return err
+		}
+		numFrames, err := comfyNumericInput(node.Inputs, "num_frames")
+		if err != nil {
+			return err
+		}
+		frames := max(frameCount, numFrames)
+		if batch == 0 {
+			batch = 1
+		}
+		if frames == 0 {
+			frames = 1
+		}
+		if width < 0 || height < 0 || batch < 0 || steps < 0 || frames < 0 ||
+			width > maxComfyPromptDimension || height > maxComfyPromptDimension ||
+			batch > maxComfyPromptBatch || steps > maxComfyPromptSteps || frames > maxComfyPromptFrames {
+			return errors.New("ComfyUI prompt exceeds the workload limits")
+		}
+		if width > 0 && height > 0 {
+			requested := width * height
+			if requested > maxComfyPromptPixelFrames/batch || requested*batch > maxComfyPromptPixelFrames/frames {
+				return errors.New("ComfyUI prompt exceeds the pixel-frame limit")
+			}
+			pixelFrames += requested * batch * frames
+			if pixelFrames > maxComfyPromptPixelFrames {
+				return errors.New("ComfyUI prompt exceeds the aggregate pixel-frame limit")
+			}
+		}
+	}
+	if samplers > maxComfyPromptSamplers || outputs > maxComfyPromptOutputs {
+		return errors.New("ComfyUI prompt contains too many execution or output nodes")
+	}
+	return nil
+}
+
+func comfyNumericInput(inputs map[string]any, name string) (int64, error) {
+	value, ok := inputs[name]
+	if !ok {
+		return 0, nil
+	}
+	switch typed := value.(type) {
+	case float64:
+		if math.IsNaN(typed) || math.IsInf(typed, 0) || math.Trunc(typed) != typed ||
+			typed >= 9223372036854775808.0 || typed < -9223372036854775808.0 {
+			return 0, fmt.Errorf("ComfyUI prompt input %q must be a literal integer", name)
+		}
+		return int64(typed), nil
+	case int:
+		return int64(typed), nil
+	case int64:
+		return typed, nil
+	case json.Number:
+		result, err := typed.Int64()
+		if err != nil {
+			return 0, fmt.Errorf("ComfyUI prompt input %q must be a literal integer", name)
+		}
+		return result, nil
+	default:
+		return 0, fmt.Errorf("ComfyUI prompt input %q must be a literal integer", name)
+	}
 }
 
 func comfyPromptTextInputs(classType string, inputs map[string]any) []string {
@@ -101,6 +221,9 @@ func (a *App) authorizeComfyMediaRequest(r *http.Request, user *User) (bool, err
 	subfolder := strings.TrimSpace(r.URL.Query().Get("subfolder"))
 	storageType := strings.TrimSpace(r.URL.Query().Get("type"))
 	if storageType == "input" {
+		if _, err := normalizeComfyDataPath(name, false); err != nil || strings.ContainsAny(name, `/\`) {
+			return false, nil
+		}
 		if namespaced, owned := comfyNamespaceOwnership(subfolder, comfyUploadNamespace(a.comfyClientID(user.ID))); namespaced {
 			return owned, nil
 		}
@@ -193,8 +316,7 @@ func (a *App) filterComfyResponse(resp *http.Response) error {
 	if isHistory {
 		allowed, err := a.store.ComfyPromptIDsForUser(resp.Request.Context(), user.ID)
 		if err != nil {
-			resetResponseBody(resp, body)
-			return nil
+			return fmt.Errorf("load ComfyUI prompt ownership: %w", err)
 		}
 		filtered, err = filterComfyHistoryJSON(body, allowed)
 		if err == nil {
@@ -210,8 +332,7 @@ func (a *App) filterComfyResponse(resp *http.Response) error {
 		filtered, err = filterComfyQueueJSON(body, a.comfyClientID(user.ID))
 	}
 	if err != nil {
-		resetResponseBody(resp, body)
-		return nil
+		return fmt.Errorf("filter ComfyUI %s response: %w", resp.Request.URL.Path, err)
 	}
 	resetResponseBody(resp, filtered)
 	return nil
@@ -360,14 +481,98 @@ func (a *App) enforceComfyControlIsolation(r *http.Request, user *User, service 
 	if service != "comfyui" || user == nil || r.Method != http.MethodPost {
 		return true, nil
 	}
+	if strings.HasPrefix(r.URL.Path, "/api/jobs/") {
+		if user.Role == "admin" {
+			return true, nil
+		}
+		promptID, valid := comfyDirectCancelPromptID(r.URL.Path)
+		if !valid {
+			return false, nil
+		}
+		return a.generationOwned(r.Context(), promptID, user.ID)
+	}
 	switch r.URL.Path {
 	case "/queue":
 		return true, a.rewriteComfyQueueControl(r, user.ID)
 	case "/interrupt":
-		return a.comfyRunningJobOwnedBy(r.Context(), user.ID)
+		if user.Role == "admin" {
+			return true, nil
+		}
+		promptID, owned, err := a.comfyRunningJobOwnedBy(r.Context(), user.ID)
+		if err != nil || !owned {
+			return owned, err
+		}
+		r.URL.Path = "/api/jobs/" + promptID + "/cancel"
+		r.URL.RawPath = ""
+		r.Body = http.NoBody
+		r.ContentLength = 0
+		r.Header.Del("Content-Length")
+		return true, nil
+	case "/free":
+		return user.Role == "admin", nil
 	default:
 		return true, nil
 	}
+}
+
+func comfyDirectCancelPromptID(requestPath string) (string, bool) {
+	const prefix = "/api/jobs/"
+	const suffix = "/cancel"
+	if !strings.HasPrefix(requestPath, prefix) || !strings.HasSuffix(requestPath, suffix) {
+		return "", false
+	}
+	promptID := strings.TrimSuffix(strings.TrimPrefix(requestPath, prefix), suffix)
+	if strings.Contains(promptID, "/") || !validComfyPromptID(promptID) {
+		return "", false
+	}
+	return promptID, true
+}
+
+func (a *App) acquireComfyPromptAdmission(ctx context.Context, userID int64) (func(), error) {
+	if a.comfyPromptLimiter == nil {
+		return func() {}, nil
+	}
+	limitKey := strconv.FormatInt(userID, 10)
+	if !limiterAllows(a.comfyPromptLimiter, limitKey) {
+		return nil, errComfyPromptAdmission
+	}
+	releaseSlot, acquired := acquireBoundedSlot(ctx, a.comfyPromptSlots, 2*time.Second)
+	if !acquired {
+		recordLimiterFailure(a.comfyPromptLimiter, limitKey)
+		return nil, errComfyPromptAdmission
+	}
+	a.comfyPromptAdmissionMu.Lock()
+	queue, err := a.fetchGenerationQueue(ctx)
+	if err != nil {
+		a.comfyPromptAdmissionMu.Unlock()
+		releaseSlot()
+		return nil, err
+	}
+	if len(queue.Running)+len(queue.Pending) >= maxComfyQueueEntries {
+		a.comfyPromptAdmissionMu.Unlock()
+		releaseSlot()
+		recordLimiterFailure(a.comfyPromptLimiter, limitKey)
+		return nil, errComfyPromptAdmission
+	}
+	clientID := a.comfyClientID(userID)
+	owned := 0
+	items := append(append([]json.RawMessage(nil), queue.Running...), queue.Pending...)
+	for _, item := range items {
+		if comfyQueueItemClientID(item) == clientID {
+			owned++
+		}
+	}
+	if owned >= maxComfyQueueEntriesPerUser {
+		a.comfyPromptAdmissionMu.Unlock()
+		releaseSlot()
+		recordLimiterFailure(a.comfyPromptLimiter, limitKey)
+		return nil, errComfyPromptAdmission
+	}
+	recordLimiterFailure(a.comfyPromptLimiter, limitKey)
+	return func() {
+		a.comfyPromptAdmissionMu.Unlock()
+		releaseSlot()
+	}, nil
 }
 
 func (a *App) rewriteComfyQueueControl(r *http.Request, userID int64) error {
@@ -416,7 +621,7 @@ func (a *App) rewriteComfyQueueControl(r *http.Request, userID int64) error {
 	return nil
 }
 
-func (a *App) comfyRunningJobOwnedBy(ctx context.Context, userID int64) (bool, error) {
+func (a *App) comfyRunningJobOwnedBy(ctx context.Context, userID int64) (string, bool, error) {
 	queueURL := *a.cfg.ComfyUIUpstream
 	queueURL.Path = singleJoiningSlash(queueURL.Path, "/queue")
 	queueURL.RawQuery = ""
@@ -424,24 +629,25 @@ func (a *App) comfyRunningJobOwnedBy(ctx context.Context, userID int64) (bool, e
 	defer cancel()
 	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, queueURL.String(), nil)
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
 	if a.cfg.ComfyUIUpstreamAuthHeader != "" {
 		req.Header.Set("Authorization", a.cfg.ComfyUIUpstreamAuthHeader)
 	}
 	resp, err := (&http.Client{Timeout: 5 * time.Second, CheckRedirect: rejectUpstreamRedirect}).Do(req)
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("ComfyUI queue returned %d", resp.StatusCode)
+		return "", false, fmt.Errorf("ComfyUI queue returned %d", resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxCapturedContent+1))
 	if err != nil || len(body) > maxCapturedContent {
-		return false, err
+		return "", false, err
 	}
-	return comfyQueueContainsClient(body, "queue_running", a.comfyClientID(userID)), nil
+	promptID := comfyQueuePromptForClient(body, "queue_running", a.comfyClientID(userID))
+	return promptID, promptID != "", nil
 }
 
 func comfyQueueContainsClient(body []byte, key, clientID string) bool {
@@ -456,6 +662,24 @@ func comfyQueueContainsClient(body []byte, key, clientID string) bool {
 		}
 	}
 	return false
+}
+
+func comfyQueuePromptForClient(body []byte, key, clientID string) string {
+	var queue map[string]json.RawMessage
+	var items []json.RawMessage
+	if json.Unmarshal(body, &queue) != nil || json.Unmarshal(queue[key], &items) != nil {
+		return ""
+	}
+	for _, item := range items {
+		if comfyQueueItemClientID(item) == clientID {
+			var fields []json.RawMessage
+			var promptID string
+			if json.Unmarshal(item, &fields) == nil && len(fields) > 1 && json.Unmarshal(fields[1], &promptID) == nil && validComfyPromptID(promptID) {
+				return promptID
+			}
+		}
+	}
+	return ""
 }
 
 func rejectUpstreamRedirect(_ *http.Request, _ []*http.Request) error {

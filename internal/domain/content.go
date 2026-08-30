@@ -107,6 +107,25 @@ type ExpiredComfyMedia struct {
 	HasOwnership bool
 }
 
+type ExpiredComfyInputAsset struct {
+	ID          string
+	Filename    string
+	Subfolder   string
+	StorageType string
+	SizeBytes   int64
+	ContentHash string
+	State       string
+}
+
+type ComfyOutputCleanupTombstone struct {
+	ID          int64
+	Filename    string
+	Subfolder   string
+	StorageType string
+	SizeBytes   int64
+	ContentHash string
+}
+
 type UnhashedComfyMedia struct {
 	ID            int64
 	PayloadCipher []byte

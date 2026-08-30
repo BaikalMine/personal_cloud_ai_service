@@ -206,7 +206,10 @@ func (a *App) revokeOtherSessions(userID int64, r *http.Request) {
 	cookie, err := r.Cookie(sessionCookieName)
 	if err != nil || cookie.Value == "" {
 		_, _ = a.store.RevokeSessions(r.Context(), userID)
+		a.closeUserWebSockets(userID)
 		return
 	}
-	_, _ = a.store.RevokeOtherSessions(r.Context(), userID, security.HashToken(cookie.Value))
+	currentHash := security.HashToken(cookie.Value)
+	_, _ = a.store.RevokeOtherSessions(r.Context(), userID, currentHash)
+	a.closeOtherUserWebSockets(userID, currentHash)
 }

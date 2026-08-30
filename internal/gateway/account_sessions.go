@@ -41,6 +41,7 @@ func (a *App) handleAccountSessions(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "ошибка базы данных", http.StatusInternalServerError)
 			return
 		}
+		a.closeOtherUserWebSockets(user.ID, currentHash)
 		a.audit(r.Context(), &user.ID, "user_sessions_revoked", "session", nil, a.clientIP(r), r.UserAgent(), map[string]any{"count": revoked})
 		http.Redirect(w, r, "/account/sessions?status=others_revoked", http.StatusFound)
 	case "revoke":
@@ -49,7 +50,7 @@ func (a *App) handleAccountSessions(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "неверная сессия", http.StatusBadRequest)
 			return
 		}
-		revoked, err := a.store.RevokeOwnedSession(r.Context(), id, user.ID, currentHash)
+		revokedHash, revoked, err := a.store.RevokeOwnedSessionWithHash(r.Context(), id, user.ID, currentHash)
 		if err != nil {
 			http.Error(w, "ошибка базы данных", http.StatusInternalServerError)
 			return
@@ -58,6 +59,7 @@ func (a *App) handleAccountSessions(w http.ResponseWriter, r *http.Request) {
 			a.renderAccountSessions(w, r, user.ID, currentHash, "Текущую сессию нельзя завершить на этой странице.")
 			return
 		}
+		a.closeSessionWebSockets(revokedHash)
 		auditID := id
 		a.audit(r.Context(), &user.ID, "user_session_revoked", "session", &auditID, a.clientIP(r), r.UserAgent(), nil)
 		http.Redirect(w, r, "/account/sessions?status=revoked", http.StatusFound)

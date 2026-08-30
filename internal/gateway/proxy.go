@@ -6,15 +6,26 @@ import (
 	"errors"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"ai-access-gateway/internal/store"
 )
 
 const openWebUIHTMLLimit = 4 << 20
+
+var comfyAdminOnlyPathPrefixes = []string{
+	"/manager",
+	"/customnode",
+	"/snapshot",
+	"/externalmodel",
+	"/comfyui_manager",
+}
 
 const aiGatewayReturnStyle = `<style id="ai-gateway-return-style">.ai-gateway-return-bar{position:fixed;top:50%;right:0;z-index:99999;display:block;width:34px;height:44px;margin:0;padding:0;box-sizing:border-box;pointer-events:none;transform:translateY(-50%);font-family:system-ui,sans-serif}.ai-gateway-return{all:initial;box-sizing:border-box;display:flex;align-items:center;justify-content:center;width:34px;height:44px;padding:0;border:1px solid rgba(98,221,181,.72);border-right:0;border-radius:8px 0 0 8px;background:#183c31;box-shadow:0 3px 10px rgba(0,0,0,.24);color:#b6f2dc;cursor:pointer;font:700 18px/1 system-ui,sans-serif;text-decoration:none;pointer-events:auto;transition:width .16s ease,background .16s ease,border-color .16s ease}.ai-gateway-return:hover{width:40px;border-color:#83e7c6;background:#1b4335}.ai-gateway-return:focus-visible{outline:2px solid #55c7d8;outline-offset:-3px}.ai-gateway-return-label{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.ai-gateway-comfy-return-bar{position:fixed;top:10px;right:10px;z-index:99999;display:block;width:36px;height:36px;margin:0;padding:0;box-sizing:border-box;pointer-events:none}.ai-gateway-comfy-return-link{all:initial;box-sizing:border-box;display:flex;align-items:center;justify-content:center;width:36px;height:36px;padding:0;border:1px solid rgba(98,221,181,.72);border-radius:8px;background:#183c31;box-shadow:0 3px 10px rgba(0,0,0,.24);color:#b6f2dc;cursor:pointer;font:700 18px/1 system-ui,sans-serif;text-decoration:none;pointer-events:auto;transition:background .16s ease,border-color .16s ease,transform .16s ease}.ai-gateway-comfy-return-link:hover{border-color:#83e7c6;background:#1b4335;transform:translateY(-1px)}.ai-gateway-comfy-return-link:focus-visible{outline:2px solid #55c7d8;outline-offset:2px}@media (max-width:600px){.ai-gateway-return-bar{width:30px;height:40px}.ai-gateway-return{width:30px;height:40px}.ai-gateway-return:hover{width:34px}.ai-gateway-comfy-return-bar{top:8px;right:8px}}</style>`
 
@@ -69,6 +80,16 @@ func insertBytes(body []byte, index int, insertion []byte) []byte {
 	return append(result, body[index:]...)
 }
 
+func isComfyAdminOnlyPath(requestPath string) bool {
+	requestPath = strings.ToLower(strings.TrimSpace(requestPath))
+	for _, prefix := range comfyAdminOnlyPathPrefixes {
+		if requestPath == prefix || strings.HasPrefix(requestPath, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *App) proxyRootHandler(service string, upstream *url.URL, authHeader string) http.Handler {
 	return a.proxyHandlerWithPath(service, "", upstream, authHeader, false)
 }
@@ -105,6 +126,9 @@ func (a *App) proxyHandlerWithPath(service, prefix string, upstream *url.URL, au
 		},
 		ModifyResponse: func(resp *http.Response) error {
 			if service == "comfyui" {
+				if err := a.finalizeComfyInputUpload(resp); err != nil {
+					return err
+				}
 				if err := a.filterComfyResponse(resp); err != nil {
 					return err
 				}
@@ -141,6 +165,10 @@ func (a *App) proxyHandlerWithPath(service, prefix string, upstream *url.URL, au
 			r = r.WithContext(context.WithValue(r.Context(), openWebCookieSecureKey{}, a.cookieSecure(r)))
 		}
 		if service == "comfyui" {
+			if (user == nil || user.Role != "admin") && isComfyAdminOnlyPath(r.URL.Path) {
+				http.Error(w, "управление ComfyUI доступно только администратору", http.StatusForbidden)
+				return
+			}
 			stateWriter := &captureWriter{ResponseWriter: w}
 			started := time.Now()
 			if a.handleComfyUserState(stateWriter, r, user) {
@@ -167,15 +195,26 @@ func (a *App) proxyHandlerWithPath(service, prefix string, upstream *url.URL, au
 						return
 					}
 				}
-				if err := a.rewriteComfyUpload(w, r, user); err != nil {
+				preparedRequest, reservation, uploadErr := a.prepareComfyInputUpload(w, r, user)
+				r = preparedRequest
+				if reservation != nil {
+					defer a.releaseComfyInputReservation(reservation)
+				}
+				if uploadErr != nil {
 					status := http.StatusBadRequest
 					var tooLarge *http.MaxBytesError
-					if errors.As(err, &tooLarge) {
+					if errors.As(uploadErr, &tooLarge) {
 						status = http.StatusRequestEntityTooLarge
-					} else if errors.Is(err, errForeignComfyAsset) {
+					} else if errors.Is(uploadErr, errForeignComfyAsset) {
 						status = http.StatusForbidden
+					} else if errors.Is(uploadErr, store.ErrComfyInputUserQuota) || errors.Is(uploadErr, store.ErrComfyInputGlobalQuota) {
+						status = http.StatusInsufficientStorage
 					}
-					http.Error(w, "некорректная загрузка ComfyUI", status)
+					message := "некорректная загрузка ComfyUI"
+					if status == http.StatusInsufficientStorage {
+						message = "хранилище входных файлов ComfyUI заполнено; дождитесь автоматической очистки"
+					}
+					http.Error(w, message, status)
 					return
 				}
 			}
@@ -215,6 +254,19 @@ func (a *App) proxyHandlerWithPath(service, prefix string, upstream *url.URL, au
 			http.Error(w, "некорректный запрос ComfyUI", http.StatusBadRequest)
 			return
 		}
+		var releasePromptAdmission func()
+		if service == "comfyui" && r.Method == http.MethodPost && r.URL.Path == "/prompt" {
+			releasePromptAdmission, err = a.acquireComfyPromptAdmission(r.Context(), user.ID)
+			if err != nil {
+				status := http.StatusBadGateway
+				if errors.Is(err, errComfyPromptAdmission) {
+					status = http.StatusTooManyRequests
+				}
+				http.Error(w, "очередь ComfyUI временно заполнена", status)
+				return
+			}
+			defer releasePromptAdmission()
+		}
 		contentCapture, err := a.beginContentCapture(r, user, service)
 		if err != nil {
 			http.Error(w, "некорректный запрос к сервису", http.StatusBadRequest)
@@ -242,7 +294,27 @@ func (a *App) proxyHandlerWithPath(service, prefix string, upstream *url.URL, au
 		}
 
 		cw := &captureWriter{ResponseWriter: w}
+		var trackedWS *trackedWebSocket
+		if isWS {
+			sessionHash := sessionHashFromRequest(r)
+			cw.onHijack = func(conn net.Conn) {
+				trackedWS = a.registerWebSocket(user.ID, sessionHash, service, conn)
+				if trackedWS == nil {
+					_ = conn.Close()
+					return
+				}
+				authorizationCtx, authorizationCancel := context.WithTimeout(context.Background(), 3*time.Second)
+				authorized := a.authorizeRegisteredWebSocket(authorizationCtx, trackedWS)
+				authorizationCancel()
+				if !authorized {
+					a.closeTrackedWebSocket(trackedWS)
+				}
+			}
+		}
 		proxy.ServeHTTP(cw, r)
+		if trackedWS != nil {
+			a.unregisterWebSocket(trackedWS)
+		}
 		persistCtx, cancelPersist := contentPersistenceContext(r.Context())
 		err = a.persistContentCapture(persistCtx, contentCapture)
 		cancelPersist()

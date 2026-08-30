@@ -122,8 +122,8 @@ try {
     if ($app.StatusCode -ne 200 -or $app.Content -notmatch 'mining-status stopped' -or $app.Content -match 'mining-status unavailable') {
         throw 'User page does not show the available stopped miner'
     }
-    if ($app.Content -notmatch 'Содержимое скрипта' -or $app.Content -notmatch '--pool' -or $app.Content -notmatch '--wallet' -or $app.Content -notmatch '[a-f0-9]{64}') {
-        throw 'User page does not show the selected mining script contents and SHA-256'
+    if ($app.Content -match 'Содержимое скрипта' -or $app.Content -match '--pool' -or $app.Content -match '--wallet') {
+        throw 'Trusted user page discloses mining script contents'
     }
     $csrf = Get-CSRF $app.Content
 

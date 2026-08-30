@@ -167,3 +167,44 @@ func TestEnforceComfyPromptRejectsForeignUploadNamespace(t *testing.T) {
 		t.Fatalf("own namespace was rejected: %v", err)
 	}
 }
+
+func TestComfyNamespaceIsolationNormalizesWindowsPathsAndCase(t *testing.T) {
+	own := "gateway/gateway-bbbbbbbbbbbbbbbbbbbbbbbb"
+	foreign := json.RawMessage(`{"image":"GATEWAY\\GATEWAY-AAAAAAAAAAAAAAAAAAAAAAAA\\private.png"}`)
+	if !containsForeignComfyNamespace(foreign, own) {
+		t.Fatal("foreign Windows namespace escaped isolation")
+	}
+
+	ownWindowsPath := json.RawMessage(`{"image":"GATEWAY\\GATEWAY-BBBBBBBBBBBBBBBBBBBBBBBB\\mine.png"}`)
+	if containsForeignComfyNamespace(ownWindowsPath, own) {
+		t.Fatal("normalized own Windows namespace was rejected")
+	}
+}
+
+func TestEnforceComfyPromptRejectsLegacyAndNoncanonicalAssetPaths(t *testing.T) {
+	app := &App{cfg: Config{SessionSecret: "01234567890123456789012345678901"}}
+	user := &User{ID: 7, Username: "bob"}
+	for _, asset := range []string{
+		"legacy.png",
+		"gateway/gateway-aaaaaaaaaaaaaaaaaaaaaaaa/../gateway-bbbbbbbbbbbbbbbbbbbbbbbb/private.png",
+	} {
+		request := httptest.NewRequest(http.MethodPost, "/prompt", strings.NewReader(
+			`{"prompt":{"1":{"class_type":"LoadImage","inputs":{"image":"`+asset+`"}}}}`,
+		))
+		if err := app.enforceComfyPromptIdentity(request, user); err == nil {
+			t.Fatalf("asset %q was accepted", asset)
+		}
+	}
+}
+
+func TestEnforceComfyPromptAllowsNodeLinkedMediaInputs(t *testing.T) {
+	app := &App{cfg: Config{SessionSecret: "01234567890123456789012345678901"}}
+	user := &User{ID: 7, Username: "bob"}
+	own := comfyUploadNamespace(app.comfyClientID(user.ID))
+	request := httptest.NewRequest(http.MethodPost, "/prompt", strings.NewReader(
+		`{"prompt":{"1":{"class_type":"LoadImage","inputs":{"image":"`+own+`/mine.png"}},"2":{"class_type":"ImageScale","inputs":{"image":["1",0]}}}}`,
+	))
+	if err := app.enforceComfyPromptIdentity(request, user); err != nil {
+		t.Fatalf("node-linked image was rejected: %v", err)
+	}
+}

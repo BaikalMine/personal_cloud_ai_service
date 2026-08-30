@@ -30,6 +30,8 @@ func (a *App) runMaintenance(ctx context.Context) {
 	defer generationTicker.Stop()
 	comfyMemoryTicker := time.NewTicker(comfyMemoryMonitorInterval)
 	defer comfyMemoryTicker.Stop()
+	websocketTicker := time.NewTicker(websocketAuthorizationRefreshInterval)
+	defer websocketTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -46,6 +48,10 @@ func (a *App) runMaintenance(ctx context.Context) {
 			memoryCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 			a.observeComfyQueueForMemoryRelease(memoryCtx)
 			cancel()
+		case <-websocketTicker.C:
+			websocketCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+			a.pruneUnauthorizedWebSockets(websocketCtx)
+			cancel()
 		case <-ticker.C:
 			virusTotalCtx, virusTotalCancel := context.WithTimeout(ctx, 2*time.Minute)
 			a.refreshFeatureSuggestionScans(virusTotalCtx)
@@ -54,13 +60,23 @@ func (a *App) runMaintenance(ctx context.Context) {
 			a.backfillComfyContentMedia(backfillCtx)
 			a.backfillContentMediaHashes(backfillCtx)
 			backfillCancel()
-			cleanupCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			deletedMedia, mediaErr := a.deleteExpiredComfyMedia(cleanupCtx)
+			inputCleanupCtx, inputCleanupCancel := context.WithTimeout(ctx, 3*time.Minute)
+			deletedInputs, inputErr := a.deleteExpiredComfyInputs(inputCleanupCtx)
+			inputCleanupCancel()
+			if inputErr != nil {
+				log.Printf("delete expired ComfyUI inputs: %v", inputErr)
+			} else if deletedInputs > 0 {
+				log.Printf("deleted %d expired ComfyUI input records", deletedInputs)
+			}
+			mediaCleanupCtx, mediaCleanupCancel := context.WithTimeout(ctx, 3*time.Minute)
+			deletedMedia, mediaErr := a.deleteExpiredComfyMedia(mediaCleanupCtx)
+			mediaCleanupCancel()
 			if mediaErr != nil {
 				log.Printf("delete expired ComfyUI media: %v", mediaErr)
 			} else if deletedMedia > 0 {
 				log.Printf("deleted %d expired ComfyUI media items", deletedMedia)
 			}
+			cleanupCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			deletedOtherMedia, otherMediaErr := a.store.DeleteExpiredNonComfyMedia(cleanupCtx)
 			if otherMediaErr != nil {
 				log.Printf("delete expired non-ComfyUI media: %v", otherMediaErr)

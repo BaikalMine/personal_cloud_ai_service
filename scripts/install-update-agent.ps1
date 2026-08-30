@@ -73,6 +73,48 @@ function Convert-ToJsonSafe([object]$Value) {
     return ($Value | ConvertTo-Json -Depth 6)
 }
 
+function Set-StrictServiceDirectoryAcl([string]$Path, [string[]]$AdditionalAccounts = @()) {
+    & icacls.exe $Path /reset /T /C | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to reset ACLs below $Path"
+    }
+
+    $security = [Security.AccessControl.DirectorySecurity]::new()
+    $security.SetAccessRuleProtection($true, $false)
+    $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+        [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    $propagation = [Security.AccessControl.PropagationFlags]::None
+    $allow = [Security.AccessControl.AccessControlType]::Allow
+    $fullControl = [Security.AccessControl.FileSystemRights]::FullControl
+    $principals = @(
+        [Security.Principal.SecurityIdentifier]::new(
+            [Security.Principal.WellKnownSidType]::LocalSystemSid,
+            $null
+        ),
+        [Security.Principal.SecurityIdentifier]::new(
+            [Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid,
+            $null
+        )
+    )
+    foreach ($account in $AdditionalAccounts) {
+        if (-not [string]::IsNullOrWhiteSpace($account)) {
+            $principals += [Security.Principal.NTAccount]::new($account)
+        }
+    }
+    foreach ($principalIdentity in $principals) {
+        $security.AddAccessRule(
+            [Security.AccessControl.FileSystemAccessRule]::new(
+                $principalIdentity,
+                $fullControl,
+                $inheritance,
+                $propagation,
+                $allow
+            )
+        )
+    }
+    [IO.Directory]::SetAccessControl($Path, $security)
+}
+
 if ([string]::IsNullOrWhiteSpace($Token)) {
     $Token = [Environment]::GetEnvironmentVariable('AI_UPDATE_AGENT_TOKEN')
 }
@@ -102,6 +144,7 @@ $sourceExecutable = Resolve-ExistingFile $Executable 'Update agent executable'
 $gatewayRoot = Resolve-ExistingDirectory $GatewayRoot 'Gateway directory'
 $comfyRoot = Resolve-ExistingDirectory $ComfyRoot 'ComfyUI directory'
 $comfyPython = Resolve-ExistingFile $ComfyPython 'ComfyUI Python executable'
+$comfyMain = Resolve-ExistingFile (Join-Path $comfyRoot 'main.py') 'ComfyUI main.py'
 $gatewayComposeFile = if ([string]::IsNullOrWhiteSpace($GatewayComposeFile)) { Join-Path $gatewayRoot 'docker-compose.yml' } else { $GatewayComposeFile }
 $gatewayComposeFile = Resolve-ExistingFile $gatewayComposeFile 'Gateway Docker Compose file'
 $openWebUIComposeFile = Resolve-ExistingFile $OpenWebUIComposeFile 'Open WebUI Docker Compose file'
@@ -158,9 +201,11 @@ $stopperPath = Join-Path $InstallDirectory 'stop-comfyui.ps1'
 $watchdogPath = Join-Path $InstallDirectory 'ensure-update-agent.ps1'
 
 Copy-Item -LiteralPath $sourceExecutable -Destination $targetExecutable -Force
-$launcher = "@echo off`r`ntitle ComfyUI`r`ncd /d `"$comfyRoot`"`r`n`"$comfyPython`" main.py --listen 0.0.0.0`r`necho.`r`necho ComfyUI stopped. Press any key to close this window.`r`npause > nul`r`n"
+$launcher = "@echo off`r`ntitle ComfyUI`r`ncd /d `"$comfyRoot`"`r`n`"$comfyPython`" `"$comfyMain`" --enable-manager --listen 0.0.0.0`r`nexit /b %ERRORLEVEL%`r`n"
 [IO.File]::WriteAllText($launcherPath, $launcher, [Text.UTF8Encoding]::new($false))
-$stopper = "`$processes = Get-CimInstance Win32_Process -Filter `"Name = 'python.exe'`" | Where-Object { `$_.CommandLine -match '(?i)(^|\s)main\.py(\s|$)' -and `$_.CommandLine -match '(?i)--listen\s+0\.0\.0\.0' }`r`nforeach (`$process in `$processes) { Stop-Process -Id `$process.ProcessId -Force -ErrorAction Stop }`r`n"
+$escapedComfyPython = $comfyPython.Replace("'", "''")
+$escapedComfyMain = $comfyMain.Replace("'", "''")
+$stopper = "`$expectedPython = [IO.Path]::GetFullPath('$escapedComfyPython')`r`n`$expectedMain = [IO.Path]::GetFullPath('$escapedComfyMain')`r`n`$processes = Get-CimInstance Win32_Process -Filter `"Name = 'python.exe'`" | Where-Object { `$_.ExecutablePath -and `$_.CommandLine -and [IO.Path]::GetFullPath(`$_.ExecutablePath).Equals(`$expectedPython, [StringComparison]::OrdinalIgnoreCase) -and `$_.CommandLine.IndexOf(`$expectedMain, [StringComparison]::OrdinalIgnoreCase) -ge 0 -and `$_.CommandLine -match '(?i)--listen\s+0\.0\.0\.0' }`r`nforeach (`$process in `$processes) { Stop-Process -Id `$process.ProcessId -Force -ErrorAction Stop }`r`n"
 [IO.File]::WriteAllText($stopperPath, $stopper, [Text.UTF8Encoding]::new($false))
 $watchdog = "`$ErrorActionPreference = 'Stop'`r`n`$listener = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue`r`nif (-not `$listener) { Start-ScheduledTask -TaskName '$taskName' }`r`n"
 [IO.File]::WriteAllText($watchdogPath, $watchdog, [Text.UTF8Encoding]::new($false))
@@ -180,11 +225,12 @@ $config = [ordered]@{
     }
     comfyui = [ordered]@{
         working_directory = $comfyRoot
+		input_directory = (Join-Path $comfyRoot 'input')
 		output_directory = (Join-Path $comfyRoot 'output')
         remote_url = $comfyRemote
         branch = $comfyBranch
         python_executable = $comfyPython
-        launch_arguments = @('main.py', '--listen', '0.0.0.0')
+		launch_arguments = @($comfyMain, '--enable-manager', '--listen', '0.0.0.0')
         launch_command = @('powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', $launchCommand)
         stop_command = @('powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $stopperPath)
         health_url = 'http://127.0.0.1:8188/'
@@ -203,9 +249,7 @@ $config = [ordered]@{
 }
 [IO.File]::WriteAllText($configPath, (Convert-ToJsonSafe $config), [Text.UTF8Encoding]::new($false))
 
-$aclGrants = @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F', "$serviceAccount:(OI)(CI)F")
-& icacls.exe $InstallDirectory /inheritance:r /grant:r $aclGrants | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'Failed to apply the update agent directory ACL.' }
+Set-StrictServiceDirectoryAcl -Path $InstallDirectory -AdditionalAccounts @($serviceAccount)
 
 $action = New-ScheduledTaskAction -Execute $targetExecutable -Argument "-config `"$configPath`"" -WorkingDirectory $InstallDirectory
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $serviceAccount

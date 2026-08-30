@@ -18,16 +18,17 @@ func (a *App) handleApp(w http.ResponseWriter, r *http.Request) {
 	canAccessMining := user.CanAccessMining()
 	mining := MiningOverview{}
 	if canAccessMining {
-		mining = a.miningOverview(r.Context(), false)
+		mining = a.miningOverview(r.Context(), false, user.Role == "admin")
 	}
 	a.render(w, r, "app", map[string]any{
-		"Title":           "Главная",
-		"Stats":           stats,
-		"Activities":      activities,
-		"Services":        a.serviceStatuses(r.Context()),
-		"Mining":          mining,
-		"CanAccessMining": canAccessMining,
-		"MiningStatus":    r.URL.Query().Get("mining"),
-		"PriorityStatus":  r.URL.Query().Get("priority"),
+		"Title":                "Главная",
+		"Stats":                stats,
+		"Activities":           activities,
+		"Services":             a.serviceStatuses(r.Context()),
+		"Mining":               mining,
+		"CanAccessMining":      canAccessMining,
+		"CanViewMiningDetails": user.Role == "admin",
+		"MiningStatus":         r.URL.Query().Get("mining"),
+		"PriorityStatus":       r.URL.Query().Get("priority"),
 	})
 }

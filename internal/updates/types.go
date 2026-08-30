@@ -30,9 +30,9 @@ type Request struct {
 	Components []string `json:"components,omitempty"`
 }
 
-// ComfyOutputFile identifies one archived generation result. The agent checks
-// every field against the local file before deleting it.
-type ComfyOutputFile struct {
+// ComfyAssetFile identifies one tracked ComfyUI input or archived output. The
+// agent checks every field against the local file before deleting it.
+type ComfyAssetFile struct {
 	Filename    string `json:"filename"`
 	Subfolder   string `json:"subfolder,omitempty"`
 	StorageType string `json:"storage_type"`
@@ -40,16 +40,31 @@ type ComfyOutputFile struct {
 	SHA256      string `json:"sha256"`
 }
 
-type ComfyOutputDeleteRequest struct {
-	Files []ComfyOutputFile `json:"files"`
+type ComfyOutputFile = ComfyAssetFile
+
+type ComfyAssetDeleteRequest struct {
+	Files []ComfyAssetFile `json:"files"`
 }
 
-type ComfyOutputDeleteResult struct {
-	Deleted    int `json:"deleted"`
-	Missing    int `json:"missing"`
-	Mismatched int `json:"mismatched"`
-	Rejected   int `json:"rejected"`
+type ComfyAssetDeleteResult struct {
+	Deleted    int                       `json:"deleted"`
+	Missing    int                       `json:"missing"`
+	Mismatched int                       `json:"mismatched"`
+	Rejected   int                       `json:"rejected"`
+	Items      []ComfyAssetDeleteOutcome `json:"items,omitempty"`
 }
+
+type ComfyAssetDeleteOutcome struct {
+	Filename    string `json:"filename"`
+	Subfolder   string `json:"subfolder,omitempty"`
+	StorageType string `json:"storage_type"`
+	SizeBytes   int64  `json:"size_bytes"`
+	SHA256      string `json:"sha256"`
+	Status      string `json:"status"`
+}
+
+type ComfyOutputDeleteRequest = ComfyAssetDeleteRequest
+type ComfyOutputDeleteResult = ComfyAssetDeleteResult
 
 func ValidComponent(name string) bool {
 	switch name {

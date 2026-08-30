@@ -17,8 +17,11 @@ func TestValidateGenerationPromptRejectsSexualizedMinorContent(t *testing.T) {
 		{name: "english", text: "explicit nude schoolgirl portrait", want: true},
 		{name: "russian", text: "эротический портрет несовершеннолетней", want: true},
 		{name: "age", text: "nude person, 16 years old", want: true},
+		{name: "teenager", text: "explicit nude teenager", want: true},
+		{name: "minor plural", text: "sexualized content involving minors", want: true},
 		{name: "safe child scene", text: "a child playing football in a park"},
 		{name: "adult content", text: "editorial portrait of an adult woman in lingerie"},
+		{name: "fifteen second adult content", text: "a clearly adult woman in a continuous fifteen-second nude boudoir shot"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

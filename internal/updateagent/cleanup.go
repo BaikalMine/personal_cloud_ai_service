@@ -17,65 +17,120 @@ import (
 // DeleteComfyOutputFiles removes an output only after its exact local bytes
 // match a result that Gateway has already archived in its database.
 func DeleteComfyOutputFiles(ctx context.Context, target ComfyTarget, files []updates.ComfyOutputFile) (updates.ComfyOutputDeleteResult, error) {
-	directory := target.OutputDirectory
-	if directory == "" {
-		directory = filepath.Join(target.WorkingDirectory, "output")
+	for _, file := range files {
+		if file.StorageType != "output" {
+			return updates.ComfyOutputDeleteResult{Rejected: len(files)}, nil
+		}
 	}
-	directory, err := filepath.Abs(directory)
-	if err != nil {
-		return updates.ComfyOutputDeleteResult{}, err
-	}
-	info, err := os.Stat(directory)
-	if errors.Is(err, fs.ErrNotExist) {
-		return updates.ComfyOutputDeleteResult{Missing: len(files)}, nil
-	}
-	if err != nil {
-		return updates.ComfyOutputDeleteResult{}, err
-	}
-	if !info.IsDir() {
-		return updates.ComfyOutputDeleteResult{}, errors.New("ComfyUI output path is not a directory")
-	}
+	return DeleteComfyAssetFiles(ctx, target, files)
+}
 
-	result := updates.ComfyOutputDeleteResult{}
+func DeleteComfyAssetFiles(ctx context.Context, target ComfyTarget, files []updates.ComfyAssetFile) (updates.ComfyAssetDeleteResult, error) {
+	result := updates.ComfyAssetDeleteResult{}
 	for _, file := range files {
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
-		path, valid := safeComfyOutputPath(directory, file)
+		directory, valid := comfyAssetRoot(target, file.StorageType)
 		if !valid {
 			result.Rejected++
+			result.Items = append(result.Items, comfyAssetOutcome(file, "rejected"))
 			continue
 		}
-		entry, err := os.Lstat(path)
-		if errors.Is(err, fs.ErrNotExist) {
+		outcome, err := deleteComfyAssetFile(directory, file)
+		if err != nil {
+			return result, err
+		}
+		result.Items = append(result.Items, comfyAssetOutcome(file, outcome))
+		switch outcome {
+		case "deleted":
+			result.Deleted++
+		case "missing":
 			result.Missing++
-			continue
-		}
-		if err != nil {
-			return result, err
-		}
-		if entry.Mode()&fs.ModeSymlink != 0 || !entry.Mode().IsRegular() || entry.Size() != file.SizeBytes {
+		case "mismatched":
 			result.Mismatched++
-			continue
+		default:
+			result.Rejected++
 		}
-		matched, err := hasExpectedSHA256(path, file.SHA256)
-		if err != nil {
-			return result, err
-		}
-		if !matched {
-			result.Mismatched++
-			continue
-		}
-		if err := os.Remove(path); err != nil {
-			return result, err
-		}
-		result.Deleted++
 	}
 	return result, nil
 }
 
-func safeComfyOutputPath(root string, file updates.ComfyOutputFile) (string, bool) {
-	if file.StorageType != "output" || file.SizeBytes < 0 || !validSHA256(file.SHA256) {
+func comfyAssetOutcome(file updates.ComfyAssetFile, status string) updates.ComfyAssetDeleteOutcome {
+	return updates.ComfyAssetDeleteOutcome{
+		Filename: file.Filename, Subfolder: file.Subfolder,
+		StorageType: file.StorageType, SizeBytes: file.SizeBytes, SHA256: file.SHA256, Status: status,
+	}
+}
+
+func comfyAssetRoot(target ComfyTarget, storageType string) (string, bool) {
+	var directory string
+	switch storageType {
+	case "input":
+		directory = target.InputDirectory
+		if directory == "" {
+			directory = filepath.Join(target.WorkingDirectory, "input")
+		}
+	case "output":
+		directory = target.OutputDirectory
+		if directory == "" {
+			directory = filepath.Join(target.WorkingDirectory, "output")
+		}
+	default:
+		return "", false
+	}
+	directory, err := filepath.Abs(directory)
+	if err != nil {
+		return "", false
+	}
+	info, err := os.Stat(directory)
+	if errors.Is(err, fs.ErrNotExist) {
+		return directory, true
+	}
+	if err != nil || !info.IsDir() {
+		return "", false
+	}
+	return directory, true
+}
+
+func deleteComfyAssetFile(directory string, file updates.ComfyAssetFile) (string, error) {
+	relative, valid := safeComfyAssetRelativePath(file)
+	if !valid {
+		return "rejected", nil
+	}
+	root, err := os.OpenRoot(directory)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "missing", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	entry, err := root.Lstat(relative)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "missing", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if entry.Mode()&fs.ModeSymlink != 0 || !entry.Mode().IsRegular() || entry.Size() != file.SizeBytes {
+		return "mismatched", nil
+	}
+	matched, err := hasExpectedSHA256(root, relative, file.SHA256)
+	if err != nil {
+		return "", err
+	}
+	if !matched {
+		return "mismatched", nil
+	}
+	if err := root.Remove(relative); err != nil {
+		return "", err
+	}
+	return "deleted", nil
+}
+
+func safeComfyAssetRelativePath(file updates.ComfyAssetFile) (string, bool) {
+	if file.StorageType != "output" && file.StorageType != "input" || file.SizeBytes < 0 || !validSHA256(file.SHA256) {
 		return "", false
 	}
 	filename := strings.TrimSpace(file.Filename)
@@ -93,12 +148,11 @@ func safeComfyOutputPath(root string, file updates.ComfyOutputFile) (string, boo
 	if cleanSubfolder == ".." || strings.HasPrefix(cleanSubfolder, ".."+string(filepath.Separator)) {
 		return "", false
 	}
-	candidate := filepath.Join(root, cleanSubfolder, filename)
-	relative, err := filepath.Rel(root, candidate)
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+	relative := filepath.Join(cleanSubfolder, filename)
+	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
 		return "", false
 	}
-	return candidate, true
+	return relative, true
 }
 
 func validSHA256(value string) bool {
@@ -109,8 +163,8 @@ func validSHA256(value string) bool {
 	return err == nil
 }
 
-func hasExpectedSHA256(path, expected string) (bool, error) {
-	file, err := os.Open(path)
+func hasExpectedSHA256(root *os.Root, relative, expected string) (bool, error) {
+	file, err := root.Open(relative)
 	if err != nil {
 		return false, err
 	}

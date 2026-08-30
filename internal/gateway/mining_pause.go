@@ -24,7 +24,7 @@ func (a *App) pauseMiningForQuickGeneration(ctx context.Context, user *User) (*d
 
 	existing, err := a.store.ActiveQuickGenerationMiningLease(ctx)
 	if err == nil {
-		overview := a.miningOverview(ctx, true)
+		overview := a.miningOverview(ctx, true, false)
 		if !overview.Available {
 			return nil, "Агент майнинга недоступен: генерация запущена, но остановка майнинга не подтверждена.", nil
 		}
@@ -51,7 +51,7 @@ func (a *App) pauseMiningForQuickGeneration(ctx context.Context, user *User) (*d
 		return nil, "", fmt.Errorf("проверить резервирования майнинга: %w", err)
 	}
 
-	overview := a.miningOverview(ctx, true)
+	overview := a.miningOverview(ctx, true, false)
 	if !overview.Available {
 		return nil, "Агент майнинга недоступен: генерация запущена, но остановка майнинга не подтверждена.", nil
 	}
@@ -123,7 +123,7 @@ func (a *App) releaseMiningPause(ctx context.Context, leaseID string) {
 	if remaining > 0 || !lease.ResumeMining {
 		return
 	}
-	overview := a.miningOverview(ctx, true)
+	overview := a.miningOverview(ctx, true, false)
 	if !overview.Available {
 		log.Printf("resume mining after quick generation: %s", overview.Message)
 		a.restoreMiningPauseLease(ctx, lease)

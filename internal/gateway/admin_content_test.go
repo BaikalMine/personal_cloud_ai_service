@@ -32,6 +32,16 @@ func TestContentAssistantIsEmbeddedInGenerationMetadata(t *testing.T) {
 	}
 }
 
+func TestContentMetadataIsFormattedForAdminReview(t *testing.T) {
+	formatted := prettyContentMetadata(`{"workflow":"minimax-h3-video","minimax_h3":{"rife":{"enabled":true}}}`)
+	if !strings.Contains(formatted, "\n") || !strings.Contains(formatted, `"rife"`) {
+		t.Fatalf("formatted metadata = %q", formatted)
+	}
+	if got := prettyContentMetadata("not-json"); got != "not-json" {
+		t.Fatalf("invalid metadata changed to %q", got)
+	}
+}
+
 func TestAdminContentRendersEveryMediaItem(t *testing.T) {
 	templates, err := ParseTemplates()
 	if err != nil {

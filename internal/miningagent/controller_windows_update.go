@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"mime"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -38,6 +37,9 @@ type preservedBAT struct {
 }
 
 func (c *windowsController) Update(ctx context.Context, request mining.UpdateRequest) (mining.UpdateResult, error) {
+	c.updateMu.Lock()
+	defer c.updateMu.Unlock()
+
 	result := mining.UpdateResult{}
 	scriptPath, err := c.allowedScript(request.ScriptPath)
 	if err != nil {
@@ -47,8 +49,12 @@ func (c *windowsController) Update(ctx context.Context, request mining.UpdateReq
 	if samePath(currentDir, c.rootDir) {
 		return result, errors.New("обновление требует отдельной папки майнера внутри корня майнинга")
 	}
+	if err := pruneMinerUpdateArtifacts(currentDir); err != nil {
+		return result, fmt.Errorf("очистка старых версий майнера: %w", err)
+	}
+	defer func() { _ = pruneMinerUpdateArtifacts(currentDir) }()
 
-	archivePath, archiveName, err := downloadMinerArchive(ctx, request.ArchiveURL, request.ArchiveSHA256)
+	archivePath, archiveName, err := downloadMinerArchive(ctx, request.ArchiveURL, request.ArchiveSHA256, c.archivePolicy)
 	if err != nil {
 		return result, err
 	}
@@ -122,20 +128,12 @@ func (c *windowsController) Update(ctx context.Context, request mining.UpdateReq
 	return result, nil
 }
 
-func downloadMinerArchive(ctx context.Context, rawURL, expectedSHA256 string) (string, string, error) {
-	parsed, err := validateArchiveURL(rawURL)
+func downloadMinerArchive(ctx context.Context, rawURL, expectedSHA256 string, policy archiveSourcePolicy) (string, string, error) {
+	parsed, err := policy.validateInitial(rawURL)
 	if err != nil {
 		return "", "", err
 	}
-	client := &http.Client{
-		Timeout: 35 * time.Minute,
-		CheckRedirect: func(req *http.Request, _ []*http.Request) error {
-			if _, err := validateArchiveURL(req.URL.String()); err != nil {
-				return err
-			}
-			return nil
-		},
-	}
+	client := newMinerArchiveHTTPClient(policy)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 	if err != nil {
 		return "", "", fmt.Errorf("ссылка на архив: %w", err)
@@ -184,17 +182,6 @@ func downloadMinerArchive(ctx context.Context, rawURL, expectedSHA256 string) (s
 	}
 	removeOnError = false
 	return temporaryPath, archiveName, nil
-}
-
-func validateArchiveURL(raw string) (*url.URL, error) {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
-		return nil, errors.New("ссылка на обновление должна быть HTTPS-ссылкой без логина и пароля")
-	}
-	if ip := net.ParseIP(parsed.Hostname()); ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()) {
-		return nil, errors.New("ссылки на локальные и приватные адреса запрещены")
-	}
-	return parsed, nil
 }
 
 func archiveNameFromURL(parsed *url.URL) (string, error) {

@@ -3,7 +3,9 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
 
@@ -27,9 +30,11 @@ import (
 )
 
 const (
-	maxGenerationRequest = 32 << 10
-	maxComfyObjectInfo   = 32 << 20
-	maxGenerationHistory = 32 << 20
+	maxGenerationRequest           = 32 << 10
+	maxComfyObjectInfo             = 32 << 20
+	maxGenerationHistory           = 32 << 20
+	maxGenerationOutputFingerprint = int64(2 << 30)
+	generationMediaRetention       = 24 * time.Hour
 )
 
 type generationOutput struct {
@@ -97,8 +102,8 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 	library := quick(http.HandlerFunc(a.handleGenerationLibraryMedia))
 	recentLibrary := quick(http.HandlerFunc(a.handleRecentGenerationLibrary))
 	hideLibrary := quick(http.HandlerFunc(a.handleHideGenerationLibraryMedia))
-	upload := quick(a.quickGenerationUploadHandler())
-	uploadAudio := quick(a.quickGenerationAudioUploadHandler())
+	upload := quick(a.requireQuickGenerationTypes([]string{"image-to-image", "minimax-h3-video"}, a.quickGenerationUploadHandler()))
+	uploadAudio := quick(a.requireQuickGenerationTypes([]string{"minimax-h3-video"}, a.quickGenerationAudioUploadHandler()))
 	mux.Handle("/generate", page)
 	mux.Handle("/generate/", page)
 	mux.Handle("/generate/upload/image", upload)
@@ -114,6 +119,19 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 	mux.Handle("/generate/library/recent", recentLibrary)
 	mux.Handle("/generate/library/", library)
 	a.registerGenerationCompanionRoutes(mux, quick)
+}
+
+func (a *App) requireQuickGenerationTypes(templateIDs []string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := a.currentUser(r)
+		for _, templateID := range templateIDs {
+			if user != nil && user.CanUseQuickGenerationType(templateID) {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+		writeGenerationError(w, http.StatusForbidden, "этот тип быстрой генерации недоступен")
+	})
 }
 
 func (a *App) handleGeneratePage(w http.ResponseWriter, r *http.Request) {
@@ -413,6 +431,22 @@ func (a *App) prepareGeneration(ctx context.Context, user *User, input generatio
 	input.ReferenceModel = model.ReferenceModel
 	input.Lora = model.Lora
 	input.IdentityLora = model.IdentityLora
+	input.VideoIntegratedTurbo = model.VideoIntegratedTurbo
+	input.VideoReferenceOnly = model.VideoReferenceOnly
+	if model.Family == modelFamilyMiniMaxH3 {
+		if input.VideoSteps == 0 {
+			input.VideoSteps = model.DefaultSteps
+		}
+		if input.VideoSampler == "" {
+			input.VideoSampler = model.DefaultSampler
+		}
+		if input.VideoShiftVideo == 0 {
+			input.VideoShiftVideo = model.DefaultVideoShift
+		}
+		if input.VideoShiftAudio == 0 {
+			input.VideoShiftAudio = model.DefaultAudioShift
+		}
+	}
 	if model.Family == modelFamilyKrea2 {
 		if input.TemplateID == "image-to-image" {
 			if input.IdentityLora == "" {
@@ -581,7 +615,7 @@ func (a *App) handleCancelGeneration(w http.ResponseWriter, r *http.Request) {
 	if queued {
 		err = a.cancelQueuedComfyGeneration(r.Context(), promptID)
 	} else if running {
-		err = a.interruptRunningComfyGeneration(r.Context())
+		err = a.interruptRunningComfyGeneration(r.Context(), promptID)
 	}
 	if err != nil {
 		writeGenerationError(w, http.StatusBadGateway, "не удалось отменить генерацию: "+err.Error())
@@ -606,8 +640,11 @@ func (a *App) cancelQueuedComfyGeneration(ctx context.Context, promptID string) 
 	return a.postComfyGenerationControl(ctx, "/queue", map[string]any{"delete": []string{promptID}})
 }
 
-func (a *App) interruptRunningComfyGeneration(ctx context.Context) error {
-	return a.postComfyGenerationControl(ctx, "/interrupt", nil)
+func (a *App) interruptRunningComfyGeneration(ctx context.Context, promptID string) error {
+	if !validComfyPromptID(promptID) {
+		return errors.New("invalid ComfyUI prompt id")
+	}
+	return a.postComfyGenerationControl(ctx, "/api/jobs/"+promptID+"/cancel", nil)
 }
 
 func (a *App) postComfyGenerationControl(ctx context.Context, endpointPath string, document any) error {
@@ -746,6 +783,11 @@ func (a *App) handleGenerationQueue(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) submitComfyPrompt(ctx context.Context, userID int64, prompt map[string]any) (string, error) {
+	releaseAdmission, err := a.acquireComfyPromptAdmission(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+	defer releaseAdmission()
 	document := comfyPromptDocument(a.comfyClientID(userID), prompt)
 	body, err := json.Marshal(document)
 	if err != nil {
@@ -892,10 +934,10 @@ func (a *App) fetchGenerationStatus(ctx context.Context, promptID string, userID
 			StorageType: output.Type, MediaType: output.MediaType,
 		}})
 	}
-	if len(outputs) > 0 {
-		a.archiveGenerationOutputs(ctx, userID, outputs)
+	newOutputs := a.rememberGenerationOutputs(promptID, outputs)
+	if len(newOutputs) > 0 {
+		a.archiveGenerationOutputs(ctx, userID, newOutputs)
 	}
-	a.rememberGenerationOutputs(promptID, outputs)
 	statusStr := strings.ToLower(strings.TrimSpace(entry.Status.StatusStr))
 	if statusStr == "error" || statusStr == "failed" {
 		status.State, status.Message = "error", "ComfyUI завершил генерацию с ошибкой"
@@ -1198,6 +1240,12 @@ func (a *App) handleGenerationLibraryMedia(w http.ResponseWriter, r *http.Reques
 		http.NotFound(w, r)
 		return
 	}
+	releaseDownload, acquired := acquireBoundedSlot(r.Context(), a.mediaDownloadSlots, 2*time.Second)
+	if !acquired {
+		http.Error(w, "слишком много одновременных загрузок", http.StatusTooManyRequests)
+		return
+	}
+	defer releaseDownload()
 	payload, err := a.contentCipher.DecryptBytes(media.PayloadCipher)
 	if err != nil {
 		http.Error(w, "ошибка расшифровки результата", http.StatusInternalServerError)
@@ -1269,6 +1317,11 @@ func (a *App) handleHideGenerationLibraryMedia(w http.ResponseWriter, r *http.Re
 }
 
 func (a *App) fetchGenerationOutput(ctx context.Context, output generationOutput) ([]byte, string, int, error) {
+	releaseDownload, acquired := acquireBoundedSlot(ctx, a.mediaDownloadSlots, 2*time.Second)
+	if !acquired {
+		return nil, "", 0, errors.New("too many concurrent media downloads")
+	}
+	defer releaseDownload()
 	endpoint := *a.cfg.ComfyUIUpstream
 	// /view preserves the original media bytes and supports HTTP ranges. The
 	// VideoHelperSuite preview route transcodes MP4 to WebM, which breaks the
@@ -1305,6 +1358,78 @@ func (a *App) fetchGenerationOutput(ctx context.Context, output generationOutput
 		contentType = "application/octet-stream"
 	}
 	return body, contentType, response.StatusCode, nil
+}
+
+type generationOutputArchive struct {
+	Body        []byte
+	ContentType string
+	Status      int
+	SizeBytes   int64
+	ContentHash string
+}
+
+func readGenerationOutputArchive(reader io.Reader, archiveLimit, fingerprintLimit int64) ([]byte, int64, string, error) {
+	if archiveLimit < 0 || fingerprintLimit <= 0 || archiveLimit > fingerprintLimit {
+		return nil, 0, "", errors.New("invalid generation output limits")
+	}
+	digest := sha256.New()
+	capture := newLimitedBuffer(int(archiveLimit))
+	sizeBytes, err := io.Copy(io.MultiWriter(digest, &capture), io.LimitReader(reader, fingerprintLimit+1))
+	if err != nil {
+		return nil, 0, "", err
+	}
+	if sizeBytes > fingerprintLimit {
+		return nil, sizeBytes, "", errors.New("generation output exceeds fingerprint limit")
+	}
+	body := capture.data
+	if capture.truncated {
+		body = nil
+	}
+	return body, sizeBytes, hex.EncodeToString(digest.Sum(nil)), nil
+}
+
+func (a *App) fetchGenerationOutputArchive(ctx context.Context, output generationOutput) (generationOutputArchive, error) {
+	releaseDownload, acquired := acquireBoundedSlot(ctx, a.mediaDownloadSlots, 2*time.Second)
+	if !acquired {
+		return generationOutputArchive{}, errors.New("too many concurrent media downloads")
+	}
+	defer releaseDownload()
+	endpoint := *a.cfg.ComfyUIUpstream
+	endpoint.Path = singleJoiningSlash(endpoint.Path, "/view")
+	query := endpoint.Query()
+	query.Set("filename", output.Filename)
+	query.Set("subfolder", output.Subfolder)
+	query.Set("type", output.Type)
+	endpoint.RawQuery = query.Encode()
+	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, endpoint.String(), http.NoBody)
+	if err != nil {
+		return generationOutputArchive{}, err
+	}
+	if a.cfg.ComfyUIUpstreamAuthHeader != "" {
+		request.Header.Set("Authorization", a.cfg.ComfyUIUpstreamAuthHeader)
+	}
+	response, err := (&http.Client{Timeout: 2 * time.Minute, CheckRedirect: rejectUpstreamRedirect}).Do(request)
+	if err != nil {
+		return generationOutputArchive{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return generationOutputArchive{}, fmt.Errorf("ComfyUI returned HTTP %d", response.StatusCode)
+	}
+	body, sizeBytes, contentHash, err := readGenerationOutputArchive(response.Body, maxCapturedMedia, maxGenerationOutputFingerprint)
+	if err != nil {
+		return generationOutputArchive{}, err
+	}
+	contentType := strings.TrimSpace(strings.Split(response.Header.Get("Content-Type"), ";")[0])
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	return generationOutputArchive{
+		Body: body, ContentType: contentType, Status: response.StatusCode,
+		SizeBytes: sizeBytes, ContentHash: contentHash,
+	}, nil
 }
 
 // fetchGenerationInputImage retrieves a previously validated, namespaced upload
@@ -1408,22 +1533,34 @@ func webPImageDimensions(body []byte) (int, int, bool) {
 }
 
 func (a *App) archiveGenerationOutputs(ctx context.Context, userID int64, outputs []generationOutput) {
-	if a.contentCipher == nil || a.store == nil {
+	if a.store == nil {
 		return
 	}
 	for _, output := range outputs {
-		body, contentType, status, err := a.fetchGenerationOutput(ctx, output)
+		archive, err := a.fetchGenerationOutputArchive(ctx, output)
 		if err != nil {
 			log.Printf("archive generation output %s: %v", output.Filename, err)
+			continue
+		}
+		if output.Type == "output" {
+			err = a.store.ScheduleComfyOutputCleanup(ctx, domain.ComfyOutputCleanupTombstone{
+				Filename: output.Filename, Subfolder: output.Subfolder, StorageType: output.Type,
+				SizeBytes: archive.SizeBytes, ContentHash: archive.ContentHash,
+			}, time.Now().Add(generationMediaRetention))
+			if err != nil {
+				log.Printf("schedule generation output cleanup %s: %v", output.Filename, err)
+			}
+		}
+		if a.contentCipher == nil || archive.Body == nil {
 			continue
 		}
 		capture := &proxyContentCapture{
 			userID: userID, service: "comfyui", mediaName: output.Filename,
 			mediaSubfolder: output.Subfolder, mediaStorageType: output.Type,
-			mediaType: output.MediaType, mimeType: contentType, isMedia: true,
-			status: status, response: newLimitedBuffer(maxCapturedMedia),
+			mediaType: output.MediaType, mimeType: archive.ContentType, isMedia: true,
+			status: archive.Status, response: newLimitedBuffer(maxCapturedMedia),
 		}
-		_, _ = capture.response.Write(body)
+		_, _ = capture.response.Write(archive.Body)
 		if err := a.persistComfyMedia(ctx, capture); err != nil {
 			log.Printf("persist generation output %s: %v", output.Filename, err)
 		}
@@ -1444,19 +1581,26 @@ func (a *App) rememberGeneration(promptID string, userID int64) {
 	a.generationJobs[promptID] = &generationJob{UserID: userID, CreatedAt: time.Now(), Outputs: make(map[string]struct{})}
 }
 
-func (a *App) rememberGenerationOutputs(promptID string, outputs []generationOutput) {
+func (a *App) rememberGenerationOutputs(promptID string, outputs []generationOutput) []generationOutput {
 	a.generationMu.Lock()
 	defer a.generationMu.Unlock()
 	job := a.generationJobs[promptID]
 	if job == nil {
-		return
+		return outputs
 	}
 	if job.Outputs == nil {
 		job.Outputs = make(map[string]struct{})
 	}
+	newOutputs := make([]generationOutput, 0, len(outputs))
 	for _, output := range outputs {
-		job.Outputs[output.Filename+"\x00"+output.Subfolder+"\x00"+output.Type] = struct{}{}
+		key := output.Filename + "\x00" + output.Subfolder + "\x00" + output.Type
+		if _, exists := job.Outputs[key]; exists {
+			continue
+		}
+		job.Outputs[key] = struct{}{}
+		newOutputs = append(newOutputs, output)
 	}
+	return newOutputs
 }
 
 // refreshTrackedGenerationStatuses archives completed output even when the
@@ -1574,23 +1718,7 @@ func (a *App) recordGenerationEvent(ctx context.Context, userID int64, promptID 
 	if a.contentCipher == nil || a.store == nil {
 		return
 	}
-	sensitive := isSensitiveGeneration(input)
-	metadataFields := map[string]any{
-		"workflow": definition.ID, "preset": input.PresetID, "model_family": input.ModelFamily,
-		"model": input.ModelName, "width": input.Width, "height": input.Height,
-		"steps": input.Steps, "cfg": input.CFG, "denoise": input.Denoise, "seed": input.Seed,
-		"base_megapixels": input.BaseMegapixels, "lora_strength": input.LoraStrength,
-		"upscale_steps": input.UpscaleSteps, "upscale_denoise": input.UpscaleDenoise,
-		"detail_steps": input.DetailSteps, "detail_denoise": input.DetailDenoise,
-		"input_images":      input.imageCount(),
-		"sensitive_content": sensitive,
-	}
-	if input.AssistantRequested {
-		metadataFields["prompt_assistant"] = map[string]any{
-			"requested": true, "applied": input.AssistantApplied, "template": input.AssistantTemplate,
-			"think": input.AssistantThink, "original_prompt": input.AssistantOriginal, "suggestion": input.AssistantSuggestion,
-		}
-	}
+	metadataFields := generationAuditMetadata(definition, input)
 	metadata, _ := json.Marshal(metadataFields)
 	promptCipher, err := a.contentCipher.Encrypt(input.Positive)
 	if err != nil {
@@ -1607,9 +1735,87 @@ func (a *App) recordGenerationEvent(ctx context.Context, userID int64, promptID 
 		log.Printf("generation metadata encryption: %v", err)
 		return
 	}
-	if _, err := a.store.InsertContentEvent(ctx, domain.ContentEventRecord{UserID: userID, Service: "comfyui", Kind: "comfyui_prompt", ExternalID: promptID, Model: input.ModelName, GenerationState: "queued", PromptCipher: promptCipher, ResponseCipher: negativeCipher, MetadataCipher: metadataCipher, Sensitive: sensitive}); err != nil {
+	if _, err := a.store.InsertContentEvent(ctx, domain.ContentEventRecord{UserID: userID, Service: "comfyui", Kind: "comfyui_prompt", ExternalID: promptID, Model: input.ModelName, GenerationState: "queued", PromptCipher: promptCipher, ResponseCipher: negativeCipher, MetadataCipher: metadataCipher, Sensitive: isSensitiveGeneration(input)}); err != nil {
 		log.Printf("store generation event: %v", err)
 	}
+}
+
+func generationAuditMetadata(definition workflowDefinition, input generationForm) map[string]any {
+	sensitive := isSensitiveGeneration(input)
+	metadata := map[string]any{
+		"workflow": definition.ID, "preset": input.PresetID, "model_family": input.ModelFamily,
+		"model": input.ModelName, "width": input.Width, "height": input.Height,
+		"steps": input.Steps, "cfg": input.CFG, "denoise": input.Denoise, "seed": input.Seed,
+		"sampler": input.Sampler, "scheduler": input.Scheduler,
+		"aspect_ratio": input.AspectRatio, "output_megapixels": input.OutputMegapixels,
+		"base_megapixels": input.BaseMegapixels, "lora_strength": input.LoraStrength,
+		"upscale_steps": input.UpscaleSteps, "upscale_denoise": input.UpscaleDenoise,
+		"detail_steps": input.DetailSteps, "detail_denoise": input.DetailDenoise,
+		"input_images":      input.imageCount(),
+		"sensitive_content": sensitive,
+	}
+	loras := make([]map[string]any, 0, maxGenerationLoraSlots)
+	for index, name := range input.LoraNames {
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		loras = append(loras, map[string]any{
+			"slot": index + 1, "name": name,
+			"model_strength": input.LoraModel[index], "clip_strength": input.LoraClip[index],
+		})
+	}
+	if len(loras) > 0 {
+		metadata["loras"] = loras
+	}
+	switch definition.ID {
+	case "text-to-image-krea2":
+		metadata["krea2_text"] = map[string]any{
+			"base_megapixels": input.BaseMegapixels,
+			"upscale":         map[string]any{"steps": input.UpscaleSteps, "denoise": input.UpscaleDenoise, "auto_denoise": input.UpscaleAutoDenoise, "sampler": input.UpscaleSampler},
+			"detail":          map[string]any{"steps": input.DetailSteps, "denoise": input.DetailDenoise, "cfg": input.DetailCFG, "sampler": input.DetailSampler, "scheduler": input.DetailScheduler},
+			"color_transfer":  map[string]any{"enabled": input.ColorTransfer, "method": input.ColorMethod, "mode": input.ColorMode, "strength": input.ColorStrength},
+		}
+	case "image-to-image-krea2":
+		metadata["krea2_edit"] = map[string]any{
+			"preserve_original_size": input.PreserveOriginalSize, "reference_boost": input.ReferenceBoost, "grounding_pixels": input.GroundingPixels,
+			"upscale":      map[string]any{"factor": input.UpscaleFactor, "steps": input.UpscaleSteps, "denoise": input.UpscaleDenoise, "cfg": input.UpscaleCFG, "sampler": input.UpscaleSampler, "scheduler": input.UpscaleScheduler},
+			"post_denoise": map[string]any{"blur": input.PostDenoiseBlur, "edge": input.PostDenoiseEdge, "radius": input.PostDenoiseRadius, "strength": input.PostDenoiseStrength},
+			"skin":         map[string]any{"preset": input.SkinPreset, "strength": input.SkinStrength, "coolness": input.SkinCoolness, "brightness": input.SkinBrightness, "rosy": input.SkinRosy, "evenness": input.SkinEvenness, "shadow_lift": input.SkinShadowLift, "smooth": input.SkinSmooth, "texture_preserve": input.SkinTexturePreserve, "saturation": input.SkinSaturation, "highlight_protect": input.SkinHighlightProtect, "mask_sensitivity": input.SkinMaskSensitivity, "mask_feather": input.SkinMaskFeather},
+			"adjust":       map[string]any{"hue": input.AdjustHue, "saturation": input.AdjustSaturation, "brightness": input.AdjustBrightness, "contrast": input.AdjustContrast, "sharpness": input.AdjustSharpness},
+			"lut":          map[string]any{"enabled": input.LUTEnabled, "name": input.LUTName, "strength": input.LUTStrength},
+		}
+	case "image-to-image-flux2":
+		metadata["flux2_edit"] = map[string]any{
+			"source_megapixels": input.SourceMegapixels, "preserve_original_size": input.PreserveOriginalSize,
+			"frame":        map[string]any{"custom_size": input.EditUseCustomSize, "aspect": input.EditAspectPreset, "swap": input.EditSwapDimensions, "resize_method": input.EditResizeMethod, "proportion": input.EditProportion, "crop": input.EditCropLocation, "pad_color": input.EditPadColor, "max_longest_side": input.MaxLongestSide},
+			"conditioning": map[string]any{"guidance": input.FluxGuidance, "detailer_steps": input.FluxDetailerSteps, "active_scale": input.FluxActiveScale, "token_whiten": input.FluxTokenWhiten, "norm_equalize": input.FluxNormEqualize},
+			"upscale_mode": input.FluxUpscaleMode,
+			"lut":          map[string]any{"enabled": input.LUTEnabled, "name": input.LUTName, "strength": input.LUTStrength},
+		}
+	case "minimax-h3-video":
+		metadata["minimax_h3"] = map[string]any{
+			"mode": input.VideoMode, "resolution": input.VideoResolution, "quality": input.VideoQuality,
+			"duration_seconds": input.VideoDurationSeconds, "reference_size": input.VideoReferenceSize,
+			"steps": input.VideoSteps, "turbo": input.VideoTurbo, "integrated_turbo": input.VideoIntegratedTurbo, "sampler": input.VideoSampler, "scheduler": input.VideoScheduler,
+			"shift_video": input.VideoShiftVideo, "shift_audio": input.VideoShiftAudio,
+			"sage_attention": input.VideoSageAttention, "clear_vram": input.VideoClearVRAM,
+			"memory_optimization": map[string]any{"enabled": input.VideoMemoryOptimize, "mlp": input.VideoMemoryMLP, "chunk_rows": input.VideoMemoryChunkRows, "precision": input.VideoMemoryPrecision, "qkv_streaming": input.VideoMemoryQKV, "attention_memory": input.VideoMemoryAttention},
+			"aimdo_residency":     map[string]any{"enabled": input.VideoAIMDOEnabled, "residency": input.VideoAIMDOResidency},
+			"sparse_attention":    map[string]any{"enabled": input.VideoSparseAttention, "budget": input.VideoSparseBudget, "early_schedule": input.VideoSparseSchedule, "early_steps": input.VideoSparseEarlyStep, "early_kv": input.VideoSparseEarlyKV, "late_steps": input.VideoSparseLateStep, "late_kv": input.VideoSparseLateKV, "backend": input.VideoSparseBackend},
+			"rife":                map[string]any{"enabled": input.VideoRIFEEnabled, "checkpoint": input.VideoRIFECheckpoint, "multiplier": input.VideoRIFEMultiplier, "fast_mode": input.VideoRIFEFastMode, "ensemble": input.VideoRIFEEnsemble, "dtype": input.VideoRIFEDtype, "compile": input.VideoRIFECompile, "batch_size": input.VideoRIFEBatchSize},
+			"rtx":                 map[string]any{"enabled": input.VideoRTXEnabled, "scale": input.VideoRTXScale, "quality": input.VideoRTXQuality},
+			"color_match":         map[string]any{"enabled": input.VideoColorMatch, "method": input.VideoColorMethod, "strength": input.VideoColorStrength},
+			"sharpen":             map[string]any{"enabled": input.VideoSharpenEnabled, "method": input.VideoSharpenMethod, "strength": input.VideoSharpenStrength, "radius": input.VideoSharpenRadius, "threshold": input.VideoSharpenThreshold, "iterations": input.VideoSharpenIterations},
+			"audio_start":         input.VideoAudioStart, "output_crf": input.VideoOutputCRF,
+		}
+	}
+	if input.AssistantRequested {
+		metadata["prompt_assistant"] = map[string]any{
+			"requested": true, "applied": input.AssistantApplied, "template": input.AssistantTemplate,
+			"think": input.AssistantThink, "original_prompt": input.AssistantOriginal, "suggestion": input.AssistantSuggestion,
+		}
+	}
+	return metadata
 }
 
 func validComfyPromptID(value string) bool {

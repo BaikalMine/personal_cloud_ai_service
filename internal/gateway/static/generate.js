@@ -43,7 +43,16 @@
   const miniMaxVideoQuality = document.getElementById("minimax-video-quality");
   const miniMaxVideoSteps = document.getElementById("minimax-video-steps");
   const miniMaxVideoTurbo = document.getElementById("minimax-video-turbo");
+  const miniMaxVideoTurboControl = document.getElementById("minimax-video-turbo-control");
+  const miniMaxVideoTurboTitle = document.getElementById("minimax-video-turbo-title");
+  const miniMaxVideoTurboDescription = document.getElementById("minimax-video-turbo-description");
   const miniMaxVideoResolutionPreview = document.getElementById("minimax-video-resolution-preview");
+  const miniMaxVideoModelProfile = document.getElementById("minimax-video-model-profile");
+  const miniMaxVideoSampler = document.getElementById("minimax-video-sampler");
+  const miniMaxVideoScheduler = document.getElementById("minimax-video-scheduler");
+  const miniMaxVideoShiftVideo = document.getElementById("minimax-video-shift-video");
+  const miniMaxVideoShiftAudio = document.getElementById("minimax-video-shift-audio");
+  const miniMaxVideoSharpenMethod = document.getElementById("minimax-video-sharpen-method");
   const workflowNote = document.getElementById("generation-workflow-note");
   const positive = document.getElementById("positive-prompt");
   const promptAssistant = document.getElementById("prompt-assistant");
@@ -185,15 +194,50 @@
     const parsed = Number(String(value).replaceAll(",", "."));
     return Number.isFinite(parsed) ? parsed : fallback;
   };
-  const syncMiniMaxVideoProfile = () => {
-    const turbo = Boolean(miniMaxVideoTurbo?.checked);
+  const syncMiniMaxVideoProfile = ({ applyModelDefaults = false } = {}) => {
+    const option = model?.selectedOptions?.[0];
+    const integratedTurbo = option?.dataset.videoIntegratedTurbo === "true";
+    const referenceOnly = option?.dataset.videoReferenceOnly === "true";
+    const frameOption = miniMaxVideoModeSelect?.querySelector('option[value="frames"]');
+    if (frameOption) frameOption.disabled = referenceOnly;
+    if (referenceOnly && miniMaxVideoModeSelect?.value !== "references") {
+      miniMaxVideoModeSelect.value = "references";
+      syncImageSlots();
+      syncMiniMaxAudioReference();
+    }
+    if (applyModelDefaults && option?.value) {
+      if (miniMaxVideoSteps) miniMaxVideoSteps.value = option.dataset.defaultSteps || (integratedTurbo ? "8" : "25");
+      if (miniMaxVideoSampler) miniMaxVideoSampler.value = option.dataset.defaultSampler || "euler";
+      if (miniMaxVideoScheduler) miniMaxVideoScheduler.value = option.dataset.defaultScheduler || "simple";
+      if (miniMaxVideoShiftVideo) miniMaxVideoShiftVideo.value = option.dataset.defaultVideoShift || (integratedTurbo ? "12" : "11");
+      if (miniMaxVideoShiftAudio) miniMaxVideoShiftAudio.value = option.dataset.defaultAudioShift || (integratedTurbo ? "7" : "3");
+      if (miniMaxVideoTurbo) miniMaxVideoTurbo.checked = false;
+    }
+    if (integratedTurbo && miniMaxVideoTurbo) miniMaxVideoTurbo.checked = false;
+    if (miniMaxVideoTurbo) miniMaxVideoTurbo.disabled = integratedTurbo;
+    if (miniMaxVideoTurboControl) miniMaxVideoTurboControl.classList.toggle("is-locked", integratedTurbo);
+    if (miniMaxVideoTurboTitle) miniMaxVideoTurboTitle.textContent = integratedTurbo ? "Turbo встроен в Eros Max" : "Turbo MiniMax H3";
+    if (miniMaxVideoTurboDescription) miniMaxVideoTurboDescription.textContent = integratedTurbo
+      ? "Дополнительная Turbo LoRA не применяется: модель уже содержит её слияние."
+      : "Опциональная официальная LoRA v4: 4–8 шагов для быстрых проб.";
+    if (miniMaxVideoModelProfile) miniMaxVideoModelProfile.textContent = integratedTurbo
+      ? "H3 Eros Max beta4 · только reference-путь · встроенный Turbo · Euler · 6–8 шагов · Sigma 12 / 7."
+      : "MiniMax H3 FL2VA · кадры или референсы · внешний Turbo опционален · 20–25 шагов без Turbo.";
+    const turbo = !integratedTurbo && Boolean(miniMaxVideoTurbo?.checked);
     if (miniMaxVideoSteps) {
-      miniMaxVideoSteps.min = turbo ? "4" : "20";
-      miniMaxVideoSteps.max = turbo ? "8" : "25";
+      miniMaxVideoSteps.min = integratedTurbo ? "6" : turbo ? "4" : "20";
+      miniMaxVideoSteps.max = integratedTurbo ? "8" : turbo ? "8" : "25";
       const current = Number(miniMaxVideoSteps.value);
       if (!Number.isFinite(current) || current < Number(miniMaxVideoSteps.min) || current > Number(miniMaxVideoSteps.max)) {
-        miniMaxVideoSteps.value = turbo ? "6" : "25";
+        miniMaxVideoSteps.value = integratedTurbo ? "8" : turbo ? "6" : "25";
       }
+    }
+    if (miniMaxVideoSampler) {
+      if (integratedTurbo) miniMaxVideoSampler.value = "euler";
+      miniMaxVideoSampler.disabled = integratedTurbo || turbo;
+    }
+    if (miniMaxVideoModeHint && referenceOnly) {
+      miniMaxVideoModeHint.textContent = "Eros Max использует reference-путь даже с одним фото. Можно добавить ещё до трёх референсов.";
     }
     if (!miniMaxVideoResolutionPreview) return;
     const quality = Number(miniMaxVideoQuality?.value);
@@ -207,7 +251,24 @@
     const targetHeight = multiple(primaryImageSize.height * scale);
     miniMaxVideoResolutionPreview.textContent = `${targetWidth} × ${targetHeight} · ${quality}p · пропорции фото`;
   };
-  const roundToMultiple = (value, multiple) => Math.max(256, Math.floor(value / multiple) * multiple);
+
+  const syncMiniMaxSharpenFields = () => {
+    const method = miniMaxVideoSharpenMethod?.value || "rcas";
+    root.querySelectorAll("[data-sharpen-field]").forEach((field) => {
+      const name = field.dataset.sharpenField;
+      field.hidden = !(
+        (name === "radius" && method !== "rcas") ||
+        (name === "threshold" && method === "adaptive_usm") ||
+        (name === "iterations" && method === "deconvolution")
+      );
+    });
+    const strength = form.elements.video_sharpen_strength;
+    if (strength) {
+      strength.max = method === "adaptive_usm" || method === "high_pass" ? "3" : "1";
+      if (numericValue(strength.value) > numericValue(strength.max, 1)) strength.value = strength.max;
+    }
+  };
+  const roundToMultiple = (value, multiple, minimum = 256) => Math.max(minimum, Math.floor(value / multiple) * multiple);
   const pause = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
   const newGenerationRequestID = () => window.crypto?.randomUUID?.() || `generation-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`;
   const persistActiveGeneration = () => {
@@ -334,11 +395,13 @@
     const sourceMegapixelsValue = sourceWidth * sourceHeight / (1024 * 1024);
     const selected = selectedGenerationWorkflow();
     const isKreaEdit = selected?.dataset.family === "krea2" && selected?.dataset.templateId === "image-to-image";
+    const isFluxEdit = selected?.dataset.family === "flux2" && selected?.dataset.templateId === "image-to-image";
+    const minimumDimension = isKreaEdit || isFluxEdit ? 16 : 256;
     const maximumPixels = isKreaEdit ? krea2EditMaxBaseMegapixels * 1024 * 1024 : Infinity;
     const maximumSide = isKreaEdit ? krea2EditMaxLongestSide : 4096;
     const scale = Math.min(1, maximumSide / Math.max(sourceWidth, sourceHeight), Math.sqrt(maximumPixels / (sourceWidth * sourceHeight)));
-    const targetWidth = roundToMultiple(sourceWidth * scale, 8);
-    const targetHeight = roundToMultiple(sourceHeight * scale, 8);
+    const targetWidth = roundToMultiple(sourceWidth * scale, 8, minimumDimension);
+    const targetHeight = roundToMultiple(sourceHeight * scale, 8, minimumDimension);
     const capped = scale < 1 || targetWidth !== sourceWidth || targetHeight !== sourceHeight;
     if (isKreaEdit) {
       originalResolution.textContent = `Исходник: ${sourceWidth} × ${sourceHeight} · ${sourceMegapixelsValue.toFixed(2).replace(".", ",")} Мп. Krea2 сохранит пропорции и обработает ${targetWidth} × ${targetHeight}: предел итогового кадра 4,7 Мп.`;
@@ -353,11 +416,13 @@
     if (!preserveOriginalSize?.checked || !primaryImageSize) return;
     const selected = selectedGenerationWorkflow();
     const isKreaEdit = selected?.dataset.family === "krea2" && selected?.dataset.templateId === "image-to-image";
+    const isFluxEdit = selected?.dataset.family === "flux2" && selected?.dataset.templateId === "image-to-image";
+    const minimumDimension = isKreaEdit || isFluxEdit ? 16 : 256;
     const maximumPixels = isKreaEdit ? krea2EditMaxBaseMegapixels * 1024 * 1024 : Infinity;
     const maximumSide = isKreaEdit ? krea2EditMaxLongestSide : 4096;
     const scale = Math.min(1, maximumSide / Math.max(primaryImageSize.width, primaryImageSize.height), Math.sqrt(maximumPixels / (primaryImageSize.width * primaryImageSize.height)));
-    const targetWidth = roundToMultiple(primaryImageSize.width * scale, 8);
-    const targetHeight = roundToMultiple(primaryImageSize.height * scale, 8);
+    const targetWidth = roundToMultiple(primaryImageSize.width * scale, 8, minimumDimension);
+    const targetHeight = roundToMultiple(primaryImageSize.height * scale, 8, minimumDimension);
     width.value = String(targetWidth);
     height.value = String(targetHeight);
     aspect.value = "custom";
@@ -366,6 +431,7 @@
     if (maxSide) maxSide.value = isKreaEdit ? String(krea2EditMaxLongestSide) : "4096";
     updateOriginalResolution();
     updateResolutionPreview();
+    syncGenerationSummary();
   };
 
   const syncSelectedImageSummary = () => {
@@ -609,6 +675,8 @@
   fieldHelps.forEach((help) => {
     help.setAttribute("role", "button");
     help.setAttribute("aria-expanded", "false");
+    const tooltip = help.dataset.tooltip?.trim();
+    if (tooltip) help.setAttribute("aria-label", `Подсказка: ${tooltip}`);
     help.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -845,6 +913,7 @@
     generationWorkflowID.value = button.dataset.presetId;
     updateQuickModelOptions(button);
     applyQuality();
+    if (button.dataset.family === "minimax_h3") syncMiniMaxVideoProfile({ applyModelDefaults: true });
     syncImageSlots();
     updateWorkflowNext();
   };
@@ -874,6 +943,7 @@
     syncWorkflowFields();
     calculateResolution();
     syncMiniMaxVideoProfile();
+    syncMiniMaxSharpenFields();
     if (openStep) {
       const needsImage = selectedChoice()?.dataset.requiresImage === "true" || selectedGenerationWorkflow()?.dataset.family === "minimax_h3";
       showStep(needsImage && !uploadedImages.get(1) ? 2 : 3);
@@ -886,11 +956,17 @@
     const isEdit = templateID.value === "image-to-image";
     const values = {};
     if (family === "minimax_h3") {
+      const option = model?.selectedOptions?.[0];
+      const integratedTurbo = option?.dataset.videoIntegratedTurbo === "true";
+      const externalTurbo = !integratedTurbo && Boolean(miniMaxVideoTurbo?.checked);
+      const draftSteps = integratedTurbo ? "6" : externalTurbo ? "4" : "20";
+      const balancedSteps = integratedTurbo ? "8" : externalTurbo ? "6" : "25";
+      const maximumSteps = integratedTurbo ? "8" : externalTurbo ? "8" : "25";
       Object.assign(values, profile === "draft"
-        ? { video_quality: "480", video_duration_seconds: "5", video_steps: "20" }
+        ? { video_quality: "480", video_duration_seconds: "5", video_steps: draftSteps }
         : profile === "maximum"
-          ? { video_quality: "1080", video_duration_seconds: "10", video_steps: "25", video_reference_size: "max" }
-          : { video_quality: "720", video_duration_seconds: "5", video_steps: "25", video_reference_size: "match" });
+          ? { video_quality: "1080", video_duration_seconds: "10", video_steps: maximumSteps, video_reference_size: "max" }
+          : { video_quality: "720", video_duration_seconds: "5", video_steps: balancedSteps, video_reference_size: "match" });
     } else if (family === "flux2") {
       Object.assign(values, profile === "draft"
         ? { source_megapixels: "0.75", flux_detailer_steps: "16", flux_guidance: "3.5", flux_upscale_mode: "none" }
@@ -936,6 +1012,8 @@
       if (mp) parts.push(`${mp} Мп`);
     } else if (family === "minimax_h3") {
       parts.push(`${miniMaxVideoQuality?.value || "720"}p`, `${form.elements.video_duration_seconds?.value || "5"} сек.`);
+      if (selectedModel.dataset.videoIntegratedTurbo === "true") parts.push("Turbo встроен");
+      else if (miniMaxVideoTurbo?.checked) parts.push("Turbo");
     } else if (isFinite(Number(width?.value)) && isFinite(Number(height?.value))) {
       parts.push(`${width.value} × ${height.value}`);
     }
@@ -1049,6 +1127,9 @@
     const isKreaEdit = isKrea && isEdit;
     const isFluxEdit = family === "flux2" && isEdit;
     const isMiniMax = family === "minimax_h3";
+    const minimumDimension = isEdit && preserveOriginalSize?.checked ? 16 : 256;
+    if (width) width.min = String(minimumDimension);
+    if (height) height.min = String(minimumDimension);
     if (generationOpenExact) {
       generationOpenExact.textContent = isMiniMax ? "Параметры видео" : "Точные настройки";
       generationOpenExact.setAttribute("aria-label", isMiniMax ? "Перейти к параметрам видео MiniMax H3" : "Открыть точные настройки workflow");
@@ -1085,6 +1166,19 @@
     setFieldState(".flux-edit-settings", isFluxEdit);
     setFieldState(".krea-edit-settings", isKreaEdit);
     setFieldState(".lut-workflow-field", isFluxEdit || isKreaEdit);
+    if (upscaleFactor && isKreaEdit) {
+      if (preserveOriginalSize?.checked) {
+        if (!upscaleFactor.dataset.restoreValue) upscaleFactor.dataset.restoreValue = upscaleFactor.value || "1.5";
+        upscaleFactor.value = "1";
+        upscaleFactor.disabled = true;
+      } else {
+        upscaleFactor.disabled = false;
+        if (upscaleFactor.value === "1" && upscaleFactor.dataset.restoreValue) {
+          upscaleFactor.value = upscaleFactor.dataset.restoreValue;
+          delete upscaleFactor.dataset.restoreValue;
+        }
+      }
+    }
     root.querySelectorAll("[data-workflow-guide]").forEach((guide) => {
       const type = guide.dataset.workflowGuide;
       guide.hidden = !(
@@ -1098,7 +1192,10 @@
     setFieldState(".standard-main-settings", !isEdit && !isMiniMax);
     setFieldState(".minimax-video-settings", isMiniMax);
     setFieldState(".minimax-reference-field", isMiniMax && miniMaxVideoModeSelect?.value === "references");
-    if (isMiniMax) syncMiniMaxVideoProfile();
+    if (isMiniMax) {
+      syncMiniMaxVideoProfile();
+      syncMiniMaxSharpenFields();
+    }
     if (isFluxEdit) syncAdaptiveLoraSlots("flux");
     if (isKreaText) syncAdaptiveLoraSlots("krea");
     if (isMiniMax) syncAdaptiveLoraSlots("minimax");
@@ -1169,7 +1266,13 @@
     calculateResolution();
   };
 
-  model?.addEventListener("change", applyQuality);
+  model?.addEventListener("change", () => {
+    applyQuality();
+    if (model.selectedOptions?.[0]?.dataset.family === "minimax_h3") {
+      syncMiniMaxVideoProfile({ applyModelDefaults: true });
+      syncWorkflowFields();
+    }
+  });
   quality?.addEventListener("change", applyQuality);
   [aspect, outputMegapixels, dimensionMultiple, maxSide].forEach((input) => input?.addEventListener("change", calculateResolution));
   outputMegapixels?.addEventListener("input", calculateResolution);
@@ -1189,7 +1292,9 @@
     syncWorkflowFields();
   });
   [width, height].forEach((input) => input?.addEventListener("change", () => {
-    const value = clamp(Number(input.value) || 1024, 256, 4096);
+    const selected = selectedGenerationWorkflow();
+    const minimumDimension = selected?.dataset.templateId === "image-to-image" && preserveOriginalSize?.checked ? 16 : 256;
+    const value = clamp(Number(input.value) || 1024, minimumDimension, 4096);
     input.value = String(Math.round(value / 8) * 8);
     aspect.value = "custom";
     outputMegapixels.value = (Number(width.value) * Number(height.value) / (1024 * 1024)).toFixed(2);
@@ -1309,8 +1414,12 @@
     button.addEventListener("click", () => showStep(Math.max(1, currentStep - 1)));
   });
   miniMaxVideoModeSelect?.addEventListener("change", () => {
+    const referenceOnly = model?.selectedOptions?.[0]?.dataset.videoReferenceOnly === "true";
+    if (referenceOnly && miniMaxVideoModeSelect.value !== "references") miniMaxVideoModeSelect.value = "references";
     if (miniMaxVideoModeHint) miniMaxVideoModeHint.textContent = miniMaxVideoModeSelect.value === "references"
-      ? "Первое фото обязательно. Можно добавить ещё до трёх референсов: лица, стиль, предметы или окружение."
+      ? referenceOnly
+        ? "Eros Max использует reference-путь даже с одним фото. Можно добавить ещё до трёх референсов."
+        : "Первое фото обязательно. Можно добавить ещё до трёх референсов: лица, стиль, предметы или окружение."
       : "Первый кадр обязателен. Второе фото можно добавить как последний кадр ролика.";
     syncImageSlots();
     syncMiniMaxAudioReference();
@@ -1343,8 +1452,15 @@
     clearMiniMaxAudio();
     updateWorkflowNext();
   });
-  miniMaxVideoQuality?.addEventListener("change", syncMiniMaxVideoProfile);
-  miniMaxVideoTurbo?.addEventListener("change", syncMiniMaxVideoProfile);
+  miniMaxVideoQuality?.addEventListener("change", () => {
+    syncMiniMaxVideoProfile();
+    syncGenerationSummary();
+  });
+  miniMaxVideoTurbo?.addEventListener("change", () => {
+    syncMiniMaxVideoProfile();
+    syncGenerationSummary();
+  });
+  miniMaxVideoSharpenMethod?.addEventListener("change", syncMiniMaxSharpenFields);
 
   const handleImageSelection = (item) => {
       const file = item.input?.files?.[0] || null;
@@ -2262,6 +2378,7 @@
     renderOutputs([{ filename: "AI-Gateway-Krea2_00002_.png", media_type: "image", url: root.dataset.previewOutput }]);
   }
   calculateResolution();
+  syncMiniMaxSharpenFields();
   syncPromptAssistant();
   refreshQueueOverview();
   refreshRecipes().catch((error) => setRecipeState(error.message || "Не удалось загрузить наборы", "error"));

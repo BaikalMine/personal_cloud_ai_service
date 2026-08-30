@@ -110,7 +110,7 @@ func assertComfyMediaAccess(t *testing.T, app *App, user *User, target string, w
 func resetGatewayIntegrationDatabase(t *testing.T, db *sql.DB) {
 	t.Helper()
 	if _, err := db.Exec(`
-		TRUNCATE comfy_userdata, comfy_settings, comfy_output_ownership, content_media, content_events,
+		TRUNCATE comfy_output_cleanup_tombstones, comfy_input_assets, comfy_userdata, comfy_settings, comfy_output_ownership, content_media, content_events,
 			websocket_sessions, proxy_requests, audit_log, invite_uses, invites, sessions, users RESTART IDENTITY CASCADE
 	`); err != nil {
 		t.Fatal(err)

@@ -119,7 +119,7 @@ func (c *ControllerImpl) Install(_ context.Context, request updates.Request) (up
 	if components[updates.ComponentOpenWebUI] {
 		if err := c.installOpenWebUI(ctx); err != nil {
 			status, _ := c.inspect(context.Background(), components)
-			return status, fmt.Errorf("Open WebUI update: %w", err)
+			return status, fmt.Errorf("open WebUI update: %w", err)
 		}
 	}
 	return c.inspect(context.Background(), components)

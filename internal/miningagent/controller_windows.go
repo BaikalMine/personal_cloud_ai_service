@@ -34,35 +34,35 @@ const (
 )
 
 type windowsController struct {
-	rootDir   string
-	outputLog string
-	stateFile string
+	rootDir       string
+	outputLog     string
+	stateFile     string
+	archivePolicy archiveSourcePolicy
 
 	mu                 sync.Mutex
+	updateMu           sync.Mutex
 	managedPID         int
+	managedLauncherSHA string
 	managedProcessName string
 	managedPIDs        []int
 	scriptPath         string
 	startedAt          time.Time
 }
 
-type managedMinerState struct {
-	ProcessName string    `json:"process_name"`
-	PIDs        []int     `json:"pids"`
-	LauncherPID int       `json:"launcher_pid,omitempty"`
-	ScriptPath  string    `json:"script_path"`
-	StartedAt   time.Time `json:"started_at"`
-}
-
-func NewController(rootDir, outputLog string) (Controller, error) {
+func NewController(rootDir, outputLog string, archivePrefixes ...string) (Controller, error) {
 	root, err := canonicalDirectory(rootDir)
 	if err != nil {
 		return nil, fmt.Errorf("mining root: %w", err)
 	}
+	policy, err := newArchiveSourcePolicy(archivePrefixes)
+	if err != nil {
+		return nil, fmt.Errorf("miner archive policy: %w", err)
+	}
 	controller := &windowsController{
-		rootDir:   root,
-		outputLog: outputLog,
-		stateFile: filepath.Join(filepath.Dir(outputLog), "managed-miner.json"),
+		rootDir:       root,
+		outputLog:     outputLog,
+		stateFile:     filepath.Join(filepath.Dir(outputLog), "managed-miner.json"),
+		archivePolicy: policy,
 	}
 	controller.restoreManagedState()
 	return controller, nil
@@ -124,7 +124,9 @@ func (c *windowsController) startLocked(ctx context.Context, request mining.Requ
 	}
 	if c.managedPID > 0 {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = runTaskkill(cleanupCtx, "/PID", strconv.Itoa(c.managedPID))
+		if matches, _ := c.managedLauncherMatches(cleanupCtx, c.managedPID, c.managedLauncherSHA); matches {
+			_ = runTaskkill(cleanupCtx, "/PID", strconv.Itoa(c.managedPID))
+		}
 		cancel()
 		c.resetManagedLocked()
 	}
@@ -135,7 +137,7 @@ func (c *windowsController) startLocked(ctx context.Context, request mining.Requ
 	if err := c.prepareOutputLog(); err != nil {
 		return state, err
 	}
-	command, err := commandForScript(scriptPath, c.outputLog)
+	command, launcherSHA, err := commandForScript(scriptPath, c.outputLog)
 	if err != nil {
 		return state, err
 	}
@@ -148,6 +150,7 @@ func (c *windowsController) startLocked(ctx context.Context, request mining.Requ
 	}
 	managedPID := command.Process.Pid
 	c.managedPID = managedPID
+	c.managedLauncherSHA = launcherSHA
 	c.scriptPath = scriptPath
 	c.startedAt = time.Now()
 	go func() {
@@ -193,46 +196,51 @@ func (c *windowsController) stopLocked(ctx context.Context, request mining.Reque
 	if err != nil {
 		return state, err
 	}
-	managedPIDs := c.managedPIDsForLocked(request.ProcessName, state.PIDs)
-	if len(managedPIDs) == 0 && state.Running {
-		// Stop is an explicit operator action for a stored Gateway profile. Capture
-		// only the matching current PIDs, never all processes with the same image name.
-		c.setManagedLocked(request.ProcessName, state.PIDs, scriptPath, time.Now())
-		managedPIDs = append([]int(nil), state.PIDs...)
+	candidates := state.PIDs
+	if strings.EqualFold(c.managedProcessName, request.ProcessName) && len(c.managedPIDs) > 0 {
+		candidates = intersectProcessIDs(c.managedPIDs, state.PIDs)
+	}
+	managedPIDs, consolePIDs, err := c.verifiedMinerProcessTree(ctx, candidates, request.ProcessName, scriptPath)
+	if err != nil {
+		return state, fmt.Errorf("проверка процесса майнера: %w", err)
 	}
 	if len(managedPIDs) == 0 {
+		if state.Running {
+			return state, errors.New("найден процесс с таким именем, но агент не смог подтвердить, что он запущен выбранным профилем")
+		}
 		state.Message = "Майнинг уже остановлен."
 		return state, nil
 	}
+	c.setManagedLocked(request.ProcessName, managedPIDs, scriptPath, c.startedAt)
 	launcherPID := c.managedPID
-	stoppedTree := false
+	launcherSHA := c.managedLauncherSHA
 	if launcherPID > 0 {
-		if err := runTaskkill(ctx, "/PID", strconv.Itoa(launcherPID)); err == nil {
-			stoppedTree = true
+		if matches, _ := c.managedLauncherMatches(ctx, launcherPID, launcherSHA); matches {
+			_ = runTaskkill(ctx, "/PID", strconv.Itoa(launcherPID))
 		}
 	}
-	if !stoppedTree {
-		for _, pid := range c.minerConsolePIDs(ctx, managedPIDs, scriptPath) {
-			if err := runTaskkill(ctx, "/PID", strconv.Itoa(pid)); err == nil {
-				stoppedTree = true
-			}
+	for _, pid := range consolePIDs {
+		if pid != launcherPID {
+			_ = runTaskkill(ctx, "/PID", strconv.Itoa(pid))
 		}
 	}
-	if !stoppedTree {
-		for _, pid := range managedPIDs {
-			if err := runTaskkill(ctx, "/PID", strconv.Itoa(pid)); err != nil {
-				return state, fmt.Errorf("stop managed miner: %w", err)
-			}
-		}
+	for _, pid := range managedPIDs {
+		_ = runTaskkill(ctx, "/PID", strconv.Itoa(pid))
 	}
-	c.resetManagedLocked()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		state, err = c.stateLocked(ctx, request.ProcessName)
-		if err != nil {
-			return state, err
+		runningPIDs, listErr := processIDs(ctx, request.ProcessName)
+		if listErr != nil {
+			return state, listErr
 		}
-		if !state.Running {
+		remaining, _, verifyErr := c.verifiedMinerProcessTree(ctx, runningPIDs, request.ProcessName, scriptPath)
+		if verifyErr != nil {
+			return state, verifyErr
+		}
+		if len(remaining) == 0 {
+			c.resetManagedLocked()
+			state.Running = false
+			state.PIDs = nil
 			state.Message = "Майнинг остановлен."
 			return state, nil
 		}
@@ -277,7 +285,7 @@ func (c *windowsController) allowedScript(rawPath string) (string, error) {
 	return resolved, nil
 }
 
-func commandForScript(path, outputLog string) (*exec.Cmd, error) {
+func commandForScript(path, outputLog string) (*exec.Cmd, string, error) {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".bat", ".cmd", ".ps1", ".exe":
 		invocation := fmt.Sprintf(`& '%s'`, powerShellQuote(path))
@@ -291,9 +299,9 @@ func commandForScript(path, outputLog string) (*exec.Cmd, error) {
 		innerEncoded := encodePowerShell(innerScript)
 		return exec.Command(
 			"powershell.exe", "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", innerEncoded,
-		), nil
+		), encodedPowerShellPayloadDigest(innerEncoded), nil
 	default:
-		return nil, errors.New("неподдерживаемый тип скрипта")
+		return nil, "", errors.New("неподдерживаемый тип скрипта")
 	}
 }
 
@@ -376,14 +384,16 @@ func processIDs(ctx context.Context, processName string) ([]int, error) {
 }
 
 type windowsProcess struct {
-	PID         int    `json:"ProcessId"`
-	ParentPID   int    `json:"ParentProcessId"`
-	Name        string `json:"Name"`
-	CommandLine string `json:"CommandLine"`
+	PID            int    `json:"ProcessId"`
+	ParentPID      int    `json:"ParentProcessId"`
+	Name           string `json:"Name"`
+	CommandLine    string `json:"CommandLine"`
+	ExecutablePath string `json:"ExecutablePath"`
+	CreationUnix   int64  `json:"CreationUnix"`
 }
 
 func windowsProcesses(ctx context.Context) ([]windowsProcess, error) {
-	command := exec.CommandContext(ctx, "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", `@(Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine) | ConvertTo-Json -Compress`)
+	command := exec.CommandContext(ctx, "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", `@(Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine,ExecutablePath,@{Name='CreationUnix';Expression={if ($_.CreationDate) { ([DateTimeOffset]$_.CreationDate).ToUnixTimeSeconds() } else { 0 }}}) | ConvertTo-Json -Compress`)
 	command.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNoWindow, HideWindow: true}
 	output, err := command.Output()
 	if err != nil {
@@ -399,10 +409,10 @@ func windowsProcesses(ctx context.Context) ([]windowsProcess, error) {
 // minerConsolePIDs finds only a shell that explicitly references the approved
 // mining script. It is used for a miner that was started manually before the
 // agent began tracking its own launcher PID.
-func (c *windowsController) minerConsolePIDs(ctx context.Context, minerPIDs []int, scriptPath string) []int {
+func (c *windowsController) verifiedMinerProcessTree(ctx context.Context, minerPIDs []int, processName, scriptPath string) ([]int, []int, error) {
 	processes, err := windowsProcesses(ctx)
 	if err != nil {
-		return nil
+		return nil, nil, err
 	}
 	byPID := make(map[int]windowsProcess, len(processes))
 	for _, process := range processes {
@@ -411,9 +421,24 @@ func (c *windowsController) minerConsolePIDs(ctx context.Context, minerPIDs []in
 	scriptPath = strings.ToLower(scriptPath)
 	scriptName := strings.ToLower(filepath.Base(scriptPath))
 	rootDir := strings.ToLower(c.rootDir)
-	candidates := make(map[int]struct{})
+	scriptDir := filepath.Dir(scriptPath)
+	managedState := managedMinerState{
+		ProcessName: c.managedProcessName,
+		PIDs:        c.managedPIDs,
+		ScriptPath:  c.scriptPath,
+		StartedAt:   c.startedAt,
+	}
+	verified := make(map[int]struct{})
+	consoles := make(map[int]struct{})
 	for _, minerPID := range minerPIDs {
 		current, exists := byPID[minerPID]
+		if !exists || !strings.EqualFold(current.Name, processName) {
+			continue
+		}
+		durableMatch := managedProcessStateMatches(current.PID, current.Name, current.CreationUnix, processName, scriptPath, managedState)
+		if durableMatch && current.ExecutablePath != "" && pathWithinDirectoryFold(scriptDir, current.ExecutablePath) {
+			verified[minerPID] = struct{}{}
+		}
 		for hops := 0; exists && hops < 8 && current.ParentPID > 0; hops++ {
 			parent, found := byPID[current.ParentPID]
 			if !found {
@@ -424,15 +449,62 @@ func (c *windowsController) minerConsolePIDs(ctx context.Context, minerPIDs []in
 			isShell := name == "cmd.exe" || name == "powershell.exe" || name == "pwsh.exe"
 			referencesScript := strings.Contains(commandLine, scriptPath) || (strings.Contains(commandLine, rootDir) && strings.Contains(commandLine, scriptName))
 			if isShell && referencesScript {
-				candidates[parent.PID] = struct{}{}
+				verified[minerPID] = struct{}{}
+				consoles[parent.PID] = struct{}{}
+				break
+			}
+			if parent.PID == c.managedPID && strings.EqualFold(encodedPowerShellCommandDigest(parent.CommandLine), c.managedLauncherSHA) {
+				verified[minerPID] = struct{}{}
+				consoles[parent.PID] = struct{}{}
 				break
 			}
 			current, exists = parent, true
 		}
 	}
-	result := make([]int, 0, len(candidates))
-	for pid := range candidates {
-		result = append(result, pid)
+	verifiedPIDs := make([]int, 0, len(verified))
+	for pid := range verified {
+		verifiedPIDs = append(verifiedPIDs, pid)
+	}
+	consolePIDs := make([]int, 0, len(consoles))
+	for pid := range consoles {
+		consolePIDs = append(consolePIDs, pid)
+	}
+	return verifiedPIDs, consolePIDs, nil
+}
+
+func (c *windowsController) managedLauncherMatches(ctx context.Context, pid int, digest string) (bool, error) {
+	if pid <= 0 || digest == "" {
+		return false, nil
+	}
+	processes, err := windowsProcesses(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, process := range processes {
+		if process.PID != pid {
+			continue
+		}
+		name := strings.ToLower(process.Name)
+		return (name == "powershell.exe" || name == "pwsh.exe") && strings.EqualFold(encodedPowerShellCommandDigest(process.CommandLine), digest), nil
+	}
+	return false, nil
+}
+
+func pathWithinDirectoryFold(root, target string) bool {
+	relative, err := filepath.Rel(strings.ToLower(filepath.Clean(root)), strings.ToLower(filepath.Clean(target)))
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative)
+}
+
+func intersectProcessIDs(left, right []int) []int {
+	running := make(map[int]struct{}, len(right))
+	for _, pid := range right {
+		running[pid] = struct{}{}
+	}
+	result := make([]int, 0, len(left))
+	for _, pid := range left {
+		if _, ok := running[pid]; ok {
+			result = append(result, pid)
+		}
 	}
 	return result
 }
@@ -470,6 +542,7 @@ func (c *windowsController) prepareOutputLog() error {
 
 func (c *windowsController) resetManagedLocked() {
 	c.managedPID = 0
+	c.managedLauncherSHA = ""
 	c.managedProcessName = ""
 	c.managedPIDs = nil
 	c.scriptPath = ""
@@ -501,6 +574,7 @@ func (c *windowsController) setManagedLocked(processName string, pids []int, scr
 		ProcessName: processName,
 		PIDs:        unique,
 		LauncherPID: c.managedPID,
+		LauncherSHA: c.managedLauncherSHA,
 		ScriptPath:  scriptPath,
 		StartedAt:   startedAt,
 	})
@@ -527,26 +601,13 @@ func (c *windowsController) restoreManagedState() {
 		_ = os.Remove(c.stateFile)
 		return
 	}
-	c.managedPID = state.LauncherPID
-	c.setManagedLocked(state.ProcessName, state.PIDs, state.ScriptPath, state.StartedAt)
-}
-
-func (c *windowsController) managedPIDsForLocked(processName string, runningPIDs []int) []int {
-	if !strings.EqualFold(c.managedProcessName, processName) || len(c.managedPIDs) == 0 {
-		return nil
-	}
-	running := make(map[int]struct{}, len(runningPIDs))
-	for _, pid := range runningPIDs {
-		running[pid] = struct{}{}
-	}
-	matched := make([]int, 0, len(c.managedPIDs))
-	for _, pid := range c.managedPIDs {
-		if _, ok := running[pid]; ok {
-			matched = append(matched, pid)
+	if len(state.LauncherSHA) == sha256.Size*2 {
+		probeCtx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		if matches, _ := c.managedLauncherMatches(probeCtx, state.LauncherPID, state.LauncherSHA); matches {
+			c.managedPID = state.LauncherPID
+			c.managedLauncherSHA = state.LauncherSHA
 		}
+		cancel()
 	}
-	if len(matched) == 0 {
-		c.resetManagedLocked()
-	}
-	return matched
+	c.setManagedLocked(state.ProcessName, state.PIDs, state.ScriptPath, state.StartedAt)
 }

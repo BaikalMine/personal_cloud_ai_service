@@ -12,7 +12,10 @@ import (
 	"ai-access-gateway/internal/promptassistant"
 )
 
-const maxPromptAssistantInput = 4000
+const (
+	maxPromptAssistantInput          = 4000
+	maxPromptAssistantReferenceBytes = 64 << 20
+)
 
 func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -41,6 +44,10 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 		writeGenerationError(w, http.StatusBadRequest, "неизвестный режим генерации")
 		return
 	}
+	if user == nil || !user.CanUseQuickGenerationType(promptAssistantTemplateID(mode)) {
+		writeGenerationError(w, http.StatusForbidden, "этот тип быстрой генерации недоступен")
+		return
+	}
 	profile := promptassistant.Profile(strings.TrimSpace(r.Form.Get("assistant_template")))
 	if profile == "" {
 		profile = promptassistant.ProfileWorkflowDefault
@@ -49,6 +56,16 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 		writeGenerationError(w, http.StatusBadRequest, "неизвестный шаблон промт-ассистента")
 		return
 	}
+	if a.promptAssistant == nil || !a.promptAssistant.Configured() {
+		writeGenerationError(w, http.StatusServiceUnavailable, "локальный промт-ассистент не настроен")
+		return
+	}
+	releaseAssistant, acquired := acquireBoundedSlot(r.Context(), a.promptAssistantSlots, time.Second)
+	if !acquired {
+		writeGenerationError(w, http.StatusTooManyRequests, "промт-ассистент уже обрабатывает другой запрос")
+		return
+	}
+	defer releaseAssistant()
 	references, err := a.promptAssistantImageReferences(r.Context(), user.ID, r, mode)
 	if err != nil {
 		writeGenerationError(w, http.StatusBadRequest, err.Error())
@@ -60,10 +77,6 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	think := thinkValue == "true"
-	if a.promptAssistant == nil || !a.promptAssistant.Configured() {
-		writeGenerationError(w, http.StatusServiceUnavailable, "локальный промт-ассистент не настроен")
-		return
-	}
 	miningLease, miningWarning, err := a.pauseMiningForQuickGeneration(r.Context(), user)
 	if err != nil {
 		writeGenerationError(w, http.StatusServiceUnavailable, "не удалось освободить ресурсы для приоритетной работы ассистента: "+err.Error())
@@ -113,6 +126,19 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+func promptAssistantTemplateID(mode promptassistant.Mode) string {
+	switch mode {
+	case promptassistant.ModeTextToImage:
+		return "text-to-image"
+	case promptassistant.ModeImageToImage:
+		return "image-to-image"
+	case promptassistant.ModeTextToVideo:
+		return "minimax-h3-video"
+	default:
+		return ""
+	}
+}
+
 func promptAssistantVideoContext(r *http.Request, mode promptassistant.Mode) (promptassistant.VideoContext, error) {
 	if mode != promptassistant.ModeTextToVideo {
 		return promptassistant.VideoContext{}, fmt.Errorf("шаблон MiniMax H3 доступен только для видео")
@@ -159,6 +185,7 @@ func (a *App) promptAssistantImageReferences(ctx context.Context, userID int64, 
 		return nil, nil
 	}
 	references := make([]promptassistant.ImageReference, 0, 4)
+	var totalBytes int
 	for number := 1; number <= 4; number++ {
 		role, err := promptAssistantImageRole(r, number)
 		if err != nil {
@@ -178,6 +205,10 @@ func (a *App) promptAssistantImageReferences(ctx context.Context, userID int64, 
 		image, mimeType, err := a.fetchGenerationInputImage(ctx, filename)
 		if err != nil {
 			return nil, fmt.Errorf("не удалось прочитать изображение %d для ассистента", number)
+		}
+		totalBytes += len(image)
+		if totalBytes > maxPromptAssistantReferenceBytes {
+			return nil, fmt.Errorf("общий размер изображений для ассистента превышает 64 МБ")
 		}
 		references = append(references, promptassistant.ImageReference{Number: number, Role: role, MIMEType: mimeType, Image: image})
 	}

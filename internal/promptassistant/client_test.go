@@ -154,7 +154,13 @@ func TestEnhanceVideoUsesMiniMaxContextForReferenceAudio(t *testing.T) {
 			t.Fatal(err)
 		}
 		system := body.Messages[0].Content
-		if !strings.Contains(system, "Ref2VA with 3 declared image reference") || !strings.Contains(system, "<Audio 1> reference is attached") || body.Options.NumPredict != miniMaxNumPredict || len(body.Messages[1].Images) != 2 || body.Messages[1].Images[0] != "aW1hZ2UtMQ==" || body.Messages[1].Images[1] != "aW1hZ2UtMg==" {
+		if !strings.Contains(system, "Ref2VA with 3 declared image reference") ||
+			!strings.Contains(system, "<Audio 1> reference is attached") ||
+			!strings.Contains(system, "<Picture 1> (image 1): the base scene") ||
+			!strings.Contains(system, "<Picture 2> (image 2): the person or character's identity") ||
+			!strings.Contains(system, "at least three concrete visible attributes") ||
+			!strings.Contains(system, "define a human as <Subject 1>") ||
+			body.Options.NumPredict != miniMaxNumPredict || len(body.Messages[1].Images) != 2 || body.Messages[1].Images[0] != "aW1hZ2UtMQ==" || body.Messages[1].Images[1] != "aW1hZ2UtMg==" {
 			t.Fatalf("wrong MiniMax context: %#v", body)
 		}
 		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"summary: a concise video."}}`))

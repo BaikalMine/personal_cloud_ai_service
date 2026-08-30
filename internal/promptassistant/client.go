@@ -104,10 +104,14 @@ func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt
 	target.Path = joinPath(target.Path, "/api/chat")
 	target.RawQuery = ""
 	target.Fragment = ""
+	systemPrompt := SystemPromptWithReferences(mode, profile, references)
+	if mode == ModeTextToVideo && profile == ProfileMiniMaxH3 {
+		systemPrompt = SystemPromptWithVideoContextAndReferences(mode, profile, references, video)
+	}
 	payload := chatRequest{
 		Model: c.model,
 		Messages: []Message{
-			{Role: "system", Content: SystemPromptWithVideoContext(mode, profile, video)},
+			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: prompt},
 		},
 		Stream:    false,
@@ -127,9 +131,6 @@ func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt
 			return "", fmt.Errorf("%w: формат изображения %d", ErrUnsupportedImage, reference.Number)
 		}
 		payload.Messages[1].Images = append(payload.Messages[1].Images, base64.StdEncoding.EncodeToString(reference.Image))
-	}
-	if mode != ModeTextToVideo || profile != ProfileMiniMaxH3 {
-		payload.Messages[0].Content = SystemPromptWithReferences(mode, profile, references)
 	}
 	payload.Options.Temperature = 0.35
 	payload.Options.TopP = 0.9

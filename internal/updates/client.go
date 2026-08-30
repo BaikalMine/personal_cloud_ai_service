@@ -16,8 +16,9 @@ import (
 const maxResponseBytes = 1 << 20
 
 const (
-	requestTimeout = 8 * time.Second
-	installTimeout = 25 * time.Minute
+	requestTimeout        = 8 * time.Second
+	cleanupRequestTimeout = 3 * time.Minute
+	installTimeout        = 25 * time.Minute
 )
 
 var ErrUnavailable = errors.New("update agent is unavailable")
@@ -26,6 +27,7 @@ type Client struct {
 	baseURL *url.URL
 	token   string
 	http    *http.Client
+	cleanup *http.Client
 	install *http.Client
 }
 
@@ -34,6 +36,7 @@ func NewClient(baseURL *url.URL, token string) *Client {
 		baseURL: baseURL,
 		token:   strings.TrimSpace(token),
 		http:    &http.Client{Timeout: requestTimeout},
+		cleanup: &http.Client{Timeout: cleanupRequestTimeout},
 		install: &http.Client{Timeout: installTimeout},
 	}
 }
@@ -55,30 +58,38 @@ func (c *Client) Install(ctx context.Context, request Request) (Status, error) {
 }
 
 func (c *Client) DeleteComfyOutputs(ctx context.Context, files []ComfyOutputFile) (ComfyOutputDeleteResult, error) {
+	return c.deleteComfyAssets(ctx, "/v1/comfy-output/delete", files)
+}
+
+func (c *Client) DeleteComfyAssets(ctx context.Context, files []ComfyAssetFile) (ComfyAssetDeleteResult, error) {
+	return c.deleteComfyAssets(ctx, "/v1/comfy-asset/delete", files)
+}
+
+func (c *Client) deleteComfyAssets(ctx context.Context, endpoint string, files []ComfyAssetFile) (ComfyAssetDeleteResult, error) {
 	if !c.Configured() {
-		return ComfyOutputDeleteResult{}, ErrUnavailable
+		return ComfyAssetDeleteResult{}, ErrUnavailable
 	}
-	payload, err := json.Marshal(ComfyOutputDeleteRequest{Files: files})
+	payload, err := json.Marshal(ComfyAssetDeleteRequest{Files: files})
 	if err != nil {
-		return ComfyOutputDeleteResult{}, err
+		return ComfyAssetDeleteResult{}, err
 	}
 	target := *c.baseURL
-	target.Path = "/v1/comfy-output/delete"
+	target.Path = endpoint
 	target.RawQuery = ""
 	target.Fragment = ""
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), bytes.NewReader(payload))
 	if err != nil {
-		return ComfyOutputDeleteResult{}, err
+		return ComfyAssetDeleteResult{}, err
 	}
 	request.Header.Set("Authorization", "Bearer "+c.token)
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("Content-Type", "application/json")
-	response, err := c.http.Do(request)
+	response, err := c.cleanup.Do(request)
 	if err != nil {
-		return ComfyOutputDeleteResult{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return ComfyAssetDeleteResult{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	defer response.Body.Close()
-	var result ComfyOutputDeleteResult
+	var result ComfyAssetDeleteResult
 	if err := json.NewDecoder(io.LimitReader(response.Body, maxResponseBytes)).Decode(&result); err != nil {
 		return ComfyOutputDeleteResult{}, fmt.Errorf("decode ComfyUI output delete response: %w", err)
 	}

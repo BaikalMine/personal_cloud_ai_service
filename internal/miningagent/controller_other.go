@@ -11,7 +11,7 @@ import (
 
 type unsupportedController struct{}
 
-func NewController(_, _ string) (Controller, error) {
+func NewController(_, _ string, _ ...string) (Controller, error) {
 	return unsupportedController{}, nil
 }
 

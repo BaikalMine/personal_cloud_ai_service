@@ -232,7 +232,7 @@ func (a *App) persistComfyMedia(ctx context.Context, capture *proxyContentCaptur
 		EventID: eventID, MediaType: capture.mediaType, MIMEType: mimeType,
 		OriginalName: capture.mediaName, Subfolder: capture.mediaSubfolder, StorageType: capture.mediaStorageType,
 		PayloadCipher: payload, SizeBytes: int64(len(capture.response.data)), ContentHash: hex.EncodeToString(digest[:]),
-		ExpiresAt: time.Now().Add(24 * time.Hour),
+		ExpiresAt: time.Now().Add(generationMediaRetention),
 	})
 	if err == nil && capture.mediaType == "image" {
 		a.queueSensitiveMediaClassification()

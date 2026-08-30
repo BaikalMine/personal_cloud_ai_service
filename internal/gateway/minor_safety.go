@@ -12,7 +12,7 @@ var errMinorSexualContent = errors.New("нельзя создавать секс
 var minorAgePattern = regexp.MustCompile(`(?:^|\s)(?:[0-9]|1[0-7])\s*(?:yo|y o|year old|years old|лет|год|года)(?:\s|$)`)
 
 var minorPromptTerms = []string{
-	"minor", "underage", "under age", "child", "children", "kid", "kids", "teen", "teenage",
+	"minor", "minors", "underage", "under age", "child", "children", "kid", "kids", "teen", "teenage",
 	"preteen", "pre teen", "schoolgirl", "school boy", "schoolboy", "loli", "lolita", "shota",
 	"infant", "toddler", "pubescent", "barely legal", "несовершеннолет", "малолет",
 	"ребен", "подрост", "школьниц", "школьник", "девочк", "мальчик",
@@ -66,10 +66,36 @@ func normalizeSafetyPrompt(value string) string {
 }
 
 func containsSafetyTerm(normalized string, terms []string) bool {
+	tokens := strings.Fields(normalized)
+	padded := " " + normalized + " "
 	for _, term := range terms {
-		if strings.Contains(normalized, term) {
-			return true
+		term = strings.TrimSpace(term)
+		if term == "" {
+			continue
+		}
+		if strings.Contains(term, " ") {
+			if strings.Contains(padded, " "+term+" ") {
+				return true
+			}
+			continue
+		}
+		for _, token := range tokens {
+			if token == term || safetyTermUsesPrefix(term) && strings.HasPrefix(token, term) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+func safetyTermUsesPrefix(term string) bool {
+	switch term {
+	case "teen", "teenage", "preteen", "schoolgirl", "schoolboy", "loli", "lolita", "shota",
+		"porn", "sexual", "erotic", "fetish", "masturb", "orgasm",
+		"несовершеннолет", "малолет", "ребен", "подрост", "школьниц", "школьник", "девочк", "мальчик",
+		"обнажен", "сексуал", "эрот", "откровенн", "генитал", "эякуля", "проникнов":
+			return true
+	default:
+		return false
+	}
 }

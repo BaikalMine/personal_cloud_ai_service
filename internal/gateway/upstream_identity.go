@@ -130,8 +130,14 @@ func (a *App) enforceComfyPromptIdentity(req *http.Request, user *User) error {
 		req.ContentLength = int64(len(body))
 		return nil
 	}
-	if prompt, ok := document["prompt"]; ok && containsForeignComfyNamespace(prompt, comfyUploadNamespace(a.comfyClientID(user.ID))) {
-		return errForeignComfyAsset
+	if prompt, ok := document["prompt"]; ok {
+		ownNamespace := comfyUploadNamespace(a.comfyClientID(user.ID))
+		if containsForeignComfyNamespace(prompt, ownNamespace) {
+			return errForeignComfyAsset
+		}
+		if err := validateComfyPromptAssetInputs(prompt, ownNamespace); err != nil {
+			return err
+		}
 	}
 	clientID, _ := json.Marshal(a.comfyClientID(user.ID))
 	document["client_id"] = clientID
@@ -150,11 +156,12 @@ func containsForeignComfyNamespace(raw json.RawMessage, ownNamespace string) boo
 	if json.Unmarshal(raw, &value) != nil {
 		return false
 	}
+	ownNamespace = normalizeComfyNamespace(ownNamespace)
 	var inspect func(any) bool
 	inspect = func(current any) bool {
 		switch typed := current.(type) {
 		case string:
-			for _, namespace := range comfyNamespacePattern.FindAllString(typed, -1) {
+			for _, namespace := range comfyNamespacePattern.FindAllString(normalizeComfyNamespace(typed), -1) {
 				if namespace != ownNamespace {
 					return true
 				}
@@ -175,4 +182,74 @@ func containsForeignComfyNamespace(raw json.RawMessage, ownNamespace string) boo
 		return false
 	}
 	return inspect(value)
+}
+
+func normalizeComfyNamespace(value string) string {
+	return strings.ToLower(strings.ReplaceAll(value, `\`, "/"))
+}
+
+func validateComfyPromptAssetInputs(raw json.RawMessage, ownNamespace string) error {
+	var nodes map[string]struct {
+		ClassType string         `json:"class_type"`
+		Inputs    map[string]any `json:"inputs"`
+	}
+	if err := json.Unmarshal(raw, &nodes); err != nil {
+		return fmt.Errorf("decode ComfyUI prompt graph: %w", err)
+	}
+	for _, node := range nodes {
+		for field, value := range node.Inputs {
+			if !isComfyUserAssetField(node.ClassType, field) {
+				continue
+			}
+			var references []string
+			collectComfyAssetReferences(value, &references)
+			for _, reference := range references {
+				if err := validateComfyInputReference(reference, ownNamespace); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func collectComfyAssetReferences(value any, target *[]string) {
+	switch typed := value.(type) {
+	case string:
+		*target = append(*target, typed)
+	case []any:
+		if len(typed) == 2 {
+			_, nodeID := typed[0].(string)
+			_, outputIndex := typed[1].(float64)
+			if nodeID && outputIndex {
+				return
+			}
+		}
+		for _, item := range typed {
+			collectComfyAssetReferences(item, target)
+		}
+	case map[string]any:
+		for _, item := range typed {
+			collectComfyAssetReferences(item, target)
+		}
+	}
+}
+
+func isComfyUserAssetField(classType, field string) bool {
+	classType = strings.ToLower(strings.TrimSpace(classType))
+	field = strings.ToLower(strings.TrimSpace(field))
+	for _, sharedAsset := range []string{"checkpoint", "lora", "model", "unet", "clip", "vae", "controlnet", "upscale", "embedding", "hypernetwork", "gguf"} {
+		if strings.Contains(classType, sharedAsset) {
+			return false
+		}
+	}
+	if strings.Contains(classType, "save") || strings.Contains(classType, "preview") || strings.Contains(classType, "output") {
+		return false
+	}
+	switch field {
+	case "image", "audio", "video", "mask", "file", "filename", "image_path", "audio_path", "video_path", "source_path":
+		return true
+	default:
+		return false
+	}
 }

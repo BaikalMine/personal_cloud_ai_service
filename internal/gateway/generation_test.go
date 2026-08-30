@@ -42,6 +42,7 @@ func TestGenerateTemplateRenders(t *testing.T) {
 
 func TestQuickGenerationUploadForwardsNamespacedImageToComfyUI(t *testing.T) {
 	var receivedSubfolder, receivedName string
+	imagePayload := testPNG(t)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/upload/image" {
 			t.Fatalf("unexpected upstream request %s %s", r.Method, r.URL.Path)
@@ -56,7 +57,7 @@ func TestQuickGenerationUploadForwardsNamespacedImageToComfyUI(t *testing.T) {
 		}
 		defer file.Close()
 		payload, err := io.ReadAll(file)
-		if err != nil || !bytes.Equal(payload, []byte("image-data")) {
+		if err != nil || !bytes.Equal(payload, imagePayload) {
 			t.Fatalf("uploaded image = %q, err = %v", payload, err)
 		}
 		receivedName = header.Filename
@@ -75,7 +76,7 @@ func TestQuickGenerationUploadForwardsNamespacedImageToComfyUI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := part.Write([]byte("image-data")); err != nil {
+	if _, err := part.Write(imagePayload); err != nil {
 		t.Fatal(err)
 	}
 	if err := writer.WriteField("type", "input"); err != nil {
@@ -93,7 +94,7 @@ func TestQuickGenerationUploadForwardsNamespacedImageToComfyUI(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("upload status = %d, body = %s", response.Code, response.Body.String())
 	}
-	if receivedName != "sample.png" || receivedSubfolder != comfyUploadNamespace(app.comfyClientID(user.ID)) {
+	if !strings.HasPrefix(receivedName, "gateway-") || !strings.HasSuffix(receivedName, ".png") || receivedSubfolder != comfyUploadNamespace(app.comfyClientID(user.ID)) {
 		t.Fatalf("upstream image = %q, subfolder = %q", receivedName, receivedSubfolder)
 	}
 }
@@ -125,6 +126,20 @@ func TestFetchGenerationOutputUsesOriginalVideoRoute(t *testing.T) {
 	}
 	if status != http.StatusOK || contentType != "video/mp4" || string(body) != "video" {
 		t.Fatalf("output = (%d, %q, %q)", status, contentType, body)
+	}
+}
+
+func TestReadGenerationOutputArchiveFingerprintsBeyondArchiveLimit(t *testing.T) {
+	payload := bytes.Repeat([]byte("video"), 32)
+	body, sizeBytes, contentHash, err := readGenerationOutputArchive(bytes.NewReader(payload), 16, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body != nil || sizeBytes != int64(len(payload)) || len(contentHash) != 64 {
+		t.Fatalf("archive = body:%d size:%d hash:%q", len(body), sizeBytes, contentHash)
+	}
+	if _, _, _, err := readGenerationOutputArchive(bytes.NewReader(payload), 16, int64(len(payload)-1)); err == nil {
+		t.Fatal("output above the absolute fingerprint limit was accepted")
 	}
 }
 
@@ -478,6 +493,33 @@ func TestKrea2ImageWorkflowFitsLargeOriginalToSafeBaseResolution(t *testing.T) {
 	}
 	if got, want := prompt["14"].(map[string]any)["inputs"].(map[string]any)["upscale_by"], 1.0; got != want {
 		t.Fatalf("Krea2 upscale factor = %v, want %v", got, want)
+	}
+}
+
+func TestKrea2ImageWorkflowPreservesShortPanorama(t *testing.T) {
+	definitions, err := loadWorkflowDefinitions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition, ok := findWorkflow(definitions, "image-to-image-krea2")
+	if !ok {
+		t.Fatal("Krea 2 image workflow is missing")
+	}
+	prompt, err := definition.buildPrompt(generationForm{
+		ModelName: "Krea2/model.safetensors", ModelFamily: modelFamilyKrea2,
+		TextEncoder: "encoder.safetensors", VAE: "vae.safetensors", IdentityLora: "identity.safetensors",
+		InputImage: "gateway/input.png", Positive: "preserve the panorama", Width: 1056, Height: 192,
+		OutputMegapixels: 0.19, DimensionMultiple: 16, MaxLongestSide: 4096,
+		Steps: 8, CFG: 1, Denoise: 1, Sampler: "euler", Scheduler: "simple", Seed: 42,
+		EditUseCustomSize: true, PreserveOriginalSize: true, ReferenceBoost: 4, GroundingPixels: 768,
+		UpscaleFactor: 1.5, UpscaleSteps: 4, UpscaleDenoise: 0.15, UpscaleSampler: "deis", UpscaleScheduler: "simple",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame := prompt["5"].(map[string]any)["inputs"].(map[string]any)
+	if frame["custom_width"] != 1056 || frame["custom_height"] != 192 {
+		t.Fatalf("Krea2 short panorama was distorted: %#v", frame)
 	}
 }
 
@@ -952,6 +994,46 @@ func TestGenerationModelCatalogEnablesInstalledEditWorkflows(t *testing.T) {
 	}
 }
 
+func TestGenerationModelCatalogDiscoversMiniMaxH3V4AndErosMax(t *testing.T) {
+	var info map[string]comfyNodeInfo
+	fixture := `{
+		"UNETLoader":{"input":{"required":{"unet_name":[["MiniMax\\MiniMax_H3_FL2VA_pruned_int8_convrot.safetensors","MiniMax\\MiniMax_H3_Ref2VA_pruned_int8_convrot.safetensors","MiniMax\\h3ErosMax_beta4.safetensors"]]}}},
+		"CLIPLoader":{"input":{"required":{"clip_name":[["MiniMax\\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"]]}}},
+		"VAELoader":{"input":{"required":{"vae_name":[["MiniMax\\minimax_h3_video_vae_fp16.safetensors","MiniMax\\minimax_h3_audio_vae_fp32.safetensors"]]}}},
+		"LoraLoader":{"input":{"required":{"lora_name":[["MiniMaxH3\\motion.safetensors","MiniMaxH3\\minimax_h3_turbo_v4_step600_ema.safetensors"]]}}},
+		"MiniMaxH3ImageToVideo":{},"MiniMaxH3ReferenceToVideo":{},"MiniMaxH3SigmaShift":{},"MiniMaxH3MemoryEfficientSageAttentionPatch":{},
+		"MiniMaxH3TurboLoRA":{},"MiniMaxH3TurboSampler":{},"H3MemoryOptimization":{},"H3AIMDOResidencyLimiter":{},"H3SparseAttentionAdvanced":{},
+		"LCImageMaskResize":{},"LCVRAMCacheClear":{},"ImageSharpenKJ":{},"CR LoRA Stack":{},"CR Apply LoRA Stack":{},"VHS_VideoCombine":{}
+	}`
+	if err := json.Unmarshal([]byte(fixture), &info); err != nil {
+		t.Fatal(err)
+	}
+	catalog := buildGenerationModelCatalog(info)
+	var base, eros generationModel
+	for _, group := range catalog.Groups {
+		for _, model := range group.Models {
+			if model.Family != modelFamilyMiniMaxH3 {
+				continue
+			}
+			if model.VideoIntegratedTurbo {
+				eros = model
+			} else {
+				base = model
+			}
+		}
+	}
+	if !base.Available || base.DefaultSampler != "euler" || base.DefaultVideoShift != 11 || base.DefaultAudioShift != 3 {
+		t.Fatalf("unexpected MiniMax H3 v4 base model: %#v", base)
+	}
+	if !eros.Available || !eros.VideoIntegratedTurbo || !eros.VideoReferenceOnly || eros.ReferenceModel != eros.Name || eros.DefaultSteps != 8 || eros.DefaultVideoShift != 12 || eros.DefaultAudioShift != 7 {
+		t.Fatalf("unexpected H3 Eros Max model: %#v", eros)
+	}
+	preset, ok := findGenerationPreset(buildGenerationPresets(catalog), "minimax-h3-video", "minimax-h3-video")
+	if !ok || preset.ModelCount != 2 {
+		t.Fatalf("MiniMax H3 preset = %#v", preset)
+	}
+}
+
 func TestFlux2LoraGroupsExcludeOtherFamilies(t *testing.T) {
 	groups := buildFlux2LoraGroups([]string{
 		"Krea2/detailer.safetensors",
@@ -987,10 +1069,40 @@ func TestMiniMaxH3LoraGroupsUseDedicatedDirectory(t *testing.T) {
 		}
 		if name == "MiniMaxH3\\h3_Better_NSFW_Motion_V1.safetensors" {
 			foundBetterMotion = true
+			if lora.DisplayName != "Better NSFW Motion (H3 Ref2VA V1)" {
+				t.Fatalf("unexpected Better NSFW Motion display name: %q", lora.DisplayName)
+			}
+			if lora.DefaultStrength != 0.9 {
+				t.Fatalf("unexpected Better NSFW Motion default strength: %v", lora.DefaultStrength)
+			}
 		}
 	}
 	if !foundBetterMotion {
 		t.Fatal("MiniMax H3 Better NSFW Motion LoRA is missing from the dedicated catalog")
+	}
+}
+
+func TestFlux2PreserveOriginalAllowsPanoramaBelow256(t *testing.T) {
+	definition := workflowDefinition{ID: "image-to-image-flux2", RequiresImage: true}
+	input := generationForm{
+		ModelName: "Flux2/model.safetensors", ModelFamily: modelFamilyFlux2,
+		InputImage: "gateway/input.png", Positive: "preserve the panorama", Width: 1056, Height: 192,
+		OutputMegapixels: 0.19, MaxLongestSide: 4096, Steps: 25, CFG: 1, Denoise: 0.9, Seed: 42,
+		PreserveOriginalSize: true, SourceMegapixels: 0.25,
+	}
+	if err := definition.normalizeAndValidate(&input); err != nil {
+		t.Fatalf("Flux2 preserve-original panorama was rejected: %v", err)
+	}
+}
+
+func TestTextGenerationStillRejectsDimensionsBelow256(t *testing.T) {
+	definition := workflowDefinition{ID: "text-to-image"}
+	input := generationForm{
+		ModelName: "model.safetensors", Positive: "panorama", Width: 1056, Height: 192,
+		OutputMegapixels: 0.19, Steps: 25, CFG: 7, Denoise: 1, Seed: 42,
+	}
+	if err := definition.normalizeAndValidate(&input); err == nil {
+		t.Fatal("text generation accepted a dimension below 256")
 	}
 }
 
@@ -1231,7 +1343,7 @@ func TestMiniMaxH3WorkflowBuildsFrameAndReferenceGraphs(t *testing.T) {
 		VAE:            "MiniMax\\minimax_h3_video_vae_fp16.safetensors",
 		AudioVAE:       "MiniMax\\minimax_h3_audio_vae_fp32.safetensors",
 		Positive:       "A dancer turns toward the camera in warm evening light.", InputImage: "gateway/input-1.png", Width: 768, Height: 1344,
-		Steps: 25, CFG: 1, Denoise: 1, Sampler: "res_multistep", Scheduler: "simple", Seed: 42,
+		Steps: 25, CFG: 1, Denoise: 1, VideoSampler: "euler", Sampler: "euler", Scheduler: "simple", Seed: 42,
 		VideoMode: miniMaxH3FrameMode, VideoResolution: "portrait", VideoDurationSeconds: 5, VideoSteps: 25,
 		VideoSageAttention: true, VideoClearVRAM: true,
 	}
@@ -1269,6 +1381,14 @@ func TestMiniMaxH3WorkflowBuildsFrameAndReferenceGraphs(t *testing.T) {
 	if got, want := prompt["18"].(map[string]any)["class_type"], "LCVRAMCacheClear"; got != want {
 		t.Fatalf("cache-clear node = %v, want %q", got, want)
 	}
+	for _, nodeID := range []string{"19", "23"} {
+		if got, want := prompt[nodeID].(map[string]any)["class_type"], "LCVRAMCacheClear"; got != want {
+			t.Fatalf("cache-clear node %s = %v, want %q", nodeID, got, want)
+		}
+	}
+	if got, want := prompt["50"].(map[string]any)["class_type"], "LCImageMaskResize"; got != want {
+		t.Fatalf("frame resize = %v, want %q", got, want)
+	}
 
 	base.VideoTurbo = true
 	base.VideoSteps = 6
@@ -1293,6 +1413,9 @@ func TestMiniMaxH3WorkflowBuildsFrameAndReferenceGraphs(t *testing.T) {
 	if got, want := prompt["11"].(map[string]any)["class_type"], "MiniMaxH3TurboSampler"; got != want {
 		t.Fatalf("Turbo sampler = %v, want %q", got, want)
 	}
+	if got, want := prompt["9"].(map[string]any)["inputs"].(map[string]any)["model"], []any{"8", 0}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("optional LoRA model path = %#v, want %#v", got, want)
+	}
 
 	base.VideoMode = miniMaxH3ReferenceMode
 	base.InputImage = "gateway/input-1.png"
@@ -1312,6 +1435,12 @@ func TestMiniMaxH3WorkflowBuildsFrameAndReferenceGraphs(t *testing.T) {
 	if got, want := prompt["1"].(map[string]any)["inputs"].(map[string]any)["unet_name"], base.ReferenceModel; got != want {
 		t.Fatalf("reference model = %v, want %q", got, want)
 	}
+	if got, want := referenceInputs["ref_images.ref_image_0"], []any{"30", 0}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("native reference source = %#v, want %#v", got, want)
+	}
+	if _, ok := prompt["50"]; ok {
+		t.Fatal("reference mode must not stretch source images")
+	}
 	base.InputAudio = "gateway/reference-audio.mp3"
 	prompt, err = definition.buildPrompt(base)
 	if err != nil {
@@ -1329,6 +1458,53 @@ func TestMiniMaxH3WorkflowBuildsFrameAndReferenceGraphs(t *testing.T) {
 	}
 }
 
+func TestMiniMaxH3ErosMaxUsesIntegratedTurboReferencePath(t *testing.T) {
+	input := generationForm{
+		ModelName: "MiniMax\\h3ErosMax_beta4.safetensors", ReferenceModel: "MiniMax\\h3ErosMax_beta4.safetensors",
+		TextEncoder: "MiniMax\\text.safetensors", VAE: "MiniMax\\video.safetensors", AudioVAE: "MiniMax\\audio.safetensors",
+		Positive: "A single continuous camera move.", InputImage: "gateway/input.png", Width: 768, Height: 1024, Seed: 42,
+		VideoMode: miniMaxH3FrameMode, VideoReferenceOnly: true, VideoIntegratedTurbo: true, VideoTurbo: true,
+		VideoQuality: 480, VideoDurationSeconds: 5, VideoSteps: 8, VideoSampler: "euler", VideoScheduler: "simple", VideoShiftVideo: 12, VideoShiftAudio: 7,
+		VideoSageAttention: true, VideoMemoryOptimize: true, VideoMemoryChunkRows: 4096, VideoMemoryMLP: "auto", VideoMemoryPrecision: "Auto", VideoMemoryQKV: "Auto", VideoMemoryAttention: "Standard",
+		VideoAIMDOEnabled: true, VideoAIMDOResidency: "0 blocks",
+		VideoSparseAttention: true, VideoSparseBudget: 0.15, VideoSparseSchedule: "Hold", VideoSparseEarlyStep: 4, VideoSparseEarlyKV: 0.5, VideoSparseLateStep: 0, VideoSparseLateKV: 0.5, VideoSparseBackend: "Kitchen INT8",
+	}
+	if err := normalizeMiniMaxH3(&input); err != nil {
+		t.Fatal(err)
+	}
+	if input.VideoMode != miniMaxH3ReferenceMode || input.VideoTurbo || input.Sampler != "euler" {
+		t.Fatalf("normalized Eros profile = %#v", input)
+	}
+	prompt, err := buildMiniMaxH3Prompt(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := prompt["7"].(map[string]any)["class_type"], "MiniMaxH3ReferenceToVideo"; got != want {
+		t.Fatalf("Eros conditioning = %v, want %q", got, want)
+	}
+	if _, ok := prompt["6"]; ok {
+		t.Fatal("integrated Eros Turbo must not add the external Turbo LoRA")
+	}
+	if got, want := prompt["11"].(map[string]any)["class_type"], "KSamplerSelect"; got != want {
+		t.Fatalf("Eros sampler node = %v, want %q", got, want)
+	}
+	if got, want := prompt["24"].(map[string]any)["class_type"], "H3MemoryOptimization"; got != want {
+		t.Fatalf("memory node = %v, want %q", got, want)
+	}
+	if got, want := prompt["26"].(map[string]any)["class_type"], "H3AIMDOResidencyLimiter"; got != want {
+		t.Fatalf("AIMDO node = %v, want %q", got, want)
+	}
+	if got, want := prompt["25"].(map[string]any)["class_type"], "H3SparseAttentionAdvanced"; got != want {
+		t.Fatalf("sparse node = %v, want %q", got, want)
+	}
+	if got, want := prompt["25"].(map[string]any)["inputs"].(map[string]any)["early_schedule"], "Hold"; got != want {
+		t.Fatalf("sparse early schedule = %v, want %q", got, want)
+	}
+	if got, want := prompt["9"].(map[string]any)["inputs"].(map[string]any)["model"], []any{"25", 0}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Eros model chain = %#v, want %#v", got, want)
+	}
+}
+
 func TestMiniMaxH3WorkflowBuildsOptionalPostProcessing(t *testing.T) {
 	definitions, err := loadWorkflowDefinitions()
 	if err != nil {
@@ -1342,16 +1518,20 @@ func TestMiniMaxH3WorkflowBuildsOptionalPostProcessing(t *testing.T) {
 		ModelName: "MiniMax/model.safetensors", TextEncoder: "MiniMax/text.safetensors", VAE: "MiniMax/video.safetensors", AudioVAE: "MiniMax/audio.safetensors",
 		Positive: "A calm cinematic scene.", InputImage: "gateway/input.png", Width: 768, Height: 1344, Steps: 25, CFG: 1, Denoise: 1, Seed: 42,
 		VideoMode: miniMaxH3FrameMode, VideoQuality: 720, VideoDurationSeconds: 5, VideoSteps: 25,
-		VideoSageAttention: true, VideoClearVRAM: true, VideoRIFEEnabled: true, VideoRIFECheckpoint: "rife49.pth", VideoRIFEMultiplier: 2,
+		VideoSageAttention: true, VideoClearVRAM: true, VideoMemoryOptimize: true, VideoMemoryChunkRows: 4096, VideoMemoryMLP: "auto", VideoMemoryPrecision: "Auto", VideoMemoryQKV: "Auto", VideoMemoryAttention: "Standard",
+		VideoAIMDOEnabled: true, VideoAIMDOResidency: "0 blocks",
+		VideoSparseAttention: true, VideoSparseBudget: 0.15, VideoSparseSchedule: "Hold", VideoSparseEarlyStep: 4, VideoSparseEarlyKV: 0.5, VideoSparseLateStep: 0, VideoSparseLateKV: 0.5, VideoSparseBackend: "Kitchen INT8",
+		VideoRIFEEnabled: true, VideoRIFECheckpoint: "rife49.pth", VideoRIFEMultiplier: 2,
 		VideoRIFEFastMode: true, VideoRIFEEnsemble: true, VideoRIFEDtype: "float32", VideoRIFEBatchSize: 1,
 		VideoRTXEnabled: true, VideoRTXScale: 2, VideoRTXQuality: "ULTRA", VideoColorMatch: true, VideoColorMethod: "adain", VideoColorStrength: 0.8,
+		VideoSharpenEnabled: true, VideoSharpenMethod: "rcas", VideoSharpenStrength: 0.8, VideoSharpenRadius: 1, VideoSharpenThreshold: 0.05, VideoSharpenIterations: 10,
 		VideoOutputCRF: 19,
 	}
 	prompt, err := definition.buildPrompt(input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for nodeID, classType := range map[string]string{"20": "RTXVideoSuperResolution", "21": "LCColorMatch", "22": "RIFE VFI"} {
+	for nodeID, classType := range map[string]string{"20": "RTXVideoSuperResolution", "21": "LCColorMatch", "22": "RIFE VFI", "24": "H3MemoryOptimization", "25": "H3SparseAttentionAdvanced", "26": "H3AIMDOResidencyLimiter", "27": "ImageSharpenKJ"} {
 		if got := prompt[nodeID].(map[string]any)["class_type"]; got != classType {
 			t.Fatalf("node %s = %v, want %q", nodeID, got, classType)
 		}
@@ -1367,11 +1547,17 @@ func TestMiniMaxH3WorkflowBuildsOptionalPostProcessing(t *testing.T) {
 		t.Fatal("RTX scale must use the DynamicCombo key path")
 	}
 	video := prompt["17"].(map[string]any)["inputs"].(map[string]any)
-	if got, want := video["images"], []any{"22", 0}; !reflect.DeepEqual(got, want) {
+	if got, want := video["images"], []any{"27", 0}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("video source = %#v, want %#v", got, want)
 	}
 	if got, want := video["frame_rate"], 48; got != want {
 		t.Fatalf("frame rate = %v, want %d", got, want)
+	}
+	if got, want := prompt["20"].(map[string]any)["inputs"].(map[string]any)["images"], []any{"22", 0}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("RTX input = %#v, want %#v", got, want)
+	}
+	if got, want := prompt["27"].(map[string]any)["inputs"].(map[string]any)["method.strength"], 0.8; got != want {
+		t.Fatalf("sharpen strength = %#v, want %#v", got, want)
 	}
 }
 
@@ -1429,5 +1615,76 @@ func TestMiniMaxH3VideoQualityPreservesReferenceAspect(t *testing.T) {
 		if input.VideoResolution != "reference-"+strconv.Itoa(quality)+"p" {
 			t.Fatalf("video resolution = %q", input.VideoResolution)
 		}
+	}
+}
+
+func TestMiniMaxH3VideoDimensionsBoundExtremeReferences(t *testing.T) {
+	width, height, err := miniMaxH3VideoDimensions(6000, 2000, 1440)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if max(width, height) > miniMaxH3MaxDimension || int64(width)*int64(height) > miniMaxH3MaxBasePixels {
+		t.Fatalf("unsafe dimensions: %dx%d", width, height)
+	}
+	if got := float64(width) / float64(height); math.Abs(got-3) > 0.04 {
+		t.Fatalf("aspect ratio changed: %.3f", got)
+	}
+}
+
+func TestMiniMaxH3ResourceBudgetRejectsCombinedHeavyPostProcessing(t *testing.T) {
+	input := generationForm{
+		Width: 1440, Height: 2560, InputImage: "gateway/first.png",
+		VideoMode: miniMaxH3FrameMode, VideoQuality: 1440, VideoDurationSeconds: 15, VideoSteps: 25,
+		VideoRTXEnabled: true, VideoRTXScale: 2, VideoRTXQuality: "ULTRA",
+		VideoRIFEEnabled: true, VideoRIFEMultiplier: 4, VideoRIFEBatchSize: 1, VideoRIFECheckpoint: "rife49.pth", VideoRIFEDtype: "float32",
+	}
+	if err := normalizeMiniMaxH3(&input); err == nil || !strings.Contains(err.Error(), "RTX") {
+		t.Fatalf("heavy post-processing error = %v", err)
+	}
+}
+
+func TestMiniMaxH3ResourceBudgetAllowsPracticalPostProcessing(t *testing.T) {
+	input := generationForm{
+		Width: 720, Height: 1280, InputImage: "gateway/first.png",
+		VideoMode: miniMaxH3FrameMode, VideoQuality: 720, VideoDurationSeconds: 15, VideoSteps: 25,
+		VideoRTXEnabled: true, VideoRTXScale: 2, VideoRTXQuality: "ULTRA",
+		VideoRIFEEnabled: true, VideoRIFEMultiplier: 2, VideoRIFEBatchSize: 1, VideoRIFECheckpoint: "rife49.pth", VideoRIFEDtype: "float32",
+	}
+	if err := normalizeMiniMaxH3(&input); err != nil {
+		t.Fatalf("practical post-processing was rejected: %v", err)
+	}
+}
+
+func TestGenerationAuditMetadataCapturesMiniMaxSettingsAndLoras(t *testing.T) {
+	input := generationForm{
+		ModelName: "MiniMax/model.safetensors", ModelFamily: modelFamilyMiniMaxH3,
+		InputImage: "gateway/first.png", ReferenceImages: [3]string{"gateway/second.png"},
+		Width: 480, Height: 640, Steps: 20, CFG: 1, Denoise: 1, Sampler: "res_multistep", Scheduler: "simple", Seed: 42,
+		VideoMode: miniMaxH3ReferenceMode, VideoResolution: "reference-480p", VideoQuality: 480, VideoDurationSeconds: 5,
+		VideoReferenceSize: "match", VideoSteps: 20, VideoScheduler: "simple", VideoShiftVideo: 11, VideoShiftAudio: 3,
+		VideoSampler: "euler", VideoSageAttention: true, VideoClearVRAM: true,
+		VideoMemoryOptimize: true, VideoMemoryMLP: "auto", VideoMemoryChunkRows: 4096, VideoMemoryPrecision: "Auto", VideoMemoryQKV: "Auto", VideoMemoryAttention: "Standard",
+		VideoAIMDOEnabled: true, VideoAIMDOResidency: "0 blocks",
+		VideoSparseAttention: true, VideoSparseBudget: 0.15, VideoSparseSchedule: "Hold", VideoSparseEarlyStep: 4, VideoSparseEarlyKV: 0.5, VideoSparseLateStep: 0, VideoSparseLateKV: 0.5, VideoSparseBackend: "Kitchen INT8",
+		VideoRIFEEnabled: true, VideoRIFECheckpoint: "rife49.pth", VideoRIFEMultiplier: 2, VideoRIFEFastMode: true, VideoRIFEEnsemble: true, VideoRIFEDtype: "float32", VideoRIFEBatchSize: 1,
+		VideoRTXEnabled: true, VideoRTXScale: 2, VideoRTXQuality: "ULTRA",
+		VideoColorMatch: true, VideoColorMethod: "adain", VideoColorStrength: 1, VideoOutputCRF: 19,
+		VideoSharpenEnabled: true, VideoSharpenMethod: "rcas", VideoSharpenStrength: 0.8, VideoSharpenRadius: 1, VideoSharpenThreshold: 0.05, VideoSharpenIterations: 10,
+		LoraNames: [maxGenerationLoraSlots]string{"MiniMaxH3/motion.safetensors"}, LoraModel: [maxGenerationLoraSlots]float64{0.9}, LoraClip: [maxGenerationLoraSlots]float64{1},
+	}
+	metadata := generationAuditMetadata(workflowDefinition{ID: "minimax-h3-video"}, input)
+	video, ok := metadata["minimax_h3"].(map[string]any)
+	if !ok || video["mode"] != miniMaxH3ReferenceMode || video["quality"] != 480 || video["sage_attention"] != true || video["clear_vram"] != true {
+		t.Fatalf("MiniMax audit settings = %#v", video)
+	}
+	if video["rife"].(map[string]any)["enabled"] != true || video["rtx"].(map[string]any)["scale"] != float64(2) || video["color_match"].(map[string]any)["enabled"] != true {
+		t.Fatalf("MiniMax post-processing audit settings = %#v", video)
+	}
+	if video["memory_optimization"].(map[string]any)["enabled"] != true || video["aimdo_residency"].(map[string]any)["residency"] != "0 blocks" || video["sparse_attention"].(map[string]any)["early_schedule"] != "Hold" || video["sparse_attention"].(map[string]any)["backend"] != "Kitchen INT8" || video["sharpen"].(map[string]any)["method"] != "rcas" {
+		t.Fatalf("MiniMax v4 audit settings = %#v", video)
+	}
+	loras, ok := metadata["loras"].([]map[string]any)
+	if !ok || len(loras) != 1 || loras[0]["name"] != "MiniMaxH3/motion.safetensors" || loras[0]["model_strength"] != 0.9 {
+		t.Fatalf("MiniMax audit LoRAs = %#v", metadata["loras"])
 	}
 }

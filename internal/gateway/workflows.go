@@ -46,133 +46,158 @@ type workflowView struct {
 }
 
 type generationForm struct {
-	TemplateID           string
-	PresetID             string
-	ModelID              string
-	ModelName            string
-	ModelFamily          string
-	TextEncoder          string
-	VAE                  string
-	AudioVAE             string
-	ReferenceModel       string
-	Lora                 string
-	LoraStrength         float64
-	IdentityLora         string
-	LoraNames            [maxGenerationLoraSlots]string
-	LoraModel            [maxGenerationLoraSlots]float64
-	LoraClip             [maxGenerationLoraSlots]float64
-	LorasConfigured      bool
-	AspectRatio          string
-	OutputMegapixels     float64
-	DimensionMultiple    int
-	MaxLongestSide       int
-	BaseMegapixels       float64
-	UpscaleSteps         int
-	UpscaleDenoise       float64
-	UpscaleAutoDenoise   bool
-	UpscaleSampler       string
-	DetailSteps          int
-	DetailDenoise        float64
-	DetailCFG            float64
-	DetailSampler        string
-	DetailScheduler      string
-	ColorTransfer        bool
-	ColorMethod          string
-	ColorMode            string
-	ColorStrength        float64
-	SourceMegapixels     float64
-	PreserveOriginalSize bool
-	FluxGuidance         float64
-	FluxDetailerSteps    int
-	FluxActiveScale      float64
-	FluxTokenWhiten      float64
-	FluxNormEqualize     float64
-	FluxUpscaleMode      string
-	EditUseCustomSize    bool
-	EditAspectPreset     string
-	EditSwapDimensions   bool
-	EditResizeMethod     string
-	EditProportion       string
-	EditCropLocation     string
-	EditPadColor         string
-	ReferenceBoost       float64
-	GroundingPixels      int
-	UpscaleFactor        float64
-	UpscaleCFG           float64
-	UpscaleScheduler     string
-	PostDenoiseBlur      float64
-	PostDenoiseEdge      float64
-	PostDenoiseRadius    float64
-	PostDenoiseStrength  float64
-	SkinPreset           string
-	SkinStrength         float64
-	SkinCoolness         float64
-	SkinBrightness       float64
-	SkinRosy             float64
-	SkinEvenness         float64
-	SkinShadowLift       float64
-	SkinSmooth           float64
-	SkinTexturePreserve  float64
-	SkinSaturation       float64
-	SkinHighlightProtect float64
-	SkinMaskSensitivity  float64
-	SkinMaskFeather      float64
-	AdjustHue            float64
-	AdjustSaturation     float64
-	AdjustBrightness     float64
-	AdjustContrast       float64
-	AdjustSharpness      float64
-	LUTName              string
-	LUTStrength          float64
-	LUTEnabled           bool
-	InputImage           string
-	ReferenceImages      [3]string
-	InputAudio           string
-	Positive             string
-	Negative             string
-	Width                int
-	Height               int
-	Steps                int
-	CFG                  float64
-	Denoise              float64
-	Sampler              string
-	Scheduler            string
-	Seed                 int64
-	VideoMode            string
-	VideoResolution      string
-	VideoAspect          string
-	VideoQuality         int
-	VideoDurationSeconds int
-	VideoReferenceSize   string
-	VideoSteps           int
-	VideoTurbo           bool
-	VideoScheduler       string
-	VideoShiftVideo      int
-	VideoShiftAudio      int
-	VideoSageAttention   bool
-	VideoClearVRAM       bool
-	VideoRIFEEnabled     bool
-	VideoRIFECheckpoint  string
-	VideoRIFEMultiplier  int
-	VideoRIFEFastMode    bool
-	VideoRIFEEnsemble    bool
-	VideoRIFEDtype       string
-	VideoRIFECompile     bool
-	VideoRIFEBatchSize   int
-	VideoRTXEnabled      bool
-	VideoRTXScale        float64
-	VideoRTXQuality      string
-	VideoColorMatch      bool
-	VideoColorMethod     string
-	VideoColorStrength   float64
-	VideoAudioStart      float64
-	VideoOutputCRF       int
-	AssistantRequested   bool
-	AssistantApplied     bool
-	AssistantTemplate    string
-	AssistantThink       bool
-	AssistantOriginal    string
-	AssistantSuggestion  string
+	TemplateID             string
+	PresetID               string
+	ModelID                string
+	ModelName              string
+	ModelFamily            string
+	TextEncoder            string
+	VAE                    string
+	AudioVAE               string
+	ReferenceModel         string
+	Lora                   string
+	LoraStrength           float64
+	IdentityLora           string
+	LoraNames              [maxGenerationLoraSlots]string
+	LoraModel              [maxGenerationLoraSlots]float64
+	LoraClip               [maxGenerationLoraSlots]float64
+	LorasConfigured        bool
+	AspectRatio            string
+	OutputMegapixels       float64
+	DimensionMultiple      int
+	MaxLongestSide         int
+	BaseMegapixels         float64
+	UpscaleSteps           int
+	UpscaleDenoise         float64
+	UpscaleAutoDenoise     bool
+	UpscaleSampler         string
+	DetailSteps            int
+	DetailDenoise          float64
+	DetailCFG              float64
+	DetailSampler          string
+	DetailScheduler        string
+	ColorTransfer          bool
+	ColorMethod            string
+	ColorMode              string
+	ColorStrength          float64
+	SourceMegapixels       float64
+	PreserveOriginalSize   bool
+	FluxGuidance           float64
+	FluxDetailerSteps      int
+	FluxActiveScale        float64
+	FluxTokenWhiten        float64
+	FluxNormEqualize       float64
+	FluxUpscaleMode        string
+	EditUseCustomSize      bool
+	EditAspectPreset       string
+	EditSwapDimensions     bool
+	EditResizeMethod       string
+	EditProportion         string
+	EditCropLocation       string
+	EditPadColor           string
+	ReferenceBoost         float64
+	GroundingPixels        int
+	UpscaleFactor          float64
+	UpscaleCFG             float64
+	UpscaleScheduler       string
+	PostDenoiseBlur        float64
+	PostDenoiseEdge        float64
+	PostDenoiseRadius      float64
+	PostDenoiseStrength    float64
+	SkinPreset             string
+	SkinStrength           float64
+	SkinCoolness           float64
+	SkinBrightness         float64
+	SkinRosy               float64
+	SkinEvenness           float64
+	SkinShadowLift         float64
+	SkinSmooth             float64
+	SkinTexturePreserve    float64
+	SkinSaturation         float64
+	SkinHighlightProtect   float64
+	SkinMaskSensitivity    float64
+	SkinMaskFeather        float64
+	AdjustHue              float64
+	AdjustSaturation       float64
+	AdjustBrightness       float64
+	AdjustContrast         float64
+	AdjustSharpness        float64
+	LUTName                string
+	LUTStrength            float64
+	LUTEnabled             bool
+	InputImage             string
+	ReferenceImages        [3]string
+	InputAudio             string
+	Positive               string
+	Negative               string
+	Width                  int
+	Height                 int
+	Steps                  int
+	CFG                    float64
+	Denoise                float64
+	Sampler                string
+	Scheduler              string
+	Seed                   int64
+	VideoMode              string
+	VideoResolution        string
+	VideoAspect            string
+	VideoQuality           int
+	VideoDurationSeconds   int
+	VideoReferenceSize     string
+	VideoSteps             int
+	VideoTurbo             bool
+	VideoIntegratedTurbo   bool
+	VideoReferenceOnly     bool
+	VideoSampler           string
+	VideoScheduler         string
+	VideoShiftVideo        int
+	VideoShiftAudio        int
+	VideoSageAttention     bool
+	VideoClearVRAM         bool
+	VideoMemoryOptimize    bool
+	VideoMemoryMLP         string
+	VideoMemoryChunkRows   int
+	VideoMemoryPrecision   string
+	VideoMemoryQKV         string
+	VideoMemoryAttention   string
+	VideoAIMDOEnabled      bool
+	VideoAIMDOResidency    string
+	VideoSparseAttention   bool
+	VideoSparseBudget      float64
+	VideoSparseSchedule    string
+	VideoSparseEarlyStep   int
+	VideoSparseEarlyKV     float64
+	VideoSparseLateStep    int
+	VideoSparseLateKV      float64
+	VideoSparseBackend     string
+	VideoRIFEEnabled       bool
+	VideoRIFECheckpoint    string
+	VideoRIFEMultiplier    int
+	VideoRIFEFastMode      bool
+	VideoRIFEEnsemble      bool
+	VideoRIFEDtype         string
+	VideoRIFECompile       bool
+	VideoRIFEBatchSize     int
+	VideoRTXEnabled        bool
+	VideoRTXScale          float64
+	VideoRTXQuality        string
+	VideoColorMatch        bool
+	VideoColorMethod       string
+	VideoColorStrength     float64
+	VideoSharpenEnabled    bool
+	VideoSharpenMethod     string
+	VideoSharpenStrength   float64
+	VideoSharpenRadius     float64
+	VideoSharpenThreshold  float64
+	VideoSharpenIterations int
+	VideoAudioStart        float64
+	VideoOutputCRF         int
+	AssistantRequested     bool
+	AssistantApplied       bool
+	AssistantTemplate      string
+	AssistantThink         bool
+	AssistantOriginal      string
+	AssistantSuggestion    string
 }
 
 func (input generationForm) imageCount() int {
@@ -472,8 +497,12 @@ func (definition workflowDefinition) normalizeAndValidate(input *generationForm)
 	if len(input.Positive) > 4000 || len(input.Negative) > 4000 {
 		return errors.New("промт слишком длинный")
 	}
-	if input.Width < 256 || input.Width > 4096 || input.Width%8 != 0 || input.Height < 256 || input.Height > 4096 || input.Height%8 != 0 {
-		return errors.New("ширина и высота должны быть от 256 до 4096 и кратны 8")
+	minimumDimension := 256
+	if (definition.ID == "image-to-image-flux2" || definition.ID == "image-to-image-krea2") && input.PreserveOriginalSize {
+		minimumDimension = 16
+	}
+	if input.Width < minimumDimension || input.Width > 4096 || input.Width%8 != 0 || input.Height < minimumDimension || input.Height > 4096 || input.Height%8 != 0 {
+		return fmt.Errorf("ширина и высота должны быть от %d до 4096 и кратны 8", minimumDimension)
 	}
 	if input.OutputMegapixels < 0.1 || input.OutputMegapixels > 16 {
 		return errors.New("итоговое разрешение должно быть от 0.1 до 16 мегапикселей")
@@ -686,8 +715,8 @@ func normalizeKrea2EditResolution(input *generationForm) {
 		scale = min(scale, float64(krea2EditMaxLongestSidePixels)/float64(longest))
 	}
 	if scale < 1 {
-		input.Width = max(256, int(float64(input.Width)*scale/8)*8)
-		input.Height = max(256, int(float64(input.Height)*scale/8)*8)
+		input.Width = max(16, int(float64(input.Width)*scale/8)*8)
+		input.Height = max(16, int(float64(input.Height)*scale/8)*8)
 		// Keep the final frame within the same ceiling instead of scaling the
 		// fitted image up again in the optional finishing pass.
 		input.PreserveOriginalSize = true
@@ -1057,7 +1086,7 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 	if err != nil {
 		return generationForm{}, errors.New("некорректное число шагов")
 	}
-	videoSteps, err := parseInt("video_steps", 25)
+	videoSteps, err := parseInt("video_steps", 0)
 	if err != nil {
 		return generationForm{}, errors.New("некорректное число шагов MiniMax H3")
 	}
@@ -1153,13 +1182,37 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 	if err != nil {
 		return generationForm{}, errors.New("некорректный norm equalize Flux2")
 	}
-	videoShiftVideo, err := parseInt("video_shift_video", 11)
+	videoShiftVideo, err := parseInt("video_shift_video", 0)
 	if err != nil {
 		return generationForm{}, errors.New("некорректный video shift MiniMax H3")
 	}
-	videoShiftAudio, err := parseInt("video_shift_audio", 3)
+	videoShiftAudio, err := parseInt("video_shift_audio", 0)
 	if err != nil {
 		return generationForm{}, errors.New("некорректный audio shift MiniMax H3")
+	}
+	videoMemoryChunkRows, err := parseInt("video_memory_chunk_rows", 4096)
+	if err != nil {
+		return generationForm{}, errors.New("некорректный размер блока H3 Memory Optimization")
+	}
+	videoSparseBudget, err := parseFloat("video_sparse_budget", 0.15)
+	if err != nil {
+		return generationForm{}, errors.New("некорректный бюджет H3 Sparse Attention")
+	}
+	videoSparseEarlyStep, err := parseInt("video_sparse_early_steps", 4)
+	if err != nil {
+		return generationForm{}, errors.New("некорректное число ранних шагов H3 Sparse Attention")
+	}
+	videoSparseEarlyKV, err := parseFloat("video_sparse_early_kv", 0.5)
+	if err != nil {
+		return generationForm{}, errors.New("некорректный ранний KV H3 Sparse Attention")
+	}
+	videoSparseLateStep, err := parseInt("video_sparse_late_steps", 0)
+	if err != nil {
+		return generationForm{}, errors.New("некорректное число финальных шагов H3 Sparse Attention")
+	}
+	videoSparseLateKV, err := parseFloat("video_sparse_late_kv", 0.5)
+	if err != nil {
+		return generationForm{}, errors.New("некорректный финальный KV H3 Sparse Attention")
 	}
 	videoRIFEMultiplier, err := parseInt("video_rife_multiplier", 2)
 	if err != nil {
@@ -1176,6 +1229,22 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 	videoColorStrength, err := parseFloat("video_color_strength", 1)
 	if err != nil {
 		return generationForm{}, errors.New("некорректная сила ColorMatch")
+	}
+	videoSharpenStrength, err := parseFloat("video_sharpen_strength", 0.8)
+	if err != nil {
+		return generationForm{}, errors.New("некорректная сила резкости видео")
+	}
+	videoSharpenRadius, err := parseFloat("video_sharpen_radius", 1)
+	if err != nil {
+		return generationForm{}, errors.New("некорректный радиус резкости видео")
+	}
+	videoSharpenThreshold, err := parseFloat("video_sharpen_threshold", 0.05)
+	if err != nil {
+		return generationForm{}, errors.New("некорректный порог резкости видео")
+	}
+	videoSharpenIterations, err := parseInt("video_sharpen_iterations", 10)
+	if err != nil {
+		return generationForm{}, errors.New("некорректное число итераций резкости видео")
 	}
 	videoAudioStart, err := parseFloat("video_audio_start", 0.03)
 	if err != nil {
@@ -1303,12 +1372,19 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 		Scheduler: strings.TrimSpace(r.Form.Get("scheduler")), Seed: seed,
 		VideoMode: strings.TrimSpace(r.Form.Get("video_mode")), VideoResolution: strings.TrimSpace(r.Form.Get("video_resolution")), VideoAspect: strings.TrimSpace(r.Form.Get("video_aspect")), VideoQuality: videoQuality,
 		VideoDurationSeconds: videoDurationSeconds, VideoReferenceSize: strings.TrimSpace(r.Form.Get("video_reference_size")), VideoSteps: videoSteps, VideoTurbo: r.Form.Get("video_turbo") == "true",
-		VideoScheduler: strings.TrimSpace(r.Form.Get("video_scheduler")), VideoShiftVideo: videoShiftVideo, VideoShiftAudio: videoShiftAudio,
+		VideoSampler: strings.TrimSpace(r.Form.Get("video_sampler")), VideoScheduler: strings.TrimSpace(r.Form.Get("video_scheduler")), VideoShiftVideo: videoShiftVideo, VideoShiftAudio: videoShiftAudio,
 		VideoSageAttention: r.Form.Get("video_sage_attention") == "true", VideoClearVRAM: r.Form.Get("video_clear_vram") == "true",
+		VideoMemoryOptimize: r.Form.Get("video_memory_optimize") == "true", VideoMemoryMLP: strings.TrimSpace(r.Form.Get("video_memory_mlp")), VideoMemoryChunkRows: videoMemoryChunkRows,
+		VideoMemoryPrecision: strings.TrimSpace(r.Form.Get("video_memory_precision")), VideoMemoryQKV: strings.TrimSpace(r.Form.Get("video_memory_qkv")), VideoMemoryAttention: strings.TrimSpace(r.Form.Get("video_memory_attention")),
+		VideoAIMDOEnabled: r.Form.Get("video_aimdo_enabled") == "true", VideoAIMDOResidency: strings.TrimSpace(r.Form.Get("video_aimdo_residency")),
+		VideoSparseAttention: r.Form.Get("video_sparse_attention") == "true", VideoSparseBudget: videoSparseBudget, VideoSparseSchedule: strings.TrimSpace(r.Form.Get("video_sparse_early_schedule")), VideoSparseEarlyStep: videoSparseEarlyStep, VideoSparseEarlyKV: videoSparseEarlyKV,
+		VideoSparseLateStep: videoSparseLateStep, VideoSparseLateKV: videoSparseLateKV, VideoSparseBackend: strings.TrimSpace(r.Form.Get("video_sparse_backend")),
 		VideoRIFEEnabled: r.Form.Get("video_rife_enabled") == "true", VideoRIFECheckpoint: strings.TrimSpace(r.Form.Get("video_rife_checkpoint")), VideoRIFEMultiplier: videoRIFEMultiplier,
 		VideoRIFEFastMode: r.Form.Get("video_rife_fast_mode") == "true", VideoRIFEEnsemble: r.Form.Get("video_rife_ensemble") == "true", VideoRIFEDtype: strings.TrimSpace(r.Form.Get("video_rife_dtype")), VideoRIFECompile: r.Form.Get("video_rife_compile") == "true", VideoRIFEBatchSize: videoRIFEBatchSize,
 		VideoRTXEnabled: r.Form.Get("video_rtx_enabled") == "true", VideoRTXScale: videoRTXScale, VideoRTXQuality: strings.TrimSpace(r.Form.Get("video_rtx_quality")),
 		VideoColorMatch: r.Form.Get("video_color_match") == "true", VideoColorMethod: strings.TrimSpace(r.Form.Get("video_color_method")), VideoColorStrength: videoColorStrength,
+		VideoSharpenEnabled: r.Form.Get("video_sharpen_enabled") == "true", VideoSharpenMethod: strings.TrimSpace(r.Form.Get("video_sharpen_method")), VideoSharpenStrength: videoSharpenStrength,
+		VideoSharpenRadius: videoSharpenRadius, VideoSharpenThreshold: videoSharpenThreshold, VideoSharpenIterations: videoSharpenIterations,
 		VideoAudioStart: videoAudioStart, VideoOutputCRF: videoOutputCRF,
 		AssistantRequested: r.Form.Get("assistant_requested") == "true", AssistantApplied: r.Form.Get("assistant_applied") == "true",
 		AssistantTemplate: strings.TrimSpace(r.Form.Get("assistant_template_used")), AssistantThink: r.Form.Get("assistant_think_used") == "true",

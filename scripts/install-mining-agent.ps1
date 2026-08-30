@@ -11,6 +11,9 @@ param(
     [string]$InstallDirectory = (Join-Path $env:ProgramData 'AI-Mining-Agent'),
     [string]$MiningRoot = (Join-Path $env:USERPROFILE 'AI-Mining'),
     [string]$ListenAddress = ':8092',
+	[string[]]$AllowedArchivePrefixes = @(
+		'https://github.com/doktor83/SRBMiner-Multi/releases/download/'
+	),
     [string[]]$DockerRemoteAddresses = @(
         '192.168.65.0/24',
         '172.16.0.0/12',
@@ -28,6 +31,48 @@ Remove-Item -LiteralPath $failureLog -Force -ErrorAction SilentlyContinue
 trap {
     ($_ | Out-String) | Set-Content -LiteralPath $failureLog -Encoding UTF8
     exit 1
+}
+
+function Set-StrictServiceDirectoryAcl([string]$Path, [string[]]$AdditionalAccounts = @()) {
+    & icacls.exe $Path /reset /T /C | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to reset ACLs below $Path"
+    }
+
+    $security = [Security.AccessControl.DirectorySecurity]::new()
+    $security.SetAccessRuleProtection($true, $false)
+    $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+        [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    $propagation = [Security.AccessControl.PropagationFlags]::None
+    $allow = [Security.AccessControl.AccessControlType]::Allow
+    $fullControl = [Security.AccessControl.FileSystemRights]::FullControl
+    $principals = @(
+        [Security.Principal.SecurityIdentifier]::new(
+            [Security.Principal.WellKnownSidType]::LocalSystemSid,
+            $null
+        ),
+        [Security.Principal.SecurityIdentifier]::new(
+            [Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid,
+            $null
+        )
+    )
+    foreach ($account in $AdditionalAccounts) {
+        if (-not [string]::IsNullOrWhiteSpace($account)) {
+            $principals += [Security.Principal.NTAccount]::new($account)
+        }
+    }
+    foreach ($principalIdentity in $principals) {
+        $security.AddAccessRule(
+            [Security.AccessControl.FileSystemAccessRule]::new(
+                $principalIdentity,
+                $fullControl,
+                $inheritance,
+                $propagation,
+                $allow
+            )
+        )
+    }
+    [IO.Directory]::SetAccessControl($Path, $security)
 }
 
 if ([string]::IsNullOrWhiteSpace($Token)) {
@@ -120,7 +165,12 @@ if (Test-Path -LiteralPath $minerLogPath -PathType Leaf) {
     $existingLog = Get-Item -LiteralPath $minerLogPath
     if ($existingLog.Length -gt 0) {
         $archivePath = Join-Path $InstallDirectory ("miner-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
-        Move-Item -LiteralPath $minerLogPath -Destination $archivePath -Force
+        try {
+            Move-Item -LiteralPath $minerLogPath -Destination $archivePath -Force
+        } catch [IO.IOException] {
+            # A preserved running miner can keep this file open. The new agent
+            # safely continues with the existing log instead of failing midway.
+        }
     }
 }
 $config = [ordered]@{
@@ -129,20 +179,15 @@ $config = [ordered]@{
     token = $Token
     log_file = $logPath
     miner_log_file = $minerLogPath
+	allowed_archive_prefixes = @($AllowedArchivePrefixes)
 }
 $configJSON = $config | ConvertTo-Json
 [IO.File]::WriteAllText($configPath, $configJSON, [Text.UTF8Encoding]::new($false))
 $logViewer = "@echo off`r`ntitle Miner log`r`npowershell.exe -NoLogo -NoProfile -NoExit -Command `"`$p='$minerLogPath'; while (-not (Test-Path -LiteralPath `$p)) { Write-Host 'Waiting for miner.log...'; Start-Sleep -Seconds 1 }; Get-Content -LiteralPath `$p -Tail 200 -Wait`"`r`n"
 [IO.File]::WriteAllText($logViewerPath, $logViewer, [Text.ASCIIEncoding]::new())
 
-$aclGrants = @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
-if ($InteractiveConsole) {
-    $aclGrants += "$($identity.Name):(OI)(CI)F"
-}
-& icacls.exe $InstallDirectory /inheritance:r /grant:r $aclGrants | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    throw 'Failed to apply the mining agent directory ACL.'
-}
+$additionalAclAccounts = if ($InteractiveConsole) { @($identity.Name) } else { @() }
+Set-StrictServiceDirectoryAcl -Path $InstallDirectory -AdditionalAccounts $additionalAclAccounts
 
 $action = New-ScheduledTaskAction -Execute $targetExecutable -Argument "-config `"$configPath`"" -WorkingDirectory $InstallDirectory
 if ($InteractiveConsole) {

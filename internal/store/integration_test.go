@@ -122,6 +122,8 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 		t.Fatalf("find user by email: user=%+v err=%v", byEmail, err)
 	}
 	assertComfyUserStateIsolation(t, ctx, repository, registeredUserID, adminID)
+	assertComfyInputLifecycle(t, ctx, db, repository, registeredUserID)
+	assertComfyOutputCleanupLifecycle(t, ctx, db, repository, registeredUserID)
 
 	sessionToken := "integration-session-token"
 	sessionHash := security.HashToken(sessionToken)
@@ -219,10 +221,101 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	}
 }
 
+func assertComfyInputLifecycle(t *testing.T, ctx context.Context, db *sql.DB, repository *store.Store, userID int64) {
+	t.Helper()
+	const (
+		reservationID = "0123456789abcdef0123456789abcdef"
+		filename      = "gateway-0123456789abcdef0123456789abcdef.png"
+		contentHash   = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	)
+	quota := store.ComfyInputQuota{UserBytes: 1024, GlobalBytes: 2048, UserFiles: 2, GlobalFiles: 4}
+	if err := repository.ReserveComfyInputAsset(ctx, userID, reservationID, filename, "gateway/owner", 12, contentHash, quota); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE comfy_input_assets SET expires_at=now() - interval '1 second' WHERE id=$1`, reservationID); err != nil {
+		t.Fatal(err)
+	}
+	items, err := repository.ExpiredComfyInputAssets(ctx, 10)
+	if err != nil || len(items) != 1 || items[0].ID != reservationID {
+		t.Fatalf("expired reserved ComfyUI input = %#v, err=%v", items, err)
+	}
+	if deleted, err := repository.DeleteComfyInputAssetsByIDs(ctx, []string{reservationID}); err != nil || deleted != 1 {
+		t.Fatalf("delete reserved ComfyUI input = %d, err=%v", deleted, err)
+	}
+}
+
+func assertComfyOutputCleanupLifecycle(t *testing.T, ctx context.Context, db *sql.DB, repository *store.Store, userID int64) {
+	t.Helper()
+	const contentHash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	scheduled := domain.ComfyOutputCleanupTombstone{
+		Filename: "large.mp4", Subfolder: "tests", StorageType: "output",
+		SizeBytes: 96 << 20, ContentHash: contentHash,
+	}
+	if err := repository.ScheduleComfyOutputCleanup(ctx, scheduled, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if due, err := repository.DueComfyOutputCleanup(ctx, 10); err != nil || len(due) != 0 {
+		t.Fatalf("future scheduled cleanup became due: %#v err=%v", due, err)
+	}
+	if err := repository.ScheduleComfyOutputCleanup(ctx, scheduled, time.Now().Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if due, err := repository.DueComfyOutputCleanup(ctx, 10); err != nil || len(due) != 1 || due[0].Filename != scheduled.Filename {
+		t.Fatalf("scheduled cleanup = %#v err=%v", due, err)
+	} else if _, err := repository.DeleteComfyOutputCleanupByIDs(ctx, []int64{due[0].ID}); err != nil {
+		t.Fatal(err)
+	}
+	eventID, err := repository.InsertContentEvent(ctx, domain.ContentEventRecord{
+		UserID: userID, Service: "comfyui", Kind: "comfyui_prompt", ExternalID: "cleanup-prompt",
+		Model: "model", PromptCipher: []byte{1}, ResponseCipher: []byte{2}, MetadataCipher: []byte{3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownership := domain.ComfyOutputOwnership{PromptID: "cleanup-prompt", Filename: "cleanup.png", Subfolder: "tests", StorageType: "output", MediaType: "image"}
+	if err := repository.InsertComfyOutputOwnerships(ctx, userID, []domain.ComfyOutputOwnership{ownership}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.InsertContentMedia(ctx, domain.ContentMediaRecord{
+		EventID: eventID, MediaType: "image", MIMEType: "image/png", OriginalName: ownership.Filename,
+		Subfolder: ownership.Subfolder, StorageType: ownership.StorageType, PayloadCipher: []byte("encrypted payload"),
+		SizeBytes: 12, ContentHash: contentHash, ExpiresAt: time.Now().Add(-time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	expired, err := repository.ExpiredComfyMedia(ctx, 10)
+	if err != nil || len(expired) != 1 || !expired[0].HasOwnership {
+		t.Fatalf("expired ComfyUI media = %#v, err=%v", expired, err)
+	}
+	if deleted, err := repository.QueueExpiredComfyOutputCleanup(ctx, expired); err != nil || deleted != 1 {
+		t.Fatalf("queue expired ComfyUI media = %d, err=%v", deleted, err)
+	}
+	var mediaRows int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM content_media WHERE event_id=$1`, eventID).Scan(&mediaRows); err != nil || mediaRows != 0 {
+		t.Fatalf("expired encrypted payload remains: rows=%d err=%v", mediaRows, err)
+	}
+	tombstones, err := repository.DueComfyOutputCleanup(ctx, 10)
+	if err != nil || len(tombstones) != 1 || tombstones[0].ContentHash != contentHash {
+		t.Fatalf("ComfyUI cleanup tombstones = %#v, err=%v", tombstones, err)
+	}
+	if deferred, err := repository.DeferComfyOutputCleanup(ctx, []int64{tombstones[0].ID}, time.Hour); err != nil || deferred != 1 {
+		t.Fatalf("defer ComfyUI output cleanup = %d, err=%v", deferred, err)
+	}
+	if due, err := repository.DueComfyOutputCleanup(ctx, 10); err != nil || len(due) != 0 {
+		t.Fatalf("deferred tombstone remained due: %#v err=%v", due, err)
+	}
+	if deleted, err := repository.DeleteComfyOutputCleanupByIDs(ctx, []int64{tombstones[0].ID}); err != nil || deleted != 1 {
+		t.Fatalf("delete ComfyUI cleanup tombstone = %d, err=%v", deleted, err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM content_events WHERE id=$1`, eventID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func resetIntegrationDatabase(t *testing.T, db *sql.DB) {
 	t.Helper()
 	if _, err := db.Exec(`
-		TRUNCATE miners, comfy_userdata, comfy_settings, comfy_output_ownership, content_media, content_events, websocket_sessions, proxy_requests,
+		TRUNCATE miners, comfy_output_cleanup_tombstones, comfy_input_assets, comfy_userdata, comfy_settings, comfy_output_ownership, content_media, content_events, websocket_sessions, proxy_requests,
 			audit_log, invite_uses, invites, sessions, users RESTART IDENTITY CASCADE
 		;
 		INSERT INTO miners (name, script_path, process_name, enabled, is_default)
@@ -287,7 +380,7 @@ func assertComfyUserStateIsolation(t *testing.T, ctx context.Context, repository
 func assertMiningProfiles(t *testing.T, ctx context.Context, repository *store.Store, adminID int64) {
 	t.Helper()
 	initial, err := repository.DefaultMiner(ctx)
-	if err != nil || initial.ProcessName != "SRBMiner-MULTI.exe" || !strings.HasSuffix(initial.ScriptPath, `start-mining-pearl.bat`) {
+	if err != nil || initial.ProcessName != "miner.exe" || initial.ScriptPath != `mining-root/example/start-mining.bat` {
 		t.Fatalf("initial mining profile = %+v, err=%v", initial, err)
 	}
 	icon := []byte{0x89, 'P', 'N', 'G'}

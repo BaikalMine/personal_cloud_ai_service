@@ -597,6 +597,48 @@ var migrationCatalog = []migration{
 			`ALTER TABLE content_events ADD CONSTRAINT content_events_service_check CHECK (service IN ('comfyui','openwebui','ollama'))`,
 		},
 	},
+	{
+		version: 34,
+		name:    "tracked_comfy_input_assets",
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS comfy_input_assets (
+				id TEXT PRIMARY KEY CHECK (char_length(id) BETWEEN 32 AND 128),
+				user_id BIGINT NULL REFERENCES users(id) ON DELETE SET NULL,
+				filename TEXT NOT NULL DEFAULT '',
+				subfolder TEXT NOT NULL DEFAULT '',
+				storage_type TEXT NOT NULL DEFAULT 'input' CHECK (storage_type = 'input'),
+				size_bytes BIGINT NOT NULL CHECK (size_bytes >= 0 AND size_bytes <= 335544320),
+				content_hash TEXT NOT NULL CHECK (char_length(content_hash) = 64),
+				state TEXT NOT NULL DEFAULT 'reserved' CHECK (state IN ('reserved','stored')),
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				expires_at TIMESTAMPTZ NOT NULL DEFAULT (now() + interval '15 minutes'),
+				cleanup_retry_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				cleanup_attempts INTEGER NOT NULL DEFAULT 0 CHECK (cleanup_attempts >= 0)
+			)`,
+			`CREATE INDEX IF NOT EXISTS comfy_input_assets_user_live_idx ON comfy_input_assets(user_id,expires_at) WHERE user_id IS NOT NULL`,
+			`CREATE INDEX IF NOT EXISTS comfy_input_assets_expiry_idx ON comfy_input_assets(cleanup_retry_at,expires_at)`,
+		},
+	},
+	{
+		version: 35,
+		name:    "comfy_output_cleanup_tombstones",
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS comfy_output_cleanup_tombstones (
+				id BIGSERIAL PRIMARY KEY,
+				filename TEXT NOT NULL,
+				subfolder TEXT NOT NULL DEFAULT '',
+				storage_type TEXT NOT NULL DEFAULT 'output' CHECK (storage_type = 'output'),
+				size_bytes BIGINT NOT NULL CHECK (size_bytes >= 0 AND size_bytes <= 2147483648),
+				content_hash TEXT NOT NULL CHECK (char_length(content_hash) = 64),
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+				UNIQUE(filename,subfolder,storage_type,size_bytes,content_hash)
+			)`,
+			`CREATE INDEX IF NOT EXISTS comfy_output_cleanup_due_idx ON comfy_output_cleanup_tombstones(next_attempt_at,id)`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

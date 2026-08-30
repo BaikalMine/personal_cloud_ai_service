@@ -15,11 +15,12 @@ import (
 )
 
 type config struct {
-	ListenAddress string `json:"listen_address"`
-	MiningRoot    string `json:"mining_root"`
-	Token         string `json:"token"`
-	LogFile       string `json:"log_file"`
-	MinerLogFile  string `json:"miner_log_file"`
+	ListenAddress          string   `json:"listen_address"`
+	MiningRoot             string   `json:"mining_root"`
+	Token                  string   `json:"token"`
+	LogFile                string   `json:"log_file"`
+	MinerLogFile           string   `json:"miner_log_file"`
+	AllowedArchivePrefixes []string `json:"allowed_archive_prefixes"`
 }
 
 func main() {
@@ -43,7 +44,7 @@ func run(configPath string) error {
 	log.SetOutput(logFile)
 	log.SetFlags(log.Ldate | log.Ltime | log.LUTC)
 
-	controller, err := miningagent.NewController(settings.MiningRoot, settings.MinerLogFile)
+	controller, err := miningagent.NewController(settings.MiningRoot, settings.MinerLogFile, settings.AllowedArchivePrefixes...)
 	if err != nil {
 		return err
 	}
@@ -91,6 +92,9 @@ func loadConfig(path string) (config, error) {
 	}
 	if settings.MinerLogFile == "" {
 		settings.MinerLogFile = filepath.Join(base, "miner-output.log")
+	}
+	if len(settings.AllowedArchivePrefixes) == 0 {
+		settings.AllowedArchivePrefixes = []string{"https://github.com/doktor83/SRBMiner-Multi/releases/download/"}
 	}
 	return settings, nil
 }

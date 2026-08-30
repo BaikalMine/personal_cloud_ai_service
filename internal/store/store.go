@@ -295,12 +295,48 @@ func (s *Store) RevokeOtherSessions(ctx context.Context, userID int64, currentHa
 }
 
 func (s *Store) RevokeOwnedSession(ctx context.Context, sessionID, userID int64, currentHash string) (bool, error) {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE id = $1 AND user_id = $2 AND token_hash <> $3`, sessionID, userID, currentHash)
-	if err != nil {
-		return false, err
+	_, revoked, err := s.RevokeOwnedSessionWithHash(ctx, sessionID, userID, currentHash)
+	return revoked, err
+}
+
+func (s *Store) RevokeOwnedSessionWithHash(ctx context.Context, sessionID, userID int64, currentHash string) (string, bool, error) {
+	var tokenHash string
+	err := s.db.QueryRowContext(ctx, `
+		DELETE FROM sessions WHERE id = $1 AND user_id = $2 AND token_hash <> $3
+		RETURNING token_hash
+	`, sessionID, userID, currentHash).Scan(&tokenHash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
 	}
-	affected, err := result.RowsAffected()
-	return affected > 0, err
+	return tokenHash, err == nil, err
+}
+
+func (s *Store) ActiveSessionHashes(ctx context.Context, tokenHashes []string, idleTimeout time.Duration) (map[string]struct{}, error) {
+	active := make(map[string]struct{}, len(tokenHashes))
+	if len(tokenHashes) == 0 {
+		return active, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT s.token_hash
+		FROM sessions s JOIN users u ON u.id=s.user_id
+		WHERE s.token_hash = ANY($1)
+		  AND s.expires_at > now()
+		  AND s.last_seen_at > now() - ($2::bigint * interval '1 second')
+		  AND u.disabled=false
+		  AND (u.account_expires_at IS NULL OR u.account_expires_at > now())
+	`, pq.Array(tokenHashes), int64(idleTimeout.Seconds()))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var hash string
+		if err := rows.Scan(&hash); err != nil {
+			return nil, err
+		}
+		active[hash] = struct{}{}
+	}
+	return active, rows.Err()
 }
 
 func (s *Store) ListAccountSessions(ctx context.Context, userID int64, currentHash string, idleTimeout time.Duration) ([]domain.AccountSession, error) {

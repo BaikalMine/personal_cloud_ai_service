@@ -308,7 +308,7 @@ func (a *App) handleAdminContent(w http.ResponseWriter, r *http.Request) {
 		events = append(events, ContentEventView{
 			ID: row.ID, UserID: row.UserID, Username: row.Username, Service: row.Service,
 			Kind: row.Kind, ExternalID: row.ExternalID, Model: row.Model, Prompt: prompt,
-			Response: response, Metadata: metadata, Assistant: contentAssistantFromMetadata(metadata), GenerationState: row.GenerationState,
+			Response: response, Metadata: prettyContentMetadata(metadata), Assistant: contentAssistantFromMetadata(metadata), GenerationState: row.GenerationState,
 			Sensitive: row.Sensitive || visualPending, VisualPending: visualPending,
 			GeneratedMediaCount: row.GeneratedMediaCount, MediaExpiresAt: row.MediaExpiresAt,
 			MediaExpired: row.GeneratedMediaCount > 0 && row.MediaCount == 0 && !row.MediaExpiresAt.IsZero() && row.MediaExpiresAt.Before(time.Now()),
@@ -333,6 +333,18 @@ func (a *App) handleAdminContent(w http.ResponseWriter, r *http.Request) {
 		"Title": "AI-контент пользователей", "Events": events,
 		"Username": username, "Service": service, "Query": query, "Overview": overview,
 	})
+}
+
+func prettyContentMetadata(metadata string) string {
+	var payload any
+	if json.Unmarshal([]byte(metadata), &payload) != nil {
+		return metadata
+	}
+	formatted, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return metadata
+	}
+	return string(formatted)
 }
 
 func contentAssistantFromMetadata(metadata string) *ContentAssistantView {
@@ -511,6 +523,7 @@ func (a *App) handleAdminUserDetail(w http.ResponseWriter, r *http.Request, rest
 				return
 			}
 			if updated {
+				a.closeUserWebSockets(id)
 				a.audit(r.Context(), &actor.ID, "user_disabled", "user", &id, a.clientIP(r), r.UserAgent(), map[string]any{"sessions_revoked": revoked})
 			}
 		case "enable":
@@ -537,11 +550,13 @@ func (a *App) handleAdminUserDetail(w http.ResponseWriter, r *http.Request, rest
 				http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?delete=confirmation_invalid", id), http.StatusFound)
 				return
 			}
+			a.closeUserWebSockets(id)
 			a.audit(r.Context(), &actor.ID, "user_deleted", "user", &id, a.clientIP(r), r.UserAgent(), map[string]any{"username": confirmation})
 			http.Redirect(w, r, "/admin/users?deleted=1", http.StatusFound)
 			return
 		case "revoke_sessions":
 			_, _ = a.store.RevokeSessions(r.Context(), id)
+			a.closeUserWebSockets(id)
 			a.audit(r.Context(), &actor.ID, "sessions_revoked", "user", &id, a.clientIP(r), r.UserAgent(), nil)
 		case "unlock":
 			unlocked, err := a.store.UnlockUser(r.Context(), id)
@@ -575,6 +590,7 @@ func (a *App) handleAdminUserDetail(w http.ResponseWriter, r *http.Request, rest
 				return
 			}
 			if updated {
+				a.closeUserWebSockets(id)
 				a.audit(r.Context(), &actor.ID, "user_service_access_updated", "user", &id, a.clientIP(r), r.UserAgent(), map[string]any{"comfyui": comfyUI, "openwebui": openWebUI, "quick_generation": quickGeneration, "text_to_image": textToImage, "image_to_image": imageToImage, "video": video, "manage_mining": manageMining, "pause_mining_for_quick_generation": pauseMiningForQuickGeneration, "generation_daily_limit": dailyLimit, "generation_total_limit": totalLimit})
 			}
 			http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?access=changed", id), http.StatusFound)
@@ -607,6 +623,7 @@ func (a *App) handleAdminUserDetail(w http.ResponseWriter, r *http.Request, rest
 				a.revokeOtherSessions(id, r)
 			} else {
 				_, _ = a.store.RevokeSessions(r.Context(), id)
+				a.closeUserWebSockets(id)
 			}
 			a.audit(r.Context(), &actor.ID, "admin_user_password_changed", "user", &id, a.clientIP(r), r.UserAgent(), nil)
 			http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?password=changed", id), http.StatusFound)

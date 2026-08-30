@@ -26,7 +26,7 @@ var (
 	allowedIconMIMEs     = map[string]bool{"image/png": true, "image/jpeg": true, "image/webp": true, "image/x-icon": true, "image/vnd.microsoft.icon": true}
 )
 
-func (a *App) miningOverview(ctx context.Context, includeDisabled bool) MiningOverview {
+func (a *App) miningOverview(ctx context.Context, includeDisabled, includeScript bool) MiningOverview {
 	miners, err := a.store.ListMiners(ctx, includeDisabled)
 	if err != nil {
 		return MiningOverview{Message: "Не удалось загрузить настройки майнинга."}
@@ -70,7 +70,7 @@ func (a *App) miningOverview(ctx context.Context, includeDisabled bool) MiningOv
 	if selected == nil {
 		selected = overview.Default
 	}
-	if overview.Available && selected != nil {
+	if includeScript && overview.Available && selected != nil {
 		script, scriptErr := a.mining.Script(ctx, selected.ScriptPath)
 		if scriptErr != nil && script.Message == "" {
 			script.Message = "Не удалось прочитать содержимое скрипта."
@@ -96,7 +96,7 @@ func (a *App) handleMiningToggle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "доступ к майнингу не разрешён", http.StatusForbidden)
 		return
 	}
-	overview := a.miningOverview(r.Context(), true)
+	overview := a.miningOverview(r.Context(), true, false)
 	if !overview.Available {
 		http.Redirect(w, r, "/app?mining=unavailable", http.StatusSeeOther)
 		return
@@ -200,7 +200,7 @@ func (a *App) handleAdminMining(w http.ResponseWriter, r *http.Request) {
 			a.renderAdminMining(w, r, "Майнинг зарезервирован для приоритетной быстрой генерации. Дождитесь её завершения.", "")
 			return
 		}
-		overview := a.miningOverview(r.Context(), true)
+		overview := a.miningOverview(r.Context(), true, false)
 		if !overview.Available {
 			a.renderAdminMining(w, r, overview.Message, "")
 			return
@@ -289,7 +289,7 @@ func (a *App) handleCreateMiner(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) renderAdminMining(w http.ResponseWriter, r *http.Request, errorMessage, status string) {
 	a.render(w, r, "admin_mining", map[string]any{
-		"Title": "Управление майнингом", "Mining": a.miningOverview(r.Context(), true), "Error": errorMessage, "Status": status,
+		"Title": "Управление майнингом", "Mining": a.miningOverview(r.Context(), true, true), "Error": errorMessage, "Status": status,
 	})
 }
 

@@ -53,7 +53,7 @@
           <button type="submit" {{if not .Mining.Available}}disabled{{end}} class="{{if .Mining.Running}}danger{{end}}" data-confirm="{{if .Mining.Running}}Остановить майнинг и освободить ресурсы?{{else}}Запустить майнинг? Он займёт вычислительные ресурсы этого компьютера.{{end}}">{{if .Mining.Running}}Остановить майнинг{{else}}Запустить майнинг{{end}}</button>
         </form>
       </div>
-      <div class="miner-script-used">
+      {{if .CanViewMiningDetails}}<div class="miner-script-used">
         <span>Используемый скрипт</span>
         <code>{{if .Mining.Active}}{{.Mining.Active.ScriptPath}}{{else if .Mining.Default}}{{.Mining.Default.ScriptPath}}{{else}}Не настроен{{end}}</code>
       </div>
@@ -63,7 +63,7 @@
         <div class="script-fingerprint"><span>SHA-256</span><code>{{.Mining.Script.SHA256}}</code></div>
         <pre>{{.Mining.Script.Content}}</pre>
         {{else}}<p class="muted">{{if .Mining.Script.Message}}{{.Mining.Script.Message}}{{else}}Содержимое скрипта недоступно.{{end}}</p>{{end}}
-      </details>
+      </details>{{end}}
     </div>
   </section>{{end}}
 

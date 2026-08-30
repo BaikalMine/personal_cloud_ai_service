@@ -10,5 +10,5 @@ import (
 )
 
 func (unsupportedController) System(context.Context) (mining.SystemMetrics, error) {
-	return mining.SystemMetrics{Message: "Метрики доступны только на Windows-хосте."}, errors.New("Windows host required")
+	return mining.SystemMetrics{Message: "Метрики доступны только на Windows-хосте."}, errors.New("windows host required")
 }

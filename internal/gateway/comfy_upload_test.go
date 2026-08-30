@@ -3,6 +3,9 @@ package gateway
 import (
 	"bytes"
 	"errors"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -17,7 +20,7 @@ func TestRewriteComfyUploadAddsUserNamespaceAndPreservesFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload := bytes.Repeat([]byte{0x42}, maxComfyUploadField+4096)
+	payload := append(testPNG(t), bytes.Repeat([]byte{0x42}, maxComfyUploadField+4096)...)
 	if _, err := file.Write(payload); err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +57,7 @@ func TestRewriteComfyUploadAddsMissingSubfolder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = file.Write([]byte("image"))
+	_, _ = file.Write(testPNG(t))
 	_ = writer.Close()
 
 	app := &App{cfg: Config{SessionSecret: "01234567890123456789012345678901"}}
@@ -70,6 +73,44 @@ func TestRewriteComfyUploadAddsMissingSubfolder(t *testing.T) {
 	}
 }
 
+func TestValidateComfyUploadPayloadRejectsDecodedImageBomb(t *testing.T) {
+	payload := make([]byte, 30)
+	copy(payload[0:4], "RIFF")
+	copy(payload[8:12], "WEBP")
+	copy(payload[12:16], "VP8X")
+	widthMinusOne := 9_999
+	heightMinusOne := 9_999
+	payload[24], payload[25], payload[26] = byte(widthMinusOne), byte(widthMinusOne>>8), byte(widthMinusOne>>16)
+	payload[27], payload[28], payload[29] = byte(heightMinusOne), byte(heightMinusOne>>8), byte(heightMinusOne>>16)
+	if err := validateComfyUploadPayload("large.webp", payload); err == nil {
+		t.Fatal("oversized decoded image was accepted")
+	}
+}
+
+func TestValidateComfyUploadPayloadAllowsNonImageAudio(t *testing.T) {
+	if err := validateComfyUploadPayload("reference.mp3", []byte("ID3\x04\x00\x00audio")); err != nil {
+		t.Fatalf("audio payload was rejected: %v", err)
+	}
+}
+
+func TestValidateComfyUploadPayloadRejectsUnknownFile(t *testing.T) {
+	if err := validateComfyUploadPayload("payload.bin", []byte("not a supported media file")); err == nil {
+		t.Fatal("unknown upload payload was accepted")
+	}
+	if err := validateComfyUploadPayload("fake.mp3", []byte("not really an mp3")); err == nil {
+		t.Fatal("spoofed audio payload was accepted")
+	}
+}
+
+func TestComfyStoredUploadFilenamePreservesSafeExtension(t *testing.T) {
+	if got := comfyStoredUploadFilename("reservation", "Photo.PNG"); got != "gateway-reservation.png" {
+		t.Fatalf("stored filename = %q", got)
+	}
+	if got := comfyStoredUploadFilename("reservation", "unsafe.bad-extension!"); got != "gateway-reservation.bin" {
+		t.Fatalf("unsafe stored filename = %q", got)
+	}
+}
+
 func TestValidateComfyUploadReferenceRejectsAnotherNamespace(t *testing.T) {
 	own := "gateway/gateway-111111111111111111111111"
 	foreign := []byte(`{"filename":"private.png","subfolder":"gateway/gateway-222222222222222222222222","type":"input"}`)
@@ -77,8 +118,8 @@ func TestValidateComfyUploadReferenceRejectsAnotherNamespace(t *testing.T) {
 		t.Fatalf("foreign reference error = %v", err)
 	}
 	legacy := []byte(`{"filename":"legacy.png","subfolder":"legacy","type":"input"}`)
-	if err := validateComfyUploadReference(legacy, own); err != nil {
-		t.Fatalf("legacy reference was rejected: %v", err)
+	if err := validateComfyUploadReference(legacy, own); !errors.Is(err, errForeignComfyAsset) {
+		t.Fatalf("legacy reference error = %v", err)
 	}
 }
 
@@ -94,6 +135,9 @@ func TestComfyNamespaceOwnership(t *testing.T) {
 	}
 	if namespaced, owned := comfyNamespaceOwnership("legacy", own); namespaced || owned {
 		t.Fatalf("legacy namespace = namespaced:%v owned:%v", namespaced, owned)
+	}
+	if namespaced, owned := comfyNamespaceOwnership(own+"/nested/../gateway/gateway-222222222222222222222222", own); !namespaced || owned {
+		t.Fatalf("noncanonical namespace = namespaced:%v owned:%v", namespaced, owned)
 	}
 }
 
@@ -119,4 +163,15 @@ func readMultipartValues(t *testing.T, request *http.Request) map[string][]byte 
 		values[part.FormName()] = payload
 	}
 	return values
+}
+
+func testPNG(t *testing.T) []byte {
+	t.Helper()
+	var body bytes.Buffer
+	canvas := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	canvas.Set(0, 0, color.RGBA{R: 255, A: 255})
+	if err := png.Encode(&body, canvas); err != nil {
+		t.Fatal(err)
+	}
+	return body.Bytes()
 }

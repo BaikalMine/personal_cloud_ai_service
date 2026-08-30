@@ -24,7 +24,7 @@ type Controller interface {
 type Server struct {
 	tokenHash   [32]byte
 	controller  Controller
-	comfyOutput ComfyTarget
+	comfyTarget ComfyTarget
 }
 
 func NewServer(token string, controller Controller, comfyTarget ...ComfyTarget) (*Server, error) {
@@ -36,7 +36,7 @@ func NewServer(token string, controller Controller, comfyTarget ...ComfyTarget) 
 	}
 	server := &Server{tokenHash: sha256.Sum256([]byte(strings.TrimSpace(token))), controller: controller}
 	if len(comfyTarget) > 0 {
-		server.comfyOutput = comfyTarget[0]
+		server.comfyTarget = comfyTarget[0]
 	}
 	return server, nil
 }
@@ -48,6 +48,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/v1/check", s.authenticate(http.HandlerFunc(s.handleCheck)))
 	mux.Handle("/v1/install", s.authenticate(http.HandlerFunc(s.handleInstall)))
 	mux.Handle("/v1/comfy-output/delete", s.authenticate(http.HandlerFunc(s.handleDeleteComfyOutput)))
+	mux.Handle("/v1/comfy-asset/delete", s.authenticate(http.HandlerFunc(s.handleDeleteComfyAsset)))
 	return securityHeaders(mux)
 }
 
@@ -94,13 +95,36 @@ func (s *Server) handleDeleteComfyOutput(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, updates.ComfyOutputDeleteResult{Rejected: len(request.Files)})
 		return
 	}
-	result, err := DeleteComfyOutputFiles(r.Context(), s.comfyOutput, request.Files)
+	result, err := DeleteComfyOutputFiles(r.Context(), s.comfyTarget, request.Files)
 	if err != nil {
 		log.Printf("delete ComfyUI output: %v", err)
 		writeJSON(w, http.StatusInternalServerError, result)
 		return
 	}
 	log.Printf("processed %d expired ComfyUI output files: deleted=%d missing=%d mismatched=%d rejected=%d", len(request.Files), result.Deleted, result.Missing, result.Mismatched, result.Rejected)
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleDeleteComfyAsset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBytes)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var request updates.ComfyAssetDeleteRequest
+	if err := decoder.Decode(&request); err != nil || len(request.Files) == 0 || len(request.Files) > 50 {
+		writeJSON(w, http.StatusBadRequest, updates.ComfyAssetDeleteResult{Rejected: len(request.Files)})
+		return
+	}
+	result, err := DeleteComfyAssetFiles(r.Context(), s.comfyTarget, request.Files)
+	if err != nil {
+		log.Printf("delete ComfyUI asset: %v", err)
+		writeJSON(w, http.StatusInternalServerError, result)
+		return
+	}
+	log.Printf("processed %d expired ComfyUI assets: deleted=%d missing=%d mismatched=%d rejected=%d", len(request.Files), result.Deleted, result.Missing, result.Mismatched, result.Rejected)
 	writeJSON(w, http.StatusOK, result)
 }
 

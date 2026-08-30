@@ -20,6 +20,8 @@ services:
       timeout: 5s
       retries: 10
     logging: *default-logging
+    mem_limit: 1g
+    pids_limit: 128
     stop_grace_period: 30s
     restart: unless-stopped
 
@@ -29,6 +31,9 @@ services:
     init: true
     env_file:
       - .env
+    environment:
+      GOMEMLIMIT: 768MiB
+      GOGC: "75"
     ports:
       - "8090:8090"
       - "192.168.1.86:8091:8091"
@@ -56,6 +61,8 @@ services:
       retries: 5
       start_period: 10s
     logging: *default-logging
+    mem_limit: 1g
+    pids_limit: 128
     stop_grace_period: 15s
     restart: unless-stopped
 
@@ -65,6 +72,10 @@ services:
     init: true
     environment:
       HF_HOME: /models
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      MKL_NUM_THREADS: "2"
+      OMP_NUM_THREADS: "2"
+      TOKENIZERS_PARALLELISM: "false"
     volumes:
       - content-moderator-models:/models
     networks:
@@ -83,6 +94,8 @@ services:
       retries: 20
       start_period: 30s
     logging: *default-logging
+    mem_limit: 3g
+    pids_limit: 64
     stop_grace_period: 20s
     restart: unless-stopped
 

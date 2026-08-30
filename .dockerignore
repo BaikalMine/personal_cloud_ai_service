@@ -4,6 +4,10 @@ gateway
 postgres-data
 tmp
 backups
+bin
+dist
+__pycache__
+*.py[cod]
 *.dump
 *.zip
 coverage.out

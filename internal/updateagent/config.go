@@ -27,6 +27,7 @@ type GitTarget struct {
 
 type ComfyTarget struct {
 	WorkingDirectory string   `json:"working_directory"`
+	InputDirectory   string   `json:"input_directory"`
 	OutputDirectory  string   `json:"output_directory"`
 	RemoteURL        string   `json:"remote_url"`
 	Branch           string   `json:"branch"`
@@ -104,6 +105,7 @@ func (t *GitTarget) normalize(name string, required bool) error {
 
 func (t *ComfyTarget) normalize() error {
 	t.WorkingDirectory = strings.TrimSpace(t.WorkingDirectory)
+	t.InputDirectory = strings.TrimSpace(t.InputDirectory)
 	t.OutputDirectory = strings.TrimSpace(t.OutputDirectory)
 	t.RemoteURL = strings.TrimSpace(t.RemoteURL)
 	t.Branch = strings.TrimSpace(t.Branch)
@@ -120,6 +122,9 @@ func (t *ComfyTarget) normalize() error {
 	}
 	if t.OutputDirectory != "" && !filepath.IsAbs(t.OutputDirectory) {
 		return fmt.Errorf("comfyui output_directory path must be absolute")
+	}
+	if t.InputDirectory != "" && !filepath.IsAbs(t.InputDirectory) {
+		return fmt.Errorf("comfyui input_directory path must be absolute")
 	}
 	if _, err := url.ParseRequestURI(t.RemoteURL); err != nil {
 		return fmt.Errorf("comfyui remote_url: %w", err)

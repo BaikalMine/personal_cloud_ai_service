@@ -38,28 +38,39 @@ const (
 type Config = config.Config
 
 type App struct {
-	cfg                 Config
-	tpl                 *Templates
-	loginLimiter        *security.LoginLimiter
-	csrfSigner          *security.CSRFSigner
-	store               *store.Store
-	mining              *mining.Client
-	systemMonitor       *mining.Client
-	promptAssistant     *promptassistant.Client
-	contentModerator    *moderation.Client
-	updates             *updates.Client
-	virusTotal          *virustotal.Client
-	contentCipher       *contentcrypto.Cipher
-	mediaCaptureSlots   chan struct{}
-	adminMediaSlots     chan struct{}
-	comfyUploadSlots    chan struct{}
-	sensitiveMediaSlots chan struct{}
-	comfyMemorySlots    chan struct{}
-	generationMu        sync.Mutex
-	miningPauseMu       sync.Mutex
-	comfyQueueMu        sync.Mutex
-	comfyQueueWasBusy   bool
-	generationJobs      map[string]*generationJob
+	cfg                    Config
+	tpl                    *Templates
+	loginLimiter           *security.LoginLimiter
+	loginIPLimiter         *security.LoginLimiter
+	loginAuditLimiter      *security.LoginLimiter
+	inviteLimiter          *security.LoginLimiter
+	comfyPromptLimiter     *security.LoginLimiter
+	csrfSigner             *security.CSRFSigner
+	store                  *store.Store
+	mining                 *mining.Client
+	systemMonitor          *mining.Client
+	promptAssistant        *promptassistant.Client
+	contentModerator       *moderation.Client
+	updates                *updates.Client
+	virusTotal             *virustotal.Client
+	contentCipher          *contentcrypto.Cipher
+	mediaCaptureSlots      chan struct{}
+	adminMediaSlots        chan struct{}
+	comfyUploadSlots       chan struct{}
+	sensitiveMediaSlots    chan struct{}
+	comfyMemorySlots       chan struct{}
+	passwordWorkSlots      chan struct{}
+	promptAssistantSlots   chan struct{}
+	mediaDownloadSlots     chan struct{}
+	comfyPromptSlots       chan struct{}
+	generationMu           sync.Mutex
+	miningPauseMu          sync.Mutex
+	comfyQueueMu           sync.Mutex
+	comfyPromptAdmissionMu sync.Mutex
+	websocketMu            sync.Mutex
+	comfyQueueWasBusy      bool
+	generationJobs         map[string]*generationJob
+	websocketConnections   map[*trackedWebSocket]struct{}
 
 	requestsTotal atomic.Int64
 	loginFailures atomic.Int64
@@ -188,8 +199,9 @@ type ContentOverview struct {
 
 type captureWriter struct {
 	http.ResponseWriter
-	status int
-	bytes  int64
+	status   int
+	bytes    int64
+	onHijack func(net.Conn)
 }
 
 func (w *captureWriter) WriteHeader(status int) {
@@ -241,6 +253,9 @@ func (w *captureWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	conn, rw, err := h.Hijack()
 	if err == nil && w.status == 0 {
 		w.status = http.StatusSwitchingProtocols
+	}
+	if err == nil && w.onHijack != nil {
+		w.onHijack(conn)
 	}
 	return conn, rw, err
 }

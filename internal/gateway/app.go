@@ -96,25 +96,34 @@ func Run() error {
 	}
 
 	app := &App{
-		cfg:                 cfg,
-		tpl:                 tpl,
-		loginLimiter:        security.NewLoginLimiter(10*time.Minute, 10),
-		csrfSigner:          security.NewCSRFSigner(cfg.SessionSecret),
-		store:               repository,
-		mining:              mining.NewClient(cfg.MiningAgentURL, cfg.MiningAgentToken),
-		systemMonitor:       mining.NewClient(cfg.SystemMonitorAgentURL, cfg.SystemMonitorAgentToken),
-		promptAssistant:     promptassistant.NewClient(cfg.OllamaUpstream, cfg.PromptAssistantModel),
-		contentModerator:    moderation.NewClient(cfg.ContentModeratorUpstream),
-		updates:             updates.NewClient(cfg.UpdateAgentURL, cfg.UpdateAgentToken),
-		virusTotal:          virustotal.NewClient(cfg.VirusTotalAPIKey),
-		contentCipher:       contentCipher,
-		mediaCaptureSlots:   make(chan struct{}, maxConcurrentMediaCaptures),
-		adminMediaSlots:     make(chan struct{}, maxConcurrentAdminMediaResponses),
-		comfyUploadSlots:    make(chan struct{}, maxConcurrentComfyUploads),
-		sensitiveMediaSlots: make(chan struct{}, 1),
-		comfyMemorySlots:    make(chan struct{}, 1),
-		generationJobs:      make(map[string]*generationJob),
-		proxyCounts:         map[string]int64{},
+		cfg:                  cfg,
+		tpl:                  tpl,
+		loginLimiter:         security.NewLoginLimiter(10*time.Minute, 10),
+		loginIPLimiter:       security.NewLoginLimiter(10*time.Minute, 30),
+		loginAuditLimiter:    security.NewLoginLimiter(time.Minute, 1),
+		inviteLimiter:        security.NewLoginLimiter(10*time.Minute, 20),
+		comfyPromptLimiter:   security.NewLoginLimiter(time.Minute, 10),
+		csrfSigner:           security.NewCSRFSigner(cfg.SessionSecret),
+		store:                repository,
+		mining:               mining.NewClient(cfg.MiningAgentURL, cfg.MiningAgentToken),
+		systemMonitor:        mining.NewClient(cfg.SystemMonitorAgentURL, cfg.SystemMonitorAgentToken),
+		promptAssistant:      promptassistant.NewClient(cfg.OllamaUpstream, cfg.PromptAssistantModel),
+		contentModerator:     moderation.NewClient(cfg.ContentModeratorUpstream),
+		updates:              updates.NewClient(cfg.UpdateAgentURL, cfg.UpdateAgentToken),
+		virusTotal:           virustotal.NewClient(cfg.VirusTotalAPIKey),
+		contentCipher:        contentCipher,
+		mediaCaptureSlots:    make(chan struct{}, maxConcurrentMediaCaptures),
+		adminMediaSlots:      make(chan struct{}, maxConcurrentAdminMediaResponses),
+		comfyUploadSlots:     make(chan struct{}, maxConcurrentComfyUploads),
+		sensitiveMediaSlots:  make(chan struct{}, 1),
+		comfyMemorySlots:     make(chan struct{}, 1),
+		passwordWorkSlots:    make(chan struct{}, 4),
+		promptAssistantSlots: make(chan struct{}, 1),
+		mediaDownloadSlots:   make(chan struct{}, 4),
+		comfyPromptSlots:     make(chan struct{}, maxComfyPromptAdmissionWaiters),
+		generationJobs:       make(map[string]*generationJob),
+		websocketConnections: make(map[*trackedWebSocket]struct{}),
+		proxyCounts:          map[string]int64{},
 	}
 
 	publicSrv := newHTTPServer(cfg.PublicAddr, app.securityHeaders(app.publicMux()))
@@ -157,6 +166,7 @@ func newHTTPServer(addr string, handler http.Handler) *http.Server {
 		Addr:              addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       15 * time.Minute,
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
@@ -212,6 +222,8 @@ func (a *App) publicMux() http.Handler {
 	mux.HandleFunc("/login", a.handleLogin)
 	mux.HandleFunc("/logout", a.handleLogout)
 	mux.HandleFunc("/invite/", a.handleInvite)
+	mux.Handle("/admin", a.requireAdmin(http.HandlerFunc(a.handleAdminDashboard)))
+	mux.Handle("/admin/", a.requireAdmin(http.HandlerFunc(a.handleAdminRoutes)))
 	mux.Handle("/app", a.requireAuth(http.HandlerFunc(a.handleApp)))
 	mux.Handle("/suggestions", a.requireAuth(a.featureSuggestionsOnly(http.HandlerFunc(a.handleSuggestions))))
 	mux.Handle("/account/profile", a.requireAuth(http.HandlerFunc(a.handleAccountProfile)))
@@ -220,11 +232,6 @@ func (a *App) publicMux() http.Handler {
 	mux.Handle("/account/sessions", a.requireAuth(http.HandlerFunc(a.handleAccountSessions)))
 	mux.Handle("/mining/toggle", a.requireAuth(http.HandlerFunc(a.handleMiningToggle)))
 	mux.Handle("/mining/icon/", a.requireAuth(http.HandlerFunc(a.handleMinerIcon)))
-	// Administration is served through the same HTTPS edge as the user portal.
-	// The private listener remains available only for local diagnostics.
-	mux.Handle("/metrics", a.adminLANOnly(http.HandlerFunc(a.handlePrometheusMetrics)))
-	mux.Handle("/admin", a.requireAdmin(http.HandlerFunc(a.handleAdminDashboard)))
-	mux.Handle("/admin/", a.requireAdmin(http.HandlerFunc(a.handleAdminRoutes)))
 	a.registerGenerationRoutes(mux)
 	a.registerServiceRoutes(mux)
 	return mux
@@ -259,8 +266,8 @@ func (a *App) adminMux() http.Handler {
 	mux.Handle("/mining/toggle", a.requireAuth(http.HandlerFunc(a.handleMiningToggle)))
 	mux.Handle("/mining/icon/", a.requireAuth(http.HandlerFunc(a.handleMinerIcon)))
 	mux.Handle("/metrics", a.adminLANOnly(http.HandlerFunc(a.handlePrometheusMetrics)))
-	mux.Handle("/admin", a.requireAdmin(http.HandlerFunc(a.handleAdminDashboard)))
-	mux.Handle("/admin/", a.requireAdmin(http.HandlerFunc(a.handleAdminRoutes)))
+	mux.Handle("/admin", a.requireLANAdmin(http.HandlerFunc(a.handleAdminDashboard)))
+	mux.Handle("/admin/", a.requireLANAdmin(http.HandlerFunc(a.handleAdminRoutes)))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin", http.StatusFound)
 	})

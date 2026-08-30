@@ -73,7 +73,13 @@ func (a *App) isAdminAllowedIP(clientIP string) bool {
 }
 
 func safeNext(next string) string {
-	if next == "" || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") {
+	next = strings.TrimSpace(next)
+	if next == "" || strings.ContainsAny(next, "\\\r\n\x00") {
+		return ""
+	}
+	parsed, err := url.ParseRequestURI(next)
+	if err != nil || parsed.IsAbs() || parsed.Host != "" || parsed.User != nil || parsed.Opaque != "" ||
+		!strings.HasPrefix(parsed.Path, "/") || strings.HasPrefix(parsed.Path, "//") || strings.Contains(parsed.Path, "\\") {
 		return ""
 	}
 	return next

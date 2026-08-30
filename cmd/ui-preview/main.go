@@ -45,12 +45,17 @@ func main() {
 	}
 	miningOverview.Default = &miningOverview.Miners[0]
 	miningOverview.Active = &miningOverview.Miners[0]
+	previewSVG := `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000"><rect width="1600" height="1000" fill="#13201d"/><rect x="120" y="120" width="1360" height="760" rx="28" fill="#20453a"/><circle cx="800" cy="500" r="250" fill="#71dfb9"/><path d="M420 650 700 360l190 180 150-140 260 250z" fill="#0a1714"/></svg>`
 
 	mux := http.NewServeMux()
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("internal/gateway/static"))))
 	mux.HandleFunc("/preview/result.svg", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "image/svg+xml")
-		_, _ = w.Write([]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000"><rect width="1600" height="1000" fill="#13201d"/><rect x="120" y="120" width="1360" height="760" rx="28" fill="#20453a"/><circle cx="800" cy="500" r="250" fill="#71dfb9"/><path d="M420 650 700 360l190 180 150-140 260 250z" fill="#0a1714"/></svg>`))
+		_, _ = w.Write([]byte(previewSVG))
+	})
+	mux.HandleFunc("/admin/content/media/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		_, _ = w.Write([]byte(previewSVG))
 	})
 	mux.HandleFunc("/generate/upload/", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -61,7 +66,7 @@ func main() {
 		_, _ = w.Write([]byte(`{"variants":[
 			{"id":"preview-1","template_id":"text-to-image","model_name":"Krea2 / Raw INT8 Mixed","seed":284797972294826,"state":"completed","duration_seconds":15,"values":{"positive_prompt":"A cinematic portrait of a woman in a quiet neon-lit street, realistic skin, dramatic atmosphere."},"media":[{"media_type":"image","url":"/preview/result.svg","sensitive":false}]},
 			{"id":"preview-2","template_id":"text-to-image","model_name":"Krea2 / Raw INT8 Mixed","seed":1033409957175067,"state":"completed","duration_seconds":16,"values":{"positive_prompt":"A calm seaside embankment at sunset with editorial fashion photography and soft detailed light."},"media":[{"media_type":"image","url":"/preview/result.svg","sensitive":false}]},
-			{"id":"preview-3","template_id":"image-to-image","model_name":"Flux 2 / Klein 9B","seed":1019794942414480,"state":"completed","duration_seconds":15,"values":{"positive_prompt":"Keep the subject identity and composition, replace the background with a warm studio environment."},"media":[{"media_type":"image","url":"/preview/result.svg","sensitive":false}]},
+			{"id":"preview-3","template_id":"image-to-image","model_name":"Flux 2 / Klein 9B","seed":1019794942414480,"state":"completed","duration_seconds":15,"values":{"positive_prompt":"Keep the subject identity and composition, replace the background with a warm studio environment."},"media":[{"media_type":"image","url":"/preview/result.svg","sensitive":true}]},
 			{"id":"preview-4","template_id":"text-to-image","model_name":"Krea2 / Raw INT8 Mixed","seed":45876641139403,"state":"error","duration_seconds":0,"error_message":"Недостаточно памяти для выбранного разрешения.","values":{"positive_prompt":"A detailed fashion portrait with dramatic lighting."},"media":[]}
 		]}`))
 	})
@@ -97,24 +102,54 @@ func main() {
 		},
 		"GenerationPresets": []map[string]any{
 			{"ID": "photoflow-krea2", "TemplateID": "text-to-image", "Name": "PhotoFlow Krea2", "Description": "Двухэтапная генерация с апскейлом и детализацией.", "Family": "krea2", "Available": true, "ModelID": "krea2:test", "ModelCount": 2, "DefaultSteps": 8, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "LoraStrength": 0.8},
+			{"ID": "photoflow-krea2-edit", "TemplateID": "image-to-image", "Name": "Krea 2: редактирование", "Description": "Редактирование первого фото с опциональным вторым референсом.", "Family": "krea2", "Available": true, "ModelID": "krea2:test", "ModelCount": 2, "DefaultSteps": 8, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "LoraStrength": 0.8, "RequiresImage": true, "AllowsImages": true, "MaxInputImages": 2},
 			{"ID": "photoflow-flux2-edit", "TemplateID": "image-to-image", "Name": "Flux2 Редактирование", "Description": "Редактирование исходного изображения через совместимую схему Flux 2.", "Family": "flux2", "Available": true, "ModelID": "flux2:test", "ModelCount": 1, "DefaultSteps": 20, "DefaultCFG": 5, "DefaultSampler": "euler", "DefaultScheduler": "normal", "RequiresImage": true},
-			{"ID": "minimax-h3-video", "TemplateID": "minimax-h3-video", "Name": "MiniMaxH3 Видео", "Description": "Ролик по первому кадру с дополнительным последним кадром или референсами.", "Family": "minimax_h3", "Available": true, "ModelID": "minimax:h3", "ModelCount": 1, "DefaultSteps": 8, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "RequiresImage": true, "AllowsImages": true, "MaxInputImages": 4},
+			{"ID": "minimax-h3-video", "TemplateID": "minimax-h3-video", "Name": "MiniMaxH3 Видео", "Description": "Ролик по первому кадру с дополнительным последним кадром или референсами.", "Family": "minimax_h3", "Available": true, "ModelID": "minimax:h3", "ModelCount": 2, "DefaultSteps": 25, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "RequiresImage": true, "AllowsImages": true, "MaxInputImages": 4},
 		},
 		"QuickModels": []map[string]any{
 			{"ID": "krea2:test", "DisplayName": "Krea2 / Raw INT8 Mixed", "Family": "krea2", "Available": true, "DefaultSteps": 8, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "LoraStrength": 0.8},
 			{"ID": "flux2:test", "DisplayName": "Flux 2 / Klein 9B", "Family": "flux2", "Available": true, "DefaultSteps": 20, "DefaultCFG": 5, "DefaultSampler": "euler", "DefaultScheduler": "flux2"},
-			{"ID": "minimax:h3", "DisplayName": "MiniMaxH3", "Family": "minimax_h3", "Available": true, "DefaultSteps": 8, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple"},
+			{"ID": "minimax:h3", "DisplayName": "MiniMax H3 FL2VA", "Family": "minimax_h3", "Available": true, "DefaultSteps": 25, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "DefaultVideoShift": 11, "DefaultAudioShift": 3},
+			{"ID": "minimax:eros", "DisplayName": "H3 Eros Max beta4 · встроенный Turbo", "Family": "minimax_h3", "Available": true, "VideoIntegratedTurbo": true, "VideoReferenceOnly": true, "DefaultSteps": 8, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "DefaultVideoShift": 12, "DefaultAudioShift": 7},
 		},
 		"LoraGroups": []map[string]any{
 			{"Name": "Базовые Krea2", "Loras": []map[string]any{{"Name": "lenovo_krea2.safetensors", "DisplayName": "Lenovo Krea2", "DefaultStrength": 0.8, "Default": true}, {"Name": "krea2_turbo.safetensors", "DisplayName": "Krea2 Turbo", "DefaultStrength": 1.0}}},
 			{"Name": "Реализм и детали", "Loras": []map[string]any{{"Name": "Krea2-realism-V2.safetensors", "DisplayName": "Krea2 Realism V2", "DefaultStrength": 1.0}, {"Name": "Detailer-KREA2.safetensors", "DisplayName": "Detailer Krea2", "DefaultStrength": 2.0}}},
 			{"Name": "Стили", "Loras": []map[string]any{{"Name": "AltGirlKreaV1.5.safetensors", "DisplayName": "AltGirl Krea", "DefaultStrength": 1.0}}},
 		},
+		"FluxLoraGroups": []map[string]any{
+			{"Name": "Flux2", "Loras": []map[string]any{
+				{"Name": "Flux2\\cinematic_detail.safetensors", "DisplayName": "Cinematic Detail", "DefaultStrength": 1.0},
+				{"Name": "Flux2\\product_identity.safetensors", "DisplayName": "Product Identity", "DefaultStrength": 0.8},
+			}},
+		},
+		"MiniMaxLoraGroups": []map[string]any{
+			{"Name": "MiniMax H3", "Loras": []map[string]any{
+				{"Name": "MiniMaxH3\\h3_Better_NSFW_Motion_V1.safetensors", "DisplayName": "Better NSFW Motion (H3 Ref2VA V1)", "DefaultStrength": 0.9},
+				{"Name": "MiniMaxH3\\HMNSFW-AIO-V2.5.safetensors", "DisplayName": "HMNSFW AIO V2.5", "DefaultStrength": 1.0},
+				{"Name": "MiniMaxH3\\Minimaxh3-cowgirl_position-Ref2V-512_000000550.safetensors", "DisplayName": "Cowgirl Position Ref2V", "DefaultStrength": 1.0},
+				{"Name": "MiniMaxH3\\SexGod-NaughtyTimes-v2-rank256.safetensors", "DisplayName": "NaughtyTimes V2", "DefaultStrength": 1.0},
+				{"Name": "MiniMaxH3\\SynthPussy_H3_closeups_v1-step00008300.safetensors", "DisplayName": "Closeups H3 V1", "DefaultStrength": 1.0},
+				{"Name": "MiniMaxH3\\VBVR_H3_attn_only.safetensors", "DisplayName": "VBVR H3", "DefaultStrength": 1.0},
+			}},
+		},
 		"ComfyOnline": true, "ModelsAvailable": true, "SelectedWorkflow": "", "PreviewOutputURL": "/preview/result.svg",
-		"GenerationQuota":       map[string]any{"HasLimits": true, "DailyLimit": 12, "DailyRemaining": 7, "TotalLimit": int64(100), "TotalRemaining": int64(73)},
-		"RecentGenerationMedia": []map[string]any{{"ID": int64(1), "URL": "/preview/result.svg", "Filename": "AI-Gateway-preview.png", "MediaType": "image", "ExpiresUnix": now.Add(18*time.Hour + 27*time.Minute).UnixMilli()}},
+		"GenerationQuota": map[string]any{"HasLimits": true, "DailyLimit": 12, "DailyRemaining": 7, "TotalLimit": int64(100), "TotalRemaining": int64(73)},
+		"RecentGenerationMedia": []map[string]any{
+			{"ID": int64(1), "URL": "/preview/result.svg", "Filename": "AI-Gateway-preview.png", "MediaType": "image", "ExpiresUnix": now.Add(18*time.Hour + 27*time.Minute).UnixMilli()},
+			{"ID": int64(2), "URL": "/preview/result.svg", "Filename": "AI-Gateway-sensitive-preview.png", "MediaType": "image", "Sensitive": true, "ExpiresUnix": now.Add(17*time.Hour + 5*time.Minute).UnixMilli()},
+		},
 	}))
 	mux.HandleFunc("/preview/login", render("login", "Вход", map[string]any{"CurrentUser": nil, "Next": ""}))
+	mux.HandleFunc("/preview/profile", render("account_profile", "Профиль", map[string]any{
+		"ProfileUsername": "admin", "ProfileEmail": "admin@example.local", "CanChangeUsername": true,
+	}))
+	mux.HandleFunc("/preview/password", render("account_password", "Смена пароля", map[string]any{}))
+	accountSessions := []domain.AccountSession{
+		{ID: 71, Current: true, IP: "192.168.1.86", UserAgent: "Chrome 139 · Windows 11", CreatedAt: now.Add(-8 * time.Hour), LastSeenAt: now.Add(-time.Minute), ExpiresAt: now.Add(22 * time.Hour)},
+		{ID: 68, IP: "192.168.1.24", UserAgent: "Chrome Mobile · Android 15 with a deliberately long device description", CreatedAt: now.Add(-36 * time.Hour), LastSeenAt: now.Add(-3 * time.Hour), ExpiresAt: now.Add(12 * time.Hour)},
+	}
+	mux.HandleFunc("/preview/account-sessions", render("account_sessions", "Активные сессии", map[string]any{"Sessions": accountSessions}))
 	mux.HandleFunc("/preview/invite", render("invite", "Создание аккаунта", map[string]any{
 		"CurrentUser": nil,
 		"Invalid":     false,
@@ -139,6 +174,16 @@ func main() {
 			Trend:            chart,
 		},
 	}))
+	serviceStats := []domain.ServiceUsage{{Service: "comfyui", Requests: 516, Users: 3, Bytes: 6400000000, Errors: 2}, {Service: "openwebui", Requests: 308, Users: 3, Bytes: 18400000, Errors: 1}}
+	mux.HandleFunc("/preview/metrics", render("admin_metrics", "Метрики", map[string]any{
+		"Stats":        domain.AdminStats{RequestsToday: 147, Requests7Days: 824, ActiveWebSockets: 2, ErrorRate: "0,8%", Trend: chart},
+		"ServiceStats": serviceStats,
+	}))
+	serviceAnalytics := domain.ServiceAnalytics{
+		Service: "comfyui", DisplayName: "ComfyUI", Requests: 516, Users: 3, Bytes: 6400000000, Errors: 2, AverageDuration: 1160, ActiveWebSockets: 2,
+		Trend: []domain.ServiceTrendPoint{{Label: "Сегодня", Requests: 84, Users: 3, Errors: 1, Bytes: 1600000000, RequestPercent: 100}, {Label: "Вчера", Requests: 61, Users: 3, Bytes: 1200000000, RequestPercent: 73}, {Label: "10 июл", Requests: 46, Users: 2, Errors: 1, Bytes: 920000000, RequestPercent: 55}},
+	}
+	mux.HandleFunc("/preview/service", render("admin_service", "ComfyUI", map[string]any{"Analytics": serviceAnalytics}))
 	mux.HandleFunc("/preview/mining", render("admin_mining", "Управление майнингом", map[string]any{"Mining": miningOverview, "Error": "", "Status": ""}))
 	mux.HandleFunc("/preview/updates", render("admin_updates", "Обновления", map[string]any{
 		"Updates": updates.Status{Available: true, Components: []updates.ComponentStatus{
@@ -156,6 +201,16 @@ func main() {
 		{ID: 4, Username: "disabled-user-with-long-name", Email: "long.address@example.local", Role: "user", Disabled: true, CanUseComfyUI: true, Requests: 4},
 	}
 	mux.HandleFunc("/preview/users", render("admin_users", "Пользователи", map[string]any{"Users": users, "Query": ""}))
+	adminSessions := []domain.SessionRow{
+		{ID: 71, Username: "admin", IP: "192.168.1.86", UserAgent: "Chrome 139 · Windows 11", CreatedAt: now.Add(-8 * time.Hour), LastSeenAt: now.Add(-time.Minute), ExpiresAt: now.Add(22 * time.Hour)},
+		{ID: 68, Username: "rayka", IP: "192.168.1.24", UserAgent: "Chrome Mobile · Android 15 with a deliberately long device description", CreatedAt: now.Add(-36 * time.Hour), LastSeenAt: now.Add(-3 * time.Hour), ExpiresAt: now.Add(12 * time.Hour)},
+	}
+	mux.HandleFunc("/preview/admin-sessions", render("admin_sessions", "Активные сессии", map[string]any{"Sessions": adminSessions}))
+	audits := []domain.AuditRow{
+		{ID: 15, Actor: "admin", Action: "user_service_access_updated", TargetType: "user", TargetID: sql.NullInt64{Int64: 2, Valid: true}, IP: "192.168.1.86", CreatedAt: now.Add(-4 * time.Minute), Metadata: `{"quick_generation":true,"video":true}`},
+		{ID: 14, Action: "temporary_users_cleanup", TargetType: "system", IP: "127.0.0.1", CreatedAt: now.Add(-2 * time.Hour), Metadata: `{"deleted":2}`},
+	}
+	mux.HandleFunc("/preview/audit", render("admin_audit", "Журнал аудита", map[string]any{"Audits": audits}))
 	invites := []domain.InviteRow{
 		{ID: 48, CreatedBy: "admin", MaxUses: 1, ExpiresAt: now.Add(48 * time.Hour), GrantComfyUI: true, GrantOpenWebUI: true, Status: "active", CreatedAt: now.Add(-time.Hour)},
 		{ID: 47, CreatedBy: "admin", MaxUses: 3, UsedCount: 1, ExpiresAt: now.Add(24 * time.Hour), Revoked: true, GrantOpenWebUI: true, Status: "revoked", CreatedAt: now.Add(-4 * time.Hour)},
@@ -170,8 +225,22 @@ func main() {
 	mux.HandleFunc("/preview/content", render("admin_content", "AI-контент", map[string]any{
 		"Username": "", "Service": "", "Query": "",
 		"Overview": gateway.ContentOverview{Total: 28, ComfyUI: 11, OpenWebUI: 17, WithMedia: 6},
-		"Events":   []gateway.ContentEventView{{ID: 1, UserID: 2, Username: "rayka", Service: "openwebui", Model: "gemma-4-abliterated:e4b", Prompt: "Подготовь краткий план развёртывания сервиса.", Response: "1. Проверить окружение.\n2. Создать резервную копию.\n3. Развернуть и проверить healthcheck.", Metadata: `{\"temperature\":0.2}`, CreatedAt: now.Add(-9 * time.Minute), ExpiresAt: now.Add(7 * 24 * time.Hour)}},
+		"Events": []gateway.ContentEventView{
+			{ID: 3, UserID: 2, Username: "rayka", Service: "comfyui", Kind: "generation", Model: "Krea2 / Raw INT8 Mixed", Prompt: "Editorial portrait of a woman holding a perfume bottle in a bright studio.", Metadata: `{"seed":284797972294826,"megapixels":1.9}`, Assistant: &gateway.ContentAssistantView{Applied: true, Template: "photographic", OriginalPrompt: "Девушка показывает флакон духов", Suggestion: "Create an editorial portrait of a woman naturally presenting a premium perfume bottle."}, GenerationState: "completed", MediaCount: 1, Media: []domain.ContentMediaSummary{{ID: 42, EventID: 3, MediaType: "image"}}, CreatedAt: now.Add(-5 * time.Minute), ExpiresAt: now.Add(7 * 24 * time.Hour)},
+			{ID: 2, UserID: 2, Username: "rayka", Service: "comfyui", Kind: "generation", Model: "Flux 2 / Klein 9B", Prompt: "Adult editorial portrait used to verify sensitive-content masking.", Metadata: `{"seed":1019794942414480}`, GenerationState: "completed", Sensitive: true, MediaCount: 1, Media: []domain.ContentMediaSummary{{ID: 43, EventID: 2, MediaType: "image"}}, CreatedAt: now.Add(-7 * time.Minute), ExpiresAt: now.Add(7 * 24 * time.Hour)},
+			{ID: 1, UserID: 2, Username: "rayka", Service: "comfyui", Kind: "generation", Model: "Krea2 / Raw INT8 Mixed", Prompt: "A detailed fashion portrait with dramatic lighting.", Metadata: `{"seed":45876641139403}`, GenerationState: "error", CreatedAt: now.Add(-9 * time.Minute), ExpiresAt: now.Add(7 * 24 * time.Hour)},
+		},
 	}))
+	mux.HandleFunc("/preview/media", render("admin_media_viewer", "Просмотр результата", map[string]any{"Filename": "AI-Gateway-preview-result.png", "MediaID": int64(42), "MediaType": "image"}))
+	mux.HandleFunc("/preview/suggestions", render("suggestions", "Предложить улучшение", map[string]any{"VirusTotalConfigured": true}))
+	previewSuggestions := []map[string]any{{
+		"ID": int64(9), "Username": "rayka", "Title": "Новая LoRA для портретного движения", "Description": "Добавить адаптер для более естественного движения волос и ткани.", "Status": "clean", "CreatedAt": now.Add(-5 * time.Hour),
+		"Links": []string{"https://example.test/model/9"}, "JSONName": "portrait-motion.json", "JSONSize": 18432,
+		"Scans": []map[string]any{{"SourceName": "Ссылка 1", "Status": "completed", "Harmless": 73, "Undetected": 4, "Malicious": 0, "Suspicious": 0}},
+	}}
+	mux.HandleFunc("/preview/admin-suggestions", render("admin_suggestions", "Предложения пользователей", map[string]any{"VirusTotalConfigured": true, "Suggestions": previewSuggestions}))
+	mux.HandleFunc("/preview/bad-gateway", render("bad_gateway", "Сервис недоступен", map[string]any{"Service": "ComfyUI"}))
+	mux.HandleFunc("/preview/forbidden", render("service_forbidden", "Доступ запрещён", map[string]any{"Service": "ComfyUI"}))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/preview/admin", http.StatusFound) })
 
 	log.Println("UI preview listening on http://0.0.0.0:18080")

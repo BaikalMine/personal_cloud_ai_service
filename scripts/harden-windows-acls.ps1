@@ -15,15 +15,40 @@ function Protect-ServicePath([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path)) {
         throw "Path does not exist: $Path"
     }
-    $grants = @(
-        '*S-1-5-18:(OI)(CI)F',
-        '*S-1-5-32-544:(OI)(CI)F',
-        "$ServiceAccount:(OI)(CI)F"
-    )
-    & icacls.exe $Path /inheritance:r /grant:r $grants /T /C | Out-Null
+    & icacls.exe $Path /reset /T /C | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        throw "Failed to apply protected ACL to $Path"
+        throw "Failed to reset ACLs below $Path"
     }
+    $security = [Security.AccessControl.DirectorySecurity]::new()
+    $security.SetAccessRuleProtection($true, $false)
+    $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+        [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    $propagation = [Security.AccessControl.PropagationFlags]::None
+    $allow = [Security.AccessControl.AccessControlType]::Allow
+    $fullControl = [Security.AccessControl.FileSystemRights]::FullControl
+    $principals = @(
+        [Security.Principal.SecurityIdentifier]::new(
+            [Security.Principal.WellKnownSidType]::LocalSystemSid,
+            $null
+        ),
+        [Security.Principal.SecurityIdentifier]::new(
+            [Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid,
+            $null
+        ),
+        [Security.Principal.NTAccount]::new($ServiceAccount)
+    )
+    foreach ($principal in $principals) {
+        $security.AddAccessRule(
+            [Security.AccessControl.FileSystemAccessRule]::new(
+                $principal,
+                $fullControl,
+                $inheritance,
+                $propagation,
+                $allow
+            )
+        )
+    }
+    Set-Acl -LiteralPath $Path -AclObject $security
 }
 
 foreach ($path in @($GatewayRoot, $ProxyRoot, $MiningAgentRoot, $UpdateAgentRoot)) {

@@ -19,14 +19,18 @@ func (a *App) requireAuth(next http.Handler) http.Handler {
 }
 
 func (a *App) requireAdmin(next http.Handler) http.Handler {
-	return a.adminLANOnly(a.requireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return a.requireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := a.currentUser(r)
 		if user == nil || user.Role != "admin" {
 			http.Error(w, "доступ запрещён", http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(w, r)
-	})))
+	}))
+}
+
+func (a *App) requireLANAdmin(next http.Handler) http.Handler {
+	return a.adminLANOnly(a.requireAdmin(next))
 }
 
 func (a *App) requireServiceAccess(service string, next http.Handler) http.Handler {

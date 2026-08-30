@@ -14,6 +14,7 @@ import (
 )
 
 const maxImageBytes = 64 << 20
+const sensitiveScoreThreshold = 0.025
 
 var ErrUnsupportedImage = errors.New("изображение не поддерживается NSFW-классификатором")
 
@@ -75,7 +76,8 @@ func (c *Client) ClassifyImage(ctx context.Context, image []byte, mimeType strin
 	if result.NSFWScore < 0 || result.NSFWScore > 1 {
 		return false, errors.New("локальный NSFW-классификатор вернул недопустимую оценку")
 	}
-	// The lower threshold prevents accidental exposure. A user can reveal a
-	// blurred result, but an unblurred sensitive image cannot be unseen.
-	return result.NSFWScore >= 0.15, nil
+	// The classifier evaluates the full frame and overlapping regions. Keep a
+	// high-recall threshold: a user can reveal a blurred result, but an exposed
+	// sensitive image cannot be unseen.
+	return result.NSFWScore >= sensitiveScoreThreshold, nil
 }

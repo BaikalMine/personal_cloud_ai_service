@@ -114,6 +114,8 @@ Preserve the user's exact intent, requested duration, camera restrictions, degre
 
 Write the video in playback order: initial anchor, action onset, continuous development, result or reaction, then a stable final hold. Keep one main subject, one coherent idea, physically plausible weight transfer and hand paths, restrained secondary motion, and one camera behavior per shot. If a fixed camera is requested, explicitly state that it remains locked with no pan, tilt, zoom, push, pull, orbit, reframing, cuts, angle changes, or camera switching.
 
+Use the exact identifiers required by the selected structure. In Ref2VA, define a human as <Subject 1>; never replace it with an alias such as <Adult Woman>. In detailed_description, include explicit chronological time ranges that cover the requested duration and reserve the final interval for a stable hold.
+
 Use exact dialogue syntax when speech is requested: The clearly adult [subject] with [voice description] (S1) says: <d>[Russian] exact words.</d> Keep the voice description outside <d> and do not repeat dialogue in overall_soundscape. State when speech ends and that no further speech, whispering, narration, or lip-synced dialogue occurs when applicable. Include only plausible diegetic ambience and synchronized physical sounds; use non_diegetic_music: N/A unless music was explicitly requested.
 
 You receive uploaded visual references in their exact numbered order, together with their declared roles. Inspect them carefully and use only visible details that are relevant to the user's request. Keep references distinct: never silently blend identities, outfits, scenes, or visual styles from different pictures.`
@@ -201,9 +203,17 @@ func SystemPromptWithVideoContext(mode Mode, profile Profile, context VideoConte
 	return systemPrompt(mode, profile, nil, context)
 }
 
+// SystemPromptWithVideoContextAndReferences keeps the video workflow contract
+// and the user-assigned role of every attached picture in the same request.
+func SystemPromptWithVideoContextAndReferences(mode Mode, profile Profile, references []ImageReference, context VideoContext) string {
+	return systemPrompt(mode, profile, references, context)
+}
+
 func systemPrompt(mode Mode, profile Profile, references []ImageReference, video VideoContext) string {
 	if mode == ModeTextToVideo && profile == ProfileMiniMaxH3 {
-		prompt := miniMaxH3Instruction + "\n\n" + miniMaxH3FormatInstruction(video) + minorSafetyInstruction
+		prompt := miniMaxH3Instruction + "\n\n" + miniMaxH3FormatInstruction(video)
+		prompt += miniMaxH3ReferenceMapInstruction(references)
+		prompt += minorSafetyInstruction
 		return strings.TrimSpace(prompt)
 	}
 	prompt := sharedInstruction
@@ -233,6 +243,27 @@ func systemPrompt(mode Mode, profile Profile, references []ImageReference, video
 	}
 	prompt += minorSafetyInstruction
 	return strings.TrimSpace(prompt)
+}
+
+func miniMaxH3ReferenceMapInstruction(references []ImageReference) string {
+	if len(references) == 0 {
+		return ""
+	}
+	ordered := append([]ImageReference(nil), references...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Number < ordered[j].Number })
+	lines := make([]string, 0, len(ordered))
+	for _, reference := range ordered {
+		if reference.Number < 1 || reference.Number > 4 || !ValidImageReferenceRole(reference.Role) {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("- <Picture %d> (image %d): %s", reference.Number, reference.Number, referenceRoleInstruction(reference.Role)))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "\n\nThe attached pictures and their declared roles are:\n" + strings.Join(lines, "\n") + `
+
+Inspect every attached picture before writing. In retention_analysis, identify each supplied <Picture N> separately and state only the visible source details relevant to its declared role. Give at least three concrete visible attributes for every picture. For a person or base scene, use relevant facts such as hair, visible clothing and color, pose or framing, named room anchors, and lighting. For a product or object, use its silhouette, material, color, construction, and legible branding when visible. A generic restatement such as "an adult woman in a room" or "the referenced product" is invalid. Carry the concrete retained attributes into subject_definitions and detailed_description so the generated action remains grounded in the actual pictures. Never attribute a color, garment, object, person, pose, or background from one picture to another, and do not confuse the user's requested final state with what is visibly present in a source picture.`
 }
 
 func miniMaxH3FormatInstruction(context VideoContext) string {

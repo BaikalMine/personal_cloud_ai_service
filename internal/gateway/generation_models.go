@@ -19,24 +19,28 @@ const (
 )
 
 type generationModel struct {
-	ID               string
-	Name             string
-	DisplayName      string
-	Family           string
-	Available        bool
-	Reason           string
-	TextEncoder      string
-	VAE              string
-	AudioVAE         string
-	ReferenceModel   string
-	Lora             string
-	LoraStrength     float64
-	IdentityLora     string
-	SupportsImage    bool
-	DefaultSteps     int
-	DefaultCFG       float64
-	DefaultSampler   string
-	DefaultScheduler string
+	ID                   string
+	Name                 string
+	DisplayName          string
+	Family               string
+	Available            bool
+	Reason               string
+	TextEncoder          string
+	VAE                  string
+	AudioVAE             string
+	ReferenceModel       string
+	Lora                 string
+	LoraStrength         float64
+	IdentityLora         string
+	SupportsImage        bool
+	VideoIntegratedTurbo bool
+	VideoReferenceOnly   bool
+	DefaultSteps         int
+	DefaultCFG           float64
+	DefaultSampler       string
+	DefaultScheduler     string
+	DefaultVideoShift    int
+	DefaultAudioShift    int
 }
 
 type generationModelGroup struct {
@@ -233,12 +237,27 @@ func buildGenerationModelCatalog(info map[string]comfyNodeInfo) generationModelC
 			model := generationModel{
 				ID: generationModelID(modelFamilyMiniMaxH3, name), Name: name, DisplayName: "MiniMax H3 FL2VA", Family: modelFamilyMiniMaxH3,
 				TextEncoder: miniMaxEncoder, VAE: miniMaxVideoVAE, AudioVAE: miniMaxAudioVAE, ReferenceModel: miniMaxReferenceModel,
-				DefaultSteps: 25, DefaultCFG: 1, DefaultSampler: "res_multistep", DefaultScheduler: "simple",
+				DefaultSteps: 25, DefaultCFG: 1, DefaultSampler: "euler", DefaultScheduler: "simple", DefaultVideoShift: 11, DefaultAudioShift: 3,
 			}
 			model.Available = miniMaxEncoder != "" && miniMaxVideoVAE != "" && miniMaxAudioVAE != "" && miniMaxReferenceModel != "" && hasGenerationNodes(info,
-				"MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo", "MiniMaxH3SigmaShift", "MiniMaxH3MemoryEfficientSageAttentionPatch", "MiniMaxH3TurboLoRA", "MiniMaxH3TurboSampler", "ImageResizeKJv2", "CR LoRA Stack", "CR Apply LoRA Stack", "VHS_VideoCombine")
+				"MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo", "MiniMaxH3SigmaShift", "MiniMaxH3MemoryEfficientSageAttentionPatch", "MiniMaxH3TurboLoRA", "MiniMaxH3TurboSampler",
+				"H3MemoryOptimization", "H3AIMDOResidencyLimiter", "H3SparseAttentionAdvanced", "LCImageMaskResize", "LCVRAMCacheClear", "ImageSharpenKJ", "CR LoRA Stack", "CR Apply LoRA Stack", "VHS_VideoCombine")
 			if !model.Available {
-				model.Reason = missingGenerationDependencies(miniMaxEncoder, miniMaxVideoVAE, "MiniMax H3 Qwen3-VL encoder", "MiniMax H3 video VAE")
+				model.Reason = missingMiniMaxH3Dependencies(miniMaxEncoder, miniMaxVideoVAE, miniMaxAudioVAE, miniMaxReferenceModel)
+			}
+			miniMaxModels = append(miniMaxModels, model)
+		case strings.Contains(lower, "h3erosmax_beta4") || strings.Contains(lower, "h3erosmax-beta4"):
+			model := generationModel{
+				ID: generationModelID(modelFamilyMiniMaxH3, name), Name: name, DisplayName: "H3 Eros Max beta4 · встроенный Turbo", Family: modelFamilyMiniMaxH3,
+				TextEncoder: miniMaxEncoder, VAE: miniMaxVideoVAE, AudioVAE: miniMaxAudioVAE, ReferenceModel: name,
+				VideoIntegratedTurbo: true, VideoReferenceOnly: true,
+				DefaultSteps: 8, DefaultCFG: 1, DefaultSampler: "euler", DefaultScheduler: "simple", DefaultVideoShift: 12, DefaultAudioShift: 7,
+			}
+			model.Available = miniMaxEncoder != "" && miniMaxVideoVAE != "" && miniMaxAudioVAE != "" && hasGenerationNodes(info,
+				"MiniMaxH3ReferenceToVideo", "MiniMaxH3SigmaShift", "MiniMaxH3MemoryEfficientSageAttentionPatch",
+				"H3MemoryOptimization", "H3AIMDOResidencyLimiter", "H3SparseAttentionAdvanced", "LCVRAMCacheClear", "ImageSharpenKJ", "CR LoRA Stack", "CR Apply LoRA Stack", "VHS_VideoCombine")
+			if !model.Available {
+				model.Reason = missingMiniMaxH3Dependencies(miniMaxEncoder, miniMaxVideoVAE, miniMaxAudioVAE, name)
 			}
 			miniMaxModels = append(miniMaxModels, model)
 		}
@@ -329,7 +348,11 @@ func buildMiniMaxH3LoraGroups(values []string) []generationLoraGroup {
 		if strings.EqualFold(name, miniMaxH3TurboLoraName) {
 			continue
 		}
-		loras = append(loras, generationLora{Name: name, DisplayName: generationModelDisplayName(name), DefaultStrength: 1})
+		loras = append(loras, generationLora{
+			Name:            name,
+			DisplayName:     miniMaxH3LoraDisplayName(name),
+			DefaultStrength: miniMaxH3LoraDefaultStrength(lower),
+		})
 	}
 	if len(loras) == 0 {
 		return nil
@@ -338,6 +361,25 @@ func buildMiniMaxH3LoraGroups(values []string) []generationLoraGroup {
 		return strings.ToLower(loras[i].DisplayName) < strings.ToLower(loras[j].DisplayName)
 	})
 	return []generationLoraGroup{{Name: "MiniMax H3", Loras: loras}}
+}
+
+func miniMaxH3LoraDisplayName(name string) string {
+	baseName := strings.ReplaceAll(name, "\\", "/")
+	if separator := strings.LastIndex(baseName, "/"); separator >= 0 {
+		baseName = baseName[separator+1:]
+	}
+	baseName = strings.TrimSuffix(baseName, ".safetensors")
+	if strings.EqualFold(baseName, "h3_Better_NSFW_Motion_V1") {
+		return "Better NSFW Motion (H3 Ref2VA V1)"
+	}
+	return generationModelDisplayName(name)
+}
+
+func miniMaxH3LoraDefaultStrength(lower string) float64 {
+	if strings.Contains(lower, "h3_better_nsfw_motion_v1") {
+		return 0.9
+	}
+	return 1
 }
 
 func isKreaLora(lower string) bool {
@@ -432,24 +474,26 @@ func buildGenerationPresets(catalog generationModelCatalog) []generationPreset {
 		presets = append(presets, preset)
 	}
 	var miniMax *generationModel
+	miniMaxCount := 0
 	for _, group := range catalog.Groups {
 		for index := range group.Models {
 			model := group.Models[index]
 			if model.Family != modelFamilyMiniMaxH3 {
 				continue
 			}
-			copy := model
-			miniMax = &copy
-			break
-		}
-		if miniMax != nil {
-			break
+			if model.Available {
+				miniMaxCount++
+			}
+			if miniMax == nil || (!miniMax.Available && model.Available) {
+				copy := model
+				miniMax = &copy
+			}
 		}
 	}
 	if miniMax != nil {
 		preset := presetFromModel("minimax-h3-video", "minimax-h3-video", "MiniMax H3: видео",
 			"Текст в видео, первый и последний кадр или до четырёх референсов. Звук создаётся вместе с видео.", *miniMax, false)
-		preset.ModelCount = 1
+		preset.ModelCount = miniMaxCount
 		preset.MaxInputImages = 4
 		preset.AllowsImages = true
 		presets = append(presets, preset)
@@ -615,6 +659,26 @@ func missingGenerationDependencies(encoder, vae, encoderName, vaeName string) st
 	}
 	if vae == "" {
 		missing = append(missing, vaeName)
+	}
+	return "Не установлено: " + strings.Join(missing, ", ")
+}
+
+func missingMiniMaxH3Dependencies(encoder, videoVAE, audioVAE, referenceModel string) string {
+	missing := make([]string, 0, 4)
+	if encoder == "" {
+		missing = append(missing, "MiniMax H3 Qwen3-VL encoder")
+	}
+	if videoVAE == "" {
+		missing = append(missing, "MiniMax H3 video VAE")
+	}
+	if audioVAE == "" {
+		missing = append(missing, "MiniMax H3 audio VAE")
+	}
+	if referenceModel == "" {
+		missing = append(missing, "MiniMax H3 reference model")
+	}
+	if len(missing) == 0 {
+		return "Не установлены обязательные ноды MiniMax H3 v4"
 	}
 	return "Не установлено: " + strings.Join(missing, ", ")
 }

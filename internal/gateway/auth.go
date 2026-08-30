@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/mail"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -45,11 +46,15 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	password := r.Form.Get("password")
 	nextURL := safeNext(r.Form.Get("next"))
 	limitKey := loginRateLimitKey(ip, identity)
-	if !a.loginLimiter.Allow(limitKey) {
+	limitIP := rateLimitIP(ip)
+	if !limiterAllows(a.loginIPLimiter, limitIP) || !limiterAllows(a.loginLimiter, limitKey) {
 		a.loginFailures.Add(1)
-		a.audit(r.Context(), nil, "user_login_failed", "user", nil, ip, r.UserAgent(), map[string]any{
-			"identity": truncate(identity, 256), "reason": "rate_limited",
-		})
+		if limiterAllows(a.loginAuditLimiter, limitIP) {
+			a.audit(r.Context(), nil, "user_login_failed", "user", nil, ip, r.UserAgent(), map[string]any{
+				"identity": truncate(identity, 256), "reason": "rate_limited",
+			})
+			recordLimiterFailure(a.loginAuditLimiter, limitIP)
+		}
 		a.render(w, r, "login", map[string]any{"Title": "Вход", "Error": "Слишком много попыток входа. Попробуйте позже."})
 		return
 	}
@@ -67,10 +72,22 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userFound := err == nil
+	releasePasswordWork, acquired := acquireBoundedSlot(r.Context(), a.passwordWorkSlots, 3*time.Second)
+	if !acquired {
+		a.render(w, r, "login", map[string]any{"Title": "Вход", "Error": "Сервер занят проверкой входа. Повторите попытку через несколько секунд.", "Next": nextURL})
+		return
+	}
 	passwordValid := security.VerifyPassword(passwordHash, password)
 	accountLocked := userFound && user.Role != "admin" && user.IsLocked(time.Now())
+	var upgradedHash string
+	var hashErr error
+	if userFound && !user.Disabled && !accountLocked && passwordValid && security.PasswordHashNeedsUpgrade(passwordHash) {
+		upgradedHash, hashErr = security.HashPassword(password)
+	}
+	releasePasswordWork()
 	if !userFound || user.Disabled || accountLocked || !passwordValid {
-		a.loginLimiter.RecordFailure(limitKey)
+		recordLimiterFailure(a.loginLimiter, limitKey)
+		recordLimiterFailure(a.loginIPLimiter, limitIP)
 		a.loginFailures.Add(1)
 		reason := "invalid_credentials"
 		if accountLocked {
@@ -89,12 +106,11 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 		a.render(w, r, "login", map[string]any{"Title": "Вход", "Error": "Неверный логин или пароль.", "Next": nextURL})
 		return
 	}
-	if security.PasswordHashNeedsUpgrade(passwordHash) {
-		upgradedHash, hashErr := security.HashPassword(password)
-		if hashErr != nil {
-			http.Error(w, "не удалось обновить защиту пароля", http.StatusInternalServerError)
-			return
-		}
+	if hashErr != nil {
+		http.Error(w, "не удалось обновить защиту пароля", http.StatusInternalServerError)
+		return
+	}
+	if upgradedHash != "" {
 		if err := a.store.UpdatePassword(r.Context(), user.ID, upgradedHash); err != nil {
 			http.Error(w, "ошибка обновления защиты пароля", http.StatusInternalServerError)
 			return
@@ -110,7 +126,9 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "не удалось создать сессию", http.StatusInternalServerError)
 		return
 	}
-	a.loginLimiter.Clear(limitKey)
+	if a.loginLimiter != nil {
+		a.loginLimiter.Clear(limitKey)
+	}
 	http.SetCookie(w, a.sessionCookie(r, token))
 	a.audit(r.Context(), &user.ID, "user_login_success", "user", &user.ID, ip, r.UserAgent(), nil)
 	if user.Role == "admin" {
@@ -123,7 +141,45 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func loginRateLimitKey(ip, username string) string {
-	return ip + "\x00" + strings.ToLower(truncate(strings.TrimSpace(username), 256))
+	return rateLimitIP(ip) + "\x00" + strings.ToLower(truncate(strings.TrimSpace(username), 256))
+}
+
+func rateLimitIP(raw string) string {
+	address, err := netip.ParseAddr(strings.TrimSpace(raw))
+	if err != nil {
+		return strings.ToLower(strings.TrimSpace(raw))
+	}
+	address = address.Unmap()
+	if address.Is6() {
+		return netip.PrefixFrom(address, 64).Masked().String()
+	}
+	return address.String()
+}
+
+func limiterAllows(limiter *security.LoginLimiter, key string) bool {
+	return limiter == nil || limiter.Allow(key)
+}
+
+func recordLimiterFailure(limiter *security.LoginLimiter, key string) {
+	if limiter != nil {
+		limiter.RecordFailure(key)
+	}
+}
+
+func acquireBoundedSlot(ctx context.Context, slots chan struct{}, wait time.Duration) (func(), bool) {
+	if slots == nil {
+		return func() {}, true
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case slots <- struct{}{}:
+		return func() { <-slots }, true
+	case <-ctx.Done():
+		return nil, false
+	case <-timer.C:
+		return nil, false
+	}
 }
 
 func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -142,8 +198,13 @@ func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := a.currentUser(r)
+	sessionHash := ""
 	if c, err := r.Cookie(sessionCookieName); err == nil {
-		_ = a.store.DeleteSessionByHash(r.Context(), security.HashToken(c.Value))
+		sessionHash = security.HashToken(c.Value)
+		_ = a.store.DeleteSessionByHash(r.Context(), sessionHash)
+	}
+	if sessionHash != "" {
+		a.closeSessionWebSockets(sessionHash)
 	}
 	if user != nil {
 		a.audit(r.Context(), &user.ID, "user_logout", "session", nil, a.clientIP(r), r.UserAgent(), nil)
@@ -198,7 +259,26 @@ func (a *App) handleInvite(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	ip := a.clientIP(r)
+	limitIP := rateLimitIP(ip)
+	if !limiterAllows(a.inviteLimiter, limitIP) {
+		a.render(w, r, "invite", map[string]any{"Title": "Создание аккаунта", "Token": token, "Error": "Слишком много попыток регистрации. Попробуйте позже."})
+		return
+	}
+	access, err := a.store.AvailableInvite(r.Context(), security.HashToken(token))
+	if err != nil {
+		recordLimiterFailure(a.inviteLimiter, limitIP)
+		a.render(w, r, "invite", map[string]any{"Title": "Создание аккаунта", "Token": token, "Invalid": true})
+		return
+	}
+	recordLimiterFailure(a.inviteLimiter, limitIP)
+	releasePasswordWork, acquired := acquireBoundedSlot(r.Context(), a.passwordWorkSlots, 3*time.Second)
+	if !acquired {
+		a.render(w, r, "invite", map[string]any{"Title": "Создание аккаунта", "Token": token, "Access": access, "Error": "Сервер занят обработкой регистраций. Повторите попытку через несколько секунд."})
+		return
+	}
 	passwordHash, err := security.HashPassword(password)
+	releasePasswordWork()
 	if err != nil {
 		http.Error(w, "ошибка обработки пароля", http.StatusInternalServerError)
 		return
@@ -208,7 +288,7 @@ func (a *App) handleInvite(w http.ResponseWriter, r *http.Request) {
 		Username:     username,
 		Email:        email,
 		PasswordHash: passwordHash,
-		IP:           a.clientIP(r),
+		IP:           ip,
 	})
 	if errors.Is(err, store.ErrInviteUnavailable) {
 		a.render(w, r, "invite", map[string]any{"Title": "Создание аккаунта", "Token": token, "Invalid": true})
@@ -225,6 +305,9 @@ func (a *App) handleInvite(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "ошибка базы данных", http.StatusInternalServerError)
 		return
+	}
+	if a.inviteLimiter != nil {
+		a.inviteLimiter.Clear(limitIP)
 	}
 	a.audit(r.Context(), &userID, "invite_used", "invite", &inviteID, a.clientIP(r), r.UserAgent(), map[string]any{"username": username})
 	http.Redirect(w, r, "/login", http.StatusFound)
