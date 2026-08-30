@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"mime"
 	"net/http"
@@ -19,7 +20,11 @@ import (
 	"ai-access-gateway/internal/updates"
 )
 
-const maxConcurrentAdminMediaResponses = 2
+const (
+	maxConcurrentAdminMediaResponses = 2
+	adminContentPollInterval         = 750 * time.Millisecond
+	adminContentHeartbeatInterval    = 15 * time.Second
+)
 
 func (a *App) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/admin" {
@@ -69,6 +74,8 @@ func (a *App) handleAdminRoutes(w http.ResponseWriter, r *http.Request) {
 		a.handleAdminUpdates(w, r)
 	case strings.HasPrefix(path, "content/media/"):
 		a.handleAdminContentMedia(w, r, strings.TrimPrefix(path, "content/media/"))
+	case path == "content/events":
+		a.handleAdminContentEvents(w, r)
 	case path == "content":
 		a.handleAdminContent(w, r)
 	case strings.HasPrefix(path, "services/"):
@@ -261,9 +268,17 @@ func (a *App) handleAdminContent(w http.ResponseWriter, r *http.Request) {
 	if len(query) > 200 {
 		query = query[:200]
 	}
-	a.classifyPendingSensitiveContent(r.Context())
-	a.queueSensitiveMediaClassification()
-	a.backfillComfyContentMedia(r.Context())
+	liveRefresh := r.URL.Query().Get("live") == "1"
+	if !liveRefresh {
+		a.classifyPendingSensitiveContent(r.Context())
+		a.queueSensitiveMediaClassification()
+		a.backfillComfyContentMedia(r.Context())
+	}
+	contentRevision, err := a.store.ContentRevision(r.Context())
+	if err != nil {
+		http.Error(w, "ошибка ревизии контента", http.StatusInternalServerError)
+		return
+	}
 	rowLimit := 200
 	if query != "" {
 		rowLimit = 500
@@ -332,7 +347,76 @@ func (a *App) handleAdminContent(w http.ResponseWriter, r *http.Request) {
 	a.render(w, r, "admin_content", map[string]any{
 		"Title": "AI-контент пользователей", "Events": events,
 		"Username": username, "Service": service, "Query": query, "Overview": overview,
+		"ContentRevision": contentRevision,
 	})
+}
+
+func (a *App) handleAdminContentEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "потоковые обновления не поддерживаются", http.StatusInternalServerError)
+		return
+	}
+	lastRevision, _ := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("since")), 10, 64)
+	revision, err := a.store.ContentRevision(r.Context())
+	if err != nil {
+		http.Error(w, "ошибка ревизии контента", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	_, _ = io.WriteString(w, "retry: 2000\n\n")
+	if revision != lastRevision {
+		if err := writeContentRevisionEvent(w, "content", revision); err != nil {
+			return
+		}
+	} else if err := writeContentRevisionEvent(w, "ready", revision); err != nil {
+		return
+	}
+	flusher.Flush()
+	lastRevision = revision
+
+	poll := time.NewTicker(adminContentPollInterval)
+	heartbeat := time.NewTicker(adminContentHeartbeatInterval)
+	defer poll.Stop()
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-poll.C:
+			revision, err = a.store.ContentRevision(r.Context())
+			if err != nil {
+				log.Printf("admin content event stream: %v", err)
+				return
+			}
+			if revision == lastRevision {
+				continue
+			}
+			if err := writeContentRevisionEvent(w, "content", revision); err != nil {
+				return
+			}
+			flusher.Flush()
+			lastRevision = revision
+		case <-heartbeat.C:
+			if _, err := fmt.Fprintf(w, ": keepalive %d\n\n", time.Now().Unix()); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+func writeContentRevisionEvent(w io.Writer, event string, revision int64) error {
+	_, err := fmt.Fprintf(w, "event: %s\ndata: %d\n\n", event, revision)
+	return err
 }
 
 func prettyContentMetadata(metadata string) string {

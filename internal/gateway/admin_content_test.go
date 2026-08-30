@@ -136,3 +136,13 @@ func TestAcquireAdminMediaSlotQueuesInsteadOfRejecting(t *testing.T) {
 	}
 	release()
 }
+
+func TestWriteContentRevisionEvent(t *testing.T) {
+	var output bytes.Buffer
+	if err := writeContentRevisionEvent(&output, "content", 42); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := output.String(), "event: content\ndata: 42\n\n"; got != want {
+		t.Fatalf("event output = %q, want %q", got, want)
+	}
+}

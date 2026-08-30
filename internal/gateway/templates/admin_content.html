@@ -1,12 +1,12 @@
 {{define "admin_content"}}
 {{template "head" .}}
 {{template "admin_nav" .}}
-<main class="page" id="main-content">
+<main class="page" id="main-content" data-admin-content-page data-content-revision="{{.ContentRevision}}">
   <section class="hero admin-hero">
     <div><p class="eyebrow">Контроль использования</p><h1>AI-контент</h1><p class="content-intro">Запросы, ответы и результаты генераций. Новые события расположены сверху.</p></div>
-    <span class="live-badge"><i></i>Параметры: 7 дней · результаты: 3 дня</span>
+    <span class="live-badge is-connecting" data-content-live-indicator aria-live="polite" title="Параметры хранятся 7 дней, результаты — 3 дня"><i></i><span data-content-live-label>Подключаем живые обновления</span></span>
   </section>
-  <section class="content-overview" aria-label="Сводка по журналу">
+  <section class="content-overview" data-content-overview aria-label="Сводка по журналу">
     <div><span>Показано</span><strong>{{.Overview.Total}}</strong></div>
     <div><span>ComfyUI</span><strong>{{.Overview.ComfyUI}}</strong></div>
     <div><span>OpenWebUI</span><strong>{{.Overview.OpenWebUI}}</strong></div>
@@ -20,11 +20,11 @@
     </div>
     <div class="content-filter-actions"><button type="submit">Показать</button>{{if or .Username .Service .Query}}<a class="button ghost" href="/admin/content">Сбросить</a>{{end}}</div>
   </form>
-  <div class="content-list-heading"><strong>События</strong><span>{{if .Overview.Total}}Нажмите на карточку, чтобы открыть полную запись{{else}}Новых записей пока нет{{end}}</span></div>
+  <div class="content-list-heading" data-content-list-heading><strong>События</strong><span>{{if .Overview.Total}}Нажмите на карточку, чтобы открыть полную запись{{else}}Новых записей пока нет{{end}}</span></div>
   <section class="content-gallery" data-admin-content-gallery>
     {{range .Events}}
     {{$event := .}}
-    <article class="content-gallery-card{{if .Sensitive}} sensitive-media{{end}}{{if eq .GenerationState "error"}} content-gallery-card-error{{end}}">
+    <article class="content-gallery-card{{if .Sensitive}} sensitive-media{{end}}{{if eq .GenerationState "error"}} content-gallery-card-error{{end}}" data-content-event-id="{{.ID}}">
       <button class="content-gallery-preview" type="button" data-content-event-open="{{.ID}}" {{if .Sensitive}}data-sensitive-media{{end}} aria-label="Открыть запись пользователя {{.Username}}">
         {{if .Media}}
           {{$preview := index .Media 0}}

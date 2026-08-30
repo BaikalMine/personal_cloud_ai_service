@@ -639,6 +639,32 @@ var migrationCatalog = []migration{
 			`CREATE INDEX IF NOT EXISTS comfy_output_cleanup_due_idx ON comfy_output_cleanup_tombstones(next_attempt_at,id)`,
 		},
 	},
+	{
+		version: 36,
+		name:    "content_live_revision",
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS content_change_revision (
+				id SMALLINT PRIMARY KEY CHECK (id = 1),
+				revision BIGINT NOT NULL DEFAULT 1 CHECK (revision > 0),
+				changed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`INSERT INTO content_change_revision(id,revision) VALUES (1,1) ON CONFLICT (id) DO NOTHING`,
+			`CREATE OR REPLACE FUNCTION bump_content_change_revision() RETURNS trigger AS $$
+			BEGIN
+				UPDATE content_change_revision SET revision=revision+1,changed_at=now() WHERE id=1;
+				RETURN NULL;
+			END;
+			$$ LANGUAGE plpgsql`,
+			`DROP TRIGGER IF EXISTS content_events_change_revision ON content_events`,
+			`CREATE TRIGGER content_events_change_revision
+				AFTER INSERT OR UPDATE OR DELETE ON content_events
+				FOR EACH STATEMENT EXECUTE FUNCTION bump_content_change_revision()`,
+			`DROP TRIGGER IF EXISTS content_media_change_revision ON content_media`,
+			`CREATE TRIGGER content_media_change_revision
+				AFTER INSERT OR UPDATE OR DELETE ON content_media
+				FOR EACH STATEMENT EXECUTE FUNCTION bump_content_change_revision()`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

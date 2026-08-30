@@ -128,3 +128,22 @@ func TestPromptAssistantContentServiceMigration(t *testing.T) {
 		t.Fatalf("prompt assistant service migration does not allow ollama: %s", sql)
 	}
 }
+
+func TestContentLiveRevisionMigration(t *testing.T) {
+	var liveMigration *migration
+	for index := range migrationCatalog {
+		if migrationCatalog[index].version == 36 {
+			liveMigration = &migrationCatalog[index]
+			break
+		}
+	}
+	if liveMigration == nil || liveMigration.name != "content_live_revision" {
+		t.Fatal("content live revision migration is missing")
+	}
+	sql := strings.Join(liveMigration.statements, "\n")
+	for _, expected := range []string{"content_change_revision", "content_events_change_revision", "content_media_change_revision"} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("content live revision migration does not contain %q", expected)
+		}
+	}
+}

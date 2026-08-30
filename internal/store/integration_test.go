@@ -141,12 +141,20 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 		t.Fatalf("disabled user's session remained usable: %v", err)
 	}
 
+	revisionBeforeContent, err := repository.ContentRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 	eventID, err := repository.InsertContentEvent(ctx, domain.ContentEventRecord{
 		UserID: registeredUserID, Service: "comfyui", Kind: "comfyui_prompt",
 		ExternalID: "prompt-1", Model: "model", PromptCipher: []byte{1}, ResponseCipher: []byte{2}, MetadataCipher: []byte{3},
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	revisionAfterEvent, err := repository.ContentRevision(ctx)
+	if err != nil || revisionAfterEvent <= revisionBeforeContent {
+		t.Fatalf("content revision after event = %d, before = %d, err=%v", revisionAfterEvent, revisionBeforeContent, err)
 	}
 	ownership := domain.ComfyOutputOwnership{
 		PromptID: "prompt-1", Filename: "result.png", Subfolder: "alice", StorageType: "output", MediaType: "image",
@@ -167,6 +175,10 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 		Subfolder: "alice", StorageType: "output", PayloadCipher: []byte{4, 5, 6}, SizeBytes: 3, ExpiresAt: time.Now().Add(24 * time.Hour),
 	}); err != nil {
 		t.Fatal(err)
+	}
+	revisionAfterMedia, err := repository.ContentRevision(ctx)
+	if err != nil || revisionAfterMedia <= revisionAfterEvent {
+		t.Fatalf("content revision after media = %d, after event = %d, err=%v", revisionAfterMedia, revisionAfterEvent, err)
 	}
 	assertRetentionWindow(t, db, "content_events", 7*24*time.Hour)
 	assertRetentionWindow(t, db, "content_media", 24*time.Hour)

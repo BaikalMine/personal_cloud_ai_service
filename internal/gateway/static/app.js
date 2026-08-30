@@ -116,11 +116,28 @@
   };
   window.aiGatewaySensitiveContent = { reveal: revealSensitiveMedia };
 
+  const bindContentImageRetries = (root = document) => {
+    root.querySelectorAll(".content-gallery-preview img, .content-detail-media-grid img").forEach((image) => {
+      if (image.dataset.retryBound === "true") return;
+      image.dataset.retryBound = "true";
+      let retries = 0;
+      image.addEventListener("error", () => {
+        if (retries >= 2 || !image.src) return;
+        retries += 1;
+        const url = new URL(image.src, window.location.origin);
+        url.searchParams.set("retry", `${Date.now()}-${retries}`);
+        window.setTimeout(() => { image.src = url.toString(); }, 300 * retries);
+      });
+    });
+  };
+
+  const adminContentPage = document.querySelector("[data-admin-content-page]");
   const contentGallery = document.querySelector("[data-admin-content-gallery]");
   const contentDialog = document.getElementById("content-detail-dialog");
   const contentDialogBody = document.getElementById("content-detail-body");
   if (contentGallery && contentDialog && contentDialogBody) {
     let contentDialogTrigger = null;
+    let contentDialogEventID = "";
     const closeContentDialog = () => {
       if (contentDialog.hidden) return;
       contentDialog.hidden = true;
@@ -128,38 +145,139 @@
       document.body.classList.remove("content-detail-open");
       contentDialogTrigger?.focus({ preventScroll: true });
       contentDialogTrigger = null;
+      contentDialogEventID = "";
+    };
+    const renderContentDialog = (trigger, preserveScroll = false) => {
+      if (!(trigger instanceof HTMLElement)) return false;
+      const eventID = trigger.dataset.contentEventOpen || "";
+      const detail = document.getElementById(`content-event-detail-${eventID}`);
+      if (!(detail instanceof HTMLTemplateElement)) return false;
+      const scrollTop = preserveScroll ? contentDialogBody.scrollTop : 0;
+      contentDialogBody.replaceChildren(detail.content.cloneNode(true));
+      if (trigger.closest(".sensitive-media")?.classList.contains("is-revealed")) {
+        contentDialogBody.querySelectorAll(".sensitive-media").forEach((media) => media.classList.add("is-revealed"));
+      }
+      bindContentImageRetries(contentDialogBody);
+      contentDialogBody.scrollTop = scrollTop;
+      contentDialogTrigger = trigger;
+      contentDialogEventID = eventID;
+      contentDialog.hidden = false;
+      document.body.classList.add("content-detail-open");
+      return true;
     };
     contentGallery.addEventListener("click", (event) => {
       const trigger = event.target.closest("[data-content-event-open]");
       if (!trigger) return;
       if (revealSensitiveMedia(trigger)) return;
-      const detail = document.getElementById(`content-event-detail-${trigger.dataset.contentEventOpen}`);
-      if (!(detail instanceof HTMLTemplateElement)) return;
-      contentDialogBody.replaceChildren(detail.content.cloneNode(true));
-      if (trigger.closest(".sensitive-media")?.classList.contains("is-revealed")) {
-        contentDialogBody.querySelectorAll(".sensitive-media").forEach((media) => media.classList.add("is-revealed"));
-      }
-      contentDialogTrigger = trigger;
-      contentDialog.hidden = false;
-      document.body.classList.add("content-detail-open");
-      contentDialog.querySelector("[data-content-detail-close]")?.focus();
+      if (renderContentDialog(trigger)) contentDialog.querySelector("[data-content-detail-close]")?.focus();
     });
     contentDialog.querySelectorAll("[data-content-detail-close]").forEach((button) => button.addEventListener("click", closeContentDialog));
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") closeContentDialog();
     });
+
+    if (adminContentPage && "EventSource" in window) {
+      const liveIndicator = adminContentPage.querySelector("[data-content-live-indicator]");
+      const liveLabel = adminContentPage.querySelector("[data-content-live-label]");
+      let contentRevision = Number(adminContentPage.dataset.contentRevision) || 0;
+      let refreshInFlight = false;
+      let refreshPending = false;
+      let retryTimer = 0;
+      const setLiveState = (state, label) => {
+        liveIndicator?.classList.toggle("is-connecting", state === "connecting");
+        liveIndicator?.classList.toggle("is-offline", state === "offline");
+        if (liveLabel) liveLabel.textContent = label;
+      };
+      const replaceChildrenFrom = (current, next) => {
+        if (!current || !next) return;
+        current.replaceChildren(...[...next.childNodes].map((node) => document.importNode(node, true)));
+      };
+      const refreshContent = async () => {
+        if (refreshInFlight) {
+          refreshPending = true;
+          return;
+        }
+        refreshInFlight = true;
+        refreshPending = false;
+        let succeeded = false;
+        try {
+          const url = new URL(window.location.href);
+          url.searchParams.set("live", "1");
+          const response = await fetch(url, { credentials: "same-origin", cache: "no-store", headers: { Accept: "text/html" } });
+          if (!response.ok) throw new Error(`content refresh failed: ${response.status}`);
+          const nextDocument = new DOMParser().parseFromString(await response.text(), "text/html");
+          const nextPage = nextDocument.querySelector("[data-admin-content-page]");
+          const nextGallery = nextDocument.querySelector("[data-admin-content-gallery]");
+          const nextOverview = nextDocument.querySelector("[data-content-overview]");
+          const nextHeading = nextDocument.querySelector("[data-content-list-heading]");
+          if (!nextPage || !nextGallery || !nextOverview || !nextHeading) throw new Error("content refresh payload is incomplete");
+
+          const oldIDs = new Set([...contentGallery.querySelectorAll("[data-content-event-id]")].map((card) => card.dataset.contentEventId));
+          const revealedIDs = new Set([...contentGallery.querySelectorAll(".sensitive-media.is-revealed [data-content-event-open]")].map((trigger) => trigger.dataset.contentEventOpen));
+          const preserveAnchor = window.scrollY > 220 && contentDialog.hidden;
+          const anchor = preserveAnchor ? [...contentGallery.querySelectorAll("[data-content-event-id]")].find((card) => card.getBoundingClientRect().bottom > 0) : null;
+          const anchorID = anchor?.dataset.contentEventId || "";
+          const anchorTop = anchor?.getBoundingClientRect().top || 0;
+
+          replaceChildrenFrom(document.querySelector("[data-content-overview]"), nextOverview);
+          replaceChildrenFrom(document.querySelector("[data-content-list-heading]"), nextHeading);
+          replaceChildrenFrom(contentGallery, nextGallery);
+          contentRevision = Number(nextPage.dataset.contentRevision) || contentRevision;
+          adminContentPage.dataset.contentRevision = String(contentRevision);
+
+          revealedIDs.forEach((eventID) => contentGallery.querySelector(`[data-content-event-open="${eventID}"]`)?.closest(".sensitive-media")?.classList.add("is-revealed"));
+          contentGallery.querySelectorAll("[data-content-event-id]").forEach((card) => {
+            if (!oldIDs.has(card.dataset.contentEventId)) {
+              card.classList.add("is-new");
+              window.setTimeout(() => card.classList.remove("is-new"), 450);
+            }
+          });
+          bindContentImageRetries(contentGallery);
+
+          if (anchorID) {
+            const nextAnchor = contentGallery.querySelector(`[data-content-event-id="${anchorID}"]`);
+            if (nextAnchor) window.scrollBy(0, nextAnchor.getBoundingClientRect().top - anchorTop);
+          }
+          if (!contentDialog.hidden && contentDialogEventID) {
+            const nextTrigger = contentGallery.querySelector(`[data-content-event-open="${contentDialogEventID}"]`);
+            if (nextTrigger) renderContentDialog(nextTrigger, true); else closeContentDialog();
+          }
+          succeeded = true;
+          setLiveState("online", "Онлайн · новые записи появляются сразу");
+        } catch (_) {
+          setLiveState("offline", "Не удалось обновить · повторяем подключение");
+        } finally {
+          refreshInFlight = false;
+          if (refreshPending) {
+            window.setTimeout(refreshContent, 0);
+          } else if (!succeeded) {
+            window.clearTimeout(retryTimer);
+            retryTimer = window.setTimeout(refreshContent, 1800);
+          }
+        }
+      };
+
+      const eventsURL = new URL("/admin/content/events", window.location.origin);
+      eventsURL.searchParams.set("since", String(contentRevision));
+      const contentEvents = new EventSource(eventsURL, { withCredentials: true });
+      contentEvents.addEventListener("open", () => setLiveState("online", "Онлайн · новые записи появляются сразу"));
+      contentEvents.addEventListener("ready", (event) => {
+        const revision = Number(event.data);
+        if (Number.isFinite(revision)) contentRevision = Math.max(contentRevision, revision);
+        setLiveState("online", "Онлайн · новые записи появляются сразу");
+      });
+      contentEvents.addEventListener("content", (event) => {
+        const revision = Number(event.data);
+        if (!Number.isFinite(revision) || revision <= contentRevision) return;
+        refreshPending = refreshInFlight;
+        refreshContent();
+      });
+      contentEvents.addEventListener("error", () => setLiveState("offline", "Связь потеряна · переподключаемся"));
+      window.addEventListener("beforeunload", () => contentEvents.close(), { once: true });
+    }
   }
 
-  document.querySelectorAll(".content-gallery-preview img, .content-detail-media-grid img").forEach((image) => {
-    let retries = 0;
-    image.addEventListener("error", () => {
-      if (retries >= 2 || !image.src) return;
-      retries += 1;
-      const url = new URL(image.src, window.location.origin);
-      url.searchParams.set("retry", `${Date.now()}-${retries}`);
-      window.setTimeout(() => { image.src = url.toString(); }, 300 * retries);
-    });
-  });
+  bindContentImageRetries();
 
   document.querySelectorAll("table").forEach((table) => {
     const labels = [...table.querySelectorAll("thead th")].map((cell) => cell.textContent.trim());

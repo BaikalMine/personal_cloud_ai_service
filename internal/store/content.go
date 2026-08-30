@@ -23,6 +23,12 @@ func (s *Store) InsertContentEvent(ctx context.Context, event domain.ContentEven
 	return id, err
 }
 
+func (s *Store) ContentRevision(ctx context.Context) (int64, error) {
+	var revision int64
+	err := s.db.QueryRowContext(ctx, `SELECT revision FROM content_change_revision WHERE id=1`).Scan(&revision)
+	return revision, err
+}
+
 func (s *Store) ListContentEvents(ctx context.Context, limit int, username, service string) ([]domain.ContentEventRow, error) {
 	limit = boundedLimit(limit, 1, 500)
 	rows, err := s.db.QueryContext(ctx, `
