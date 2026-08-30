@@ -515,7 +515,14 @@
     </div>
   </section>
   <section class="generation-variants panel" id="generation-variants" hidden aria-live="polite">
-    <div class="generation-history-toolbar"><div class="generation-history-title"><p class="section-kicker">Быстрая генерация</p><h2>История генераций</h2><small id="generation-variant-count">Хранится 24 часа</small></div><div class="generation-history-actions"><div class="generation-variant-filters"><label><span>Статус</span><select id="generation-variant-state"><option value="">Все</option><option value="completed">Готово</option><option value="running">В работе</option><option value="queued">В очереди</option><option value="error">С ошибкой</option><option value="cancelled">Отменено</option></select></label><label><span>Сценарий</span><select id="generation-variant-template"><option value="">Все сценарии</option><option value="text-to-image">Текст в изображение</option><option value="image-to-image">Фото и промт</option><option value="minimax-h3-video">Видео</option></select></label></div><button type="button" class="button ghost generation-history-toggle" id="generation-history-toggle" aria-expanded="true">Свернуть</button></div></div>
+    <div class="generation-history-toolbar">
+      <div class="generation-history-title"><p class="section-kicker">Быстрая генерация</p><h2>История генераций</h2><small id="generation-variant-count">Хранится 24 часа</small></div>
+      <div class="generation-variant-filters">
+        <label><span>Статус</span><select id="generation-variant-state"><option value="">Все</option><option value="completed">Готово</option><option value="running">В работе</option><option value="queued">В очереди</option><option value="error">С ошибкой</option><option value="cancelled">Отменено</option></select></label>
+        <label><span>Сценарий</span><select id="generation-variant-template"><option value="">Все сценарии</option><option value="text-to-image">Текст в изображение</option><option value="image-to-image">Фото и промт</option><option value="minimax-h3-video">Видео</option></select></label>
+      </div>
+      <button type="button" class="button ghost generation-history-toggle" id="generation-history-toggle" aria-expanded="true">Свернуть</button>
+    </div>
     <div class="generation-history-content" id="generation-history-content"><div class="generation-variant-list" id="generation-variant-list"></div></div>
   </section>
   {{if .RecentGenerationMedia}}
