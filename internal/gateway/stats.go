@@ -42,6 +42,9 @@ func (a *App) handlePrometheusMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) recordProxyRequest(ctx context.Context, userID int64, service, method, path string, status int, duration time.Duration, bytesIn, bytesOut int64, ws bool, ip, userAgent string) {
+	if a.store == nil {
+		return
+	}
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
 	err := a.store.RecordProxyRequest(writeCtx, domain.ProxyRequestRecord{

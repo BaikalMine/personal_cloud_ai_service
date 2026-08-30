@@ -72,6 +72,13 @@ type SystemMetrics struct {
 	Message             string    `json:"message,omitempty"`
 }
 
+// ComfyMemoryTrim reports a best-effort reduction of ComfyUI's idle Windows
+// working set. The monitor owns process discovery; callers cannot supply a PID.
+type ComfyMemoryTrim struct {
+	Trimmed int    `json:"trimmed"`
+	Message string `json:"message,omitempty"`
+}
+
 type Client struct {
 	baseURL    *url.URL
 	token      string
@@ -140,6 +147,40 @@ func (c *Client) System(ctx context.Context) (SystemMetrics, error) {
 		return metrics, fmt.Errorf("mining agent returned %s", response.Status)
 	}
 	return metrics, nil
+}
+
+func (c *Client) TrimComfyMemory(ctx context.Context) (ComfyMemoryTrim, error) {
+	if !c.Configured() {
+		return ComfyMemoryTrim{Message: "Windows-агент недоступен."}, ErrUnavailable
+	}
+	target := c.resolve("/v1/comfyui/trim")
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), nil)
+	if err != nil {
+		return ComfyMemoryTrim{}, err
+	}
+	request.Header.Set("Authorization", "Bearer "+c.token)
+	request.Header.Set("Accept", "application/json")
+	response, err := c.http.Do(request)
+	if err != nil {
+		return ComfyMemoryTrim{Message: "Windows-агент недоступен."}, fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes))
+	if err != nil {
+		return ComfyMemoryTrim{}, fmt.Errorf("read ComfyUI memory trim response: %w", err)
+	}
+	var result ComfyMemoryTrim
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		_ = json.Unmarshal(body, &result)
+		if result.Message == "" {
+			result.Message = "Windows-агент пока не поддерживает очистку памяти ComfyUI."
+		}
+		return result, fmt.Errorf("system monitor returned %s", response.Status)
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return ComfyMemoryTrim{}, fmt.Errorf("decode ComfyUI memory trim response: %w", err)
+	}
+	return result, nil
 }
 
 func (c *Client) Start(ctx context.Context, request Request) (State, error) {

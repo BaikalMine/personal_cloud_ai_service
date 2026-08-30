@@ -295,6 +295,51 @@ func formatDuration(v any) string {
 	return fmt.Sprintf("%.2f с", float64(ms)/1000)
 }
 
+func accountLifetimeLabel(seconds int64) string {
+	if seconds <= 0 {
+		return "постоянно"
+	}
+	days := seconds / int64((24 * time.Hour).Seconds())
+	if days > 0 && seconds%int64((24*time.Hour).Seconds()) == 0 {
+		return fmt.Sprintf("%d %s", days, russianDayLabel(days))
+	}
+	hours := seconds / int64(time.Hour.Seconds())
+	if hours > 0 && seconds%int64(time.Hour.Seconds()) == 0 {
+		return fmt.Sprintf("%d %s", hours, russianHourLabel(hours))
+	}
+	return fmt.Sprintf("%d мин.", seconds/60)
+}
+
+func russianDayLabel(value int64) string {
+	lastTwo := value % 100
+	if lastTwo >= 11 && lastTwo <= 14 {
+		return "дней"
+	}
+	switch value % 10 {
+	case 1:
+		return "день"
+	case 2, 3, 4:
+		return "дня"
+	default:
+		return "дней"
+	}
+}
+
+func russianHourLabel(value int64) string {
+	lastTwo := value % 100
+	if lastTwo >= 11 && lastTwo <= 14 {
+		return "часов"
+	}
+	switch value % 10 {
+	case 1:
+		return "час"
+	case 2, 3, 4:
+		return "часа"
+	default:
+		return "часов"
+	}
+}
+
 func pct(v any) int {
 	switch x := v.(type) {
 	case int:

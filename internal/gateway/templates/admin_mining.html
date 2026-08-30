@@ -13,7 +13,7 @@
   <section class="panel">
     <div class="panel-heading"><div><p class="section-kicker">Общее состояние</p><h2>Профили запуска</h2></div><span class="muted">{{len .Mining.Miners}} настроено</span></div>
     <p class="panel-intro">{{.Mining.Message}}</p>
-    <details class="miner-script-details admin-script-details" open>
+    <details class="miner-script-details admin-script-details">
       <summary>Содержимое активного скрипта</summary>
       {{if .Mining.Script.Content}}
       <div class="script-fingerprint"><span>SHA-256</span><code>{{.Mining.Script.SHA256}}</code></div>

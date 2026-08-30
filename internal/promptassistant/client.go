@@ -15,9 +15,13 @@ import (
 )
 
 const (
-	maxPromptBytes   = 16 << 10
-	maxResponseBytes = 32 << 10
-	maxImageBytes    = 32 << 20
+	maxPromptBytes         = 16 << 10
+	maxResponseBytes       = 32 << 10
+	maxImageBytes          = 32 << 20
+	defaultNumPredict      = 700
+	thinkNumPredict        = 1400
+	miniMaxNumPredict      = 1800
+	miniMaxThinkNumPredict = 2600
 )
 
 var ErrUnsupportedImage = errors.New("изображение не поддерживается локальной vision-проверкой")
@@ -73,6 +77,16 @@ func (c *Client) Configured() bool {
 }
 
 func (c *Client) Enhance(ctx context.Context, mode Mode, profile Profile, prompt string, references []ImageReference, think bool) (string, error) {
+	return c.enhance(ctx, mode, profile, prompt, references, VideoContext{}, think)
+}
+
+// EnhanceVideo uses the MiniMax H3 workflow facts to select a compatible
+// Context-IR structure without giving the local LLM any image bytes.
+func (c *Client) EnhanceVideo(ctx context.Context, mode Mode, profile Profile, prompt string, references []ImageReference, video VideoContext, think bool) (string, error) {
+	return c.enhance(ctx, mode, profile, prompt, references, video, think)
+}
+
+func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt string, references []ImageReference, video VideoContext, think bool) (string, error) {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return "", errors.New("введите исходный промт")
@@ -93,18 +107,42 @@ func (c *Client) Enhance(ctx context.Context, mode Mode, profile Profile, prompt
 	payload := chatRequest{
 		Model: c.model,
 		Messages: []Message{
-			{Role: "system", Content: SystemPromptWithReferences(mode, profile, references)},
+			{Role: "system", Content: SystemPromptWithVideoContext(mode, profile, video)},
 			{Role: "user", Content: prompt},
 		},
 		Stream:    false,
 		Think:     think,
 		KeepAlive: "0",
 	}
+	for _, reference := range references {
+		if len(reference.Image) == 0 {
+			continue
+		}
+		if len(reference.Image) > maxImageBytes {
+			return "", fmt.Errorf("%w: изображение %d слишком большое", ErrUnsupportedImage, reference.Number)
+		}
+		switch strings.ToLower(strings.TrimSpace(reference.MIMEType)) {
+		case "image/jpeg", "image/png", "image/webp":
+		default:
+			return "", fmt.Errorf("%w: формат изображения %d", ErrUnsupportedImage, reference.Number)
+		}
+		payload.Messages[1].Images = append(payload.Messages[1].Images, base64.StdEncoding.EncodeToString(reference.Image))
+	}
+	if mode != ModeTextToVideo || profile != ProfileMiniMaxH3 {
+		payload.Messages[0].Content = SystemPromptWithReferences(mode, profile, references)
+	}
 	payload.Options.Temperature = 0.35
 	payload.Options.TopP = 0.9
-	payload.Options.NumPredict = 700
+	payload.Options.NumPredict = defaultNumPredict
+	if mode == ModeTextToVideo && profile == ProfileMiniMaxH3 {
+		payload.Options.Temperature = 0.3
+		payload.Options.NumPredict = miniMaxNumPredict
+	}
 	if think {
-		payload.Options.NumPredict = 1400
+		payload.Options.NumPredict = thinkNumPredict
+		if mode == ModeTextToVideo && profile == ProfileMiniMaxH3 {
+			payload.Options.NumPredict = miniMaxThinkNumPredict
+		}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -116,7 +154,7 @@ func (c *Client) Enhance(ctx context.Context, mode Mode, profile Profile, prompt
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
-	response, err := c.http.Do(request)
+	response, err := c.httpClientFor(mode, profile).Do(request)
 	if err != nil {
 		return "", fmt.Errorf("локальная модель недоступна: %w", err)
 	}
@@ -140,6 +178,20 @@ func (c *Client) Enhance(ctx context.Context, mode Mode, profile Profile, prompt
 		return "", errors.New("локальная модель не вернула вариант промта")
 	}
 	return answer, nil
+}
+
+func (c *Client) httpClientFor(mode Mode, profile Profile) *http.Client {
+	if mode != ModeTextToVideo || profile != ProfileMiniMaxH3 {
+		return c.http
+	}
+	client := *c.http
+	client.Timeout = 150 * time.Second
+	if transport, ok := c.http.Transport.(*http.Transport); ok {
+		videoTransport := transport.Clone()
+		videoTransport.ResponseHeaderTimeout = 140 * time.Second
+		client.Transport = videoTransport
+	}
+	return &client
 }
 
 // ClassifyImage uses the locally configured vision model to decide whether an

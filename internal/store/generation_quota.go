@@ -18,6 +18,29 @@ type QuickGenerationReservation struct {
 	UsageDate time.Time
 }
 
+// QuickGenerationQuota describes the current usage of the limits applied to a
+// user. Daily usage is measured in the same Moscow calendar day as reservation.
+type QuickGenerationQuota struct {
+	DailyLimit int
+	DailyUsed  int
+	TotalLimit int64
+	TotalUsed  int64
+}
+
+func (s *Store) QuickGenerationQuota(ctx context.Context, userID int64) (QuickGenerationQuota, error) {
+	var quota QuickGenerationQuota
+	err := s.db.QueryRowContext(ctx, `
+		SELECT u.generation_daily_limit, COALESCE(d.used_count, 0),
+		       u.generation_total_limit, u.generation_total_used
+		FROM users u
+		LEFT JOIN quick_generation_daily_usage d
+		  ON d.user_id = u.id
+		 AND d.usage_date = timezone('Europe/Moscow', now())::date
+		WHERE u.id = $1
+	`, userID).Scan(&quota.DailyLimit, &quota.DailyUsed, &quota.TotalLimit, &quota.TotalUsed)
+	return quota, err
+}
+
 // ReserveQuickGeneration atomically reserves one accepted quick-generation run.
 // A failed upstream submission must call ReleaseQuickGeneration.
 func (s *Store) ReserveQuickGeneration(ctx context.Context, userID int64) (QuickGenerationReservation, error) {

@@ -15,10 +15,10 @@ func (s *Store) InsertContentEvent(ctx context.Context, event domain.ContentEven
 	var id int64
 	err := s.db.QueryRowContext(ctx, `
 		INSERT INTO content_events
-			(user_id, service, kind, external_id, model, prompt_cipher, response_cipher, metadata_cipher, is_sensitive, sensitivity_classified_at)
-		VALUES ($1,$2,$3,NULLIF($4,''),$5,$6,$7,$8,$9,now())
+			(user_id, service, kind, external_id, model, generation_state, prompt_cipher, response_cipher, metadata_cipher, is_sensitive, sensitivity_classified_at)
+		VALUES ($1,$2,$3,NULLIF($4,''),$5,$6,$7,$8,$9,$10,now())
 		RETURNING id
-	`, event.UserID, event.Service, event.Kind, event.ExternalID, event.Model,
+	`, event.UserID, event.Service, event.Kind, event.ExternalID, event.Model, event.GenerationState,
 		event.PromptCipher, event.ResponseCipher, event.MetadataCipher, event.Sensitive).Scan(&id)
 	return id, err
 }
@@ -26,14 +26,15 @@ func (s *Store) InsertContentEvent(ctx context.Context, event domain.ContentEven
 func (s *Store) ListContentEvents(ctx context.Context, limit int, username, service string) ([]domain.ContentEventRow, error) {
 	limit = boundedLimit(limit, 1, 500)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT e.id, e.user_id, u.username, e.service, e.kind, COALESCE(e.external_id,''), e.model,
-		       e.prompt_cipher, e.response_cipher, e.metadata_cipher, e.is_sensitive, COUNT(m.id),
-		       e.created_at, e.expires_at
+		SELECT e.id, COALESCE(e.user_id,0), COALESCE(u.username,'Удалённый пользователь'), e.service, e.kind, COALESCE(e.external_id,''), e.model,
+		       e.generation_state, e.prompt_cipher, e.response_cipher, e.metadata_cipher, e.is_sensitive,
+		       e.generated_media_count, COALESCE(e.media_expires_at,'epoch'::timestamptz), COUNT(m.id), e.created_at, e.expires_at
 		FROM content_events e
-		JOIN users u ON u.id = e.user_id
+		LEFT JOIN users u ON u.id = e.user_id
 		LEFT JOIN content_media m ON m.event_id = e.id AND m.expires_at > now()
 		WHERE e.expires_at > now()
-		  AND ($2 = '' OR u.username ILIKE '%' || $2 || '%')
+		  AND e.kind <> 'prompt_assistant'
+		  AND ($2 = '' OR COALESCE(u.username,'Удалённый пользователь') ILIKE '%' || $2 || '%')
 		  AND ($3 = '' OR e.service = $3)
 		GROUP BY e.id, u.username
 		ORDER BY e.created_at DESC
@@ -47,8 +48,8 @@ func (s *Store) ListContentEvents(ctx context.Context, limit int, username, serv
 	for rows.Next() {
 		var event domain.ContentEventRow
 		if err := rows.Scan(&event.ID, &event.UserID, &event.Username, &event.Service, &event.Kind,
-			&event.ExternalID, &event.Model, &event.PromptCipher, &event.ResponseCipher,
-			&event.MetadataCipher, &event.Sensitive, &event.MediaCount, &event.CreatedAt, &event.ExpiresAt); err != nil {
+			&event.ExternalID, &event.Model, &event.GenerationState, &event.PromptCipher, &event.ResponseCipher,
+			&event.MetadataCipher, &event.Sensitive, &event.GeneratedMediaCount, &event.MediaExpiresAt, &event.MediaCount, &event.CreatedAt, &event.ExpiresAt); err != nil {
 			return nil, err
 		}
 		events = append(events, event)
@@ -131,12 +132,35 @@ func (s *Store) InsertContentMedia(ctx context.Context, media domain.ContentMedi
 	if !media.ExpiresAt.IsZero() {
 		expiresAt = media.ExpiresAt
 	}
-	_, err := s.db.ExecContext(ctx, `
+	var expiresAtStored time.Time
+	err := s.db.QueryRowContext(ctx, `
 		INSERT INTO content_media(event_id,media_type,mime_type,original_name,subfolder,storage_type,payload_cipher,size_bytes,content_hash,expires_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,COALESCE($10,now() + interval '3 days'))
 		ON CONFLICT (event_id,original_name,subfolder,storage_type) DO NOTHING
+		RETURNING expires_at
 	`, media.EventID, media.MediaType, media.MIMEType, media.OriginalName, media.Subfolder,
-		media.StorageType, media.PayloadCipher, media.SizeBytes, media.ContentHash, expiresAt)
+		media.StorageType, media.PayloadCipher, media.SizeBytes, media.ContentHash, expiresAt).Scan(&expiresAtStored)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
+		UPDATE content_events
+		SET generated_media_count=generated_media_count+1,
+		    media_expires_at=GREATEST(COALESCE(media_expires_at,'epoch'::timestamptz),$2)
+		WHERE id=$1
+	`, media.EventID, expiresAtStored)
+	return err
+}
+
+func (s *Store) SetContentGenerationState(ctx context.Context, userID int64, promptID, state string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE content_events
+		SET generation_state=$3
+		WHERE user_id=$1 AND service='comfyui' AND external_id=$2
+	`, userID, promptID, state)
 	return err
 }
 

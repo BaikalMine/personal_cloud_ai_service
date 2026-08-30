@@ -1,0 +1,22 @@
+{{define "suggestions"}}
+{{template "head" .}}
+{{template "nav" .}}
+<main class="page narrow-page" id="main-content">
+  <section class="hero compact-hero"><div><p class="eyebrow">Развитие сервиса</p><h1>Предложить улучшение</h1><p>Модель, LoRA или workflow можно предложить без доступа к серверу.</p></div></section>
+  {{if .Message}}<p class="success-box">{{.Message}}</p>{{end}}
+  {{if .Error}}<p class="alert">{{.Error}}</p>{{end}}
+  {{if .VirusTotalConfigured}}
+  <form class="panel form-grid suggestion-form" method="post" action="/suggestions" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label class="full"><span>Что добавить</span><input name="title" required minlength="3" maxlength="120" placeholder="Например: LoRA для портретов или новый workflow"></label>
+    <label class="full"><span>Описание</span><textarea name="description" required minlength="10" maxlength="4000" rows="7" placeholder="Для чего это нужно, с какими моделями работает, чего ожидаете от результата."></textarea></label>
+    <label class="full"><span>Ссылки на источник</span><textarea name="links" rows="4" placeholder="До трёх ссылок: по одной в строке"></textarea><small>Gateway не открывает эти адреса и не скачивает файлы. Каждая ссылка отправляется в VirusTotal.</small></label>
+    <label class="full"><span>Workflow JSON</span><input name="workflow_json" type="file" accept="application/json,.json"><small>Только корректный JSON до 5 МБ. Он не выполняется Gateway и отправляется в VirusTotal на проверку.</small></label>
+    <div class="full form-actions"><button type="submit">Отправить на проверку</button></div>
+  </form>
+  {{else}}
+  <section class="panel"><h2>Проверка ещё не подключена</h2><p class="panel-intro">Администратор должен добавить ключ VirusTotal. До этого момента предложения с файлами и ссылками не принимаются.</p></section>
+  {{end}}
+</main>
+</body></html>
+{{end}}

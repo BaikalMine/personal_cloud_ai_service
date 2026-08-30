@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
 	"io"
 	"log"
 	"mime"
@@ -17,6 +18,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	_ "image/jpeg"
+	_ "image/png"
 
 	"ai-access-gateway/internal/domain"
 	"ai-access-gateway/internal/store"
@@ -46,17 +50,31 @@ type generationMediaView struct {
 }
 
 type generationStatus struct {
-	PromptID      string             `json:"prompt_id"`
-	State         string             `json:"state"`
-	Message       string             `json:"message"`
-	QueuePosition int                `json:"queue_position,omitempty"`
-	QueueTotal    int                `json:"queue_total,omitempty"`
-	Outputs       []generationOutput `json:"outputs,omitempty"`
+	PromptID             string             `json:"prompt_id"`
+	State                string             `json:"state"`
+	Message              string             `json:"message"`
+	QueuePosition        int                `json:"queue_position,omitempty"`
+	QueueTotal           int                `json:"queue_total,omitempty"`
+	EstimatedWaitSeconds int                `json:"estimated_wait_seconds,omitempty"`
+	Outputs              []generationOutput `json:"outputs,omitempty"`
 }
 
 type generationQueueOverview struct {
-	Running int `json:"running"`
-	Pending int `json:"pending"`
+	Running              int    `json:"running"`
+	Pending              int    `json:"pending"`
+	CurrentTask          string `json:"current_task"`
+	EstimatedWaitSeconds int    `json:"estimated_wait_seconds,omitempty"`
+	AverageTaskSeconds   int    `json:"average_task_seconds,omitempty"`
+}
+
+type generationQuotaView struct {
+	DailyLimit     int   `json:"daily_limit"`
+	DailyUsed      int   `json:"daily_used"`
+	DailyRemaining int   `json:"daily_remaining"`
+	TotalLimit     int64 `json:"total_limit"`
+	TotalUsed      int64 `json:"total_used"`
+	TotalRemaining int64 `json:"total_remaining"`
+	HasLimits      bool  `json:"has_limits"`
 }
 
 type comfyQueueSnapshot struct {
@@ -80,9 +98,11 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 	recentLibrary := quick(http.HandlerFunc(a.handleRecentGenerationLibrary))
 	hideLibrary := quick(http.HandlerFunc(a.handleHideGenerationLibraryMedia))
 	upload := quick(a.quickGenerationUploadHandler())
+	uploadAudio := quick(a.quickGenerationAudioUploadHandler())
 	mux.Handle("/generate", page)
 	mux.Handle("/generate/", page)
 	mux.Handle("/generate/upload/image", upload)
+	mux.Handle("/generate/upload/audio", uploadAudio)
 	mux.Handle("/generate/run", run)
 	mux.Handle("/generate/recover", recover)
 	mux.Handle("/generate/prompt-assistant", promptAssistant)
@@ -93,6 +113,7 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 	mux.Handle("/generate/library/hide", hideLibrary)
 	mux.Handle("/generate/library/recent", recentLibrary)
 	mux.Handle("/generate/library/", library)
+	a.registerGenerationCompanionRoutes(mux, quick)
 }
 
 func (a *App) handleGeneratePage(w http.ResponseWriter, r *http.Request) {
@@ -108,12 +129,23 @@ func (a *App) handleGeneratePage(w http.ResponseWriter, r *http.Request) {
 	catalog := a.comfyGenerationModels(r.Context())
 	presets := buildGenerationPresets(catalog)
 	user := a.currentUser(r)
+	policy, policyErr := a.generationAccessPolicy(r.Context(), user)
+	if policyErr != nil {
+		http.Error(w, "не удалось загрузить права быстрой генерации", http.StatusInternalServerError)
+		return
+	}
+	quota, quotaErr := a.generationQuotaView(r.Context(), user.ID)
+	if quotaErr != nil {
+		http.Error(w, "не удалось загрузить лимиты быстрой генерации", http.StatusInternalServerError)
+		return
+	}
 	for index := range presets {
 		if presets[index].AdminOnly && user.Role != "admin" {
 			presets[index].Restricted = true
 			presets[index].Restriction = "Доступно только администратору"
 		}
 	}
+	presets = filterGenerationPresets(presets, policy)
 	views := make([]workflowView, 0, len(definitions))
 	for _, definition := range definitions {
 		if definition.ID != "text-to-image" && definition.ID != "image-to-image" && definition.ID != "minimax-h3-video" {
@@ -140,14 +172,41 @@ func (a *App) handleGeneratePage(w http.ResponseWriter, r *http.Request) {
 		"Workflows":             views,
 		"ModelGroups":           catalog.Groups,
 		"GenerationPresets":     presets,
-		"QuickModels":           quickGenerationModels(catalog),
-		"LoraGroups":            catalog.LoraGroups,
-		"FluxLoraGroups":        catalog.FluxLoraGroups,
+		"QuickModels":           filterGenerationModels(quickGenerationModels(catalog), policy),
+		"LoraGroups":            filterGenerationLoraGroups(catalog.LoraGroups, policy.KreaLoraGroups),
+		"FluxLoraGroups":        filterGenerationLoraGroups(catalog.FluxLoraGroups, policy.FluxLoraGroups),
+		"MiniMaxLoraGroups":     catalog.MiniMaxLoraGroups,
 		"ComfyOnline":           catalog.Online,
 		"ModelsAvailable":       catalog.AvailableCount > 0,
 		"SelectedWorkflow":      r.URL.Query().Get("workflow"),
 		"RecentGenerationMedia": recentMedia,
+		"GenerationQuota":       quota,
 	})
+}
+
+func (a *App) generationQuotaView(ctx context.Context, userID int64) (generationQuotaView, error) {
+	quota, err := a.store.QuickGenerationQuota(ctx, userID)
+	if err != nil {
+		return generationQuotaView{}, err
+	}
+	view := generationQuotaView{
+		DailyLimit: quota.DailyLimit, DailyUsed: quota.DailyUsed,
+		TotalLimit: quota.TotalLimit, TotalUsed: quota.TotalUsed,
+		HasLimits: quota.DailyLimit > 0 || quota.TotalLimit > 0,
+	}
+	if view.DailyLimit > 0 {
+		view.DailyRemaining = view.DailyLimit - view.DailyUsed
+		if view.DailyRemaining < 0 {
+			view.DailyRemaining = 0
+		}
+	}
+	if view.TotalLimit > 0 {
+		view.TotalRemaining = view.TotalLimit - view.TotalUsed
+		if view.TotalRemaining < 0 {
+			view.TotalRemaining = 0
+		}
+	}
+	return view, nil
 }
 
 func (a *App) recentGenerationMedia(ctx context.Context, userID int64) []generationMediaView {
@@ -179,134 +238,23 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 		writeGenerationError(w, http.StatusForbidden, "проверка безопасности не пройдена")
 		return
 	}
+	user := a.currentUser(r)
 	input, err := parseGenerationForm(r)
 	if err != nil {
 		writeGenerationError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	definitions, err := loadWorkflowDefinitions()
+	preparation, err := a.prepareGeneration(r.Context(), user, input, true)
 	if err != nil {
-		writeGenerationError(w, http.StatusInternalServerError, "не удалось загрузить шаблоны генерации")
-		return
-	}
-	if input.TemplateID != "text-to-image" && input.TemplateID != "image-to-image" && input.TemplateID != "minimax-h3-video" {
-		writeGenerationError(w, http.StatusBadRequest, "неизвестный шаблон workflow")
-		return
-	}
-	definition, ok := findWorkflow(definitions, input.TemplateID)
-	if !ok {
-		writeGenerationError(w, http.StatusBadRequest, "неизвестный шаблон workflow")
-		return
-	}
-	user := a.currentUser(r)
-	if !user.CanUseQuickGenerationType(input.TemplateID) {
-		writeGenerationError(w, http.StatusForbidden, "этот тип быстрой генерации отключён администратором")
-		return
-	}
-	if definition.AdminOnly && user.Role != "admin" {
-		writeGenerationError(w, http.StatusForbidden, "этот сценарий доступен только администратору")
-		return
-	}
-	catalog := a.comfyGenerationModels(r.Context())
-	presets := buildGenerationPresets(catalog)
-	preset, ok := findGenerationPreset(presets, input.PresetID, input.TemplateID)
-	if !ok {
-		writeGenerationError(w, http.StatusBadRequest, "выбранный workflow больше не доступен")
-		return
-	}
-	model, ok := catalog.byID[preset.ModelID]
-	if input.ModelID != "" {
-		model, ok = catalog.byID[input.ModelID]
-	}
-	if !ok {
-		writeGenerationError(w, http.StatusBadRequest, "модель, привязанная к workflow, больше не доступна в ComfyUI")
-		return
-	}
-	if model.Family != preset.Family {
-		writeGenerationError(w, http.StatusBadRequest, "эта модель не разрешена для выбранного workflow")
-		return
-	}
-	if !model.Available {
-		writeGenerationError(w, http.StatusBadRequest, model.Reason)
-		return
-	}
-	if definition.RequiresImage && !model.SupportsImage {
-		writeGenerationError(w, http.StatusBadRequest, "выбранная модель пока не подготовлена для редактирования фото")
-		return
-	}
-	input.ModelName = model.Name
-	input.ModelFamily = model.Family
-	input.TextEncoder = model.TextEncoder
-	input.VAE = model.VAE
-	input.AudioVAE = model.AudioVAE
-	input.ReferenceModel = model.ReferenceModel
-	input.Lora = model.Lora
-	input.IdentityLora = model.IdentityLora
-	if model.Family == modelFamilyKrea2 {
-		if input.TemplateID == "image-to-image" {
-			if input.IdentityLora == "" {
-				writeGenerationError(w, http.StatusBadRequest, "не установлена обязательная LoRA Krea2 для сохранения внешности")
-				return
-			}
-			input.LoraNames = [maxGenerationLoraSlots]string{}
-			input.LoraModel = [maxGenerationLoraSlots]float64{}
-			input.LoraClip = [maxGenerationLoraSlots]float64{}
-		} else if !input.LorasConfigured {
-			input.LoraNames[0] = model.Lora
-			input.LoraModel[0] = model.LoraStrength
-			input.LoraClip[0] = 1
-		} else {
-			for _, name := range input.LoraNames {
-				if name != "" && !generationLoraAllowed(catalog.LoraGroups, name) {
-					writeGenerationError(w, http.StatusBadRequest, "выбранная LoRA недоступна для PhotoFlow Krea2")
-					return
-				}
-			}
-		}
-	} else if model.Family == modelFamilyFlux2 {
-		for _, name := range input.LoraNames {
-			if name != "" && !generationLoraAllowed(catalog.FluxLoraGroups, name) {
-				writeGenerationError(w, http.StatusBadRequest, "выбранная LoRA недоступна для Flux2")
-				return
-			}
-		}
-	} else {
-		input.LoraNames = [maxGenerationLoraSlots]string{}
-		input.LoraModel = [maxGenerationLoraSlots]float64{}
-		input.LoraClip = [maxGenerationLoraSlots]float64{}
-	}
-	if model.Family != modelFamilyCheckpoint && definition.Builder == "" {
-		definition, ok = findWorkflow(definitions, input.TemplateID+"-"+model.Family)
-		if !ok {
-			writeGenerationError(w, http.StatusInternalServerError, "workflow для выбранного семейства моделей не найден")
+		if errors.Is(err, errMinorSexualContent) {
+			a.audit(r.Context(), &user.ID, "generation_safety_blocked", "quick_generation", nil, a.clientIP(r), r.UserAgent(), map[string]any{"reason": "minor_sexual_content"})
+			writeGenerationError(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
-	}
-	if input.Seed < 0 {
-		input.Seed, err = randomSeed()
-		if err != nil {
-			writeGenerationError(w, http.StatusInternalServerError, "не удалось подготовить случайный seed")
-			return
-		}
-	}
-	if definition.RequiresImage || (definition.AllowsImages && input.imageCount() > 0) {
-		maxImages := maxGenerationInputImages(model.Family)
-		if input.imageCount() > maxImages {
-			writeGenerationError(w, http.StatusBadRequest, fmt.Sprintf("для этого workflow доступно не более %d изображений", maxImages))
-			return
-		}
-		for _, image := range input.images() {
-			if err := a.validateGenerationImage(image, user.ID); err != nil {
-				writeGenerationError(w, http.StatusForbidden, err.Error())
-				return
-			}
-		}
-	}
-	prompt, err := definition.buildPrompt(input)
-	if err != nil {
 		writeGenerationError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	input, definition, prompt := preparation.Input, preparation.Definition, preparation.Prompt
 	requestID := strings.TrimSpace(r.Form.Get("client_request_id"))
 	if requestID == "" {
 		requestID = newRequestID()
@@ -372,8 +320,14 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 	}
 	a.rememberGeneration(promptID, user.ID)
 	a.recordGenerationEvent(r.Context(), user.ID, promptID, definition, input)
+	a.rememberGenerationVariant(r.Context(), user.ID, promptID, input, r.Form)
 	response := a.generationRunResponse(r.Context(), promptID)
 	response["request_id"] = requestID
+	if quota, quotaErr := a.generationQuotaView(r.Context(), user.ID); quotaErr != nil {
+		log.Printf("load quick generation quota for user %d: %v", user.ID, quotaErr)
+	} else {
+		response["quota"] = quota
+	}
 	if miningLease != nil && miningLease.ResumeMining {
 		response["mining_paused"] = true
 	}
@@ -396,6 +350,157 @@ func validGenerationRequestID(value string) bool {
 	return true
 }
 
+type generationPreparation struct {
+	Input      generationForm
+	Definition workflowDefinition
+	Model      generationModel
+	Prompt     map[string]any
+}
+
+// prepareGeneration is deliberately shared by the preflight endpoint and the
+// real submission path so an item reported as ready is checked by the same
+// model, LoRA, workflow and image rules at submission time.
+func (a *App) prepareGeneration(ctx context.Context, user *User, input generationForm, resolveSeed bool) (generationPreparation, error) {
+	if err := validateGenerationPrompt(input.Positive, input.AssistantOriginal, input.AssistantSuggestion); err != nil {
+		return generationPreparation{}, err
+	}
+	definitions, err := loadWorkflowDefinitions()
+	if err != nil {
+		return generationPreparation{}, errors.New("не удалось загрузить шаблоны генерации")
+	}
+	if input.TemplateID != "text-to-image" && input.TemplateID != "image-to-image" && input.TemplateID != "minimax-h3-video" {
+		return generationPreparation{}, errors.New("неизвестный шаблон workflow")
+	}
+	definition, ok := findWorkflow(definitions, input.TemplateID)
+	if !ok {
+		return generationPreparation{}, errors.New("неизвестный шаблон workflow")
+	}
+	if user == nil || !user.CanUseQuickGenerationType(input.TemplateID) {
+		return generationPreparation{}, errors.New("этот тип быстрой генерации отключён администратором")
+	}
+	if definition.AdminOnly && user.Role != "admin" {
+		return generationPreparation{}, errors.New("этот сценарий доступен только администратору")
+	}
+	catalog := a.comfyGenerationModels(ctx)
+	preset, ok := findGenerationPreset(buildGenerationPresets(catalog), input.PresetID, input.TemplateID)
+	if !ok {
+		return generationPreparation{}, errors.New("выбранный workflow больше не доступен")
+	}
+	model, ok := catalog.byID[preset.ModelID]
+	if input.ModelID != "" {
+		model, ok = catalog.byID[input.ModelID]
+	}
+	if !ok {
+		return generationPreparation{}, errors.New("модель, привязанная к workflow, больше не доступна в ComfyUI")
+	}
+	if model.Family != preset.Family {
+		return generationPreparation{}, errors.New("эта модель не разрешена для выбранного workflow")
+	}
+	if input.TemplateID == "image-to-image" && model.Family == modelFamilyKrea2 && model.ID != preset.ModelID {
+		return generationPreparation{}, errors.New("для Krea2: редактирование доступна только совместимая оригинальная Turbo-модель")
+	}
+	if !model.Available {
+		return generationPreparation{}, errors.New(model.Reason)
+	}
+	if requiresImageEditingSupport(definition) && !model.SupportsImage {
+		return generationPreparation{}, errors.New("выбранная модель пока не подготовлена для редактирования фото")
+	}
+	input.ModelName = model.Name
+	input.ModelFamily = model.Family
+	input.TextEncoder = model.TextEncoder
+	input.VAE = model.VAE
+	input.AudioVAE = model.AudioVAE
+	input.ReferenceModel = model.ReferenceModel
+	input.Lora = model.Lora
+	input.IdentityLora = model.IdentityLora
+	if model.Family == modelFamilyKrea2 {
+		if input.TemplateID == "image-to-image" {
+			if input.IdentityLora == "" {
+				return generationPreparation{}, errors.New("не установлена обязательная LoRA Krea2 для сохранения внешности")
+			}
+			input.LoraNames = [maxGenerationLoraSlots]string{}
+			input.LoraModel = [maxGenerationLoraSlots]float64{}
+			input.LoraClip = [maxGenerationLoraSlots]float64{}
+		} else if !input.LorasConfigured {
+			input.LoraNames[0] = model.Lora
+			input.LoraModel[0] = model.LoraStrength
+			input.LoraClip[0] = 1
+		} else {
+			for _, name := range input.LoraNames {
+				if name != "" && !generationLoraAllowed(catalog.LoraGroups, name) {
+					return generationPreparation{}, errors.New("выбранная LoRA недоступна для PhotoFlow Krea2")
+				}
+			}
+		}
+	} else if model.Family == modelFamilyFlux2 {
+		for _, name := range input.LoraNames {
+			if name != "" && !generationLoraAllowed(catalog.FluxLoraGroups, name) {
+				return generationPreparation{}, errors.New("выбранная LoRA недоступна для Flux2")
+			}
+		}
+	} else if model.Family == modelFamilyMiniMaxH3 {
+		for _, name := range input.LoraNames {
+			if name != "" && !generationLoraAllowed(catalog.MiniMaxLoraGroups, name) {
+				return generationPreparation{}, errors.New("выбранная LoRA недоступна для MiniMax H3")
+			}
+		}
+	} else {
+		input.LoraNames = [maxGenerationLoraSlots]string{}
+		input.LoraModel = [maxGenerationLoraSlots]float64{}
+		input.LoraClip = [maxGenerationLoraSlots]float64{}
+	}
+	if err := a.assertGenerationPolicy(ctx, user, preset, model, input, catalog); err != nil {
+		return generationPreparation{}, err
+	}
+	if model.Family != modelFamilyCheckpoint && definition.Builder == "" {
+		definition, ok = findWorkflow(definitions, input.TemplateID+"-"+model.Family)
+		if !ok {
+			return generationPreparation{}, errors.New("workflow для выбранного семейства моделей не найден")
+		}
+	}
+	if resolveSeed && input.Seed < 0 {
+		input.Seed, err = randomSeed()
+		if err != nil {
+			return generationPreparation{}, errors.New("не удалось подготовить случайный seed")
+		}
+	}
+	if definition.RequiresImage || (definition.AllowsImages && input.imageCount() > 0) {
+		maxImages := maxGenerationInputImages(model.Family)
+		if input.imageCount() > maxImages {
+			return generationPreparation{}, fmt.Errorf("для этого workflow доступно не более %d изображений", maxImages)
+		}
+		for _, image := range input.images() {
+			if err := a.validateGenerationImage(image, user.ID); err != nil {
+				return generationPreparation{}, err
+			}
+		}
+	}
+	if model.Family == modelFamilyMiniMaxH3 {
+		if err := a.resolveMiniMaxH3ReferenceDimensions(ctx, &input); err != nil {
+			return generationPreparation{}, err
+		}
+	}
+	if strings.TrimSpace(input.InputAudio) != "" {
+		if model.Family != modelFamilyMiniMaxH3 {
+			return generationPreparation{}, errors.New("аудиореференс доступен только для MiniMax H3")
+		}
+		if err := a.validateGenerationAudio(input.InputAudio, user.ID); err != nil {
+			return generationPreparation{}, err
+		}
+	}
+	prompt, err := definition.buildPrompt(input)
+	if err != nil {
+		return generationPreparation{}, err
+	}
+	return generationPreparation{Input: input, Definition: definition, Model: model, Prompt: prompt}, nil
+}
+
+// requiresImageEditingSupport distinguishes an image-edit pipeline from a
+// workflow that merely consumes a reference frame, such as MiniMax H3.
+func requiresImageEditingSupport(definition workflowDefinition) bool {
+	return definition.RequiresImage && definition.Builder != "minimax_h3"
+}
+
 func (a *App) generationRunResponse(ctx context.Context, promptID string) map[string]any {
 	response := map[string]any{"prompt_id": promptID, "message": "Генерация поставлена в очередь", "state": "queued"}
 	if queued, running, position, total, err := a.generationQueueState(ctx, promptID); err == nil {
@@ -404,6 +509,9 @@ func (a *App) generationRunResponse(ctx context.Context, promptID string) map[st
 		} else if queued {
 			response["queue_position"] = position
 			response["queue_total"] = total
+			if overview, overviewErr := a.generationQueueOverview(ctx); overviewErr == nil && overview.AverageTaskSeconds > 0 {
+				response["estimated_wait_seconds"] = (position + overview.Running) * overview.AverageTaskSeconds
+			}
 		}
 	}
 	return response
@@ -481,9 +589,11 @@ func (a *App) handleCancelGeneration(w http.ResponseWriter, r *http.Request) {
 	}
 	a.releaseMiningPauseForGeneration(r.Context(), promptID)
 	a.releaseComfyMemoryIfIdle(r.Context())
+	a.scheduleComfyMemoryRelease()
 	a.generationMu.Lock()
 	delete(a.generationJobs, promptID)
 	a.generationMu.Unlock()
+	a.syncGenerationAuditState(r.Context(), user.ID, promptID, "cancelled")
 	a.audit(r.Context(), &user.ID, "quick_generation_cancelled", "comfyui", nil, a.clientIP(r), r.UserAgent(), map[string]any{"prompt_id": promptID, "running": running})
 	message := "Генерация уже завершилась."
 	if queued || running {
@@ -550,12 +660,21 @@ func quickGenerationLimitError(err error) (int, string) {
 }
 
 func (a *App) quickGenerationUploadHandler() http.Handler {
+	return a.quickGenerationUploadHandlerWithLimit(maxComfyUploadBody)
+}
+
+func (a *App) quickGenerationAudioUploadHandler() http.Handler {
+	return a.quickGenerationUploadHandlerWithLimit(32 << 20)
+}
+
+func (a *App) quickGenerationUploadHandlerWithLimit(maxBody int64) http.Handler {
 	proxy := a.proxyRootHandler("comfyui", a.cfg.ComfyUIUpstream, a.cfg.ComfyUIUpstreamAuthHeader)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 			return
 		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 		cloned := r.Clone(r.Context())
 		cloned.URL.Path = "/upload/image"
 		cloned.URL.RawPath = ""
@@ -602,8 +721,13 @@ func (a *App) handleGenerateStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if status.State == "completed" || status.State == "error" {
+		a.syncGenerationAuditState(r.Context(), user.ID, promptID, status.State)
 		a.releaseComfyMemoryIfIdle(r.Context())
+		a.scheduleComfyMemoryRelease()
 		a.releaseMiningPauseForGeneration(r.Context(), promptID)
+	}
+	if status.State == "running" {
+		a.syncGenerationAuditState(r.Context(), user.ID, promptID, status.State)
 	}
 	writeJSON(w, http.StatusOK, status)
 }
@@ -735,6 +859,9 @@ func (a *App) fetchGenerationStatus(ctx context.Context, promptID string, userID
 				status.QueuePosition, status.QueueTotal = position, total
 				if position > 0 && total > 0 {
 					status.Message = fmt.Sprintf("В очереди: %d из %d", position, total)
+					if overview, overviewErr := a.generationQueueOverview(ctx); overviewErr == nil && overview.AverageTaskSeconds > 0 {
+						status.EstimatedWaitSeconds = (position + overview.Running) * overview.AverageTaskSeconds
+					}
 				}
 			}
 		}
@@ -805,20 +932,34 @@ func (a *App) generationQueueOverview(ctx context.Context) (generationQueueOverv
 	if err != nil {
 		return generationQueueOverview{}, err
 	}
-	return generationQueueOverview{Running: len(queue.Running), Pending: len(queue.Pending)}, nil
+	overview := generationQueueOverview{Running: len(queue.Running), Pending: len(queue.Pending)}
+	if overview.Running > 0 {
+		overview.CurrentTask = "ComfyUI выполняет текущую задачу"
+	} else if overview.Pending > 0 {
+		overview.CurrentTask = "ComfyUI готовится к следующей задаче"
+	} else {
+		overview.CurrentTask = "Очередь свободна"
+	}
+	if a.store != nil {
+		if average, averageErr := a.store.AverageGenerationDuration(ctx); averageErr == nil && average > 0 {
+			overview.AverageTaskSeconds = int(average.Round(time.Second).Seconds())
+			overview.EstimatedWaitSeconds = (overview.Running + overview.Pending) * overview.AverageTaskSeconds
+		}
+	}
+	return overview, nil
 }
 
 // releaseComfyMemoryIfIdle asks ComfyUI to unload loaded models only after the
 // whole queue is empty. This keeps a completed quick generation from retaining
 // RAM and VRAM, without interrupting another user's queued work.
-func (a *App) releaseComfyMemoryIfIdle(ctx context.Context) {
+func (a *App) releaseComfyMemoryIfIdle(ctx context.Context) bool {
 	overview, err := a.generationQueueOverview(ctx)
 	if err != nil {
 		log.Printf("inspect ComfyUI queue before freeing memory: %v", err)
-		return
+		return false
 	}
 	if overview.Running != 0 || overview.Pending != 0 {
-		return
+		return false
 	}
 
 	endpoint := *a.cfg.ComfyUIUpstream
@@ -829,7 +970,7 @@ func (a *App) releaseComfyMemoryIfIdle(ctx context.Context) {
 	request, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint.String(), bytes.NewBufferString(`{"unload_models":true,"free_memory":true}`))
 	if err != nil {
 		log.Printf("build ComfyUI memory-release request: %v", err)
-		return
+		return false
 	}
 	request.Header.Set("Content-Type", "application/json")
 	if a.cfg.ComfyUIUpstreamAuthHeader != "" {
@@ -838,12 +979,74 @@ func (a *App) releaseComfyMemoryIfIdle(ctx context.Context) {
 	response, err := (&http.Client{Timeout: 10 * time.Second, CheckRedirect: rejectUpstreamRedirect}).Do(request)
 	if err != nil {
 		log.Printf("free ComfyUI memory: %v", err)
-		return
+		return false
 	}
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		log.Printf("free ComfyUI memory: upstream returned HTTP %d", response.StatusCode)
+		return false
 	}
+	log.Printf("released idle ComfyUI model cache")
+	return true
+}
+
+func (a *App) trimComfyWorkingSetIfIdle(ctx context.Context) {
+	overview, err := a.generationQueueOverview(ctx)
+	if err != nil || overview.Running != 0 || overview.Pending != 0 {
+		return
+	}
+	result, err := a.systemMonitor.TrimComfyMemory(ctx)
+	if err != nil {
+		log.Printf("trim idle ComfyUI working set: %v", err)
+		return
+	}
+	if result.Trimmed > 0 {
+		log.Printf("trimmed idle ComfyUI working set for %d process(es)", result.Trimmed)
+	}
+}
+
+func (a *App) observeComfyQueueForMemoryRelease(ctx context.Context) {
+	overview, err := a.generationQueueOverview(ctx)
+	if err != nil {
+		return
+	}
+	busy := overview.Running != 0 || overview.Pending != 0
+	a.comfyQueueMu.Lock()
+	wasBusy := a.comfyQueueWasBusy
+	a.comfyQueueWasBusy = busy
+	a.comfyQueueMu.Unlock()
+	if wasBusy && !busy {
+		a.scheduleComfyMemoryRelease()
+	}
+}
+
+func (a *App) scheduleComfyMemoryRelease() {
+	if a.comfyMemorySlots == nil {
+		return
+	}
+	select {
+	case a.comfyMemorySlots <- struct{}{}:
+	default:
+		return
+	}
+	go func() {
+		defer func() { <-a.comfyMemorySlots }()
+		for _, delay := range []time.Duration{8 * time.Second, 30 * time.Second} {
+			time.Sleep(delay)
+			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+			released := a.releaseComfyMemoryIfIdle(ctx)
+			cancel()
+			if !released {
+				continue
+			}
+			// /free wakes ComfyUI's main loop asynchronously. Let it unload model
+			// references before Windows discards unused physical pages.
+			time.Sleep(3 * time.Second)
+			trimCtx, trimCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			a.trimComfyWorkingSetIfIdle(trimCtx)
+			trimCancel()
+		}
+	}()
 }
 
 func (a *App) fetchGenerationQueue(ctx context.Context) (comfyQueueSnapshot, error) {
@@ -971,8 +1174,12 @@ func (a *App) handleGenerationOutput(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", contentType)
 	setGenerationDownloadDisposition(w, r, name)
 	w.Header().Set("Cache-Control", "private, no-store")
-	w.WriteHeader(status)
-	_, _ = w.Write(body)
+	if status != http.StatusOK {
+		w.WriteHeader(status)
+		_, _ = w.Write(body)
+		return
+	}
+	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(body))
 }
 
 func (a *App) handleGenerationLibraryMedia(w http.ResponseWriter, r *http.Request) {
@@ -1004,8 +1211,7 @@ func (a *App) handleGenerationLibraryMedia(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", contentType)
 	setGenerationDownloadDisposition(w, r, media.OriginalName)
 	w.Header().Set("Cache-Control", "private, no-store")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(payload)
+	http.ServeContent(w, r, media.OriginalName, time.Time{}, bytes.NewReader(payload))
 }
 
 // setGenerationDownloadDisposition explicitly starts a browser download when
@@ -1064,10 +1270,10 @@ func (a *App) handleHideGenerationLibraryMedia(w http.ResponseWriter, r *http.Re
 
 func (a *App) fetchGenerationOutput(ctx context.Context, output generationOutput) ([]byte, string, int, error) {
 	endpoint := *a.cfg.ComfyUIUpstream
+	// /view preserves the original media bytes and supports HTTP ranges. The
+	// VideoHelperSuite preview route transcodes MP4 to WebM, which breaks the
+	// filename/content-type contract used by the gallery and archive.
 	endpoint.Path = singleJoiningSlash(endpoint.Path, "/view")
-	if output.MediaType == "video" {
-		endpoint.Path = singleJoiningSlash(endpoint.Path, "/viewvideo")
-	}
 	query := endpoint.Query()
 	query.Set("filename", output.Filename)
 	query.Set("subfolder", output.Subfolder)
@@ -1099,6 +1305,106 @@ func (a *App) fetchGenerationOutput(ctx context.Context, output generationOutput
 		contentType = "application/octet-stream"
 	}
 	return body, contentType, response.StatusCode, nil
+}
+
+// fetchGenerationInputImage retrieves a previously validated, namespaced upload
+// for the local vision assistant. The file remains inside the ComfyUI host.
+func (a *App) fetchGenerationInputImage(ctx context.Context, value string) ([]byte, string, error) {
+	normalized, err := normalizeComfyDataPath(value, false)
+	if err != nil {
+		return nil, "", err
+	}
+	endpoint := *a.cfg.ComfyUIUpstream
+	endpoint.Path = singleJoiningSlash(endpoint.Path, "/view")
+	query := endpoint.Query()
+	query.Set("filename", path.Base(normalized))
+	if folder := path.Dir(normalized); folder != "." {
+		query.Set("subfolder", folder)
+	}
+	query.Set("type", "input")
+	endpoint.RawQuery = query.Encode()
+	requestCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, endpoint.String(), http.NoBody)
+	if err != nil {
+		return nil, "", err
+	}
+	if a.cfg.ComfyUIUpstreamAuthHeader != "" {
+		request.Header.Set("Authorization", a.cfg.ComfyUIUpstreamAuthHeader)
+	}
+	response, err := (&http.Client{Timeout: 20 * time.Second, CheckRedirect: rejectUpstreamRedirect}).Do(request)
+	if err != nil {
+		return nil, "", err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return nil, "", fmt.Errorf("ComfyUI returned HTTP %d", response.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, 32<<20+1))
+	if err != nil || len(body) > 32<<20 {
+		return nil, "", errors.New("изображение превышает допустимый размер")
+	}
+	contentType := strings.TrimSpace(strings.Split(response.Header.Get("Content-Type"), ";")[0])
+	return body, contentType, nil
+}
+
+// resolveMiniMaxH3ReferenceDimensions makes the first uploaded frame the
+// source of truth for the video aspect ratio. The quality selector controls
+// only the shorter side and never crops the reference composition.
+func (a *App) resolveMiniMaxH3ReferenceDimensions(ctx context.Context, input *generationForm) error {
+	if strings.TrimSpace(input.InputImage) == "" {
+		return errors.New("для MiniMax H3 добавьте первый кадр")
+	}
+	body, _, err := a.fetchGenerationInputImage(ctx, input.InputImage)
+	if err != nil {
+		return errors.New("не удалось прочитать первый референс MiniMax H3")
+	}
+	width, height, err := generationImageDimensions(body)
+	if err != nil {
+		return errors.New("не удалось определить разрешение первого референса MiniMax H3")
+	}
+	input.Width, input.Height, err = miniMaxH3VideoDimensions(width, height, input.VideoQuality)
+	return err
+}
+
+func generationImageDimensions(body []byte) (int, int, error) {
+	config, _, err := image.DecodeConfig(bytes.NewReader(body))
+	if err == nil && config.Width > 0 && config.Height > 0 {
+		return config.Width, config.Height, nil
+	}
+	if width, height, ok := webPImageDimensions(body); ok {
+		return width, height, nil
+	}
+	return 0, 0, errors.New("неподдерживаемый формат изображения")
+}
+
+func webPImageDimensions(body []byte) (int, int, bool) {
+	if len(body) < 30 || string(body[:4]) != "RIFF" || string(body[8:12]) != "WEBP" {
+		return 0, 0, false
+	}
+	switch string(body[12:16]) {
+	case "VP8X":
+		width := 1 + int(body[24]) + int(body[25])<<8 + int(body[26])<<16
+		height := 1 + int(body[27]) + int(body[28])<<8 + int(body[29])<<16
+		return width, height, width > 0 && height > 0
+	case "VP8 ":
+		if body[23] != 0x9d || body[24] != 0x01 || body[25] != 0x2a {
+			return 0, 0, false
+		}
+		width := int(body[26]) | int(body[27]&0x3f)<<8
+		height := int(body[28]) | int(body[29]&0x3f)<<8
+		return width, height, width > 0 && height > 0
+	case "VP8L":
+		if len(body) < 25 || body[20] != 0x2f {
+			return 0, 0, false
+		}
+		bits := uint32(body[21]) | uint32(body[22])<<8 | uint32(body[23])<<16 | uint32(body[24])<<24
+		width := int(bits&0x3fff) + 1
+		height := int((bits>>14)&0x3fff) + 1
+		return width, height, width > 0 && height > 0
+	default:
+		return 0, 0, false
+	}
 }
 
 func (a *App) archiveGenerationOutputs(ctx context.Context, userID int64, outputs []generationOutput) {
@@ -1171,6 +1477,25 @@ func (a *App) refreshTrackedGenerationStatuses(ctx context.Context) {
 		jobs = append(jobs, trackedGeneration{promptID: promptID, userID: job.UserID})
 	}
 	a.generationMu.Unlock()
+	// A browser and the Gateway process may both disappear while ComfyUI keeps
+	// working. Reload active rows so the next process continues to archive the
+	// output and releases the mining lease once the task reaches a terminal state.
+	if a.store != nil {
+		persisted, err := a.store.ListActiveGenerationVariants(ctx, 500)
+		if err != nil {
+			log.Printf("load active generation variants: %v", err)
+		} else {
+			seen := make(map[string]struct{}, len(jobs))
+			for _, job := range jobs {
+				seen[job.promptID] = struct{}{}
+			}
+			for _, row := range persisted {
+				if _, exists := seen[row.PromptID]; !exists {
+					jobs = append(jobs, trackedGeneration{promptID: row.PromptID, userID: row.UserID})
+				}
+			}
+		}
+	}
 
 	for _, job := range jobs {
 		status, err := a.fetchGenerationStatus(ctx, job.promptID, job.userID)
@@ -1178,14 +1503,37 @@ func (a *App) refreshTrackedGenerationStatuses(ctx context.Context) {
 			log.Printf("refresh ComfyUI generation %s: %v", job.promptID, err)
 			continue
 		}
-		if status.State != "completed" && status.State != "error" {
+		if status.State != "completed" && status.State != "error" && status.State != "cancelled" {
+			a.syncGenerationAuditState(ctx, job.userID, job.promptID, status.State)
 			continue
 		}
+		if status.State == "error" && a.store != nil {
+			if err := a.store.SetGenerationVariantError(ctx, job.userID, job.promptID, status.Message); err != nil {
+				log.Printf("store generation error %s: %v", job.promptID, err)
+			}
+		}
+		a.syncGenerationAuditState(ctx, job.userID, job.promptID, status.State)
 		a.releaseComfyMemoryIfIdle(ctx)
+		a.scheduleComfyMemoryRelease()
 		a.releaseMiningPauseForGeneration(ctx, job.promptID)
 		a.generationMu.Lock()
 		delete(a.generationJobs, job.promptID)
 		a.generationMu.Unlock()
+	}
+}
+
+func (a *App) syncGenerationAuditState(ctx context.Context, userID int64, promptID, state string) {
+	if a.store == nil {
+		return
+	}
+	if state != "queued" && state != "running" && state != "completed" && state != "error" && state != "cancelled" {
+		return
+	}
+	if err := a.store.SetGenerationVariantState(ctx, userID, promptID, state); err != nil {
+		log.Printf("store generation variant state %s: %v", promptID, err)
+	}
+	if err := a.store.SetContentGenerationState(ctx, userID, promptID, state); err != nil {
+		log.Printf("store content generation state %s: %v", promptID, err)
 	}
 }
 
@@ -1203,13 +1551,21 @@ func (a *App) generationOwned(ctx context.Context, promptID string, userID int64
 }
 
 func (a *App) validateGenerationImage(value string, userID int64) error {
+	return a.validateGenerationAsset(value, userID, "фото")
+}
+
+func (a *App) validateGenerationAudio(value string, userID int64) error {
+	return a.validateGenerationAsset(value, userID, "аудиореференс")
+}
+
+func (a *App) validateGenerationAsset(value string, userID int64, label string) error {
 	normalized, err := normalizeComfyDataPath(value, false)
 	if err != nil {
-		return errors.New("некорректное загруженное фото")
+		return fmt.Errorf("некорректный %s", label)
 	}
 	ownNamespace := comfyUploadNamespace(a.comfyClientID(userID))
 	if !strings.HasPrefix(normalized, ownNamespace+"/") {
-		return errors.New("фото принадлежит другой сессии")
+		return fmt.Errorf("%s принадлежит другой сессии", label)
 	}
 	return nil
 }
@@ -1251,7 +1607,7 @@ func (a *App) recordGenerationEvent(ctx context.Context, userID int64, promptID 
 		log.Printf("generation metadata encryption: %v", err)
 		return
 	}
-	if _, err := a.store.InsertContentEvent(ctx, domain.ContentEventRecord{UserID: userID, Service: "comfyui", Kind: "comfyui_prompt", ExternalID: promptID, Model: input.ModelName, PromptCipher: promptCipher, ResponseCipher: negativeCipher, MetadataCipher: metadataCipher, Sensitive: sensitive}); err != nil {
+	if _, err := a.store.InsertContentEvent(ctx, domain.ContentEventRecord{UserID: userID, Service: "comfyui", Kind: "comfyui_prompt", ExternalID: promptID, Model: input.ModelName, GenerationState: "queued", PromptCipher: promptCipher, ResponseCipher: negativeCipher, MetadataCipher: metadataCipher, Sensitive: sensitive}); err != nil {
 		log.Printf("store generation event: %v", err)
 	}
 }

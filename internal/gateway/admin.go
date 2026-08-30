@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"ai-access-gateway/internal/domain"
 	"ai-access-gateway/internal/security"
 	"ai-access-gateway/internal/store"
 	"ai-access-gateway/internal/updates"
@@ -74,9 +75,75 @@ func (a *App) handleAdminRoutes(w http.ResponseWriter, r *http.Request) {
 		a.handleAdminService(w, r, strings.TrimPrefix(path, "services/"))
 	case path == "audit":
 		a.handleAdminAudit(w, r)
+	case strings.HasPrefix(path, "suggestions/"):
+		a.handleAdminSuggestionDownload(w, r, strings.TrimPrefix(path, "suggestions/"))
+	case path == "suggestions":
+		a.handleAdminSuggestions(w, r)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (a *App) handleAdminSuggestionDownload(w http.ResponseWriter, r *http.Request, rawID string) {
+	if r.Method != http.MethodGet || !strings.HasSuffix(rawID, "/json") {
+		http.NotFound(w, r)
+		return
+	}
+	id, err := strconv.ParseInt(strings.TrimSuffix(rawID, "/json"), 10, 64)
+	if err != nil || id <= 0 {
+		http.NotFound(w, r)
+		return
+	}
+	suggestion, err := a.store.FeatureSuggestionByID(r.Context(), id)
+	if err != nil || suggestion.Status != "clean" || suggestion.JSONName == "" {
+		http.NotFound(w, r)
+		return
+	}
+	payload, err := a.contentCipher.DecryptBytes(suggestion.JSONCipher)
+	if err != nil || !json.Valid(payload) {
+		http.Error(w, "не удалось подготовить JSON", http.StatusInternalServerError)
+		return
+	}
+	filename := strings.ReplaceAll(filepath.Base(suggestion.JSONName), `"`, "")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(payload)
+}
+
+func (a *App) handleAdminSuggestions(w http.ResponseWriter, r *http.Request) {
+	if !a.cfg.FeatureSuggestionsEnabled {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
+	rows, err := a.store.ListFeatureSuggestions(r.Context(), 200)
+	if err != nil {
+		http.Error(w, "ошибка загрузки предложений", http.StatusInternalServerError)
+		return
+	}
+	items := make([]featureSuggestionView, 0, len(rows))
+	for _, row := range rows {
+		description, descriptionErr := a.contentCipher.Decrypt(row.DescriptionCipher)
+		linksRaw, linksErr := a.contentCipher.Decrypt(row.LinksCipher)
+		jsonPayload, jsonErr := a.contentCipher.DecryptBytes(row.JSONCipher)
+		if descriptionErr != nil || linksErr != nil || jsonErr != nil {
+			description, linksRaw, jsonPayload = "[не удалось расшифровать данные]", "[]", nil
+		}
+		var links []string
+		_ = json.Unmarshal([]byte(linksRaw), &links)
+		items = append(items, featureSuggestionView{FeatureSuggestionRow: row, Description: description, Links: links, JSONSize: len(jsonPayload)})
+	}
+	a.render(w, r, "admin_suggestions", map[string]any{
+		"Title": "Предложения пользователей", "Suggestions": items,
+		"VirusTotalConfigured": a.virusTotal != nil && a.virusTotal.Configured(),
+	})
 }
 
 func (a *App) handleAdminSystemOverview(w http.ResponseWriter, r *http.Request) {
@@ -241,9 +308,11 @@ func (a *App) handleAdminContent(w http.ResponseWriter, r *http.Request) {
 		events = append(events, ContentEventView{
 			ID: row.ID, UserID: row.UserID, Username: row.Username, Service: row.Service,
 			Kind: row.Kind, ExternalID: row.ExternalID, Model: row.Model, Prompt: prompt,
-			Response: response, Metadata: metadata, Assistant: contentAssistantFromMetadata(metadata), MediaCount: row.MediaCount,
+			Response: response, Metadata: metadata, Assistant: contentAssistantFromMetadata(metadata), GenerationState: row.GenerationState,
 			Sensitive: row.Sensitive || visualPending, VisualPending: visualPending,
-			Media:     mediaByEvent[row.ID],
+			GeneratedMediaCount: row.GeneratedMediaCount, MediaExpiresAt: row.MediaExpiresAt,
+			MediaExpired: row.GeneratedMediaCount > 0 && row.MediaCount == 0 && !row.MediaExpiresAt.IsZero() && row.MediaExpiresAt.Before(time.Now()),
+			MediaCount:   row.MediaCount, Media: mediaByEvent[row.ID],
 			CreatedAt: row.CreatedAt, ExpiresAt: row.ExpiresAt,
 		})
 		overview.Total++
@@ -252,8 +321,6 @@ func (a *App) handleAdminContent(w http.ResponseWriter, r *http.Request) {
 			overview.ComfyUI++
 		case "openwebui":
 			overview.OpenWebUI++
-		case "ollama":
-			overview.Ollama++
 		}
 		if row.MediaCount > 0 {
 			overview.WithMedia++
@@ -512,6 +579,19 @@ func (a *App) handleAdminUserDetail(w http.ResponseWriter, r *http.Request, rest
 			}
 			http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?access=changed", id), http.StatusFound)
 			return
+		case "update_generation_policy":
+			if target, err := a.store.UserByID(r.Context(), id); err != nil || target.Role == "admin" {
+				http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?policy=not_available", id), http.StatusFound)
+				return
+			}
+			policy := domain.GenerationAccessPolicy{UserID: id, PresetIDs: r.Form["preset_id"], ModelIDs: r.Form["model_id"], KreaLoraGroups: r.Form["krea_lora_group"], FluxLoraGroups: r.Form["flux_lora_group"]}
+			if err := a.store.SaveGenerationAccessPolicy(r.Context(), policy); err != nil {
+				http.Error(w, "не удалось сохранить правила быстрой генерации", http.StatusInternalServerError)
+				return
+			}
+			a.audit(r.Context(), &actor.ID, "user_generation_policy_updated", "user", &id, a.clientIP(r), r.UserAgent(), map[string]any{"presets": policy.PresetIDs, "models": policy.ModelIDs, "krea_lora_groups": policy.KreaLoraGroups, "flux_lora_groups": policy.FluxLoraGroups})
+			http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?policy=changed", id), http.StatusFound)
+			return
 		case "change_password":
 			newPassword := r.Form.Get("new_password")
 			confirmPassword := r.Form.Get("confirm_password")
@@ -551,16 +631,28 @@ func (a *App) handleAdminUserDetail(w http.ResponseWriter, r *http.Request, rest
 		return
 	}
 	activities = prepareUserActivities(activities, 20)
+	catalog := a.comfyGenerationModels(r.Context())
+	policy, policyErr := a.store.GenerationAccessPolicy(r.Context(), id)
+	if policyErr != nil {
+		http.Error(w, "ошибка базы данных", http.StatusInternalServerError)
+		return
+	}
 	a.render(w, r, "admin_user_detail", map[string]any{
-		"Title":          "Пользователь",
-		"Profile":        user,
-		"Stats":          stats,
-		"Activities":     activities,
-		"PasswordStatus": r.URL.Query().Get("password"),
-		"AccessStatus":   r.URL.Query().Get("access"),
-		"SecurityStatus": r.URL.Query().Get("security"),
-		"DeleteStatus":   r.URL.Query().Get("delete"),
-		"AccountLocked":  user.IsLocked(time.Now()),
+		"Title":             "Пользователь",
+		"Profile":           user,
+		"Stats":             stats,
+		"Activities":        activities,
+		"PasswordStatus":    r.URL.Query().Get("password"),
+		"AccessStatus":      r.URL.Query().Get("access"),
+		"SecurityStatus":    r.URL.Query().Get("security"),
+		"DeleteStatus":      r.URL.Query().Get("delete"),
+		"AccountLocked":     user.IsLocked(time.Now()),
+		"GenerationPolicy":  policy,
+		"GenerationPresets": buildGenerationPresets(catalog),
+		"QuickModels":       quickGenerationModels(catalog),
+		"LoraGroups":        catalog.LoraGroups,
+		"FluxLoraGroups":    catalog.FluxLoraGroups,
+		"PolicyStatus":      r.URL.Query().Get("policy"),
 	})
 }
 
@@ -579,17 +671,17 @@ func (a *App) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
 		if maxUses > 10000 {
 			maxUses = 10000
 		}
-		expiresAt := time.Now().Add(24 * time.Hour)
-		if raw := r.Form.Get("expires_at"); raw != "" {
-			if t, err := time.ParseInLocation("2006-01-02T15:04", raw, time.Local); err == nil {
-				expiresAt = t.UTC()
-			}
+		expiresAt, expiryErr := parseInviteExpiry(r)
+		if expiryErr != nil {
+			invites, _ := a.store.ListInvites(r.Context(), 200)
+			a.render(w, r, "admin_invites", map[string]any{"Title": "Приглашения", "Invites": invites, "Error": expiryErr.Error()})
+			return
 		}
-		if expiresAt.Before(time.Now().Add(5 * time.Minute)) {
-			expiresAt = time.Now().Add(5 * time.Minute)
-		}
-		if expiresAt.After(time.Now().Add(90 * 24 * time.Hour)) {
-			expiresAt = time.Now().Add(90 * 24 * time.Hour)
+		accountLifetimeSeconds, lifetimeErr := parseInviteAccountLifetime(r)
+		if lifetimeErr != nil {
+			invites, _ := a.store.ListInvites(r.Context(), 200)
+			a.render(w, r, "admin_invites", map[string]any{"Title": "Приглашения", "Invites": invites, "Error": lifetimeErr.Error()})
+			return
 		}
 		grantComfyUI := r.Form.Get("grant_comfyui") == "on"
 		grantOpenWebUI := r.Form.Get("grant_openwebui") == "on"
@@ -619,24 +711,25 @@ func (a *App) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		id, err := a.store.CreateInvite(r.Context(), store.CreateInviteParams{
-			TokenHash:            security.HashToken(token),
-			CreatedByUserID:      actor.ID,
-			MaxUses:              maxUses,
-			ExpiresAt:            expiresAt,
-			GrantComfyUI:         grantComfyUI,
-			GrantOpenWebUI:       grantOpenWebUI,
-			GrantQuickGeneration: grantQuickGeneration,
-			GrantTextToImage:     grantTextToImage,
-			GrantImageToImage:    grantImageToImage,
-			GrantVideo:           grantVideo,
-			GenerationDailyLimit: dailyLimit,
-			GenerationTotalLimit: totalLimit,
+			TokenHash:              security.HashToken(token),
+			CreatedByUserID:        actor.ID,
+			MaxUses:                maxUses,
+			ExpiresAt:              expiresAt,
+			GrantComfyUI:           grantComfyUI,
+			GrantOpenWebUI:         grantOpenWebUI,
+			GrantQuickGeneration:   grantQuickGeneration,
+			GrantTextToImage:       grantTextToImage,
+			GrantImageToImage:      grantImageToImage,
+			GrantVideo:             grantVideo,
+			GenerationDailyLimit:   dailyLimit,
+			GenerationTotalLimit:   totalLimit,
+			AccountLifetimeSeconds: accountLifetimeSeconds,
 		})
 		if err != nil {
 			http.Error(w, "ошибка базы данных", http.StatusInternalServerError)
 			return
 		}
-		a.audit(r.Context(), &actor.ID, "invite_created", "invite", &id, a.clientIP(r), r.UserAgent(), map[string]any{"max_uses": maxUses, "expires_at": expiresAt, "grant_comfyui": grantComfyUI, "grant_openwebui": grantOpenWebUI, "grant_quick_generation": grantQuickGeneration, "text_to_image": grantTextToImage, "image_to_image": grantImageToImage, "video": grantVideo, "generation_daily_limit": dailyLimit, "generation_total_limit": totalLimit})
+		a.audit(r.Context(), &actor.ID, "invite_created", "invite", &id, a.clientIP(r), r.UserAgent(), map[string]any{"max_uses": maxUses, "expires_at": expiresAt, "grant_comfyui": grantComfyUI, "grant_openwebui": grantOpenWebUI, "grant_quick_generation": grantQuickGeneration, "text_to_image": grantTextToImage, "image_to_image": grantImageToImage, "video": grantVideo, "generation_daily_limit": dailyLimit, "generation_total_limit": totalLimit, "account_lifetime_seconds": accountLifetimeSeconds})
 		invites, _ := a.store.ListInvites(r.Context(), 200)
 		a.render(w, r, "admin_invites", map[string]any{
 			"Title":      "Приглашения",
@@ -663,6 +756,56 @@ func parseGenerationLimits(r *http.Request) (int, int64, error) {
 		return 0, 0, fmt.Errorf("общий лимит должен быть числом от 0 до 10000000")
 	}
 	return dailyLimit, totalLimit, nil
+}
+
+func parseInviteExpiry(r *http.Request) (time.Time, error) {
+	if rawHours := strings.TrimSpace(r.Form.Get("invite_ttl_hours")); rawHours != "" {
+		hours, err := strconv.Atoi(rawHours)
+		if err != nil || hours < 1 || hours > 24*90 {
+			return time.Time{}, fmt.Errorf("срок действия ссылки должен быть от 1 часа до 90 дней")
+		}
+		return time.Now().Add(time.Duration(hours) * time.Hour).UTC(), nil
+	}
+
+	// Compatibility with the previous datetime-based form.
+	expiresAt := time.Now().Add(24 * time.Hour)
+	if raw := strings.TrimSpace(r.Form.Get("expires_at")); raw != "" {
+		t, err := time.ParseInLocation("2006-01-02T15:04", raw, time.Local)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("укажите корректный срок действия ссылки")
+		}
+		expiresAt = t.UTC()
+	}
+	if expiresAt.Before(time.Now().Add(5 * time.Minute)) {
+		return time.Time{}, fmt.Errorf("ссылка должна действовать ещё минимум 5 минут")
+	}
+	if expiresAt.After(time.Now().Add(90 * 24 * time.Hour)) {
+		return time.Time{}, fmt.Errorf("срок действия ссылки не может быть больше 90 дней")
+	}
+	return expiresAt, nil
+}
+
+func parseInviteAccountLifetime(r *http.Request) (int64, error) {
+	accountType := strings.TrimSpace(r.Form.Get("account_type"))
+	if accountType == "" || accountType == "permanent" {
+		return 0, nil
+	}
+	if accountType != "temporary" {
+		return 0, fmt.Errorf("выберите тип учётной записи")
+	}
+	if rawHours := strings.TrimSpace(r.Form.Get("temporary_account_hours")); rawHours != "" {
+		hours, err := strconv.Atoi(rawHours)
+		if err != nil || hours < 1 || hours > 24*365 {
+			return 0, fmt.Errorf("срок временной учётной записи должен быть от 1 часа до 365 дней")
+		}
+		return int64(hours) * int64(time.Hour.Seconds()), nil
+	}
+	// Keep invitation forms submitted before the hour selector was introduced valid.
+	days, err := strconv.Atoi(strings.TrimSpace(r.Form.Get("temporary_account_days")))
+	if err != nil || days < 1 || days > 365 {
+		return 0, fmt.Errorf("срок временной учётной записи должен быть от 1 часа до 365 дней")
+	}
+	return int64(days) * int64((24 * time.Hour).Seconds()), nil
 }
 
 func (a *App) handleAdminInviteAction(w http.ResponseWriter, r *http.Request, rest string) {

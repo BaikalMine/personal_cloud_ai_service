@@ -63,7 +63,37 @@
   document.querySelectorAll("form[data-quick-generation-priority]").forEach((form) => {
     const toggle = form.querySelector('input[name="enabled"]');
     if (!toggle) return;
-    toggle.addEventListener("change", () => form.requestSubmit());
+    let saving = false;
+    toggle.addEventListener("change", async () => {
+      if (saving) return;
+      const previous = !toggle.checked;
+      const body = new URLSearchParams(new FormData(form));
+      body.set("enabled", toggle.checked ? "on" : "");
+      saving = true;
+      toggle.disabled = true;
+      form.classList.add("is-saving");
+      try {
+        const response = await fetch(form.action, {
+          method: "POST",
+          headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+          body,
+          credentials: "same-origin",
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || typeof payload.enabled !== "boolean") throw new Error(payload.error || "Не удалось сохранить приоритет");
+        toggle.checked = payload.enabled;
+        form.title = payload.enabled
+          ? "Приоритет включён: быстрая генерация будет временно приостанавливать майнинг."
+          : "Приоритет выключен: майнинг не будет останавливаться для быстрой генерации.";
+      } catch (_) {
+        toggle.checked = previous;
+        form.title = "Не удалось сохранить настройку. Проверьте соединение и повторите попытку.";
+      } finally {
+        toggle.disabled = false;
+        form.classList.remove("is-saving");
+        saving = false;
+      }
+    });
   });
 
   const sensitiveContentStorageKey = "ai-gateway.show-sensitive-content";
@@ -360,6 +390,30 @@
     };
     refreshSystem();
     window.setInterval(refreshSystem, 10000);
+  }
+
+  const inviteComposer = document.querySelector("[data-invite-composer]");
+  if (inviteComposer instanceof HTMLFormElement) {
+    const accountTypes = Array.from(inviteComposer.querySelectorAll('input[name="account_type"]'));
+    const temporaryLifetime = inviteComposer.querySelector("[data-temporary-lifetime]");
+    const temporarySelect = temporaryLifetime?.querySelector("select");
+    const quickAccess = inviteComposer.querySelector("[data-quick-generation-access]");
+    const scenarios = inviteComposer.querySelector("[data-quick-scenarios]");
+    const syncInviteComposer = () => {
+      const temporary = accountTypes.some((input) => input instanceof HTMLInputElement && input.checked && input.value === "temporary");
+      if (temporaryLifetime instanceof HTMLElement) temporaryLifetime.hidden = !temporary;
+      if (temporarySelect instanceof HTMLSelectElement) temporarySelect.disabled = !temporary;
+      accountTypes.forEach((input) => input.closest(".invite-type-option")?.classList.toggle("is-selected", input instanceof HTMLInputElement && input.checked));
+
+      const quickEnabled = quickAccess instanceof HTMLInputElement && quickAccess.checked;
+      if (scenarios instanceof HTMLElement) {
+        scenarios.classList.toggle("is-disabled", !quickEnabled);
+        scenarios.querySelectorAll("input").forEach((input) => { input.disabled = !quickEnabled; });
+      }
+    };
+    accountTypes.forEach((input) => input.addEventListener("change", syncInviteComposer));
+    quickAccess?.addEventListener("change", syncInviteComposer);
+    syncInviteComposer();
   }
 
   const approvedSubmissions = new WeakSet();

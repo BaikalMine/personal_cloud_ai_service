@@ -468,6 +468,135 @@ var migrationCatalog = []migration{
 			`UPDATE content_media SET visual_sensitivity_classified_at=NULL WHERE media_type='image' AND expires_at > now()`,
 		},
 	},
+	{
+		version: 28,
+		name:    "quick_generation_recipes_and_variants",
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS quick_generation_recipes (
+				id BIGSERIAL PRIMARY KEY,
+				user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				name TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 80),
+				template_id TEXT NOT NULL DEFAULT '',
+				workflow_id TEXT NOT NULL DEFAULT '',
+				payload_cipher BYTEA NOT NULL,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`CREATE INDEX IF NOT EXISTS quick_generation_recipes_user_updated_idx ON quick_generation_recipes(user_id,updated_at DESC)`,
+			`CREATE TABLE IF NOT EXISTS quick_generation_variants (
+				id BIGSERIAL PRIMARY KEY,
+				user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				prompt_id TEXT NOT NULL UNIQUE,
+				template_id TEXT NOT NULL DEFAULT '',
+				workflow_id TEXT NOT NULL DEFAULT '',
+				model_name TEXT NOT NULL DEFAULT '',
+				seed BIGINT NOT NULL,
+				payload_cipher BYTEA NOT NULL,
+				state TEXT NOT NULL DEFAULT 'queued' CHECK (state IN ('queued','running','completed','error','cancelled')),
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				finished_at TIMESTAMPTZ NULL
+			)`,
+			`CREATE INDEX IF NOT EXISTS quick_generation_variants_user_created_idx ON quick_generation_variants(user_id,created_at DESC)`,
+			`CREATE INDEX IF NOT EXISTS quick_generation_variants_completed_idx ON quick_generation_variants(finished_at DESC) WHERE state='completed'`,
+		},
+	},
+	{
+		version: 29,
+		name:    "content_generation_status_and_three_day_media_retention",
+		statements: []string{
+			`ALTER TABLE content_events ADD COLUMN IF NOT EXISTS generation_state TEXT NOT NULL DEFAULT '' CHECK (generation_state IN ('','queued','running','completed','error','cancelled'))`,
+			`ALTER TABLE content_events ADD COLUMN IF NOT EXISTS generated_media_count BIGINT NOT NULL DEFAULT 0 CHECK (generated_media_count >= 0)`,
+			`ALTER TABLE content_events ADD COLUMN IF NOT EXISTS media_expires_at TIMESTAMPTZ NULL`,
+			`CREATE INDEX IF NOT EXISTS content_events_generation_state_idx ON content_events(generation_state,created_at DESC) WHERE generation_state <> ''`,
+			`ALTER TABLE content_media ALTER COLUMN expires_at SET DEFAULT (now() + interval '3 days')`,
+			`UPDATE content_media SET expires_at=GREATEST(expires_at,created_at + interval '3 days') WHERE expires_at > now()`,
+			`UPDATE content_events e
+			 SET generated_media_count=summary.media_count,media_expires_at=summary.last_media_expiry
+			 FROM (
+			   SELECT event_id,COUNT(*)::BIGINT AS media_count,MAX(expires_at) AS last_media_expiry
+			   FROM content_media GROUP BY event_id
+			 ) summary
+			 WHERE e.id=summary.event_id`,
+			`UPDATE content_events SET generation_state='completed'
+			 WHERE service='comfyui' AND kind='comfyui_prompt' AND generation_state='' AND generated_media_count > 0`,
+		},
+	},
+	{
+		version: 30,
+		name:    "quick_generation_policies_and_durable_state",
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS quick_generation_access_policies (
+				user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+				preset_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+				model_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+				krea_lora_groups JSONB NOT NULL DEFAULT '[]'::jsonb,
+				flux_lora_groups JSONB NOT NULL DEFAULT '[]'::jsonb,
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`ALTER TABLE quick_generation_variants ADD COLUMN IF NOT EXISTS state_changed_at TIMESTAMPTZ NOT NULL DEFAULT now()`,
+			`ALTER TABLE quick_generation_variants ADD COLUMN IF NOT EXISTS error_message TEXT NOT NULL DEFAULT ''`,
+			`UPDATE quick_generation_variants SET state_changed_at=COALESCE(finished_at,created_at)`,
+			`CREATE INDEX IF NOT EXISTS quick_generation_variants_active_idx ON quick_generation_variants(created_at ASC) WHERE state IN ('queued','running')`,
+		},
+	},
+	{
+		version: 31,
+		name:    "temporary_invite_accounts",
+		statements: []string{
+			`ALTER TABLE invites ADD COLUMN IF NOT EXISTS account_lifetime_seconds BIGINT NOT NULL DEFAULT 0 CHECK (account_lifetime_seconds >= 0 AND account_lifetime_seconds <= 31536000)`,
+			`ALTER TABLE users ADD COLUMN IF NOT EXISTS account_expires_at TIMESTAMPTZ NULL`,
+			`CREATE INDEX IF NOT EXISTS users_temporary_expiry_idx ON users(account_expires_at) WHERE account_expires_at IS NOT NULL`,
+			`ALTER TABLE content_events DROP CONSTRAINT IF EXISTS content_events_user_id_fkey`,
+			`ALTER TABLE content_events ALTER COLUMN user_id DROP NOT NULL`,
+			`ALTER TABLE content_events ADD CONSTRAINT content_events_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL`,
+		},
+	},
+	{
+		version: 32,
+		name:    "feature_suggestions_with_virustotal_scans",
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS feature_suggestions (
+				id BIGSERIAL PRIMARY KEY,
+				user_id BIGINT NULL REFERENCES users(id) ON DELETE SET NULL,
+				username TEXT NOT NULL DEFAULT '',
+				title TEXT NOT NULL CHECK (char_length(title) BETWEEN 3 AND 120),
+				description_cipher BYTEA NOT NULL,
+				links_cipher BYTEA NOT NULL,
+				json_name TEXT NOT NULL DEFAULT '',
+				json_cipher BYTEA NOT NULL,
+				status TEXT NOT NULL DEFAULT 'scanning' CHECK (status IN ('scanning','clean','flagged','error')),
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`CREATE INDEX IF NOT EXISTS feature_suggestions_created_idx ON feature_suggestions(created_at DESC)`,
+			`CREATE TABLE IF NOT EXISTS feature_suggestion_scans (
+				id BIGSERIAL PRIMARY KEY,
+				suggestion_id BIGINT NOT NULL REFERENCES feature_suggestions(id) ON DELETE CASCADE,
+				kind TEXT NOT NULL CHECK (kind IN ('url','json')),
+				source_name TEXT NOT NULL,
+				analysis_id TEXT NOT NULL DEFAULT '',
+				status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','in-progress','completed','error')),
+				malicious INT NOT NULL DEFAULT 0 CHECK (malicious >= 0),
+				suspicious INT NOT NULL DEFAULT 0 CHECK (suspicious >= 0),
+				harmless INT NOT NULL DEFAULT 0 CHECK (harmless >= 0),
+				undetected INT NOT NULL DEFAULT 0 CHECK (undetected >= 0),
+				timeout INT NOT NULL DEFAULT 0 CHECK (timeout >= 0),
+				error_message TEXT NOT NULL DEFAULT '',
+				checked_at TIMESTAMPTZ NULL,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`CREATE INDEX IF NOT EXISTS feature_suggestion_scans_pending_idx ON feature_suggestion_scans(status,created_at ASC) WHERE status IN ('queued','in-progress')`,
+		},
+	},
+	{
+		version: 33,
+		name:    "prompt_assistant_content_service",
+		statements: []string{
+			`ALTER TABLE content_events DROP CONSTRAINT IF EXISTS content_events_service_check`,
+			`ALTER TABLE content_events ADD CONSTRAINT content_events_service_check CHECK (service IN ('comfyui','openwebui','ollama'))`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

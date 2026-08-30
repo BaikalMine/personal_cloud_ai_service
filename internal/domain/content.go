@@ -3,32 +3,36 @@ package domain
 import "time"
 
 type ContentEventRecord struct {
-	UserID         int64
-	Service        string
-	Kind           string
-	ExternalID     string
-	Model          string
-	PromptCipher   []byte
-	ResponseCipher []byte
-	MetadataCipher []byte
-	Sensitive      bool
+	UserID          int64
+	Service         string
+	Kind            string
+	ExternalID      string
+	Model           string
+	GenerationState string
+	PromptCipher    []byte
+	ResponseCipher  []byte
+	MetadataCipher  []byte
+	Sensitive       bool
 }
 
 type ContentEventRow struct {
-	ID             int64
-	UserID         int64
-	Username       string
-	Service        string
-	Kind           string
-	ExternalID     string
-	Model          string
-	PromptCipher   []byte
-	ResponseCipher []byte
-	MetadataCipher []byte
-	Sensitive      bool
-	MediaCount     int64
-	CreatedAt      time.Time
-	ExpiresAt      time.Time
+	ID                  int64
+	UserID              int64
+	Username            string
+	Service             string
+	Kind                string
+	ExternalID          string
+	Model               string
+	GenerationState     string
+	PromptCipher        []byte
+	ResponseCipher      []byte
+	MetadataCipher      []byte
+	Sensitive           bool
+	GeneratedMediaCount int64
+	MediaExpiresAt      time.Time
+	MediaCount          int64
+	CreatedAt           time.Time
+	ExpiresAt           time.Time
 }
 
 type ContentMediaRecord struct {
@@ -106,4 +110,49 @@ type ExpiredComfyMedia struct {
 type UnhashedComfyMedia struct {
 	ID            int64
 	PayloadCipher []byte
+}
+
+type FeatureSuggestionRecord struct {
+	UserID            int64
+	Username          string
+	Title             string
+	DescriptionCipher []byte
+	LinksCipher       []byte
+	JSONName          string
+	JSONCipher        []byte
+}
+
+type FeatureSuggestionScanRecord struct {
+	Kind       string
+	SourceName string
+}
+
+type FeatureSuggestionScan struct {
+	ID         int64
+	Kind       string
+	SourceName string
+	AnalysisID string
+	Status     string
+	Malicious  int
+	Suspicious int
+	Harmless   int
+	Undetected int
+	Timeout    int
+	Error      string
+	CheckedAt  *time.Time
+}
+
+type FeatureSuggestionRow struct {
+	ID                int64
+	UserID            int64
+	Username          string
+	Title             string
+	DescriptionCipher []byte
+	LinksCipher       []byte
+	JSONName          string
+	JSONCipher        []byte
+	Status            string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	Scans             []FeatureSuggestionScan
 }

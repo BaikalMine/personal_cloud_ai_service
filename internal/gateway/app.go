@@ -25,6 +25,7 @@ import (
 	"ai-access-gateway/internal/security"
 	"ai-access-gateway/internal/store"
 	"ai-access-gateway/internal/updates"
+	"ai-access-gateway/internal/virustotal"
 )
 
 //go:embed templates/*.html static/*
@@ -67,15 +68,22 @@ func Run() error {
 		return err
 	}
 	deletedSessions, err := repository.DeleteExpiredSessions(startupCtx, cfg.SessionIdleTimeout)
+	deletedTemporaryUsers, temporaryCleanupErr := repository.DeleteExpiredTemporaryUsers(startupCtx)
 	cancelStartup()
 	if err != nil {
 		return err
+	}
+	if temporaryCleanupErr != nil {
+		return temporaryCleanupErr
 	}
 	if closedWebSockets > 0 {
 		log.Printf("closed %d stale websocket sessions", closedWebSockets)
 	}
 	if deletedSessions > 0 {
 		log.Printf("deleted %d expired sessions", deletedSessions)
+	}
+	if deletedTemporaryUsers > 0 {
+		log.Printf("deleted %d expired temporary users", deletedTemporaryUsers)
 	}
 
 	tpl, err := ParseTemplates()
@@ -98,11 +106,13 @@ func Run() error {
 		promptAssistant:     promptassistant.NewClient(cfg.OllamaUpstream, cfg.PromptAssistantModel),
 		contentModerator:    moderation.NewClient(cfg.ContentModeratorUpstream),
 		updates:             updates.NewClient(cfg.UpdateAgentURL, cfg.UpdateAgentToken),
+		virusTotal:          virustotal.NewClient(cfg.VirusTotalAPIKey),
 		contentCipher:       contentCipher,
 		mediaCaptureSlots:   make(chan struct{}, maxConcurrentMediaCaptures),
 		adminMediaSlots:     make(chan struct{}, maxConcurrentAdminMediaResponses),
 		comfyUploadSlots:    make(chan struct{}, maxConcurrentComfyUploads),
 		sensitiveMediaSlots: make(chan struct{}, 1),
+		comfyMemorySlots:    make(chan struct{}, 1),
 		generationJobs:      make(map[string]*generationJob),
 		proxyCounts:         map[string]int64{},
 	}
@@ -154,17 +164,19 @@ func newHTTPServer(addr string, handler http.Handler) *http.Server {
 
 func ParseTemplates() (*Templates, error) {
 	tpl, err := template.New("views").Funcs(template.FuncMap{
-		"formatTime":         formatTime,
-		"formatBytes":        formatBytes,
-		"formatNumber":       formatNumber,
-		"formatDuration":     formatDuration,
-		"pct":                pct,
-		"divFloat":           divFloat,
-		"roleLabel":          roleLabel,
-		"inviteStatusLabel":  inviteStatusLabel,
-		"auditActionLabel":   auditActionLabel,
-		"auditTargetLabel":   auditTargetLabel,
-		"auditMetadataLabel": auditMetadataLabel,
+		"formatTime":           formatTime,
+		"formatBytes":          formatBytes,
+		"formatNumber":         formatNumber,
+		"formatDuration":       formatDuration,
+		"accountLifetimeLabel": accountLifetimeLabel,
+		"pct":                  pct,
+		"divFloat":             divFloat,
+		"roleLabel":            roleLabel,
+		"inviteStatusLabel":    inviteStatusLabel,
+		"auditActionLabel":     auditActionLabel,
+		"auditTargetLabel":     auditTargetLabel,
+		"auditMetadataLabel":   auditMetadataLabel,
+		"hasString":            hasString,
 	}).ParseFS(embeddedFS, "templates/*.html")
 	if err != nil {
 		return nil, err
@@ -181,6 +193,15 @@ func ParseTemplates() (*Templates, error) {
 	return &Templates{Template: tpl, AssetVersion: assetVersion}, nil
 }
 
+func hasString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *App) publicMux() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/static/style.css", a.handleStaticCSS)
@@ -192,6 +213,7 @@ func (a *App) publicMux() http.Handler {
 	mux.HandleFunc("/logout", a.handleLogout)
 	mux.HandleFunc("/invite/", a.handleInvite)
 	mux.Handle("/app", a.requireAuth(http.HandlerFunc(a.handleApp)))
+	mux.Handle("/suggestions", a.requireAuth(a.featureSuggestionsOnly(http.HandlerFunc(a.handleSuggestions))))
 	mux.Handle("/account/profile", a.requireAuth(http.HandlerFunc(a.handleAccountProfile)))
 	mux.Handle("/account/password", a.requireAuth(http.HandlerFunc(a.handleAccountPassword)))
 	mux.Handle("/account/quick-generation-priority", a.requireAuth(http.HandlerFunc(a.handleAccountQuickGenerationPriority)))
@@ -377,6 +399,7 @@ func (a *App) renderStatus(w http.ResponseWriter, r *http.Request, status int, n
 	data["AdminBaseURL"] = a.cfg.AdminBaseURL
 	data["RequestID"] = requestID(r)
 	data["AssetVersion"] = a.tpl.AssetVersion
+	data["FeatureSuggestionsEnabled"] = a.cfg.FeatureSuggestionsEnabled
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' blob: data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'")

@@ -36,6 +36,7 @@
       {{if .CurrentUser}}{{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseOpenWebUI}}<a href="/openwebui/" target="_blank" rel="noopener">OpenWebUI</a>{{end}}{{end}}
       <a href="/account/profile">Профиль</a>
       <a href="/account/sessions">Сессии</a>
+      {{if .FeatureSuggestionsEnabled}}<a href="/suggestions">Предложить улучшение</a>{{end}}
       {{if .CurrentUser}}{{if eq .CurrentUser.Role "admin"}}<a href="{{.AdminBaseURL}}/admin">Администрирование</a>{{end}}{{end}}
     </nav>
     <div class="user-menu">
@@ -69,6 +70,7 @@
     <a href="/admin/sessions">Сессии</a>
     <span class="nav-section">Контроль</span>
     <a href="/admin/content">AI-контент</a>
+    {{if .FeatureSuggestionsEnabled}}<a href="/admin/suggestions">Предложения</a>{{end}}
     <a href="/admin/audit">Журнал аудита</a>
   </nav>
   <div class="admin-actions">

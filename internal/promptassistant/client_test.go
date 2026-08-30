@@ -120,7 +120,7 @@ func TestClassifyImageRejectsUnsupportedMedia(t *testing.T) {
 	}
 }
 
-func TestWorkflowProfilesWorkForBothGenerationModes(t *testing.T) {
+func TestWorkflowProfilesAreLimitedToCompatibleGenerationModes(t *testing.T) {
 	profiles := []Profile{ProfileWorkflowDefault, ProfilePhotographic, ProfileRealistic, ProfileAnime, ProfileNSFW}
 	for _, profile := range profiles {
 		if !ValidProfile(ModeTextToImage, profile) {
@@ -129,8 +129,8 @@ func TestWorkflowProfilesWorkForBothGenerationModes(t *testing.T) {
 		if !ValidProfile(ModeImageToImage, profile) {
 			t.Fatalf("profile %q must be available for image-to-image", profile)
 		}
-		if !ValidProfile(ModeTextToVideo, profile) {
-			t.Fatalf("profile %q must be available for text-to-video", profile)
+		if ValidProfile(ModeTextToVideo, profile) {
+			t.Fatalf("profile %q must not be available for MiniMax H3 video", profile)
 		}
 	}
 	if ValidProfile(ModeTextToImage, ProfileFluxEdit) {
@@ -138,5 +138,56 @@ func TestWorkflowProfilesWorkForBothGenerationModes(t *testing.T) {
 	}
 	if !ValidProfile(ModeImageToImage, ProfileFluxEdit) {
 		t.Fatal("identity-transfer profile must be available for image-to-image")
+	}
+	if !ValidProfile(ModeTextToVideo, ProfileMiniMaxH3) {
+		t.Fatal("MiniMax H3 profile must be available for video")
+	}
+	if ValidProfile(ModeTextToImage, ProfileMiniMaxH3) || ValidProfile(ModeImageToImage, ProfileMiniMaxH3) {
+		t.Fatal("MiniMax H3 profile must be limited to video")
+	}
+}
+
+func TestEnhanceVideoUsesMiniMaxContextForReferenceAudio(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body chatRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		system := body.Messages[0].Content
+		if !strings.Contains(system, "Ref2VA with 3 declared image reference") || !strings.Contains(system, "<Audio 1> reference is attached") || body.Options.NumPredict != miniMaxNumPredict || len(body.Messages[1].Images) != 2 || body.Messages[1].Images[0] != "aW1hZ2UtMQ==" || body.Messages[1].Images[1] != "aW1hZ2UtMg==" {
+			t.Fatalf("wrong MiniMax context: %#v", body)
+		}
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"summary: a concise video."}}`))
+	}))
+	defer server.Close()
+	base, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	references := []ImageReference{{Number: 1, Role: ImageReferenceBaseScene, MIMEType: "image/png", Image: []byte("image-1")}, {Number: 2, Role: ImageReferenceIdentity, MIMEType: "image/webp", Image: []byte("image-2")}}
+	result, err := NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3, "a dancer turns", references, VideoContext{Mode: "references", DurationSeconds: 10, ImageCount: 3, AudioReference: true}, false)
+	if err != nil || result != "summary: a concise video." {
+		t.Fatalf("result = %q, err = %v", result, err)
+	}
+}
+
+func TestEnhanceVideoThinkUsesExtendedTokenBudget(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body chatRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if !body.Think || body.Options.NumPredict != miniMaxThinkNumPredict {
+			t.Fatalf("wrong MiniMax think budget: %#v", body.Options)
+		}
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"A complete video prompt."}}`))
+	}))
+	defer server.Close()
+	base, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3, "a dancer turns", nil, VideoContext{Mode: "frames", DurationSeconds: 15, ImageCount: 2}, true); err != nil {
+		t.Fatal(err)
 	}
 }

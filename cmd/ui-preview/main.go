@@ -52,6 +52,19 @@ func main() {
 		w.Header().Set("Content-Type", "image/svg+xml")
 		_, _ = w.Write([]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000"><rect width="1600" height="1000" fill="#13201d"/><rect x="120" y="120" width="1360" height="760" rx="28" fill="#20453a"/><circle cx="800" cy="500" r="250" fill="#71dfb9"/><path d="M420 650 700 360l190 180 150-140 260 250z" fill="#0a1714"/></svg>`))
 	})
+	mux.HandleFunc("/generate/upload/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = w.Write([]byte(`{"name":"preview-input.png","subfolder":"preview"}`))
+	})
+	mux.HandleFunc("/generate/variants", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = w.Write([]byte(`{"variants":[
+			{"id":"preview-1","template_id":"text-to-image","model_name":"Krea2 / Raw INT8 Mixed","seed":284797972294826,"state":"completed","duration_seconds":15,"values":{"positive_prompt":"A cinematic portrait of a woman in a quiet neon-lit street, realistic skin, dramatic atmosphere."},"media":[{"media_type":"image","url":"/preview/result.svg","sensitive":false}]},
+			{"id":"preview-2","template_id":"text-to-image","model_name":"Krea2 / Raw INT8 Mixed","seed":1033409957175067,"state":"completed","duration_seconds":16,"values":{"positive_prompt":"A calm seaside embankment at sunset with editorial fashion photography and soft detailed light."},"media":[{"media_type":"image","url":"/preview/result.svg","sensitive":false}]},
+			{"id":"preview-3","template_id":"image-to-image","model_name":"Flux 2 / Klein 9B","seed":1019794942414480,"state":"completed","duration_seconds":15,"values":{"positive_prompt":"Keep the subject identity and composition, replace the background with a warm studio environment."},"media":[{"media_type":"image","url":"/preview/result.svg","sensitive":false}]},
+			{"id":"preview-4","template_id":"text-to-image","model_name":"Krea2 / Raw INT8 Mixed","seed":45876641139403,"state":"error","duration_seconds":0,"error_message":"Недостаточно памяти для выбранного разрешения.","values":{"positive_prompt":"A detailed fashion portrait with dramatic lighting."},"media":[]}
+		]}`))
+	})
 	render := func(name, title string, values map[string]any) http.HandlerFunc {
 		return func(w http.ResponseWriter, _ *http.Request) {
 			data := make(map[string]any, len(common)+len(values)+1)
@@ -80,14 +93,17 @@ func main() {
 		"Workflows": []map[string]any{
 			{"ID": "text-to-image", "Name": "Текст в изображение", "Description": "Создаёт изображение по вашему описанию.", "RequiresImage": false},
 			{"ID": "image-to-image", "Name": "Фото и промт", "Description": "Перерисовывает загруженное фото.", "RequiresImage": true},
+			{"ID": "minimax-h3-video", "Name": "Видео", "Description": "Создаёт ролик по первому кадру и описанию.", "RequiresImage": true},
 		},
 		"GenerationPresets": []map[string]any{
 			{"ID": "photoflow-krea2", "TemplateID": "text-to-image", "Name": "PhotoFlow Krea2", "Description": "Двухэтапная генерация с апскейлом и детализацией.", "Family": "krea2", "Available": true, "ModelID": "krea2:test", "ModelCount": 2, "DefaultSteps": 8, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "LoraStrength": 0.8},
 			{"ID": "photoflow-flux2-edit", "TemplateID": "image-to-image", "Name": "Flux2 Редактирование", "Description": "Редактирование исходного изображения через совместимую схему Flux 2.", "Family": "flux2", "Available": true, "ModelID": "flux2:test", "ModelCount": 1, "DefaultSteps": 20, "DefaultCFG": 5, "DefaultSampler": "euler", "DefaultScheduler": "normal", "RequiresImage": true},
+			{"ID": "minimax-h3-video", "TemplateID": "minimax-h3-video", "Name": "MiniMaxH3 Видео", "Description": "Ролик по первому кадру с дополнительным последним кадром или референсами.", "Family": "minimax_h3", "Available": true, "ModelID": "minimax:h3", "ModelCount": 1, "DefaultSteps": 8, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "RequiresImage": true, "AllowsImages": true, "MaxInputImages": 4},
 		},
 		"QuickModels": []map[string]any{
 			{"ID": "krea2:test", "DisplayName": "Krea2 / Raw INT8 Mixed", "Family": "krea2", "Available": true, "DefaultSteps": 8, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "LoraStrength": 0.8},
 			{"ID": "flux2:test", "DisplayName": "Flux 2 / Klein 9B", "Family": "flux2", "Available": true, "DefaultSteps": 20, "DefaultCFG": 5, "DefaultSampler": "euler", "DefaultScheduler": "flux2"},
+			{"ID": "minimax:h3", "DisplayName": "MiniMaxH3", "Family": "minimax_h3", "Available": true, "DefaultSteps": 8, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple"},
 		},
 		"LoraGroups": []map[string]any{
 			{"Name": "Базовые Krea2", "Loras": []map[string]any{{"Name": "lenovo_krea2.safetensors", "DisplayName": "Lenovo Krea2", "DefaultStrength": 0.8, "Default": true}, {"Name": "krea2_turbo.safetensors", "DisplayName": "Krea2 Turbo", "DefaultStrength": 1.0}}},
@@ -95,6 +111,7 @@ func main() {
 			{"Name": "Стили", "Loras": []map[string]any{{"Name": "AltGirlKreaV1.5.safetensors", "DisplayName": "AltGirl Krea", "DefaultStrength": 1.0}}},
 		},
 		"ComfyOnline": true, "ModelsAvailable": true, "SelectedWorkflow": "", "PreviewOutputURL": "/preview/result.svg",
+		"GenerationQuota":       map[string]any{"HasLimits": true, "DailyLimit": 12, "DailyRemaining": 7, "TotalLimit": int64(100), "TotalRemaining": int64(73)},
 		"RecentGenerationMedia": []map[string]any{{"ID": int64(1), "URL": "/preview/result.svg", "Filename": "AI-Gateway-preview.png", "MediaType": "image", "ExpiresUnix": now.Add(18*time.Hour + 27*time.Minute).UnixMilli()}},
 	}))
 	mux.HandleFunc("/preview/login", render("login", "Вход", map[string]any{"CurrentUser": nil, "Next": ""}))
@@ -102,10 +119,18 @@ func main() {
 		"CurrentUser": nil,
 		"Invalid":     false,
 		"Token":       "preview",
-		"Access":      map[string]any{"GrantComfyUI": true, "GrantOpenWebUI": true},
+		"Access": domain.InviteAccess{
+			GrantComfyUI:         true,
+			GrantOpenWebUI:       true,
+			GrantQuickGeneration: true,
+			GrantTextToImage:     true,
+			GenerationDailyLimit: 12,
+			GenerationTotalLimit: 50,
+		},
 	}))
 	mux.HandleFunc("/preview/admin", render("admin_dashboard", "Обзор системы", map[string]any{
 		"Services": []gateway.ServiceStatus{{Name: "ComfyUI", Online: true}, {Name: "OpenWebUI", Online: true}, {Name: "Ollama", Online: true}},
+		"System":   gateway.SystemOverview{},
 		"Stats": domain.AdminStats{
 			ActiveUsers: 3, RequestsToday: 147, Requests7Days: 824, ActiveWebSockets: 2, AverageDuration: 1160, ErrorRate: "0,8%",
 			TopUsersRequests: []domain.TopUser{{Username: "rayka", Value: 302}, {Username: "demo4518", Value: 188}, {Username: "admin", Value: 96}},

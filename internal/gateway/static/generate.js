@@ -2,6 +2,10 @@
   const root = document.querySelector("[data-comfy-generation]");
   if (!root) return;
 
+  const workflowGuides = root.querySelector(".workflow-guides");
+  const workflowContextGuides = root.querySelector(".workflow-context-guides");
+  if (workflowGuides && workflowContextGuides) workflowContextGuides.replaceWith(workflowGuides);
+
   const form = document.getElementById("generation-form");
   const templateID = document.getElementById("template-id");
   const generationWorkflowID = document.getElementById("generation-workflow-id");
@@ -11,6 +15,7 @@
     document.getElementById("input-image-3"),
     document.getElementById("input-image-4"),
   ];
+  const inputAudio = document.getElementById("input-audio");
   const imageSlots = [...root.querySelectorAll("[data-image-slot]")].map((slot) => ({
     slot,
     index: Number(slot.dataset.imageSlot),
@@ -29,8 +34,15 @@
   const miniMaxVideoMode = document.getElementById("minimax-video-mode");
   const miniMaxVideoModeSelect = document.getElementById("minimax-video-mode-select");
   const miniMaxVideoModeHint = document.getElementById("minimax-video-mode-hint");
-  const miniMaxVideoAspect = document.getElementById("minimax-video-aspect");
+  const miniMaxAudioReference = document.getElementById("minimax-audio-reference");
+  const miniMaxAudioFile = document.getElementById("minimax-audio-file");
+  const miniMaxAudioPreview = document.getElementById("minimax-audio-preview");
+  const miniMaxAudioName = document.getElementById("minimax-audio-name");
+  const miniMaxAudioState = document.getElementById("minimax-audio-state");
+  const miniMaxAudioRemove = document.getElementById("minimax-audio-remove");
   const miniMaxVideoQuality = document.getElementById("minimax-video-quality");
+  const miniMaxVideoSteps = document.getElementById("minimax-video-steps");
+  const miniMaxVideoTurbo = document.getElementById("minimax-video-turbo");
   const miniMaxVideoResolutionPreview = document.getElementById("minimax-video-resolution-preview");
   const workflowNote = document.getElementById("generation-workflow-note");
   const positive = document.getElementById("positive-prompt");
@@ -77,6 +89,28 @@
   const generationQueue = document.getElementById("generation-queue");
   const generationQueueTitle = document.getElementById("generation-queue-title");
   const generationQueueDetails = document.getElementById("generation-queue-details");
+  const preflight = document.getElementById("generation-preflight");
+  const preflightSummary = document.getElementById("generation-preflight-summary");
+  const preflightChecks = document.getElementById("generation-preflight-checks");
+  const preflightButton = document.getElementById("generation-preflight-button");
+  const preflightRepeat = document.getElementById("generation-preflight-repeat");
+  const recipeSelect = document.getElementById("generation-recipe-select");
+  const recipeApply = document.getElementById("generation-recipe-apply");
+  const recipeDelete = document.getElementById("generation-recipe-delete");
+  const recipeName = document.getElementById("generation-recipe-name");
+  const recipeSave = document.getElementById("generation-recipe-save");
+  const recipeState = document.getElementById("generation-recipe-state");
+  const generationSummaryValue = document.getElementById("generation-summary-value");
+  const generationOpenExact = document.getElementById("generation-open-exact");
+  const generationAdvanced = root.querySelector(".generation-advanced");
+  const variantsSection = document.getElementById("generation-variants");
+  const variantsContent = document.getElementById("generation-history-content");
+  const variantsToggle = document.getElementById("generation-history-toggle");
+  const variantList = document.getElementById("generation-variant-list");
+  const variantStateFilter = document.getElementById("generation-variant-state");
+  const variantTemplateFilter = document.getElementById("generation-variant-template");
+  const generationQuota = document.getElementById("generation-quota");
+  const variantCount = document.getElementById("generation-variant-count");
   const outputGrid = document.getElementById("generation-output-grid");
   const resultActions = document.getElementById("generation-result-actions");
   const retryGeneration = document.getElementById("generation-retry");
@@ -115,7 +149,9 @@
   let allowsImages = false;
   let uploadInFlight = false;
   const previewURLs = new Map();
+  const selectedImages = new Map();
   const uploadedImages = new Map();
+  let uploadedAudio = "";
   let primaryImageSize = null;
 
   const krea2EditMaxBaseMegapixels = 4.7;
@@ -128,9 +164,14 @@
   let promptAssistantAction = "";
   let activeGenerationID = "";
   let activeGenerationRequestID = "";
+  let savedRecipes = [];
+  let savedVariants = [];
   const activeGenerationStorageKey = "ai-gateway.active-generation";
+  const generationHistoryCollapsedStorageKey = "ai-gateway.generation-history-collapsed";
+  let generationHistoryCollapsed = false;
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+  const selectedImageFile = (item) => selectedImages.get(item?.index) || item?.input?.files?.[0] || null;
   const referenceRoleLabels = {
     base_scene: "Основной кадр и композиция",
     identity: "Внешность и лицо",
@@ -140,29 +181,31 @@
     background: "Фон и окружение",
     details: "Текст и мелкие детали",
   };
-  const miniMaxVideoProfiles = {
-    360: { short: 352, long: 640, label: "360p" },
-    480: { short: 480, long: 864, label: "480p" },
-    720: { short: 704, long: 1280, label: "720p" },
-    1080: { short: 1088, long: 1920, label: "1080p" },
-    1440: { short: 1440, long: 2560, label: "1440p" },
-    2160: { short: 2176, long: 3840, label: "2160p" },
-  };
   const numericValue = (value, fallback = 0) => {
     const parsed = Number(String(value).replaceAll(",", "."));
     return Number.isFinite(parsed) ? parsed : fallback;
   };
   const syncMiniMaxVideoProfile = () => {
+    const turbo = Boolean(miniMaxVideoTurbo?.checked);
+    if (miniMaxVideoSteps) {
+      miniMaxVideoSteps.min = turbo ? "4" : "20";
+      miniMaxVideoSteps.max = turbo ? "8" : "25";
+      const current = Number(miniMaxVideoSteps.value);
+      if (!Number.isFinite(current) || current < Number(miniMaxVideoSteps.min) || current > Number(miniMaxVideoSteps.max)) {
+        miniMaxVideoSteps.value = turbo ? "6" : "25";
+      }
+    }
     if (!miniMaxVideoResolutionPreview) return;
     const quality = Number(miniMaxVideoQuality?.value);
-    const profile = miniMaxVideoProfiles[quality] || miniMaxVideoProfiles[720];
-    const aspect = miniMaxVideoAspect?.value || "portrait";
-    let width = profile.short;
-    let height = profile.long;
-    if (aspect === "landscape") [width, height] = [height, width];
-    if (aspect === "square") height = width;
-    const adjusted = [360, 720, 1080, 2160].includes(quality);
-    miniMaxVideoResolutionPreview.textContent = `${width} × ${height} · ${profile.label}${adjusted ? " · кратно 32" : ""}`;
+    if (!primaryImageSize || !quality) {
+      miniMaxVideoResolutionPreview.textContent = "Выберите первое фото";
+      return;
+    }
+    const scale = quality / Math.max(1, Math.min(primaryImageSize.width, primaryImageSize.height));
+    const multiple = (value) => Math.max(256, Math.round(value / 32) * 32);
+    const targetWidth = multiple(primaryImageSize.width * scale);
+    const targetHeight = multiple(primaryImageSize.height * scale);
+    miniMaxVideoResolutionPreview.textContent = `${targetWidth} × ${targetHeight} · ${quality}p · пропорции фото`;
   };
   const roundToMultiple = (value, multiple) => Math.max(256, Math.floor(value / multiple) * multiple);
   const pause = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
@@ -327,7 +370,7 @@
 
   const syncSelectedImageSummary = () => {
     const primary = imageSlots[0];
-    const file = primary?.input?.files?.[0];
+    const file = selectedImageFile(primary);
     const previewURL = previewURLs.get(1);
     const visible = Boolean((requiresImage || allowsImages) && file && previewURL);
     if (selectedImageSummary) selectedImageSummary.hidden = !visible;
@@ -394,14 +437,24 @@
     generationProgressbarFill.style.width = `${bounded}%`;
   };
 
-  const queuePositionDetail = (position, total) => {
+  const formatWait = (seconds) => {
+    const safe = Math.max(0, Math.round(Number(seconds) || 0));
+    if (!safe) return "";
+    if (safe < 60) return `около ${safe} сек.`;
+    const minutes = Math.ceil(safe / 60);
+    return `около ${minutes} мин.`;
+  };
+
+  const queuePositionDetail = (position, total, estimatedSeconds = 0) => {
     const safePosition = Number(position) || 0;
     const safeTotal = Number(total) || 0;
     if (!safePosition || !safeTotal) return "Ожидаем свободный слот";
     const ahead = Math.max(0, safePosition - 1);
-    return ahead > 0
+    const detail = ahead > 0
       ? `Ваше место: ${safePosition} из ${safeTotal}. Перед вами: ${ahead}.`
       : `Ваше место: 1 из ${safeTotal}. Генерация начнётся следующей.`;
+    const wait = formatWait(estimatedSeconds);
+    return wait ? `${detail} Ожидание: ${wait}` : detail;
   };
 
   const renderQueueOverview = (queue) => {
@@ -410,11 +463,13 @@
     const pending = Math.max(0, Number(queue?.pending) || 0);
     generationQueue.hidden = running + pending === 0;
     if (generationQueue.hidden) return;
-    if (generationQueueTitle) generationQueueTitle.textContent = running > 0 ? "Сервер занят" : "Ожидают запуска";
+    if (generationQueueTitle) generationQueueTitle.textContent = queue?.current_task || (running > 0 ? "Сервер занят" : "Ожидают запуска");
     if (generationQueueDetails) {
       const parts = [];
       if (running > 0) parts.push(`Выполняется: ${running}`);
       if (pending > 0) parts.push(`В очереди: ${pending}`);
+      const wait = formatWait(queue?.estimated_wait_seconds);
+      if (wait) parts.push(`Полная очередь: ${wait}`);
       generationQueueDetails.textContent = parts.join(" · ");
     }
   };
@@ -576,6 +631,12 @@
   const wireVideoPreview = (button, output) => {
     const video = button?.querySelector("video");
     if (!video) return;
+    const markUnavailable = () => {
+      button.dataset.videoUnavailable = "true";
+      button.title = "Этот файл не поддерживается браузером. Его можно скачать.";
+    };
+    video.addEventListener("loadeddata", () => { delete button.dataset.videoUnavailable; }, { once: true });
+    video.addEventListener("error", markUnavailable, { once: true });
     const start = () => {
       video.muted = true;
       video.play().catch(() => {});
@@ -611,10 +672,29 @@
   const maxInputImages = () => Math.max(1, Number(selectedGenerationWorkflow()?.dataset.maxInputImages || (templateID.value === "minimax-h3-video" ? 4 : 1)));
   const activeMaxInputImages = () => isMiniMaxSelected() && miniMaxVideoModeSelect?.value === "frames" ? Math.min(2, maxInputImages()) : maxInputImages();
 
+  const miniMaxAudioIsAvailable = () => isMiniMaxSelected() && miniMaxVideoModeSelect?.value === "references";
+
+  const syncMiniMaxAudioReference = () => {
+    const available = miniMaxAudioIsAvailable();
+    if (miniMaxAudioReference) miniMaxAudioReference.hidden = !available;
+    if (inputAudio) inputAudio.value = available ? uploadedAudio : "";
+  };
+
+  const hasPendingMiniMaxAudio = () => miniMaxAudioIsAvailable() && Boolean(miniMaxAudioFile?.files?.[0]) && !uploadedAudio;
+
+  const clearMiniMaxAudio = () => {
+    if (miniMaxAudioFile) miniMaxAudioFile.value = "";
+    uploadedAudio = "";
+    if (inputAudio) inputAudio.value = "";
+    if (miniMaxAudioName) miniMaxAudioName.textContent = "";
+    if (miniMaxAudioState) miniMaxAudioState.textContent = "Готово к загрузке";
+    if (miniMaxAudioPreview) miniMaxAudioPreview.hidden = true;
+  };
+
   const promptAssistantReferences = () => {
     if (templateID.value !== "image-to-image") return [];
     return imageSlots
-      .filter((item) => item.index <= activeMaxInputImages() && item.input?.files?.[0])
+      .filter((item) => item.index <= activeMaxInputImages() && selectedImageFile(item))
       .map((item) => ({ number: item.index, role: item.role?.value || "base_scene" }));
   };
 
@@ -648,9 +728,11 @@
 
   const clearImageSlot = (item) => {
     if (!item) return;
+	item.slot.classList.remove("has-image");
     const oldURL = previewURLs.get(item.index);
     if (oldURL) URL.revokeObjectURL(oldURL);
     previewURLs.delete(item.index);
+	selectedImages.delete(item.index);
     if (item.input) item.input.value = "";
     if (item.index === 1) {
       primaryImageSize = null;
@@ -695,6 +777,7 @@
         ? "Добавьте от одного до четырёх фотореференсов. Первый обязательный, остальные появятся по мере добавления."
         : "Добавьте первый кадр. Второе фото необязательно: оно станет последним кадром ролика.";
       syncReferenceMap();
+      syncMiniMaxAudioReference();
       return;
     }
     if (note) note.textContent = maximum > 1
@@ -703,6 +786,7 @@
         : `Первое фото обязательно. Можно добавить ещё до ${maximum - 1} ${maximum === 2 ? "референса" : "референсов"}.`
       : "Загрузите исходное фото для редактирования.";
     syncReferenceMap();
+    syncMiniMaxAudioReference();
   };
 
   const chooseScenario = (button) => {
@@ -723,10 +807,21 @@
     const selected = selectedGenerationWorkflow();
     const hasWorkflow = Boolean(selected && selected.dataset.available === "true");
     const primary = imageSlots[0];
-    const hasImage = Boolean(primary?.input?.files?.[0] || uploadedImages.get(1));
+    const hasImage = Boolean(selectedImageFile(primary) || uploadedImages.get(1));
     const needsImage = requiresImage || isMiniMaxSelected();
+    const hasPendingUploads = imageSlots.some((item) => (
+      item.index <= activeMaxInputImages()
+      && Boolean(selectedImageFile(item))
+      && !uploadedImages.get(item.index)
+    )) || hasPendingMiniMaxAudio();
     workflowNext.disabled = !hasWorkflow || (needsImage && !hasImage);
-    workflowNext.textContent = needsImage ? "Загрузить фото и продолжить" : "Продолжить";
+    if (!needsImage) {
+      workflowNext.textContent = "Продолжить";
+    } else if (hasPendingUploads) {
+      workflowNext.textContent = "Загрузить в ComfyUI и продолжить";
+    } else {
+      workflowNext.textContent = "Продолжить к промту";
+    }
   };
 
   const updateWorkflowCompatibility = () => {
@@ -752,6 +847,113 @@
     applyQuality();
     syncImageSlots();
     updateWorkflowNext();
+  };
+
+  const setNamedControlValue = (name, value) => {
+    const control = form.elements.namedItem(name);
+    if (!control || typeof control === "object" && "length" in control && !control.tagName) return;
+    if (control.type === "checkbox") {
+      control.checked = value === "true" || value === "on" || value === "1";
+      return;
+    }
+    control.value = value;
+  };
+
+  const applySavedValues = (values, { openStep = true } = {}) => {
+    if (!values || typeof values !== "object") return false;
+    const scenario = values.template_id ? root.querySelector(`.scenario-choice[data-workflow-id="${CSS.escape(values.template_id)}"]`) : null;
+    if (scenario && !scenario.disabled && !scenario.classList.contains("is-selected")) chooseScenario(scenario);
+    const workflow = values.generation_workflow ? root.querySelector(`.generation-workflow-choice[data-preset-id="${CSS.escape(values.generation_workflow)}"]`) : null;
+    if (workflow && !workflow.disabled && !workflow.hidden && !workflow.classList.contains("is-selected")) chooseGenerationWorkflow(workflow);
+    Object.entries(values).forEach(([name, value]) => {
+      if (name === "template_id" || name === "generation_workflow" || name === "input_image" || name.startsWith("input_image_")) return;
+      setNamedControlValue(name, String(value));
+    });
+    syncAdaptiveLoraSlots("krea");
+    syncAdaptiveLoraSlots("flux");
+    syncWorkflowFields();
+    calculateResolution();
+    syncMiniMaxVideoProfile();
+    if (openStep) {
+      const needsImage = selectedChoice()?.dataset.requiresImage === "true" || selectedGenerationWorkflow()?.dataset.family === "minimax_h3";
+      showStep(needsImage && !uploadedImages.get(1) ? 2 : 3);
+    }
+    return Boolean(selectedChoice() && selectedGenerationWorkflow());
+  };
+
+  const profileValues = (profile) => {
+    const family = selectedGenerationWorkflow()?.dataset.family || "checkpoint";
+    const isEdit = templateID.value === "image-to-image";
+    const values = {};
+    if (family === "minimax_h3") {
+      Object.assign(values, profile === "draft"
+        ? { video_quality: "480", video_duration_seconds: "5", video_steps: "20" }
+        : profile === "maximum"
+          ? { video_quality: "1080", video_duration_seconds: "10", video_steps: "25", video_reference_size: "max" }
+          : { video_quality: "720", video_duration_seconds: "5", video_steps: "25", video_reference_size: "match" });
+    } else if (family === "flux2") {
+      Object.assign(values, profile === "draft"
+        ? { source_megapixels: "0.75", flux_detailer_steps: "16", flux_guidance: "3.5", flux_upscale_mode: "none" }
+        : profile === "maximum"
+          ? { source_megapixels: "2", flux_detailer_steps: "32", flux_guidance: "4", flux_upscale_mode: "both" }
+          : { source_megapixels: "1", flux_detailer_steps: "25", flux_guidance: "4", flux_upscale_mode: "none" });
+    } else if (family === "krea2") {
+      if (isEdit) {
+        Object.assign(values, profile === "draft"
+          ? { output_megapixels: "1", reference_boost: "4", grounding_pixels: "512", upscale_steps: "3", upscale_denoise: "0.14" }
+          : profile === "maximum"
+            ? { output_megapixels: "4.7", reference_boost: "4", grounding_pixels: "1024", upscale_steps: "8", upscale_denoise: "0.22" }
+            : { output_megapixels: "1.9", reference_boost: "4", grounding_pixels: "768", upscale_steps: "5", upscale_denoise: "0.18" });
+      } else {
+        Object.assign(values, profile === "draft"
+          ? { base_megapixels: "0.75", output_megapixels: "1", steps: "6", upscale_steps: "3", detail_steps: "1", detail_denoise: "0.02" }
+          : profile === "maximum"
+            ? { base_megapixels: "1.5", output_megapixels: "4.7", steps: "10", upscale_steps: "8", detail_steps: "4", detail_denoise: "0.04" }
+            : { base_megapixels: "1", output_megapixels: "1.9", steps: "8", upscale_steps: "5", detail_steps: "2", detail_denoise: "0.03" });
+      }
+    } else {
+      Object.assign(values, profile === "draft"
+        ? { steps: "18", cfg: "6", width: "768", height: "1024" }
+        : profile === "maximum"
+          ? { steps: "35", cfg: "7", width: "1024", height: "1536" }
+          : { steps: "25", cfg: "7", width: "1024", height: "1024" });
+    }
+    return values;
+  };
+
+  const syncGenerationSummary = () => {
+    if (!generationSummaryValue) return;
+    const preset = selectedGenerationWorkflow();
+    const selectedModel = model?.selectedOptions?.[0];
+    if (!preset || !selectedModel?.value) {
+      generationSummaryValue.textContent = "Выберите workflow и модель.";
+      return;
+    }
+    const parts = [preset.querySelector("strong")?.textContent || "Workflow", selectedModel.textContent.trim()];
+    const family = preset.dataset.family || "";
+    if (family === "krea2") {
+      const mp = outputMegapixels?.value || quality?.selectedOptions?.[0]?.textContent || "";
+      if (mp) parts.push(`${mp} Мп`);
+    } else if (family === "minimax_h3") {
+      parts.push(`${miniMaxVideoQuality?.value || "720"}p`, `${form.elements.video_duration_seconds?.value || "5"} сек.`);
+    } else if (isFinite(Number(width?.value)) && isFinite(Number(height?.value))) {
+      parts.push(`${width.value} × ${height.value}`);
+    }
+    const loras = [...root.querySelectorAll(".lora-row:not([hidden]) .generation-lora-select")].filter((item) => !item.disabled && item.value).length;
+    if (loras) parts.push(`LoRA: ${loras}`);
+    generationSummaryValue.textContent = parts.filter(Boolean).join(" · ");
+  };
+
+  const applyGenerationProfile = (profile) => {
+    if (!selectedGenerationWorkflow()) return;
+    Object.entries(profileValues(profile)).forEach(([name, value]) => setNamedControlValue(name, value));
+    root.querySelectorAll("[data-generation-profile]").forEach((button) => button.classList.toggle("is-active", button.dataset.generationProfile === profile));
+    if (quality && selectedGenerationWorkflow()?.dataset.family === "krea2" && templateID.value !== "image-to-image") {
+      quality.value = profile === "draft" ? "fast" : profile === "maximum" ? "krea-4-7" : "balanced";
+    }
+    calculateResolution();
+    syncMiniMaxVideoProfile();
+    syncGenerationSummary();
   };
 
   const updateQuickModelOptions = (workflow) => {
@@ -785,6 +987,15 @@
 
   const setPromptAssistantState = (message, state = "") => {
     if (!promptAssistantState) return;
+    if (message === "нельзя создавать сексуализированный контент с участием несовершеннолетних или персонажей с неоднозначным возрастом") {
+      const title = document.createElement("strong");
+      title.textContent = "Запрос не обработан";
+      const detail = document.createElement("span");
+      detail.textContent = "Нельзя создавать сексуализированный контент с участием несовершеннолетних или персонажей с неопределённым возрастом. Измените описание и попробуйте снова.";
+      promptAssistantState.replaceChildren(title, detail);
+      promptAssistantState.dataset.state = "safety";
+      return;
+    }
     promptAssistantState.textContent = message;
     promptAssistantState.dataset.state = state;
   };
@@ -801,16 +1012,20 @@
   const syncPromptAssistant = () => {
     if (!promptAssistant || !promptAssistantEnabled || !promptAssistantControls || !promptAssistantTemplate) return;
     const isEdit = templateID.value === "image-to-image";
+    const isVideo = templateID.value === "minimax-h3-video";
     promptAssistant.hidden = !templateID.value;
     promptAssistantControls.hidden = !promptAssistantEnabled.checked;
+	  promptAssistantTemplate.disabled = isVideo;
     [...promptAssistantTemplate.options].forEach((option) => {
       const imageOnly = option.dataset.imageOnly !== undefined;
-      option.hidden = imageOnly && !isEdit;
-      option.disabled = imageOnly && !isEdit;
+      const videoOnly = option.dataset.videoOnly !== undefined;
+      const miniMaxOnly = option.value === "minimax-h3";
+      option.hidden = isVideo ? !miniMaxOnly : (imageOnly && !isEdit) || videoOnly;
+      option.disabled = isVideo ? !miniMaxOnly : (imageOnly && !isEdit) || videoOnly;
     });
     const selectedAssistantTemplate = promptAssistantTemplate.selectedOptions[0];
-    if (!isEdit && selectedAssistantTemplate?.dataset.imageOnly !== undefined) {
-      promptAssistantTemplate.value = "workflow-default";
+    if ((isVideo && selectedAssistantTemplate?.value !== "minimax-h3") || (!isEdit && selectedAssistantTemplate?.dataset.imageOnly !== undefined) || (!isVideo && selectedAssistantTemplate?.dataset.videoOnly !== undefined)) {
+      promptAssistantTemplate.value = isVideo ? "minimax-h3" : "workflow-default";
       resetPromptAssistantReview();
     }
     if (!promptAssistantEnabled.checked) {
@@ -819,7 +1034,9 @@
     } else if (!promptAssistantReview?.hidden) {
       setPromptAssistantState("Проверьте вариант и примените его либо оставьте свой промт.", "review");
     } else {
-      setPromptAssistantState("Вариант будет создан локальной моделью e4b и затем выгружен из видеопамяти.");
+      setPromptAssistantState(isVideo && promptAssistantTemplate.value === "minimax-h3"
+        ? "Ассистент подготовит один структурированный MiniMax H3 Context-IR для прямого запуска."
+        : "Вариант будет создан локальной моделью e4b и затем выгружен из видеопамяти.");
     }
   };
 
@@ -832,6 +1049,10 @@
     const isKreaEdit = isKrea && isEdit;
     const isFluxEdit = family === "flux2" && isEdit;
     const isMiniMax = family === "minimax_h3";
+    if (generationOpenExact) {
+      generationOpenExact.textContent = isMiniMax ? "Параметры видео" : "Точные настройки";
+      generationOpenExact.setAttribute("aria-label", isMiniMax ? "Перейти к параметрам видео MiniMax H3" : "Открыть точные настройки workflow");
+    }
     syncPromptAssistant();
     if (outputMegapixels) {
       outputMegapixels.max = isKreaEdit ? String(krea2EditMaxBaseMegapixels) : "16";
@@ -869,7 +1090,8 @@
       guide.hidden = !(
         (type === "text" && !isEdit && !isMiniMax) ||
         (type === "krea-edit" && isKreaEdit) ||
-        (type === "flux-edit" && isFluxEdit)
+        (type === "flux-edit" && isFluxEdit) ||
+        (type === "video" && isMiniMax)
       );
     });
     renderLUT();
@@ -879,6 +1101,7 @@
     if (isMiniMax) syncMiniMaxVideoProfile();
     if (isFluxEdit) syncAdaptiveLoraSlots("flux");
     if (isKreaText) syncAdaptiveLoraSlots("krea");
+    if (isMiniMax) syncAdaptiveLoraSlots("minimax");
     if (qualityField) qualityField.hidden = !isKreaText;
     if (editorProfile) editorProfile.hidden = !isEdit;
     syncSelectedImageSummary();
@@ -903,6 +1126,7 @@
       if (mainPassTitle) mainPassTitle.textContent = "Основной проход";
       if (mainPassDescription) mainPassDescription.textContent = "Параметры основного семплирования выбранной схемы генерации.";
     }
+    syncGenerationSummary();
   };
 
   const applyQuality = () => {
@@ -1020,6 +1244,15 @@
         assistant_template: promptAssistantTemplate?.value || "workflow-default",
         assistant_think: promptAssistantThink?.checked ? "true" : "false",
       });
+      if (mode === "minimax-h3-video") {
+        body.set("video_mode", miniMaxVideoModeSelect?.value || "frames");
+        body.set("video_duration_seconds", form.elements.video_duration_seconds?.value || "5");
+        body.set("video_image_count", String([...uploadedImages.keys()].filter((index) => index <= activeMaxInputImages()).length || 1));
+        body.set("video_has_audio", miniMaxAudioIsAvailable() && uploadedAudio ? "true" : "false");
+      }
+      inputImages.forEach((input, index) => {
+        if (input?.value) body.set(index === 0 ? "input_image" : `input_image_${index + 1}`, input.value);
+      });
       promptAssistantReferences().forEach((reference) => {
         body.set(`image_role_${reference.number}`, reference.role);
       });
@@ -1080,27 +1313,64 @@
       ? "Первое фото обязательно. Можно добавить ещё до трёх референсов: лица, стиль, предметы или окружение."
       : "Первый кадр обязателен. Второе фото можно добавить как последний кадр ролика.";
     syncImageSlots();
+    syncMiniMaxAudioReference();
     updateWorkflowNext();
     syncWorkflowFields();
   });
-  [miniMaxVideoAspect, miniMaxVideoQuality].forEach((field) => field?.addEventListener("change", syncMiniMaxVideoProfile));
 
-  imageSlots.forEach((item) => {
-    item.input?.addEventListener("change", () => {
-      const file = item.input.files?.[0];
+  miniMaxAudioFile?.addEventListener("change", () => {
+    const file = miniMaxAudioFile.files?.[0];
+    uploadedAudio = "";
+    if (inputAudio) inputAudio.value = "";
+    if (!file) {
+      if (miniMaxAudioPreview) miniMaxAudioPreview.hidden = true;
+      updateWorkflowNext();
+      return;
+    }
+    if (file.size > 32 * 1024 * 1024) {
+      clearMiniMaxAudio();
+      if (miniMaxAudioState) miniMaxAudioState.textContent = "Аудиофайл должен быть не больше 32 МБ";
+      if (miniMaxAudioPreview) miniMaxAudioPreview.hidden = false;
+      updateWorkflowNext();
+      return;
+    }
+    if (miniMaxAudioName) miniMaxAudioName.textContent = file.name;
+    if (miniMaxAudioState) miniMaxAudioState.textContent = "Аудио выбрано. Оно загрузится вместе с фото.";
+    if (miniMaxAudioPreview) miniMaxAudioPreview.hidden = false;
+    updateWorkflowNext();
+  });
+  miniMaxAudioRemove?.addEventListener("click", () => {
+    clearMiniMaxAudio();
+    updateWorkflowNext();
+  });
+  miniMaxVideoQuality?.addEventListener("change", syncMiniMaxVideoProfile);
+  miniMaxVideoTurbo?.addEventListener("change", syncMiniMaxVideoProfile);
+
+  const handleImageSelection = (item) => {
+      const file = item.input?.files?.[0] || null;
       const previousURL = previewURLs.get(item.index);
       if (previousURL) URL.revokeObjectURL(previousURL);
       previewURLs.delete(item.index);
       uploadedImages.delete(item.index);
       if (inputImages[item.index - 1]) inputImages[item.index - 1].value = "";
       if (!file) {
+		selectedImages.delete(item.index);
+		item.slot.classList.remove("has-image");
         if (item.preview) item.preview.hidden = true;
         syncReferenceMap();
         updateWorkflowNext();
         return;
       }
-      const url = URL.createObjectURL(file);
-      previewURLs.set(item.index, url);
+      selectedImages.set(item.index, file);
+      item.slot.classList.add("has-image");
+      updateWorkflowNext();
+      let url = "";
+      try {
+        url = URL.createObjectURL(file);
+        previewURLs.set(item.index, url);
+      } catch (_) {
+        if (item.state) item.state.textContent = "Фото выбрано. Предпросмотр недоступен, но файл можно загрузить.";
+      }
       if (item.previewImage) {
         item.previewImage.onload = () => {
           if (item.index !== 1) return;
@@ -1108,19 +1378,28 @@
           applyOriginalResolution();
           updateOriginalResolution();
           syncSelectedImageSummary();
+          syncMiniMaxVideoProfile();
         };
-        item.previewImage.src = url;
+        if (url) item.previewImage.src = url;
         item.previewImage.onerror = () => {
           if (item.state) item.state.textContent = "Не удалось показать предпросмотр, но файл будет загружен";
         };
       }
       if (item.name) item.name.textContent = file.name;
-      if (item.state) item.state.textContent = "Готово к загрузке";
+      if (item.state) {
+        item.state.textContent = isMiniMaxSelected()
+          ? "Фото выбрано. Нажмите «Загрузить в ComfyUI и продолжить»."
+          : "Готово к загрузке";
+      }
       if (item.preview) item.preview.hidden = false;
       syncSelectedImageSummary();
       syncReferenceMap();
       updateWorkflowNext();
-    });
+  };
+
+  imageSlots.forEach((item) => {
+    item.input?.addEventListener("change", () => handleImageSelection(item));
+    item.input?.addEventListener("input", () => handleImageSelection(item));
     item.remove?.addEventListener("click", () => {
       clearImageSlot(item);
       updateWorkflowNext();
@@ -1135,21 +1414,27 @@
   workflowNext?.addEventListener("click", async () => {
     if (!generationWorkflowID.value) return;
     const requiresPrimary = requiresImage || isMiniMaxSelected();
-    const selectedSlots = imageSlots.filter((item) => item.index <= activeMaxInputImages() && item.input?.files?.[0]);
+    const selectedSlots = imageSlots.filter((item) => item.index <= activeMaxInputImages() && selectedImageFile(item));
     if (!selectedSlots.length && !requiresPrimary) {
       showStep(3);
       positive?.focus({ preventScroll: true });
       return;
     }
     if ((requiresPrimary && !selectedSlots.some((item) => item.index === 1)) || uploadInFlight) return;
+    const pendingSlots = selectedSlots.filter((item) => !uploadedImages.get(item.index));
+    const pendingAudio = hasPendingMiniMaxAudio();
+    if (!pendingSlots.length && !pendingAudio) {
+      showStep(3);
+      positive?.focus({ preventScroll: true });
+      return;
+    }
     uploadInFlight = true;
     workflowNext.disabled = true;
     workflowNext.classList.add("is-loading");
     try {
-      inputImages.forEach((input) => { if (input) input.value = ""; });
-      uploadedImages.clear();
-      for (const item of selectedSlots) {
-        const file = item.input.files[0];
+      for (const item of pendingSlots) {
+        const file = selectedImageFile(item);
+		if (!file) throw new Error("Не удалось прочитать выбранное фото");
         if (item.state) item.state.textContent = "Загружаем в вашу сессию...";
         const body = new FormData();
         body.append("image", file, file.name);
@@ -1163,11 +1448,26 @@
         if (inputImages[item.index - 1]) inputImages[item.index - 1].value = value;
         if (item.state) item.state.textContent = "Загружено в вашу сессию";
       }
+      if (pendingAudio && miniMaxAudioFile?.files?.[0]) {
+        if (miniMaxAudioState) miniMaxAudioState.textContent = "Загружаем аудио в вашу сессию...";
+        const body = new FormData();
+        const file = miniMaxAudioFile.files[0];
+        body.append("image", file, file.name);
+        body.append("type", "input");
+        body.append("overwrite", "true");
+        const response = await fetch("/generate/upload/audio", { method: "POST", body, credentials: "same-origin" });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.name) throw new Error(payload.error || "ComfyUI не принял аудиофайл");
+        uploadedAudio = [payload.subfolder, payload.name].filter(Boolean).join("/");
+        syncMiniMaxAudioReference();
+        if (miniMaxAudioState) miniMaxAudioState.textContent = "Загружено в вашу сессию";
+      }
       showStep(3);
       positive?.focus({ preventScroll: true });
     } catch (error) {
-      const failed = selectedSlots.find((item) => !uploadedImages.get(item.index));
+      const failed = pendingSlots.find((item) => !uploadedImages.get(item.index));
       if (failed?.state) failed.state.textContent = error.message || "Не удалось загрузить фото";
+      if (pendingAudio && miniMaxAudioState && !uploadedAudio) miniMaxAudioState.textContent = error.message || "Не удалось загрузить аудио";
       updateWorkflowNext();
     } finally {
       uploadInFlight = false;
@@ -1184,7 +1484,7 @@
       media.muted = output.media_type === "video";
       media.loop = output.media_type === "video";
       media.playsInline = output.media_type === "video";
-      media.preload = output.media_type === "video" ? "metadata" : "auto";
+      media.preload = "auto";
       media.loading = "lazy";
       media.alt = output.filename;
       const card = document.createElement("figure");
@@ -1252,7 +1552,7 @@
       video.muted = true;
       video.loop = true;
       video.playsInline = true;
-      video.preload = "metadata";
+      video.preload = "auto";
       video.src = item.url;
       const play = document.createElement("span");
       play.className = "generation-video-play";
@@ -1401,6 +1701,297 @@
   refreshExpiryLabels();
   window.setInterval(refreshExpiryLabels, 30000);
 
+  const buildGenerationPayload = () => {
+    const body = new FormData(form);
+    const numericFieldNames = new Set([...form.querySelectorAll('input[type="number"], input[data-localized-decimal]')].map((field) => field.name));
+    for (const [name, value] of [...body.entries()]) {
+      if (numericFieldNames.has(name) && typeof value === "string") body.set(name, value.replaceAll(",", "."));
+    }
+    body.set("template_id", selectedChoice()?.dataset.workflowId || "");
+    body.set("generation_workflow", selectedGenerationWorkflow()?.dataset.presetId || "");
+    body.set("assistant_requested", promptAssistantOriginal ? "true" : "false");
+    body.set("assistant_applied", promptAssistantAction.startsWith("applied") ? "true" : "false");
+    body.set("assistant_template_used", promptAssistantOriginal ? (promptAssistantTemplate?.value || "") : "");
+    body.set("assistant_think_used", promptAssistantOriginal && promptAssistantThink?.checked ? "true" : "false");
+    body.set("assistant_original_prompt", promptAssistantOriginal);
+    body.set("assistant_suggestion", promptAssistantSuggestion);
+    ["input_image", "input_image_2", "input_image_3", "input_image_4"].forEach((name, index) => body.set(name, uploadedImages.get(index + 1) || ""));
+    body.set("input_audio", miniMaxAudioIsAvailable() ? uploadedAudio : "");
+    return new URLSearchParams(body);
+  };
+
+  const renderPreflight = (payload) => {
+    if (!preflight || !preflightChecks) return;
+    const checks = Array.isArray(payload?.checks) ? payload.checks : [];
+    preflight.hidden = false;
+    preflight.classList.toggle("has-error", !payload?.ok);
+    if (preflightSummary) preflightSummary.textContent = payload?.ok ? "Проверка выполнена. Можно ставить задачу в очередь." : "Найдены проблемы, которые нужно исправить до запуска.";
+    preflightChecks.replaceChildren(...checks.map((check) => {
+      const item = document.createElement("div");
+      item.className = `generation-preflight-check ${check.level || "info"}`;
+      const label = document.createElement("strong");
+      label.textContent = check.label || "Проверка";
+      const message = document.createElement("span");
+      message.textContent = check.message || "";
+      item.append(label, message);
+      return item;
+    }));
+    if (!payload?.ok && payload?.recovery_profile) {
+      const recover = document.createElement("button");
+      recover.type = "button";
+      recover.className = "button ghost generation-preflight-recover";
+      recover.textContent = payload.recovery_label || "Вернуть безопасные параметры";
+      recover.addEventListener("click", () => {
+        applyGenerationProfile(payload.recovery_profile);
+        preflightSummary.textContent = "Применён безопасный профиль. Проверьте промт и запустите проверку ещё раз.";
+      });
+      preflightChecks.append(recover);
+    }
+    if (payload?.queue) renderQueueOverview(payload.queue);
+  };
+
+  const runPreflight = async ({ reveal = true } = {}) => {
+    if (!selectedChoice() || !selectedGenerationWorkflow() || !model?.value || !positive.value.trim()) {
+      const payload = { ok: false, checks: [{ level: "error", label: "Запуск", message: "Выберите сценарий, workflow, модель и заполните позитивный промт." }] };
+      renderPreflight(payload);
+      if (reveal) preflight?.scrollIntoView({ block: "center", behavior: "smooth" });
+      return false;
+    }
+    if (preflightButton) preflightButton.disabled = true;
+    if (preflightRepeat) preflightRepeat.disabled = true;
+    try {
+      const response = await fetch("/generate/preflight", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+        body: buildGenerationPayload(),
+        credentials: "same-origin",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Не удалось проверить готовность workflow");
+      renderPreflight(payload);
+      if (reveal) preflight?.scrollIntoView({ block: "center", behavior: "smooth" });
+      return Boolean(payload.ok);
+    } catch (error) {
+      renderPreflight({ ok: false, checks: [{ level: "error", label: "Проверка", message: error.message || "Gateway временно недоступен" }] });
+      return false;
+    } finally {
+      if (preflightButton) preflightButton.disabled = false;
+      if (preflightRepeat) preflightRepeat.disabled = false;
+    }
+  };
+
+  const renderRecipes = (recipes) => {
+    savedRecipes = Array.isArray(recipes) ? recipes : [];
+    if (!recipeSelect) return;
+    const selected = recipeSelect.value;
+    recipeSelect.replaceChildren(new Option("Выберите сохранённый набор", ""));
+    savedRecipes.forEach((recipe) => recipeSelect.append(new Option(recipe.name, String(recipe.id))));
+    recipeSelect.value = savedRecipes.some((recipe) => String(recipe.id) === selected) ? selected : "";
+    if (recipeApply) recipeApply.disabled = !recipeSelect.value;
+    if (recipeDelete) recipeDelete.disabled = !recipeSelect.value;
+  };
+
+  const refreshRecipes = async () => {
+    const response = await fetch("/generate/recipes", { credentials: "same-origin" });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Не удалось загрузить наборы");
+    renderRecipes(payload.recipes || []);
+  };
+
+  const setRecipeState = (message, state = "") => {
+    if (!recipeState) return;
+    recipeState.textContent = message || "";
+    recipeState.dataset.state = state;
+  };
+
+  const saveRecipe = async () => {
+    const name = recipeName?.value.trim() || "";
+    if (name.length < 2) {
+      setRecipeState("Введите название набора от 2 символов.", "error");
+      recipeName?.focus();
+      return;
+    }
+    if (!selectedChoice() || !selectedGenerationWorkflow()) {
+      setRecipeState("Сначала выберите сценарий и workflow.", "error");
+      return;
+    }
+    recipeSave.disabled = true;
+    setRecipeState("Сохраняем защищённый набор...");
+    try {
+      const body = buildGenerationPayload();
+      body.set("recipe_name", name);
+      const response = await fetch("/generate/recipes", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body, credentials: "same-origin" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Не удалось сохранить набор");
+      await refreshRecipes();
+      recipeSelect.value = String(payload.recipe?.id || "");
+      if (recipeApply) recipeApply.disabled = !recipeSelect.value;
+      if (recipeDelete) recipeDelete.disabled = !recipeSelect.value;
+      if (recipeName) recipeName.value = "";
+      setRecipeState("Набор сохранён. Фото в него не включаются.", "ready");
+    } catch (error) {
+      setRecipeState(error.message || "Не удалось сохранить набор", "error");
+    } finally {
+      recipeSave.disabled = false;
+    }
+  };
+
+  const applyRecipe = () => {
+    const recipe = savedRecipes.find((item) => String(item.id) === recipeSelect?.value);
+    if (!recipe) return;
+    if (!applySavedValues(recipe.values)) {
+      setRecipeState("Этот workflow сейчас недоступен. Проверьте модели и зависимости ComfyUI.", "error");
+      return;
+    }
+    setRecipeState("Набор применён. Для режима с фото заново выберите исходник.", "ready");
+  };
+
+  const deleteRecipe = async () => {
+    const id = recipeSelect?.value || "";
+    if (!id || !recipeDelete) return;
+    recipeDelete.disabled = true;
+    setRecipeState("Удаляем набор...");
+    try {
+      const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", recipe_id: id });
+      const response = await fetch("/generate/recipes/delete", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body, credentials: "same-origin" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.deleted) throw new Error(payload.error || "Не удалось удалить набор");
+      await refreshRecipes();
+      setRecipeState("Набор удалён.", "ready");
+    } catch (error) {
+      setRecipeState(error.message || "Не удалось удалить набор", "error");
+    } finally {
+      recipeDelete.disabled = !recipeSelect?.value;
+    }
+  };
+
+  const refreshVariants = async () => {
+    const response = await fetch("/generate/variants", { credentials: "same-origin" });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Не удалось загрузить историю вариантов");
+    savedVariants = Array.isArray(payload.variants) ? payload.variants : [];
+    renderVariants();
+  };
+
+  const syncGenerationHistoryVisibility = ({ persist = false } = {}) => {
+    if (!variantsContent || !variantsToggle) return;
+    variantsContent.hidden = generationHistoryCollapsed;
+    variantsToggle.textContent = generationHistoryCollapsed ? "Показать" : "Свернуть";
+    variantsToggle.setAttribute("aria-expanded", String(!generationHistoryCollapsed));
+    if (!persist) return;
+    try { window.localStorage.setItem(generationHistoryCollapsedStorageKey, generationHistoryCollapsed ? "true" : "false"); } catch (_) {}
+  };
+
+  const renderVariants = () => {
+    if (!variantsSection || !variantList) return;
+    const filteredVariants = savedVariants.filter((variant) => (!variantStateFilter?.value || variant.state === variantStateFilter.value) && (!variantTemplateFilter?.value || variant.template_id === variantTemplateFilter.value));
+    variantsSection.hidden = savedVariants.length === 0;
+    if (variantCount) {
+      const count = filteredVariants.length === savedVariants.length ? `${savedVariants.length} вариантов` : `Показано ${filteredVariants.length} из ${savedVariants.length}`;
+      variantCount.textContent = `${count} · хранится 24 часа`;
+    }
+    if (filteredVariants.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "generation-variant-empty";
+      empty.textContent = "По этим фильтрам вариантов пока нет.";
+      variantList.replaceChildren(empty);
+      updateCompareButton();
+      return;
+    }
+    variantList.replaceChildren(...filteredVariants.map((variant) => {
+      const card = document.createElement("article");
+      card.className = "generation-variant";
+      card.dataset.state = variant.state || "queued";
+      const media = variant.media?.find((item) => item.media_type === "image") || variant.media?.[0];
+      if (media?.sensitive) card.classList.add("sensitive-media");
+      if (media) {
+        const preview = document.createElement("button");
+        preview.type = "button";
+        preview.className = "generation-variant-preview";
+        if (media.sensitive) preview.dataset.sensitiveMedia = "";
+        if (media.media_type === "video") {
+          const video = document.createElement("video");
+          video.muted = true;
+          video.loop = true;
+          video.playsInline = true;
+          video.preload = "auto";
+          video.src = media.url;
+          preview.append(video);
+          wireVideoPreview(preview, media);
+        } else {
+          const image = document.createElement("img");
+          image.loading = "lazy";
+          image.src = media.url;
+          image.alt = variant.model_name || "Результат варианта";
+          preview.append(image);
+          preview.addEventListener("click", () => {
+            if (window.aiGatewaySensitiveContent?.reveal(preview)) return;
+            openLightbox(media);
+          });
+        }
+        if (media.sensitive) {
+          const cover = document.createElement("span");
+          cover.className = "sensitive-media-cover";
+          const title = document.createElement("b");
+          title.textContent = "Контент 18+";
+          const hint = document.createElement("small");
+          hint.textContent = "Нажмите, чтобы показать";
+          cover.append(title, hint);
+          preview.append(cover);
+        }
+        card.append(preview);
+      }
+      const body = document.createElement("div");
+      body.className = "generation-variant-body";
+      const title = document.createElement("strong");
+      const modelName = String(variant.model_name || "Сохранённый вариант").replaceAll("\\", "/").split("/").pop();
+      title.textContent = modelName.replace(/\.(safetensors|ckpt|gguf)$/i, "");
+      const meta = document.createElement("small");
+      const duration = Number(variant.duration_seconds || 0);
+      const time = duration > 0 ? ` · ${duration < 60 ? `${duration} сек.` : `${Math.round(duration / 60)} мин.`}` : "";
+      meta.textContent = `Seed ${variant.seed} · ${variant.state === "completed" ? "готово" : variant.state === "error" ? "ошибка" : variant.state === "cancelled" ? "отменено" : variant.state === "queued" ? "в очереди" : "в работе"}${time}`;
+      const prompt = document.createElement("p");
+      prompt.textContent = variant.values?.positive_prompt || "Промт не сохранён";
+      const actions = document.createElement("div");
+      actions.className = "generation-variant-actions";
+      const apply = document.createElement("button");
+      apply.type = "button";
+      apply.className = "button ghost";
+      apply.textContent = "Взять параметры";
+      apply.addEventListener("click", () => applySavedValues(variant.values));
+      actions.append(apply);
+      if (variant.template_id === "text-to-image" && variant.state === "completed") {
+        const repeat = document.createElement("button");
+        repeat.type = "button";
+        repeat.className = "button ghost";
+        repeat.textContent = "Повторить с этим seed";
+        repeat.addEventListener("click", () => { if (applySavedValues(variant.values)) form.requestSubmit(); });
+        actions.append(repeat);
+      }
+      body.append(title, meta, prompt, actions);
+      if (variant.error_message) {
+        const error = document.createElement("small");
+        error.className = "generation-variant-error";
+        error.textContent = variant.error_message;
+        body.append(error);
+      }
+      card.append(body);
+      return card;
+    }));
+  };
+
+  const updateGenerationQuota = (quota) => {
+    if (!generationQuota || !quota || typeof quota !== "object") return;
+    const assign = (selector, value) => {
+      const target = generationQuota.querySelector(selector);
+      if (target && Number.isFinite(Number(value))) target.textContent = String(Math.max(0, Number(value)));
+    };
+    assign("[data-generation-quota-daily-remaining]", quota.daily_remaining);
+    assign("[data-generation-quota-daily-limit]", quota.daily_limit);
+    assign("[data-generation-quota-total-remaining]", quota.total_remaining);
+    assign("[data-generation-quota-total-limit]", quota.total_limit);
+  };
+
   const poll = async (promptID) => {
     const isVideo = selectedGenerationWorkflow()?.dataset.family === "minimax_h3";
     const deadline = Date.now() + (isVideo ? 60 : 20) * 60 * 1000;
@@ -1426,7 +2017,7 @@
         resultStatus.textContent = payload.message || "Проверяем состояние...";
         if (!liveProgressReceived) {
           if (payload.state === "queued") {
-            const detail = queuePositionDetail(payload.queue_position, payload.queue_total);
+            const detail = queuePositionDetail(payload.queue_position, payload.queue_total, payload.estimated_wait_seconds);
             setGenerationProgress("В очереди ComfyUI", detail, null);
           } else if (payload.state === "running") {
             setGenerationProgress("ComfyUI выполняет workflow", "Статус восстанавливается через HTTP", null);
@@ -1439,6 +2030,7 @@
           setGenerationProgress("Готово", "Результат подготовлен", 100);
           renderOutputs(payload.outputs || []);
           try { await refreshLibrary(); } catch (_) {}
+          try { await refreshVariants(); } catch (_) {}
           result.scrollIntoView({ block: "start", behavior: "smooth" });
           return;
         }
@@ -1512,7 +2104,7 @@
           resultTitle.textContent = "Генерация выполняется";
           resultStatus.textContent = payload.message || "Генерация восстановлена.";
           if (payload.state === "queued") {
-            setGenerationProgress("В очереди ComfyUI", queuePositionDetail(payload.queue_position, payload.queue_total), null);
+            setGenerationProgress("В очереди ComfyUI", queuePositionDetail(payload.queue_position, payload.queue_total, payload.estimated_wait_seconds), null);
           } else if (payload.state === "running") {
             setGenerationProgress("ComfyUI выполняет workflow", "Статус восстанавливается через HTTP", null);
           }
@@ -1533,6 +2125,33 @@
     return false;
   };
 
+  root.querySelectorAll("[data-generation-profile]").forEach((button) => {
+    button.addEventListener("click", () => applyGenerationProfile(button.dataset.generationProfile));
+  });
+  variantStateFilter?.addEventListener("change", renderVariants);
+  variantTemplateFilter?.addEventListener("change", renderVariants);
+  try { generationHistoryCollapsed = window.localStorage.getItem(generationHistoryCollapsedStorageKey) === "true"; } catch (_) {}
+  syncGenerationHistoryVisibility();
+  variantsToggle?.addEventListener("click", () => {
+    generationHistoryCollapsed = !generationHistoryCollapsed;
+    syncGenerationHistoryVisibility({ persist: true });
+  });
+  generationOpenExact?.addEventListener("click", () => {
+    if (!generationAdvanced) return;
+    generationAdvanced.open = true;
+    generationAdvanced.scrollIntoView({ block: "start", behavior: "smooth" });
+    if (isMiniMaxSelected()) {
+      generationAdvanced.querySelector(".minimax-video-settings select, .minimax-video-settings input")?.focus({ preventScroll: true });
+    }
+  });
+  form.addEventListener("input", syncGenerationSummary);
+  form.addEventListener("change", syncGenerationSummary);
+  recipeSelect?.addEventListener("change", () => { if (recipeApply) recipeApply.disabled = !recipeSelect.value; if (recipeDelete) recipeDelete.disabled = !recipeSelect.value; });
+  recipeApply?.addEventListener("click", applyRecipe);
+  recipeDelete?.addEventListener("click", deleteRecipe);
+  recipeSave?.addEventListener("click", saveRecipe);
+  preflightButton?.addEventListener("click", () => runPreflight());
+  preflightRepeat?.addEventListener("click", () => runPreflight({ reveal: false }));
   retryGeneration?.addEventListener("click", () => form.requestSubmit());
   cancelGeneration?.addEventListener("click", async () => {
     const promptID = activeGenerationID;
@@ -1573,6 +2192,10 @@
       promptAssistant?.scrollIntoView({ block: "center", behavior: "smooth" });
       return;
     }
+    if (!await runPreflight({ reveal: false })) {
+      preflight?.scrollIntoView({ block: "center", behavior: "smooth" });
+      return;
+    }
     const submit = document.getElementById("generation-submit");
     submit.disabled = true;
     submit.classList.add("is-loading");
@@ -1589,30 +2212,12 @@
     setGenerationProgress("Подготовка", "Проверяем параметры схемы генерации", null);
     result.scrollIntoView({ block: "start", behavior: "smooth" });
     try {
-      const body = new FormData(form);
-      // Mobile Russian keyboards commonly enter decimal fractions with a comma.
-      // Convert values here as well as on the server before URL encoding them.
-      const numericFieldNames = new Set([...form.querySelectorAll('input[type="number"], input[data-localized-decimal]')].map((field) => field.name));
-      for (const [name, value] of [...body.entries()]) {
-        if (numericFieldNames.has(name) && typeof value === "string") {
-          body.set(name, value.replaceAll(",", "."));
-        }
-      }
-      body.set("template_id", selectedChoice()?.dataset.workflowId || "");
-      body.set("generation_workflow", selectedGenerationWorkflow()?.dataset.presetId || "");
+      const body = buildGenerationPayload();
       body.set("client_request_id", activeGenerationRequestID);
-      body.set("assistant_requested", promptAssistantOriginal ? "true" : "false");
-      body.set("assistant_applied", promptAssistantAction.startsWith("applied") ? "true" : "false");
-      body.set("assistant_template_used", promptAssistantOriginal ? (promptAssistantTemplate?.value || "") : "");
-      body.set("assistant_think_used", promptAssistantOriginal && promptAssistantThink?.checked ? "true" : "false");
-      body.set("assistant_original_prompt", promptAssistantOriginal);
-      body.set("assistant_suggestion", promptAssistantSuggestion);
-      ["input_image", "input_image_2", "input_image_3", "input_image_4"].forEach((name, index) => {
-        body.set(name, uploadedImages.get(index + 1) || "");
-      });
-      const response = await fetch("/generate/run", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body: new URLSearchParams(body), credentials: "same-origin" });
+      const response = await fetch("/generate/run", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body, credentials: "same-origin" });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "Не удалось запустить генерацию");
+      updateGenerationQuota(payload.quota);
       activeGenerationRequestID = payload.request_id || activeGenerationRequestID;
       if (!payload.prompt_id) {
         await recoverGeneration(activeGenerationRequestID);
@@ -1621,7 +2226,7 @@
       activeGenerationID = payload.prompt_id;
       persistActiveGeneration();
       if (payload.state === "queued") {
-        setGenerationProgress("В очереди ComfyUI", queuePositionDetail(payload.queue_position, payload.queue_total), null);
+        setGenerationProgress("В очереди ComfyUI", queuePositionDetail(payload.queue_position, payload.queue_total, payload.estimated_wait_seconds), null);
       } else if (payload.state === "running") {
         setGenerationProgress("ComfyUI начал генерацию", "Подготавливаем workflow", null);
       }
@@ -1659,6 +2264,8 @@
   calculateResolution();
   syncPromptAssistant();
   refreshQueueOverview();
+  refreshRecipes().catch((error) => setRecipeState(error.message || "Не удалось загрузить наборы", "error"));
+  refreshVariants().catch(() => {});
   const savedGeneration = storedActiveGeneration();
   if (savedGeneration?.requestID) {
     activeGenerationRequestID = savedGeneration.requestID;
@@ -1674,4 +2281,5 @@
     }
   }
   window.setInterval(refreshQueueOverview, 5000);
+  window.setInterval(() => refreshVariants().catch(() => {}), 15000);
 })();

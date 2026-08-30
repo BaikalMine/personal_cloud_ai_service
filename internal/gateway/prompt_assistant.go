@@ -2,14 +2,13 @@ package gateway
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
-	"ai-access-gateway/internal/domain"
 	"ai-access-gateway/internal/promptassistant"
 )
 
@@ -31,6 +30,12 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 		writeGenerationError(w, http.StatusBadRequest, "введите промт длиной до 4000 символов")
 		return
 	}
+	user := a.currentUser(r)
+	if err := validateGenerationPrompt(prompt); err != nil {
+		a.audit(r.Context(), &user.ID, "generation_safety_blocked", "prompt_assistant", nil, a.clientIP(r), r.UserAgent(), map[string]any{"reason": "minor_sexual_content"})
+		writeGenerationError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
 	mode := promptassistant.Mode(strings.TrimSpace(r.Form.Get("template_id")))
 	if mode != promptassistant.ModeTextToImage && mode != promptassistant.ModeImageToImage && mode != promptassistant.ModeTextToVideo {
 		writeGenerationError(w, http.StatusBadRequest, "неизвестный режим генерации")
@@ -44,7 +49,7 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 		writeGenerationError(w, http.StatusBadRequest, "неизвестный шаблон промт-ассистента")
 		return
 	}
-	references, err := promptAssistantImageReferences(r, mode)
+	references, err := a.promptAssistantImageReferences(r.Context(), user.ID, r, mode)
 	if err != nil {
 		writeGenerationError(w, http.StatusBadRequest, err.Error())
 		return
@@ -59,7 +64,6 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 		writeGenerationError(w, http.StatusServiceUnavailable, "локальный промт-ассистент не настроен")
 		return
 	}
-	user := a.currentUser(r)
 	miningLease, miningWarning, err := a.pauseMiningForQuickGeneration(r.Context(), user)
 	if err != nil {
 		writeGenerationError(w, http.StatusServiceUnavailable, "не удалось освободить ресурсы для приоритетной работы ассистента: "+err.Error())
@@ -72,15 +76,33 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 			a.releaseMiningPause(releaseCtx, miningLease.ID)
 		}()
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 95*time.Second)
+	assistantTimeout := 95 * time.Second
+	if profile == promptassistant.ProfileMiniMaxH3 {
+		assistantTimeout = 155 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), assistantTimeout)
 	defer cancel()
-	result, err := a.promptAssistant.Enhance(ctx, mode, profile, prompt, references, think)
+	var result string
+	if profile == promptassistant.ProfileMiniMaxH3 {
+		video, contextErr := promptAssistantVideoContext(r, mode)
+		if contextErr != nil {
+			writeGenerationError(w, http.StatusBadRequest, contextErr.Error())
+			return
+		}
+		result, err = a.promptAssistant.EnhanceVideo(ctx, mode, profile, prompt, references, video, think)
+	} else {
+		result, err = a.promptAssistant.Enhance(ctx, mode, profile, prompt, references, think)
+	}
 	if err != nil {
 		log.Printf("prompt assistant: %v", err)
 		writeGenerationError(w, http.StatusBadGateway, "не удалось получить вариант от локальной модели")
 		return
 	}
-	a.recordPromptAssistantEvent(ctx, user.ID, mode, profile, prompt, result, references, think)
+	if err := validateGenerationPrompt(result); err != nil {
+		a.audit(r.Context(), &user.ID, "generation_safety_blocked", "prompt_assistant", nil, a.clientIP(r), r.UserAgent(), map[string]any{"reason": "minor_sexual_content", "source": "assistant_response"})
+		writeGenerationError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
 	response := map[string]any{"prompt": result, "model": a.cfg.PromptAssistantModel}
 	if miningWarning != "" {
 		response["mining_warning"] = miningWarning
@@ -91,54 +113,84 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-func promptAssistantImageReferences(r *http.Request, mode promptassistant.Mode) ([]promptassistant.ImageReference, error) {
-	if mode != promptassistant.ModeImageToImage {
+func promptAssistantVideoContext(r *http.Request, mode promptassistant.Mode) (promptassistant.VideoContext, error) {
+	if mode != promptassistant.ModeTextToVideo {
+		return promptassistant.VideoContext{}, fmt.Errorf("шаблон MiniMax H3 доступен только для видео")
+	}
+	videoMode := strings.TrimSpace(r.Form.Get("video_mode"))
+	if videoMode == "" {
+		videoMode = "frames"
+	}
+	if videoMode != "frames" && videoMode != "references" {
+		return promptassistant.VideoContext{}, fmt.Errorf("некорректный режим MiniMax H3")
+	}
+	duration := 5
+	if raw := strings.TrimSpace(r.Form.Get("video_duration_seconds")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || (value != 5 && value != 10 && value != 15) {
+			return promptassistant.VideoContext{}, fmt.Errorf("длительность MiniMax H3 может быть 5, 10 или 15 секунд")
+		}
+		duration = value
+	}
+	imageCount := 1
+	if raw := strings.TrimSpace(r.Form.Get("video_image_count")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 4 {
+			return promptassistant.VideoContext{}, fmt.Errorf("некорректное количество фото MiniMax H3")
+		}
+		imageCount = value
+	}
+	if videoMode == "frames" && imageCount > 2 {
+		return promptassistant.VideoContext{}, fmt.Errorf("в режиме кадров MiniMax H3 доступно до двух фото")
+	}
+	audioValue := strings.TrimSpace(r.Form.Get("video_has_audio"))
+	if audioValue != "" && audioValue != "true" && audioValue != "false" {
+		return promptassistant.VideoContext{}, fmt.Errorf("некорректное значение аудиореференса MiniMax H3")
+	}
+	audioReference := audioValue == "true"
+	if audioReference && videoMode != "references" {
+		return promptassistant.VideoContext{}, fmt.Errorf("аудиореференс MiniMax H3 доступен только в режиме референсов")
+	}
+	return promptassistant.VideoContext{Mode: videoMode, DurationSeconds: duration, ImageCount: imageCount, AudioReference: audioReference}, nil
+}
+
+func (a *App) promptAssistantImageReferences(ctx context.Context, userID int64, r *http.Request, mode promptassistant.Mode) ([]promptassistant.ImageReference, error) {
+	if mode != promptassistant.ModeImageToImage && mode != promptassistant.ModeTextToVideo {
 		return nil, nil
 	}
 	references := make([]promptassistant.ImageReference, 0, 4)
 	for number := 1; number <= 4; number++ {
-		role := promptassistant.ImageReferenceRole(strings.TrimSpace(r.Form.Get(fmt.Sprintf("image_role_%d", number))))
-		if role == "" {
+		role, err := promptAssistantImageRole(r, number)
+		if err != nil {
+			return nil, err
+		}
+		field := "input_image"
+		if number > 1 {
+			field = fmt.Sprintf("input_image_%d", number)
+		}
+		filename := strings.TrimSpace(r.Form.Get(field))
+		if filename == "" {
 			continue
 		}
-		if !promptassistant.ValidImageReferenceRole(role) {
-			return nil, fmt.Errorf("некорректная роль для изображения %d", number)
+		if err := a.validateGenerationImage(filename, userID); err != nil {
+			return nil, err
 		}
-		references = append(references, promptassistant.ImageReference{Number: number, Role: role})
+		image, mimeType, err := a.fetchGenerationInputImage(ctx, filename)
+		if err != nil {
+			return nil, fmt.Errorf("не удалось прочитать изображение %d для ассистента", number)
+		}
+		references = append(references, promptassistant.ImageReference{Number: number, Role: role, MIMEType: mimeType, Image: image})
 	}
 	return references, nil
 }
 
-func (a *App) recordPromptAssistantEvent(ctx context.Context, userID int64, mode promptassistant.Mode, profile promptassistant.Profile, prompt, result string, references []promptassistant.ImageReference, think bool) {
-	if a.store == nil || a.contentCipher == nil {
-		return
+func promptAssistantImageRole(r *http.Request, number int) (promptassistant.ImageReferenceRole, error) {
+	role := promptassistant.ImageReferenceRole(strings.TrimSpace(r.Form.Get(fmt.Sprintf("image_role_%d", number))))
+	if role == "" {
+		return promptassistant.ImageReferenceBaseScene, nil
 	}
-	metadata, err := json.Marshal(map[string]any{
-		"workflow": string(mode), "template": string(profile), "think": think, "session": "single_request", "keep_alive": "0",
-		"purpose": "quick_generation_prompt_assistant", "image_references": references,
-	})
-	if err != nil {
-		return
+	if !promptassistant.ValidImageReferenceRole(role) {
+		return "", fmt.Errorf("некорректная роль для изображения %d", number)
 	}
-	promptCipher, err := a.contentCipher.Encrypt(prompt)
-	if err != nil {
-		log.Printf("prompt assistant prompt encryption: %v", err)
-		return
-	}
-	responseCipher, err := a.contentCipher.Encrypt(result)
-	if err != nil {
-		log.Printf("prompt assistant response encryption: %v", err)
-		return
-	}
-	metadataCipher, err := a.contentCipher.Encrypt(string(metadata))
-	if err != nil {
-		log.Printf("prompt assistant metadata encryption: %v", err)
-		return
-	}
-	if _, err := a.store.InsertContentEvent(ctx, domain.ContentEventRecord{
-		UserID: userID, Service: "ollama", Kind: "prompt_assistant", ExternalID: newRequestID(),
-		Model: a.cfg.PromptAssistantModel, PromptCipher: promptCipher, ResponseCipher: responseCipher, MetadataCipher: metadataCipher,
-	}); err != nil {
-		log.Printf("store prompt assistant event: %v", err)
-	}
+	return role, nil
 }

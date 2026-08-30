@@ -3,12 +3,34 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"ai-access-gateway/internal/domain"
 )
+
+func TestContentAssistantIsEmbeddedInGenerationMetadata(t *testing.T) {
+	metadata, err := json.Marshal(map[string]any{
+		"workflow": "minimax-h3-video",
+		"prompt_assistant": map[string]any{
+			"requested":       true,
+			"applied":         true,
+			"template":        "minimax-h3",
+			"think":           true,
+			"original_prompt": "A calm scene",
+			"suggestion":      "A calm cinematic scene with deliberate movement.",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assistant := contentAssistantFromMetadata(string(metadata))
+	if assistant == nil || !assistant.Applied || !assistant.Think || assistant.Template != "minimax-h3" || assistant.OriginalPrompt != "A calm scene" || assistant.Suggestion == "" {
+		t.Fatalf("assistant metadata = %#v", assistant)
+	}
+}
 
 func TestAdminContentRendersEveryMediaItem(t *testing.T) {
 	templates, err := ParseTemplates()
@@ -39,6 +61,36 @@ func TestAdminContentRendersEveryMediaItem(t *testing.T) {
 	} {
 		if !strings.Contains(html, expected) {
 			t.Fatalf("rendered gallery does not contain %q", expected)
+		}
+	}
+}
+
+func TestAdminContentRendersArchivedAndFailedGenerationStates(t *testing.T) {
+	templates, err := ParseTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	data := map[string]any{
+		"Title": "AI content",
+		"Events": []ContentEventView{
+			{ID: 1, Username: "alice", Service: "comfyui", Prompt: "archived prompt", GenerationState: "completed", GeneratedMediaCount: 1, MediaExpired: true, MediaExpiresAt: now.Add(-time.Hour), ExpiresAt: now.Add(6 * 24 * time.Hour)},
+			{ID: 2, Username: "bob", Service: "comfyui", Prompt: "failed prompt", GenerationState: "error", ExpiresAt: now.Add(6 * 24 * time.Hour)},
+		},
+	}
+	var rendered bytes.Buffer
+	if err := templates.ExecuteTemplate(&rendered, "admin_content", data); err != nil {
+		t.Fatal(err)
+	}
+	html := rendered.String()
+	for _, expected := range []string{
+		"Результат очищен после трёх дней",
+		"Генерация с ошибкой",
+		"Файл результата очищен по сроку хранения",
+		"ComfyUI завершил эту генерацию с ошибкой",
+	} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("rendered content state does not contain %q", expected)
 		}
 	}
 }

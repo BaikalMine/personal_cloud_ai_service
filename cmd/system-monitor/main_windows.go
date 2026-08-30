@@ -1,7 +1,7 @@
 //go:build windows
 
-// system-monitor is intentionally a separate, read-only Windows service. It
-// cannot start, stop, update, inspect, or otherwise interact with the miner.
+// system-monitor is intentionally separate from mining controls. It exposes
+// host metrics and one fixed, authenticated ComfyUI memory-maintenance action.
 package main
 
 import (
@@ -25,9 +25,10 @@ import (
 )
 
 type config struct {
-	ListenAddress string `json:"listen_address"`
-	Token         string `json:"token"`
-	LogFile       string `json:"log_file"`
+	ListenAddress         string `json:"listen_address"`
+	Token                 string `json:"token"`
+	LogFile               string `json:"log_file"`
+	ComfyCommandSignature string `json:"comfy_command_signature"`
 }
 
 func main() {
@@ -87,6 +88,27 @@ func run(configPath string) error {
 		}
 		writeMetrics(w, http.StatusOK, metrics)
 	})
+	mux.HandleFunc("/v1/comfyui/trim", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorized(r, tokenHash) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="system-monitor"`)
+			http.Error(w, "authorization required", http.StatusUnauthorized)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+		result, err := trimComfyWorkingSet(ctx, settings.ComfyCommandSignature)
+		if err != nil {
+			result.Message = "Не удалось освободить рабочий набор ComfyUI."
+			writeMemoryTrim(w, http.StatusServiceUnavailable, result)
+			return
+		}
+		writeMemoryTrim(w, http.StatusOK, result)
+	})
 	server := &http.Server{Addr: settings.ListenAddress, Handler: secure(mux), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
 	log.Printf("system monitor listening on %s", settings.ListenAddress)
 	return server.ListenAndServe()
@@ -113,7 +135,17 @@ func loadConfig(path string) (config, error) {
 	if strings.TrimSpace(settings.LogFile) == "" {
 		settings.LogFile = filepath.Join(filepath.Dir(path), "system-monitor.log")
 	}
+	if strings.TrimSpace(settings.ComfyCommandSignature) == "" {
+		settings.ComfyCommandSignature = "main.py --enable-manager"
+	}
 	return settings, nil
+}
+
+func authorized(r *http.Request, tokenHash [32]byte) bool {
+	value := strings.TrimSpace(r.Header.Get("Authorization"))
+	token, ok := strings.CutPrefix(value, "Bearer ")
+	candidate := sha256.Sum256([]byte(token))
+	return ok && subtle.ConstantTimeCompare(candidate[:], tokenHash[:]) == 1
 }
 
 func openLog(path string) (*os.File, error) {
@@ -129,6 +161,14 @@ func writeMetrics(w http.ResponseWriter, status int, metrics mining.SystemMetric
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(metrics)
+}
+
+func writeMemoryTrim(w http.ResponseWriter, status int, result mining.ComfyMemoryTrim) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(result)
 }
 
 func secure(next http.Handler) http.Handler {

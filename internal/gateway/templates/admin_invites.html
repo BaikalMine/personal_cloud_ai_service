@@ -2,38 +2,89 @@
 {{template "head" .}}
 {{template "admin_nav" .}}
 <main class="page" id="main-content">
-  <section class="hero"><div><p class="eyebrow">Управление доступом</p><h1>Приглашения</h1></div></section>
-  {{if .InviteLink}}<section class="panel success invite-result"><div class="panel-heading"><div><p class="section-kicker">Готово</p><h2>Ссылка создана</h2></div></div><div class="copyrow"><p class="copyline" id="invite-link">{{.InviteLink}}</p><button class="ghost" type="button" data-copy-target="#invite-link">Копировать ссылку</button></div></section>{{end}}
-  <section class="panel">
+  <section class="hero invite-hero">
+    <div><p class="eyebrow">Управление доступом</p><h1>Приглашения</h1><p class="hero-copy">Создавайте постоянные или временные учётные записи с нужным набором сервисов и лимитами.</p></div>
+  </section>
+
+  {{if .InviteLink}}
+  <section class="panel success invite-result" aria-live="polite">
+    <div class="panel-heading"><div><p class="section-kicker">Готово</p><h2>Ссылка-приглашение создана</h2></div></div>
+    <div class="copyrow"><p class="copyline" id="invite-link">{{.InviteLink}}</p><button class="ghost" type="button" data-copy-target="#invite-link">Копировать ссылку</button></div>
+  </section>
+  {{end}}
+
+  <section class="panel invite-composer">
     <div class="panel-heading"><div><p class="section-kicker">Новый доступ</p><h2>Создать приглашение</h2></div></div>
     {{if .Error}}<p class="alert">{{.Error}}</p>{{end}}
-    <form method="post" class="invite-form">
+    <form method="post" class="invite-form" data-invite-composer>
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <div class="invite-fields"><label>Срок действия<input name="expires_at" type="datetime-local"></label><label>Количество активаций<input name="max_uses" type="number" value="1" min="1"></label><label>Суточный лимит генераций<input name="generation_daily_limit" type="number" value="0" min="0" max="100000"><small class="field-hint">0 = без лимита</small></label><label>Общий лимит генераций<input name="generation_total_limit" type="number" value="0" min="0" max="10000000"><small class="field-hint">0 = без лимита</small></label></div>
-      <fieldset class="service-access"><legend>Тип доступа</legend><label class="service-toggle"><input name="grant_quick_generation" type="checkbox" checked><span><b>Быстрая генерация</b><small>Готовые workflow без входа в ComfyUI</small></span></label><fieldset class="service-access"><legend>Разрешённые сценарии быстрой генерации</legend><label class="service-toggle"><input name="grant_text_to_image" type="checkbox" checked><span><b>Текст в изображение</b><small>Доступ по умолчанию.</small></span></label><label class="service-toggle"><input name="grant_image_to_image" type="checkbox"><span><b>Фото и промт</b><small>Редактирование исходных изображений.</small></span></label><label class="service-toggle"><input name="grant_video" type="checkbox"><span><b>Видео</b><small>MiniMax H3.</small></span></label></fieldset><label class="service-toggle"><input name="grant_comfyui" type="checkbox"><span><b>ComfyUI</b><small>Полный рабочий интерфейс</small></span></label><label class="service-toggle"><input name="grant_openwebui" type="checkbox"><span><b>OpenWebUI</b><small>Чаты и локальные модели</small></span></label></fieldset>
-      <button type="submit">Создать приглашение</button>
+
+      <fieldset class="invite-account-type">
+        <legend>Тип учётной записи</legend>
+        <label class="invite-type-option is-selected"><input type="radio" name="account_type" value="permanent" checked><span><b>Постоянная</b><small>Доступ действует, пока администратор не изменит или не удалит учётную запись.</small></span></label>
+        <label class="invite-type-option"><input type="radio" name="account_type" value="temporary"><span><b>Временная</b><small>Учётная запись удаляется по сроку; история и медиа сохраняются по штатному сроку хранения.</small></span></label>
+      </fieldset>
+
+      <div class="invite-builder-grid">
+        <section class="invite-builder-section">
+          <div class="invite-section-heading"><p class="section-kicker">01</p><h3>Доступ</h3><p>Выберите только те интерфейсы и сценарии, которые нужны человеку.</p></div>
+          <div class="invite-access-grid">
+            <label class="invite-access-card invite-access-card--primary"><input name="grant_quick_generation" type="checkbox" checked data-quick-generation-access><span><b>Быстрая генерация</b><small>Готовые сценарии без входа в ComfyUI.</small></span></label>
+            <label class="invite-access-card"><input name="grant_comfyui" type="checkbox"><span><b>ComfyUI</b><small>Полный рабочий интерфейс.</small></span></label>
+            <label class="invite-access-card"><input name="grant_openwebui" type="checkbox"><span><b>OpenWebUI</b><small>Чаты и локальные модели.</small></span></label>
+          </div>
+          <fieldset class="invite-scenarios" data-quick-scenarios>
+            <legend>Сценарии быстрой генерации</legend>
+            <label><input name="grant_text_to_image" type="checkbox" checked><span>Текст в изображение</span></label>
+            <label><input name="grant_image_to_image" type="checkbox"><span>Фото и промт</span></label>
+            <label><input name="grant_video" type="checkbox"><span>Видео</span></label>
+          </fieldset>
+        </section>
+
+        <section class="invite-builder-section invite-builder-section--limits">
+          <div class="invite-section-heading"><p class="section-kicker">02</p><h3>Сроки и лимиты</h3><p>Срок ссылки не связан со сроком временной учётной записи.</p></div>
+          <div class="invite-limit-grid">
+            <label>Ссылка действует<select name="invite_ttl_hours"><option value="1">1 час</option><option value="24" selected>24 часа</option><option value="72">3 дня</option><option value="168">7 дней</option><option value="720">30 дней</option></select></label>
+            <label>Количество активаций<input name="max_uses" type="number" value="1" min="1" max="10000" inputmode="numeric"></label>
+          </div>
+          <label class="invite-temporary-lifetime" data-temporary-lifetime hidden>Срок доступа после регистрации<select name="temporary_account_hours" disabled><option value="1">1 час</option><option value="6">6 часов</option><option value="12">12 часов</option><option value="24">1 день</option><option value="72">3 дня</option><option value="168" selected>7 дней</option><option value="336">14 дней</option><option value="720">30 дней</option><option value="2160">90 дней</option></select><small class="field-hint">По окончании срока учётная запись удаляется, а история и медиа остаются до штатного срока хранения с пометкой об удалённом пользователе.</small></label>
+          <details class="invite-advanced-limits">
+            <summary>Дополнительные ограничения</summary>
+            <div class="invite-limit-grid">
+              <label>Суточный лимит генераций<input name="generation_daily_limit" type="number" value="0" min="0" max="100000" inputmode="numeric"><small class="field-hint">0 = без лимита</small></label>
+              <label>Общий лимит генераций<input name="generation_total_limit" type="number" value="0" min="0" max="10000000" inputmode="numeric"><small class="field-hint">0 = без лимита</small></label>
+            </div>
+          </details>
+        </section>
+      </div>
+
+      <div class="invite-submit-row"><p>После создания ссылку можно скопировать один раз. Секретный токен в базе не хранится в открытом виде.</p><button type="submit">Создать приглашение</button></div>
     </form>
   </section>
-  <section class="panel">
+
+  <section class="panel invite-history-panel">
     <div class="panel-heading"><div><p class="section-kicker">История</p><h2>Созданные приглашения</h2></div></div>
-    <table><thead><tr><th>ID</th><th>Создал</th><th>Доступ</th><th>Активации</th><th>Истекает</th><th>Статус</th><th></th></tr></thead><tbody>
+    {{if .Invites}}
+    <div class="table-scroll"><table><thead><tr><th>ID</th><th>Создал</th><th>Доступ</th><th>Учётная запись</th><th>Активации</th><th>Ссылка истекает</th><th>Статус</th><th></th></tr></thead><tbody>
     {{range .Invites}}
       <tr>
-        <td data-label="ID">{{.ID}}</td><td data-label="Создал">{{.CreatedBy}}</td><td data-label="Доступ">{{if .GrantQuickGeneration}}<span class="badge ok">Быстрая генерация</span>{{if .GrantTextToImage}} <span class="badge">Текст в изображение</span>{{end}}{{if .GrantImageToImage}} <span class="badge">Фото и промт</span>{{end}}{{if .GrantVideo}} <span class="badge">Видео</span>{{end}}{{end}} {{if .GrantComfyUI}}<span class="badge">ComfyUI</span>{{end}} {{if .GrantOpenWebUI}}<span class="badge">OpenWebUI</span>{{end}}<small class="table-note">{{if gt .GenerationDailyLimit 0}}день: {{.GenerationDailyLimit}}{{else}}день: без лимита{{end}} · {{if gt .GenerationTotalLimit 0}}всего: {{.GenerationTotalLimit}}{{else}}всего: без лимита{{end}}</small></td><td data-label="Активации">{{.UsedCount}} / {{.MaxUses}}</td><td data-label="Истекает">{{formatTime .ExpiresAt}}</td>
+        <td data-label="ID">{{.ID}}</td>
+        <td data-label="Создал">{{.CreatedBy}}</td>
+        <td data-label="Доступ">{{if .GrantQuickGeneration}}<span class="badge ok">Быстрая генерация</span>{{if .GrantTextToImage}} <span class="badge">Текст в изображение</span>{{end}}{{if .GrantImageToImage}} <span class="badge">Фото и промт</span>{{end}}{{if .GrantVideo}} <span class="badge">Видео</span>{{end}}{{end}} {{if .GrantComfyUI}}<span class="badge">ComfyUI</span>{{end}} {{if .GrantOpenWebUI}}<span class="badge">OpenWebUI</span>{{end}}<small class="table-note">{{if gt .GenerationDailyLimit 0}}день: {{.GenerationDailyLimit}}{{else}}день: без лимита{{end}} · {{if gt .GenerationTotalLimit 0}}всего: {{.GenerationTotalLimit}}{{else}}всего: без лимита{{end}}</small></td>
+        <td data-label="Учётная запись">{{if gt .AccountLifetimeSeconds 0}}<span class="badge warning">Временная</span><small class="table-note">{{accountLifetimeLabel .AccountLifetimeSeconds}} после регистрации</small>{{else}}<span class="badge">Постоянная</span>{{end}}</td>
+        <td data-label="Активации">{{.UsedCount}} / {{.MaxUses}}</td>
+        <td data-label="Ссылка истекает">{{formatTime .ExpiresAt}}</td>
         <td data-label="Статус"><span class="badge {{if eq .Status "active"}}ok{{else}}danger{{end}}">{{inviteStatusLabel .Status}}</span></td>
         <td data-label="Действия"><div class="table-actions">
-          <form method="post" action="/admin/invites/{{.ID}}/{{if .Revoked}}unrevoke{{else}}revoke{{end}}">
-            <input type="hidden" name="csrf" value="{{$.CSRF}}">
-            <button class="action-button {{if .Revoked}}restore{{else}}warning{{end}}" {{if not .Revoked}}data-confirm="Отозвать это приглашение?"{{end}}><span class="action-icon" aria-hidden="true">{{if .Revoked}}&#8634;{{else}}&#8722;{{end}}</span>{{if .Revoked}}Вернуть{{else}}Отозвать{{end}}</button>
-          </form>
-          <form method="post" action="/admin/invites/{{.ID}}/delete">
-            <input type="hidden" name="csrf" value="{{$.CSRF}}">
-            <button class="action-button danger" type="submit" data-confirm="Удалить приглашение навсегда? Ссылка больше не будет работать."><span class="action-icon" aria-hidden="true">&#215;</span>Удалить</button>
-          </form>
+          <form method="post" action="/admin/invites/{{.ID}}/{{if .Revoked}}unrevoke{{else}}revoke{{end}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="action-button {{if .Revoked}}restore{{else}}warning{{end}}" {{if not .Revoked}}data-confirm="Отозвать это приглашение?"{{end}}><span class="action-icon" aria-hidden="true">{{if .Revoked}}&#8634;{{else}}&#8722;{{end}}</span>{{if .Revoked}}Вернуть{{else}}Отозвать{{end}}</button></form>
+          <form method="post" action="/admin/invites/{{.ID}}/delete"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="action-button danger" type="submit" data-confirm="Удалить приглашение навсегда? Ссылка больше не будет работать."><span class="action-icon" aria-hidden="true">&#215;</span>Удалить</button></form>
         </div></td>
       </tr>
-    {{else}}<tr><td colspan="7" class="muted">Приглашений пока нет.</td></tr>{{end}}
-    </tbody></table>
+    {{end}}
+    </tbody></table></div>
+    {{else}}
+    <div class="invite-history-empty"><span aria-hidden="true">+</span><div><h3>Приглашений пока нет</h3><p>Созданные ссылки появятся здесь вместе со статусом, сроком действия и доступами.</p></div></div>
+    {{end}}
   </section>
 </main>
 </body></html>

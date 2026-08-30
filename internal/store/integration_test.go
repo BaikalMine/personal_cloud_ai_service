@@ -186,9 +186,33 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	if _, err := repository.UserByID(ctx, registeredUserID); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("deleted user remained readable: %v", err)
 	}
-	var remainingEvents int
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM content_events WHERE user_id=$1`, registeredUserID).Scan(&remainingEvents); err != nil || remainingEvents != 0 {
-		t.Fatalf("deleted user content remained: count=%d err=%v", remainingEvents, err)
+	var retainedEvents, anonymizedEvents, retainedMedia int
+	if err := db.QueryRowContext(ctx, `
+		SELECT count(*), count(*) FILTER (WHERE user_id IS NULL)
+		FROM content_events WHERE id=$1
+	`, eventID).Scan(&retainedEvents, &anonymizedEvents); err != nil || retainedEvents != 1 || anonymizedEvents != 1 {
+		t.Fatalf("retained content after user deletion: retained=%d anonymized=%d err=%v", retainedEvents, anonymizedEvents, err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM content_media WHERE event_id=$1`, eventID).Scan(&retainedMedia); err != nil || retainedMedia != 1 {
+		t.Fatalf("retained media after user deletion: count=%d err=%v", retainedMedia, err)
+	}
+	retained, err := repository.ListContentEvents(ctx, 10, "Удалённый пользователь", "comfyui")
+	if err != nil || len(retained) != 1 || retained[0].ID != eventID || retained[0].Username != "Удалённый пользователь" {
+		t.Fatalf("anonymized content listing: events=%v err=%v", retained, err)
+	}
+	var temporaryID int64
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO users(username,password_hash,role,account_expires_at)
+		VALUES ('temporary-user','test-hash','user',now() - interval '1 second')
+		RETURNING id
+	`).Scan(&temporaryID); err != nil {
+		t.Fatal(err)
+	}
+	if deletedCount, err := repository.DeleteExpiredTemporaryUsers(ctx); err != nil || deletedCount != 1 {
+		t.Fatalf("delete expired temporary users: count=%d err=%v", deletedCount, err)
+	}
+	if _, err := repository.UserByID(ctx, temporaryID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("expired temporary user remained readable: %v", err)
 	}
 	if deleted, err := repository.DeleteUser(ctx, adminID, "admin"); err != nil || deleted {
 		t.Fatalf("admin deletion protection: deleted=%v err=%v", deleted, err)

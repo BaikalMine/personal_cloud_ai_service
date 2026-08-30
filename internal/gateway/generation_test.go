@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"math"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -34,6 +37,94 @@ func TestGenerateTemplateRenders(t *testing.T) {
 		!strings.Contains(output.String(), "Перенос внешности и редактирование") || !strings.Contains(output.String(), "prompt-assistant-think") ||
 		!strings.Contains(output.String(), "Максимум деталей · 4,7 Мп") {
 		t.Fatal("generation template did not render the wizard")
+	}
+}
+
+func TestQuickGenerationUploadForwardsNamespacedImageToComfyUI(t *testing.T) {
+	var receivedSubfolder, receivedName string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/upload/image" {
+			t.Fatalf("unexpected upstream request %s %s", r.Method, r.URL.Path)
+		}
+		if err := r.ParseMultipartForm(2 << 20); err != nil {
+			t.Fatal(err)
+		}
+		receivedSubfolder = r.FormValue("subfolder")
+		file, header, err := r.FormFile("image")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer file.Close()
+		payload, err := io.ReadAll(file)
+		if err != nil || !bytes.Equal(payload, []byte("image-data")) {
+			t.Fatalf("uploaded image = %q, err = %v", payload, err)
+		}
+		receivedName = header.Filename
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"name":"sample.png","subfolder":"` + receivedSubfolder + `"}`))
+	}))
+	defer upstream.Close()
+	upstreamURL, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := &App{cfg: Config{ComfyUIUpstream: upstreamURL, SessionSecret: "01234567890123456789012345678901"}, proxyCounts: make(map[string]int64)}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("image", "sample.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte("image-data")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.WriteField("type", "input"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	user := &User{ID: 7}
+	request := httptest.NewRequest(http.MethodPost, "/generate/upload/image", bytes.NewReader(body.Bytes()))
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request = request.WithContext(context.WithValue(request.Context(), userCtxKey, user))
+	response := httptest.NewRecorder()
+	app.quickGenerationUploadHandler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("upload status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if receivedName != "sample.png" || receivedSubfolder != comfyUploadNamespace(app.comfyClientID(user.ID)) {
+		t.Fatalf("upstream image = %q, subfolder = %q", receivedName, receivedSubfolder)
+	}
+}
+
+func TestFetchGenerationOutputUsesOriginalVideoRoute(t *testing.T) {
+	var requestPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPath = r.URL.Path
+		if got := r.URL.Query().Get("filename"); got != "clip.mp4" {
+			t.Fatalf("filename = %q", got)
+		}
+		w.Header().Set("Content-Type", "video/mp4")
+		_, _ = w.Write([]byte("video"))
+	}))
+	defer upstream.Close()
+	upstreamURL, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := &App{cfg: Config{ComfyUIUpstream: upstreamURL}}
+	body, contentType, status, err := app.fetchGenerationOutput(context.Background(), generationOutput{
+		Filename: "clip.mp4", Type: "output", MediaType: "video",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requestPath != "/view" {
+		t.Fatalf("video output path = %q", requestPath)
+	}
+	if status != http.StatusOK || contentType != "video/mp4" || string(body) != "video" {
+		t.Fatalf("output = (%d, %q, %q)", status, contentType, body)
 	}
 }
 
@@ -592,7 +683,7 @@ func TestKrea2ImageWorkflowUsesIdentityEditAndQualityUpscale(t *testing.T) {
 	prompt, err := definition.buildPrompt(generationForm{
 		TemplateID: "image-to-image", ModelName: "Krea2/gonzalomoKrea2_v40.safetensors", ModelFamily: modelFamilyKrea2,
 		TextEncoder: "qwen3VLInstruct4bHeretic_v10.safetensors", VAE: "qwen_image_vae.safetensors",
-		IdentityLora: "krea2_identity_edit_v1_1.safetensors", InputImage: "gateway/input.png", Positive: "change the jacket to red",
+		IdentityLora: "krea2_identity_edit_v1_2.safetensors", InputImage: "gateway/input.png", Positive: "change the jacket to red",
 		Width: 1024, Height: 1024, Steps: 8, CFG: 1, Denoise: 1, Sampler: "euler", Scheduler: "simple", Seed: 42,
 		ReferenceBoost: 4, GroundingPixels: 768, UpscaleFactor: 1.5, UpscaleSteps: 4, UpscaleDenoise: 0.15, UpscaleSampler: "euler_ancestral",
 	})
@@ -600,7 +691,7 @@ func TestKrea2ImageWorkflowUsesIdentityEditAndQualityUpscale(t *testing.T) {
 		t.Fatal(err)
 	}
 	identity := prompt["7"].(map[string]any)["inputs"].(map[string]any)
-	if got, want := identity["lora_name"], "krea2_identity_edit_v1_1.safetensors"; got != want {
+	if got, want := identity["lora_name"], "krea2_identity_edit_v1_2.safetensors"; got != want {
 		t.Fatalf("identity LoRA = %v, want %v", got, want)
 	}
 	patch := prompt["8"].(map[string]any)["inputs"].(map[string]any)
@@ -697,7 +788,7 @@ func TestKrea2ImageWorkflowAcceptsSecondImage(t *testing.T) {
 	}
 	prompt, err := definition.buildPrompt(generationForm{
 		TemplateID: "image-to-image", ModelName: "Krea2/gonzalomoKrea2_v40.safetensors", ModelFamily: modelFamilyKrea2,
-		TextEncoder: "qwen3VLInstruct4bHeretic_v10.safetensors", VAE: "qwen_image_vae.safetensors", IdentityLora: "krea2_identity_edit_v1_1.safetensors",
+		TextEncoder: "qwen3VLInstruct4bHeretic_v10.safetensors", VAE: "qwen_image_vae.safetensors", IdentityLora: "krea2_identity_edit_v1_2.safetensors",
 		InputImage: "gateway/input-1.png", ReferenceImages: [3]string{"gateway/input-2.png"}, Positive: "use the second image as a style reference",
 		Width: 1024, Height: 1024, Steps: 8, CFG: 1, Denoise: 1, Sampler: "euler", Scheduler: "simple", Seed: 42,
 		ReferenceBoost: 4, GroundingPixels: 768, UpscaleFactor: 1.5, UpscaleSteps: 4, UpscaleDenoise: 0.15, UpscaleSampler: "euler_ancestral",
@@ -757,7 +848,7 @@ func TestKrea2ImageWorkflowDoesNotValidateFlux2OnlySettings(t *testing.T) {
 	prompt, err := definition.buildPrompt(generationForm{
 		ModelName: "Krea2/gonzalomoKrea2_v40.safetensors", ModelFamily: modelFamilyKrea2,
 		TextEncoder: "qwen3VLInstruct4bHeretic_v10.safetensors", VAE: "qwen_image_vae.safetensors",
-		IdentityLora: "krea2_identity_edit_v1_1.safetensors", InputImage: "gateway/input.png", Positive: "change the jacket",
+		IdentityLora: "krea2_identity_edit_v1_2.safetensors", InputImage: "gateway/input.png", Positive: "change the jacket",
 		Width: 1024, Height: 1024, Steps: 8, CFG: 1, Denoise: 1, Sampler: "euler", Scheduler: "simple", Seed: 42,
 		ReferenceBoost: 4, GroundingPixels: 768, UpscaleFactor: 1.5, UpscaleSteps: 4, UpscaleDenoise: 0.15, UpscaleSampler: "euler_ancestral",
 		// Source megapixels are a Flux2-only control and must not affect Krea2.
@@ -840,11 +931,11 @@ func TestGenerationModelCatalogGroupsDiffusionModels(t *testing.T) {
 func TestGenerationModelCatalogEnablesInstalledEditWorkflows(t *testing.T) {
 	var info map[string]comfyNodeInfo
 	fixture := `{
-		"UNETLoader":{"input":{"required":{"unet_name":[["Flux.2 Klein 9B/base.safetensors","Krea2/gonzalomoKrea2_v40.safetensors"]]}}},
+		"UNETLoader":{"input":{"required":{"unet_name":[["Flux.2 Klein 9B/base.safetensors","Krea2/gonzalomoKrea2_v40.safetensors","Krea2/krea2TurboOfficialComfy_krea2TurboBf16.safetensors"]]}}},
 		"CLIPLoader":{"input":{"required":{"clip_name":[["qwen3VLInstruct4bHeretic_v10.safetensors"]]}}},
 		"ClipLoaderGGUF":{"input":{"required":{"clip_name":[["Qwen3-8B-abliterated-bf16.gguf"]]}}},
 		"VAELoader":{"input":{"required":{"vae_name":[["qwen_image_vae.safetensors","flux2-vae.safetensors"]]}}},
-		"LoraLoader":{"input":{"required":{"lora_name":[["lenovo_krea2.safetensors","krea2_identity_edit_v1_1.safetensors"]]}}},
+		"LoraLoader":{"input":{"required":{"lora_name":[["lenovo_krea2.safetensors","krea2_identity_edit_v1_2.safetensors"]]}}},
 		"Krea2EditModelPatch":{},"Krea2EditGroundedEncode":{},"AspectRatioSimplifier":{},"UltimateSDUpscale":{},
 		"LCAspectRatioPipeOut":{},"LCReferenceLatent":{},"LCPipeEdit":{},"LCSamplerConfigureSimplePipeOut":{},"Power Lora Loader (rgthree)":{}
 	}`
@@ -853,8 +944,8 @@ func TestGenerationModelCatalogEnablesInstalledEditWorkflows(t *testing.T) {
 	}
 	catalog := buildGenerationModelCatalog(info)
 	presets := buildGenerationPresets(catalog)
-	if _, ok := findGenerationPreset(presets, "photoflow-krea2-edit", "image-to-image"); !ok {
-		t.Fatalf("Krea 2 edit preset is unavailable: %#v", presets)
+	if preset, ok := findGenerationPreset(presets, "photoflow-krea2-edit", "image-to-image"); !ok || preset.ModelName != "Krea2/krea2TurboOfficialComfy_krea2TurboBf16" || preset.DefaultSteps != 8 || preset.DefaultCFG != 1 {
+		t.Fatalf("unexpected Krea 2 edit preset: %#v", preset)
 	}
 	if preset, ok := findGenerationPreset(presets, "photoflow-flux2-edit", "image-to-image"); !ok || !preset.Available {
 		t.Fatalf("Flux 2 edit preset is unavailable: %#v", preset)
@@ -873,6 +964,33 @@ func TestFlux2LoraGroupsExcludeOtherFamilies(t *testing.T) {
 	}
 	if groups[0].Loras[0].Name != "Flux.2/character.safetensors" || groups[0].Loras[1].Name != "Flux2/klein_style.safetensors" {
 		t.Fatalf("unexpected Flux2 LoRA entries: %#v", groups[0].Loras)
+	}
+}
+
+func TestMiniMaxH3LoraGroupsUseDedicatedDirectory(t *testing.T) {
+	groups := buildMiniMaxH3LoraGroups([]string{
+		"HMNSFW-AIO-V2.5.safetensors",
+		"MiniMaxH3/h3_Better_NSFW_Motion_V1.safetensors",
+		"MiniMaxH3/HMNSFW-AIO-V2.5.safetensors",
+		"MiniMaxH3/SexGod-NaughtyTimes-v2-rank256.safetensors",
+		miniMaxH3TurboLoraName,
+		"Krea2/SynthPussy_H3_closeups_v1-step00008300.safetensors",
+	})
+	if len(groups) != 1 || groups[0].Name != "MiniMax H3" || len(groups[0].Loras) != 3 {
+		t.Fatalf("unexpected MiniMax H3 LoRA groups: %#v", groups)
+	}
+	foundBetterMotion := false
+	for _, lora := range groups[0].Loras {
+		name := strings.ReplaceAll(lora.Name, "/", "\\")
+		if !strings.HasPrefix(name, miniMaxH3LoraDirectory) || name == miniMaxH3TurboLoraName {
+			t.Fatalf("MiniMax H3 group leaked an invalid LoRA: %#v", lora)
+		}
+		if name == "MiniMaxH3\\h3_Better_NSFW_Motion_V1.safetensors" {
+			foundBetterMotion = true
+		}
+	}
+	if !foundBetterMotion {
+		t.Fatal("MiniMax H3 Better NSFW Motion LoRA is missing from the dedicated catalog")
 	}
 }
 
@@ -1103,8 +1221,8 @@ func TestMiniMaxH3WorkflowBuildsFrameAndReferenceGraphs(t *testing.T) {
 		t.Fatal(err)
 	}
 	definition, ok := findWorkflow(definitions, "minimax-h3-video")
-	if !ok || definition.Builder != "minimax_h3" || !definition.AdminOnly {
-		t.Fatalf("MiniMax H3 definition is missing or not restricted: %#v", definition)
+	if !ok || definition.Builder != "minimax_h3" || definition.AdminOnly {
+		t.Fatalf("MiniMax H3 definition is missing or unexpectedly restricted: %#v", definition)
 	}
 	base := generationForm{
 		ModelName:      "MiniMax\\MiniMax_H3_FL2VA_pruned_int8_convrot.safetensors",
@@ -1115,6 +1233,7 @@ func TestMiniMaxH3WorkflowBuildsFrameAndReferenceGraphs(t *testing.T) {
 		Positive:       "A dancer turns toward the camera in warm evening light.", InputImage: "gateway/input-1.png", Width: 768, Height: 1344,
 		Steps: 25, CFG: 1, Denoise: 1, Sampler: "res_multistep", Scheduler: "simple", Seed: 42,
 		VideoMode: miniMaxH3FrameMode, VideoResolution: "portrait", VideoDurationSeconds: 5, VideoSteps: 25,
+		VideoSageAttention: true, VideoClearVRAM: true,
 	}
 	prompt, err := definition.buildPrompt(base)
 	if err != nil {
@@ -1131,9 +1250,48 @@ func TestMiniMaxH3WorkflowBuildsFrameAndReferenceGraphs(t *testing.T) {
 	if _, ok := frameInputs["first_frame"]; !ok {
 		t.Fatal("first frame is absent")
 	}
+	if _, ok := prompt["8"]; ok {
+		t.Fatal("LoRA stack must not be created when no optional LoRA is selected")
+	}
+	if got, want := prompt["9"].(map[string]any)["inputs"].(map[string]any)["model"], []any{"5", 0}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("no-LoRA model path = %#v, want %#v", got, want)
+	}
+	if _, ok := prompt["6"]; ok {
+		t.Fatal("Turbo LoRA must remain optional")
+	}
+	if got, want := prompt["11"].(map[string]any)["class_type"], "KSamplerSelect"; got != want {
+		t.Fatalf("regular sampler = %v, want %q", got, want)
+	}
 	video := prompt["17"].(map[string]any)["inputs"].(map[string]any)
 	if got, want := video["format"], "video/h264-mp4"; got != want {
 		t.Fatalf("browser video format = %v, want %q", got, want)
+	}
+	if got, want := prompt["18"].(map[string]any)["class_type"], "LCVRAMCacheClear"; got != want {
+		t.Fatalf("cache-clear node = %v, want %q", got, want)
+	}
+
+	base.VideoTurbo = true
+	base.VideoSteps = 6
+	base.LoraNames = [maxGenerationLoraSlots]string{"MiniMax/style.safetensors", "", "", "MiniMax/motion.safetensors"}
+	base.LoraModel = [maxGenerationLoraSlots]float64{0.7, 0, 0, 0.5}
+	base.LoraClip = [maxGenerationLoraSlots]float64{0.7, 0, 0, 0.5}
+	prompt, err = definition.buildPrompt(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stackID := range []string{"lora_stack_1", "lora_stack_2"} {
+		inputs := prompt[stackID].(map[string]any)["inputs"].(map[string]any)
+		for _, key := range []string{"switch_1", "switch_2", "switch_3"} {
+			if _, ok := inputs[key]; !ok {
+				t.Fatalf("%s is missing %s: %#v", stackID, key, inputs)
+			}
+		}
+	}
+	if got, want := prompt["6"].(map[string]any)["inputs"].(map[string]any)["lora_name"], miniMaxH3TurboLoraName; got != want {
+		t.Fatalf("Turbo LoRA = %v, want %q", got, want)
+	}
+	if got, want := prompt["11"].(map[string]any)["class_type"], "MiniMaxH3TurboSampler"; got != want {
+		t.Fatalf("Turbo sampler = %v, want %q", got, want)
 	}
 
 	base.VideoMode = miniMaxH3ReferenceMode
@@ -1154,6 +1312,67 @@ func TestMiniMaxH3WorkflowBuildsFrameAndReferenceGraphs(t *testing.T) {
 	if got, want := prompt["1"].(map[string]any)["inputs"].(map[string]any)["unet_name"], base.ReferenceModel; got != want {
 		t.Fatalf("reference model = %v, want %q", got, want)
 	}
+	base.InputAudio = "gateway/reference-audio.mp3"
+	prompt, err = definition.buildPrompt(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	referenceInputs = prompt["7"].(map[string]any)["inputs"].(map[string]any)
+	if got, want := referenceInputs["ref_audios.ref_audio_0"], []any{"41", 0}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("audio reference = %#v, want %#v", got, want)
+	}
+	if got, want := prompt["40"].(map[string]any)["class_type"], "LoadAudio"; got != want {
+		t.Fatalf("audio loader = %v, want %q", got, want)
+	}
+	if got, want := prompt["41"].(map[string]any)["class_type"], "TrimAudioDuration"; got != want {
+		t.Fatalf("audio trim = %v, want %q", got, want)
+	}
+}
+
+func TestMiniMaxH3WorkflowBuildsOptionalPostProcessing(t *testing.T) {
+	definitions, err := loadWorkflowDefinitions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition, ok := findWorkflow(definitions, "minimax-h3-video")
+	if !ok {
+		t.Fatal("MiniMax H3 definition is missing")
+	}
+	input := generationForm{
+		ModelName: "MiniMax/model.safetensors", TextEncoder: "MiniMax/text.safetensors", VAE: "MiniMax/video.safetensors", AudioVAE: "MiniMax/audio.safetensors",
+		Positive: "A calm cinematic scene.", InputImage: "gateway/input.png", Width: 768, Height: 1344, Steps: 25, CFG: 1, Denoise: 1, Seed: 42,
+		VideoMode: miniMaxH3FrameMode, VideoQuality: 720, VideoDurationSeconds: 5, VideoSteps: 25,
+		VideoSageAttention: true, VideoClearVRAM: true, VideoRIFEEnabled: true, VideoRIFECheckpoint: "rife49.pth", VideoRIFEMultiplier: 2,
+		VideoRIFEFastMode: true, VideoRIFEEnsemble: true, VideoRIFEDtype: "float32", VideoRIFEBatchSize: 1,
+		VideoRTXEnabled: true, VideoRTXScale: 2, VideoRTXQuality: "ULTRA", VideoColorMatch: true, VideoColorMethod: "adain", VideoColorStrength: 0.8,
+		VideoOutputCRF: 19,
+	}
+	prompt, err := definition.buildPrompt(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for nodeID, classType := range map[string]string{"20": "RTXVideoSuperResolution", "21": "LCColorMatch", "22": "RIFE VFI"} {
+		if got := prompt[nodeID].(map[string]any)["class_type"]; got != classType {
+			t.Fatalf("node %s = %v, want %q", nodeID, got, classType)
+		}
+	}
+	rtx := prompt["20"].(map[string]any)["inputs"].(map[string]any)
+	if got, want := rtx["resize_type"], "scale by multiplier"; got != want {
+		t.Fatalf("RTX resize type = %v, want %q", got, want)
+	}
+	if got, want := rtx["resize_type.scale"], 2.0; got != want {
+		t.Fatalf("RTX scale = %v, want %v", got, want)
+	}
+	if _, exists := rtx["scale"]; exists {
+		t.Fatal("RTX scale must use the DynamicCombo key path")
+	}
+	video := prompt["17"].(map[string]any)["inputs"].(map[string]any)
+	if got, want := video["images"], []any{"22", 0}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("video source = %#v, want %#v", got, want)
+	}
+	if got, want := video["frame_rate"], 48; got != want {
+		t.Fatalf("frame rate = %v, want %d", got, want)
+	}
 }
 
 func TestMiniMaxH3RequiresFirstFrame(t *testing.T) {
@@ -1172,22 +1391,43 @@ func TestMiniMaxH3RequiresFirstFrame(t *testing.T) {
 	}
 }
 
-func TestMiniMaxH3VideoQualityProfilesUseModelCompatibleDimensions(t *testing.T) {
-	for _, quality := range []int{360, 480, 720, 1080, 1440, 2160} {
-		for _, aspect := range []string{"portrait", "landscape", "square"} {
-			input := generationForm{
-				VideoAspect: aspect, VideoQuality: quality, VideoDurationSeconds: 5, VideoSteps: 25,
-				VideoMode: miniMaxH3FrameMode, InputImage: "gateway/first-frame.png",
-			}
-			if err := normalizeMiniMaxH3(&input); err != nil {
-				t.Fatalf("normalize %s/%dp: %v", aspect, quality, err)
-			}
-			if input.Width%32 != 0 || input.Height%32 != 0 {
-				t.Fatalf("%s/%dp produced non-compatible dimensions %dx%d", aspect, quality, input.Width, input.Height)
-			}
-			if input.VideoResolution != aspect+"-"+strconv.Itoa(quality)+"p" {
-				t.Fatalf("video resolution = %q", input.VideoResolution)
-			}
+func TestRequiresImageEditingSupport(t *testing.T) {
+	if !requiresImageEditingSupport(workflowDefinition{RequiresImage: true, Builder: "flux2_edit"}) {
+		t.Fatal("image-edit workflow must require dedicated image-edit support")
+	}
+	if requiresImageEditingSupport(workflowDefinition{RequiresImage: true, Builder: "minimax_h3"}) {
+		t.Fatal("MiniMax H3 must not be treated as an image-edit workflow")
+	}
+	if requiresImageEditingSupport(workflowDefinition{RequiresImage: false, Builder: "checkpoint"}) {
+		t.Fatal("text workflow must not require dedicated image-edit support")
+	}
+}
+
+func TestMiniMaxH3RejectsAudioOutsideReferenceMode(t *testing.T) {
+	input := generationForm{VideoMode: miniMaxH3FrameMode, VideoResolution: "portrait", VideoDurationSeconds: 5, VideoSteps: 25, InputImage: "gateway/first.png", InputAudio: "gateway/reference.mp3"}
+	if err := normalizeMiniMaxH3(&input); err == nil || !strings.Contains(err.Error(), "аудиореференс") {
+		t.Fatalf("frame-mode audio error = %v", err)
+	}
+}
+
+func TestMiniMaxH3VideoQualityPreservesReferenceAspect(t *testing.T) {
+	for _, quality := range []int{480, 720, 1080, 1440} {
+		width, height, err := miniMaxH3VideoDimensions(1200, 1600, quality)
+		if err != nil {
+			t.Fatalf("dimensions for %dp: %v", quality, err)
+		}
+		if width%32 != 0 || height%32 != 0 {
+			t.Fatalf("%dp produced non-compatible dimensions %dx%d", quality, width, height)
+		}
+		if got := float64(width) / float64(height); math.Abs(got-0.75) > 0.03 {
+			t.Fatalf("%dp changed reference aspect ratio: %.3f", quality, got)
+		}
+		input := generationForm{VideoQuality: quality, VideoDurationSeconds: 5, VideoSteps: 25, VideoMode: miniMaxH3FrameMode, InputImage: "gateway/first-frame.png", Width: width, Height: height}
+		if err := normalizeMiniMaxH3(&input); err != nil {
+			t.Fatalf("normalize %dp: %v", quality, err)
+		}
+		if input.VideoResolution != "reference-"+strconv.Itoa(quality)+"p" {
+			t.Fatalf("video resolution = %q", input.VideoResolution)
 		}
 	}
 }

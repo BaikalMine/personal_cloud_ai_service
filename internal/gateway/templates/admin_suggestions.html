@@ -1,0 +1,19 @@
+{{define "admin_suggestions"}}
+{{template "head" .}}
+{{template "admin_nav" .}}
+<main class="page" id="main-content">
+  <section class="hero compact-hero"><div><p class="eyebrow">Входящие запросы</p><h1>Предложения пользователей</h1><p>{{if .VirusTotalConfigured}}Проверка выполняется через VirusTotal. Ничего из предложений не запускается автоматически.{{else}}VirusTotal не настроен: новые предложения не принимаются.{{end}}</p></div></section>
+  <section class="stack-list suggestion-list">
+    {{range .Suggestions}}
+    {{$suggestion := .}}<article class="panel suggestion-item">
+      <div class="panel-heading"><div><p class="section-kicker">{{.Username}} · {{formatTime .CreatedAt}}</p><h2>{{.Title}}</h2></div><span class="badge {{if eq .Status "clean"}}ok{{else if eq .Status "flagged"}}danger{{else}}warning{{end}}">{{if eq .Status "clean"}}Проверено: чисто{{else if eq .Status "flagged"}}Обнаружены угрозы{{else if eq .Status "error"}}Ошибка проверки{{else}}Проверяется{{end}}</span></div>
+      <p class="suggestion-description">{{.Description}}</p>
+      {{if .Links}}<div class="suggestion-links"><strong>Ссылки</strong>{{range .Links}}{{if eq $suggestion.Status "clean"}}<a href="{{.}}" target="_blank" rel="noreferrer noopener">{{.}}</a>{{else}}<span>{{.}}</span>{{end}}{{end}}</div>{{end}}
+      {{if .JSONName}}<p class="suggestion-json"><strong>JSON:</strong> {{.JSONName}} · {{formatBytes .JSONSize}}{{if eq .Status "clean"}} · <a href="/admin/suggestions/{{.ID}}/json">Скачать проверенный JSON</a>{{else}} · <span class="muted">Скачивание откроется после чистой проверки</span>{{end}}</p>{{end}}
+      <div class="suggestion-scans">{{range .Scans}}<div><strong>{{.SourceName}}</strong><span>{{if eq .Status "completed"}}{{.Harmless}} чисто · {{.Undetected}} без вердикта{{else if eq .Status "error"}}Ошибка VirusTotal{{else}}{{if eq .Status "in-progress"}}Проверяется{{else}}В очереди VirusTotal{{end}}{{end}}</span>{{if or (gt .Malicious 0) (gt .Suspicious 0)}}<b>{{.Malicious}} угроз · {{.Suspicious}} подозрений</b>{{end}}{{if .Error}}<small>{{.Error}}</small>{{end}}</div>{{end}}</div>
+    </article>
+    {{else}}<section class="panel"><p class="muted">Предложений пока нет.</p></section>{{end}}
+  </section>
+</main>
+</body></html>
+{{end}}

@@ -175,7 +175,10 @@ func (a *App) refreshQuickGenerationMiningLeases(ctx context.Context) {
 			continue
 		}
 		if status.State == "completed" || status.State == "error" {
+			a.syncGenerationAuditState(ctx, lease.UserID, lease.PromptID, status.State)
 			a.releaseMiningPauseForGeneration(ctx, lease.PromptID)
+		} else if status.State == "running" {
+			a.syncGenerationAuditState(ctx, lease.UserID, lease.PromptID, status.State)
 		}
 	}
 }

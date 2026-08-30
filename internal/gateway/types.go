@@ -19,6 +19,7 @@ import (
 	"ai-access-gateway/internal/security"
 	"ai-access-gateway/internal/store"
 	"ai-access-gateway/internal/updates"
+	"ai-access-gateway/internal/virustotal"
 )
 
 const (
@@ -47,13 +48,17 @@ type App struct {
 	promptAssistant     *promptassistant.Client
 	contentModerator    *moderation.Client
 	updates             *updates.Client
+	virusTotal          *virustotal.Client
 	contentCipher       *contentcrypto.Cipher
 	mediaCaptureSlots   chan struct{}
 	adminMediaSlots     chan struct{}
 	comfyUploadSlots    chan struct{}
 	sensitiveMediaSlots chan struct{}
+	comfyMemorySlots    chan struct{}
 	generationMu        sync.Mutex
 	miningPauseMu       sync.Mutex
+	comfyQueueMu        sync.Mutex
+	comfyQueueWasBusy   bool
 	generationJobs      map[string]*generationJob
 
 	requestsTotal atomic.Int64
@@ -143,23 +148,27 @@ type UpdateOverview struct {
 }
 
 type ContentEventView struct {
-	ID            int64
-	UserID        int64
-	Username      string
-	Service       string
-	Kind          string
-	ExternalID    string
-	Model         string
-	Prompt        string
-	Response      string
-	Metadata      string
-	Assistant     *ContentAssistantView
-	Sensitive     bool
-	VisualPending bool
-	MediaCount    int64
-	Media         []domain.ContentMediaSummary
-	CreatedAt     time.Time
-	ExpiresAt     time.Time
+	ID                  int64
+	UserID              int64
+	Username            string
+	Service             string
+	Kind                string
+	ExternalID          string
+	Model               string
+	Prompt              string
+	Response            string
+	Metadata            string
+	Assistant           *ContentAssistantView
+	GenerationState     string
+	Sensitive           bool
+	VisualPending       bool
+	GeneratedMediaCount int64
+	MediaExpiresAt      time.Time
+	MediaExpired        bool
+	MediaCount          int64
+	Media               []domain.ContentMediaSummary
+	CreatedAt           time.Time
+	ExpiresAt           time.Time
 }
 
 type ContentAssistantView struct {
@@ -174,7 +183,6 @@ type ContentOverview struct {
 	Total     int
 	ComfyUI   int
 	OpenWebUI int
-	Ollama    int
 	WithMedia int
 }
 

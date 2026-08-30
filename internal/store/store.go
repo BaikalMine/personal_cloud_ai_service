@@ -27,7 +27,8 @@ func (s *Store) FindUserWithPassword(ctx context.Context, identity string) (doma
 		       generation_daily_limit, generation_total_limit, generation_total_used,
 		       failed_login_count, locked_until, created_at, last_login_at, password_hash
 		FROM users
-		WHERE username = $1 OR (email IS NOT NULL AND LOWER(email) = LOWER($1))
+		WHERE (username = $1 OR (email IS NOT NULL AND LOWER(email) = LOWER($1)))
+		  AND (account_expires_at IS NULL OR account_expires_at > now())
 		ORDER BY CASE WHEN username = $1 THEN 0 ELSE 1 END
 		LIMIT 1
 	`, identity).Scan(
@@ -51,6 +52,7 @@ func (s *Store) UserBySessionHash(ctx context.Context, tokenHash string, idleTim
 		  AND s.expires_at > now()
 		  AND s.last_seen_at > now() - ($2::bigint * interval '1 second')
 		  AND u.disabled = false
+		  AND (u.account_expires_at IS NULL OR u.account_expires_at > now())
 	`, tokenHash, int64(idleTimeout.Seconds())).Scan(
 		&user.ID, &user.Username, &user.Email, &user.Role, &user.Disabled,
 		&user.CanUseComfyUI, &user.CanUseOpenWebUI, &user.CanUseQuickGeneration, &user.CanGenerateTextToImage, &user.CanGenerateImageToImage, &user.CanGenerateVideo, &user.CanManageMining, &user.PauseMiningForQuickGeneration,
@@ -217,8 +219,8 @@ func (s *Store) SetDisabled(ctx context.Context, userID int64, disabled bool) (b
 	return affected > 0, revoked, nil
 }
 
-// DeleteUser permanently removes a regular account and all data owned by it.
-// Database foreign keys revoke sessions and cascade dependent user records.
+// DeleteUser permanently removes a regular account. Sessions and account-scoped
+// records are cascaded; retained AI content is anonymized by its foreign key.
 func (s *Store) DeleteUser(ctx context.Context, userID int64, username string) (bool, error) {
 	result, err := s.db.ExecContext(ctx, `
 		DELETE FROM users
@@ -229,6 +231,21 @@ func (s *Store) DeleteUser(ctx context.Context, userID int64, username string) (
 	}
 	affected, err := result.RowsAffected()
 	return affected > 0, err
+}
+
+// DeleteExpiredTemporaryUsers permanently removes accounts created from temporary
+// invitations. Sessions and account-scoped records are cascaded, while retained
+// AI-content records stay available with a null user reference. Administrators
+// are explicitly excluded.
+func (s *Store) DeleteExpiredTemporaryUsers(ctx context.Context) (int64, error) {
+	result, err := s.db.ExecContext(ctx, `
+		DELETE FROM users
+		WHERE role = 'user' AND account_expires_at IS NOT NULL AND account_expires_at <= now()
+	`)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 func (s *Store) SetServiceAccess(ctx context.Context, userID int64, comfyUI, openWebUI, quickGeneration, textToImage, imageToImage, video, manageMining, pauseMiningForQuickGeneration bool, dailyLimit int, totalLimit int64) (bool, error) {

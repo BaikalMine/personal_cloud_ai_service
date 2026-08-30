@@ -20,16 +20,28 @@ const (
 	ProfileAnime           Profile = "anime"
 	ProfileNSFW            Profile = "nsfw"
 	ProfileFluxEdit        Profile = "flux-edit"
+	ProfileMiniMaxH3       Profile = "minimax-h3"
 )
 
 // Profile selects a user-facing assistant template.
 type Profile string
 
+// VideoContext carries the controls that materially change MiniMax H3 prompt
+// structure.
+type VideoContext struct {
+	Mode            string
+	DurationSeconds int
+	ImageCount      int
+	AudioReference  bool
+}
+
 // ImageReference describes the role a user assigned to a numbered image in an
 // image-editing request. The prompt assistant receives roles, not image bytes.
 type ImageReference struct {
-	Number int
-	Role   ImageReferenceRole
+	Number   int
+	Role     ImageReferenceRole
+	MIMEType string `json:"-"`
+	Image    []byte `json:"-"`
 }
 
 type ImageReferenceRole string
@@ -49,6 +61,10 @@ const sharedInstruction = `You are an expert prompt engineer for image-generatio
 Preserve every stated subject, action, color, object, spatial relationship, and requested visual medium. Do not invent characters, objects, clothing, colors, locations, or text that the user did not ask for. If visible text is requested, keep the exact wording in quotes. If the prompt is already detailed, polish it lightly instead of replacing its direction.
 
 Choose composition, framing, lighting, texture, and grounded visual details internally. Do not show reasoning, explanations, headings, markdown, JSON, lists, or quotation marks around the whole answer. Output only the final English image-generation prompt.`
+
+const minorSafetyInstruction = `
+
+Never create, rewrite, or expand sexualized, erotic, nude, or explicit content involving a minor, an underage person, a child, a teenager, or a person with an ambiguous young age. If the request conflicts with this rule, produce a safe non-sexual adult alternative without explaining the rule.`
 
 const workflowEditInstruction = `
 
@@ -90,12 +106,29 @@ Rules:
 const videoInstruction = `You are an expert prompt engineer for MiniMax H3 video generation. Rewrite the user's request as one precise English video prompt.
 Describe the subject, scene, visual style, camera framing and deliberate motion. Keep the action physically coherent, maintain identity and composition when reference frames or photos are supplied, and avoid changing details that the user did not ask to change. Output only one natural, production-ready prompt paragraph with no explanations, lists, markdown, or camera-setting labels.`
 
+const miniMaxH3Instruction = `You are MiniMax H3 Prompt Architect. Turn the user's request into one ready-to-run English H3 Context-IR prompt for the current Gateway video workflow.
+
+This interface accepts one prompt only. Return only the final Context-IR text: no title, markdown, code fence, explanation, analysis, checklist, or alternative version. Do not output a separate Hailuo brief.
+
+Preserve the user's exact intent, requested duration, camera restrictions, degree of sensuality, dialogue, lyrics, relationship framing, and forms of address. Never invent dialogue, music, cuts, camera movement, people, relationships, or pet names. Keep dialogue, lyrics, and visible text verbatim in their original language; all other instructions must be English.
+
+Write the video in playback order: initial anchor, action onset, continuous development, result or reaction, then a stable final hold. Keep one main subject, one coherent idea, physically plausible weight transfer and hand paths, restrained secondary motion, and one camera behavior per shot. If a fixed camera is requested, explicitly state that it remains locked with no pan, tilt, zoom, push, pull, orbit, reframing, cuts, angle changes, or camera switching.
+
+Use exact dialogue syntax when speech is requested: The clearly adult [subject] with [voice description] (S1) says: <d>[Russian] exact words.</d> Keep the voice description outside <d> and do not repeat dialogue in overall_soundscape. State when speech ends and that no further speech, whispering, narration, or lip-synced dialogue occurs when applicable. Include only plausible diegetic ambience and synchronized physical sounds; use non_diegetic_music: N/A unless music was explicitly requested.
+
+You receive uploaded visual references in their exact numbered order, together with their declared roles. Inspect them carefully and use only visible details that are relevant to the user's request. Keep references distinct: never silently blend identities, outfits, scenes, or visual styles from different pictures.`
+
 func ValidProfile(mode Mode, profile Profile) bool {
+	if mode == ModeTextToVideo {
+		return profile == ProfileMiniMaxH3
+	}
 	switch profile {
 	case ProfileWorkflowDefault, ProfilePhotographic, ProfileRealistic, ProfileAnime, ProfileNSFW:
 		return true
 	case ProfileFluxEdit:
 		return mode == ModeImageToImage
+	case ProfileMiniMaxH3:
+		return mode == ModeTextToVideo
 	default:
 		return false
 	}
@@ -151,7 +184,7 @@ func referenceMapInstruction(references []ImageReference) string {
 	}
 	return "\n\nThe user has provided this ordered reference map:\n" + strings.Join(lines, "\n") + `
 
-You receive the declared roles, not visual analysis of the image files. Never claim to see unmentioned details. When the user's request combines, preserves, or transfers a reference, explicitly use the corresponding phrase "image 1", "image 2", "image 3", or "image 4" in the final prompt. Keep image 1 as the base unless the user explicitly directs otherwise; take only the stated role from each additional image and do not merge unrelated features.`
+The image files are attached in this exact order. Inspect their visible details before writing. When the user's request combines, preserves, or transfers a reference, explicitly use the corresponding phrase "image 1", "image 2", "image 3", or "image 4" in the final prompt. Keep image 1 as the base unless the user explicitly directs otherwise; take only the stated role from each additional image and do not merge unrelated features.`
 }
 
 func SystemPrompt(mode Mode, profile Profile) string {
@@ -159,6 +192,20 @@ func SystemPrompt(mode Mode, profile Profile) string {
 }
 
 func SystemPromptWithReferences(mode Mode, profile Profile, references []ImageReference) string {
+	return systemPrompt(mode, profile, references, VideoContext{})
+}
+
+// SystemPromptWithVideoContext selects the official H3 structure matching the
+// Gateway's actual first/last-frame or reference workflow.
+func SystemPromptWithVideoContext(mode Mode, profile Profile, context VideoContext) string {
+	return systemPrompt(mode, profile, nil, context)
+}
+
+func systemPrompt(mode Mode, profile Profile, references []ImageReference, video VideoContext) string {
+	if mode == ModeTextToVideo && profile == ProfileMiniMaxH3 {
+		prompt := miniMaxH3Instruction + "\n\n" + miniMaxH3FormatInstruction(video) + minorSafetyInstruction
+		return strings.TrimSpace(prompt)
+	}
 	prompt := sharedInstruction
 	if mode == ModeTextToVideo {
 		prompt = videoInstruction
@@ -184,5 +231,60 @@ func SystemPromptWithReferences(mode Mode, profile Profile, references []ImageRe
 	if mode == ModeImageToImage {
 		prompt += referenceMapInstruction(references)
 	}
+	prompt += minorSafetyInstruction
 	return strings.TrimSpace(prompt)
+}
+
+func miniMaxH3FormatInstruction(context VideoContext) string {
+	duration := context.DurationSeconds
+	if duration != 5 && duration != 10 && duration != 15 {
+		duration = 5
+	}
+	imageCount := context.ImageCount
+	if imageCount < 1 {
+		imageCount = 1
+	}
+	if context.Mode == "references" {
+		audioReference := "No standalone audio reference is attached."
+		if context.AudioReference {
+			audioReference = "One standalone <Audio 1> reference is attached. State only the audio role explicitly requested by the user; never claim to hear or transcribe its contents."
+		}
+		return fmt.Sprintf(`The selected mode is Ref2VA with %d declared image reference(s). Use exactly this structure:
+
+subject_definitions:
+<Subject 1>: define only the identity and attributes the user explicitly supplied.
+
+summary:
+[reference generation] one concise chronological summary.
+
+retention_analysis:
+State what each supplied <Picture N> contributes, without claiming unseen details. %s
+
+detailed_description:
+Write the full %d-second chronological shot description.
+
+overall_soundscape:
+Describe ambience and synchronized physical sounds only.
+
+non_diegetic_music:
+N/A unless requested.`, imageCount, audioReference, duration)
+	}
+	if imageCount >= 2 {
+		return fmt.Sprintf(`The selected mode is FL2VA. Picture 1 is the exact opening frame and Picture 2 is the exact final frame. Begin exactly with:
+
+How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the %d.00-second mark of the target video.
+
+Then write these fields in order:
+integrated_multimodal_description: a complete chronological path that reaches Picture 2 exactly.
+overall_soundscape: ambience and synchronized physical sounds only.
+non_diegetic_music: N/A unless requested.`, duration)
+	}
+	return fmt.Sprintf(`The selected mode is I2VA. Picture 1 is the exact opening frame. Begin exactly with:
+
+For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.
+
+Then write these fields in order:
+integrated_multimodal_description: a complete %d-second chronological continuation from the opening frame.
+overall_soundscape: ambience and synchronized physical sounds only.
+non_diegetic_music: N/A unless requested.`, duration)
 }

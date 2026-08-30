@@ -319,7 +319,7 @@ func (a *App) csrfToken(r *http.Request) string {
 func (a *App) validCSRF(r *http.Request) bool {
 	var err error
 	if strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data") {
-		err = r.ParseMultipartForm(1 << 20)
+		err = r.ParseMultipartForm(maxSuggestionRequest)
 	} else {
 		err = r.ParseForm()
 	}

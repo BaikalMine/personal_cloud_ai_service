@@ -94,3 +94,33 @@ func TestClientUsesLongRunningMinerUpdateEndpoint(t *testing.T) {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }
+
+func TestClientTrimsOnlyConfiguredComfyMemory(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-token" || r.Method != http.MethodPost || r.URL.Path != "/v1/comfyui/trim" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if r.ContentLength > 0 {
+			t.Fatal("memory trim must not accept caller-controlled process data")
+		}
+		_ = json.NewEncoder(w).Encode(ComfyMemoryTrim{Trimmed: 1, Message: "ok"})
+	}))
+	defer server.Close()
+	baseURL, _ := url.Parse(server.URL)
+	result, err := NewClient(baseURL, "test-token").TrimComfyMemory(context.Background())
+	if err != nil || result.Trimmed != 1 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
+func TestClientReportsLegacyMonitorWithoutJSONDecodeFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	baseURL, _ := url.Parse(server.URL)
+	result, err := NewClient(baseURL, "test-token").TrimComfyMemory(context.Background())
+	if err == nil || result.Message != "Windows-агент пока не поддерживает очистку памяти ComfyUI." {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}

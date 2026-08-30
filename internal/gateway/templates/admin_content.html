@@ -4,19 +4,18 @@
 <main class="page" id="main-content">
   <section class="hero admin-hero">
     <div><p class="eyebrow">Контроль использования</p><h1>AI-контент</h1><p class="content-intro">Запросы, ответы и результаты генераций. Новые события расположены сверху.</p></div>
-    <span class="live-badge"><i></i>Тексты: 7 дней · медиа: 3 дня</span>
+    <span class="live-badge"><i></i>Параметры: 7 дней · результаты: 3 дня</span>
   </section>
   <section class="content-overview" aria-label="Сводка по журналу">
     <div><span>Показано</span><strong>{{.Overview.Total}}</strong></div>
     <div><span>ComfyUI</span><strong>{{.Overview.ComfyUI}}</strong></div>
     <div><span>OpenWebUI</span><strong>{{.Overview.OpenWebUI}}</strong></div>
-    <div><span>Ollama</span><strong>{{.Overview.Ollama}}</strong></div>
     <div><span>С медиа</span><strong>{{.Overview.WithMedia}}</strong></div>
   </section>
   <form class="content-filters" method="get" action="/admin/content">
     <div class="content-filter-fields">
       <label>Пользователь<input name="user" value="{{.Username}}" placeholder="Логин"></label>
-      <label>Сервис<select name="service"><option value="">Все сервисы</option><option value="comfyui" {{if eq .Service "comfyui"}}selected{{end}}>ComfyUI</option><option value="openwebui" {{if eq .Service "openwebui"}}selected{{end}}>OpenWebUI</option><option value="ollama" {{if eq .Service "ollama"}}selected{{end}}>Ollama · промт-ассистент</option></select></label>
+      <label>Сервис<select name="service"><option value="">Все сервисы</option><option value="comfyui" {{if eq .Service "comfyui"}}selected{{end}}>ComfyUI</option><option value="openwebui" {{if eq .Service "openwebui"}}selected{{end}}>OpenWebUI</option></select></label>
       <label class="content-search">Поиск<input name="q" value="{{.Query}}" placeholder="Промпт, ответ, модель, seed"></label>
     </div>
     <div class="content-filter-actions"><button type="submit">Показать</button>{{if or .Username .Service .Query}}<a class="button ghost" href="/admin/content">Сбросить</a>{{end}}</div>
@@ -25,29 +24,40 @@
   <section class="content-gallery" data-admin-content-gallery>
     {{range .Events}}
     {{$event := .}}
-    <article class="content-gallery-card{{if .Sensitive}} sensitive-media{{end}}">
+    <article class="content-gallery-card{{if .Sensitive}} sensitive-media{{end}}{{if eq .GenerationState "error"}} content-gallery-card-error{{end}}">
       <button class="content-gallery-preview" type="button" data-content-event-open="{{.ID}}" {{if .Sensitive}}data-sensitive-media{{end}} aria-label="Открыть запись пользователя {{.Username}}">
         {{if .Media}}
           {{$preview := index .Media 0}}
-          {{if eq $preview.MediaType "video"}}<video muted loop playsinline preload="metadata" src="/admin/content/media/{{$preview.ID}}?raw=1"></video><span class="content-gallery-play" aria-hidden="true">&#9654;</span>{{else}}<img loading="lazy" src="/admin/content/media/{{$preview.ID}}?raw=1" alt="Результат генерации пользователя {{.Username}}">{{end}}
+          {{if eq $preview.MediaType "video"}}<video muted loop playsinline preload="auto" src="/admin/content/media/{{$preview.ID}}?raw=1"></video><span class="content-gallery-play" aria-hidden="true">&#9654;</span>{{else}}<img loading="lazy" src="/admin/content/media/{{$preview.ID}}?raw=1" alt="Результат генерации пользователя {{.Username}}">{{end}}
           {{if gt .MediaCount 1}}<span class="content-gallery-count">+{{.MediaCount}}</span>{{end}}
           {{if .Sensitive}}<span class="sensitive-media-cover"><b>Контент 18+</b><small>Нажмите, чтобы показать</small></span>{{end}}
+        {{else if eq .GenerationState "error"}}
+          <span class="content-generation-preview is-error"><small>Генерация с ошибкой</small><strong>Результат не был создан</strong><em>Промт и параметры сохранены для разбора.</em></span>
+        {{else if eq .GenerationState "cancelled"}}
+          <span class="content-generation-preview is-cancelled"><small>Генерация отменена</small><strong>Задача остановлена до результата</strong><em>Промт и параметры сохранены в журнале.</em></span>
+        {{else if .MediaExpired}}
+          <span class="content-generation-preview is-archived"><small>Архив параметров</small><strong>Результат очищен после трёх дней</strong><em>Промт, seed и настройки доступны до {{formatTime .ExpiresAt}}.</em></span>
+        {{else if eq .GenerationState "queued"}}
+          <span class="content-generation-preview is-pending"><small>Генерация в очереди</small><strong>Ожидает запуска в ComfyUI</strong><em>{{.Prompt}}</em></span>
+        {{else if eq .GenerationState "running"}}
+          <span class="content-generation-preview is-pending"><small>Генерация выполняется</small><strong>ComfyUI ещё обрабатывает задачу</strong><em>{{.Prompt}}</em></span>
         {{else}}
           <span class="content-text-preview"><small>{{if eq .Service "ollama"}}Помощь ассистента{{else if eq .Service "openwebui"}}Диалог с локальной моделью{{else}}Промт генерации{{end}}</small><strong>{{.Prompt}}</strong>{{if .Response}}<em>{{if eq .Service "ollama"}}Вариант ассистента сохранён{{else}}Ответ сохранён{{end}}</em>{{end}}</span>
         {{end}}
       </button>
-      <div class="content-gallery-meta"><div><a href="/admin/users/{{.UserID}}">{{.Username}}</a><span class="badge {{if eq .Service "comfyui"}}content-service-comfy{{else if eq .Service "ollama"}}content-service-ollama{{else}}content-service-openweb{{end}}">{{if eq .Service "comfyui"}}ComfyUI{{else if eq .Service "ollama"}}Ассистент{{else}}OpenWebUI{{end}}</span></div><time>{{formatTime .CreatedAt}}</time></div>
+      <div class="content-gallery-meta"><div><a href="/admin/users/{{.UserID}}">{{.Username}}</a><span class="badge {{if eq .Service "comfyui"}}content-service-comfy{{else if eq .Service "ollama"}}content-service-ollama{{else}}content-service-openweb{{end}}">{{if eq .Service "comfyui"}}ComfyUI{{else if eq .Service "ollama"}}Ассистент{{else}}OpenWebUI{{end}}</span>{{if eq .GenerationState "error"}}<span class="content-generation-state is-error">Ошибка</span>{{else if eq .GenerationState "cancelled"}}<span class="content-generation-state is-cancelled">Отменена</span>{{else if eq .GenerationState "queued"}}<span class="content-generation-state is-pending">Очередь</span>{{else if eq .GenerationState "running"}}<span class="content-generation-state is-pending">В работе</span>{{else if eq .GenerationState "completed"}}<span class="content-generation-state is-complete">Готово</span>{{end}}</div><time>{{formatTime .CreatedAt}}</time></div>
       {{if .Model}}<span class="content-gallery-model">{{.Model}}</span>{{end}}
     </article>
     <template id="content-event-detail-{{.ID}}">
       <article class="content-detail">
-        <header class="content-detail-header"><div><p class="section-kicker">{{if eq .Service "comfyui"}}ComfyUI · генерация{{else if eq .Service "ollama"}}Локальная модель · помощь ассистента{{else}}OpenWebUI · диалог{{end}}</p><h2>{{.Username}}</h2>{{if .Model}}<span>{{.Model}}</span>{{end}}</div><div><time>{{formatTime .CreatedAt}}</time><small>Запись хранится до {{formatTime .ExpiresAt}}</small></div></header>
-        {{if .Media}}<section class="content-detail-media{{if .Sensitive}} sensitive-media{{end}}"><div class="content-detail-heading"><h3>Результат</h3><span>{{.MediaCount}} файл(а)</span></div><div class="content-detail-media-grid">{{range .Media}}{{if eq .MediaType "video"}}<video controls playsinline preload="metadata" src="/admin/content/media/{{.ID}}?raw=1"></video>{{else}}<img loading="lazy" src="/admin/content/media/{{.ID}}?raw=1" alt="Результат генерации">{{end}}{{end}}</div></section>{{end}}
+        <header class="content-detail-header"><div><p class="section-kicker">{{if eq .Service "comfyui"}}ComfyUI · генерация{{else if eq .Service "ollama"}}Локальная модель · помощь ассистента{{else}}OpenWebUI · диалог{{end}}</p><h2>{{.Username}}</h2>{{if .Model}}<span>{{.Model}}</span>{{end}}</div><div>{{if eq .GenerationState "error"}}<span class="content-generation-state is-error">Генерация с ошибкой</span>{{else if eq .GenerationState "cancelled"}}<span class="content-generation-state is-cancelled">Генерация отменена</span>{{else if eq .GenerationState "queued"}}<span class="content-generation-state is-pending">В очереди</span>{{else if eq .GenerationState "running"}}<span class="content-generation-state is-pending">Выполняется</span>{{else if eq .GenerationState "completed"}}<span class="content-generation-state is-complete">Готово</span>{{end}}<time>{{formatTime .CreatedAt}}</time><small>Запись хранится до {{formatTime .ExpiresAt}}</small></div></header>
+        {{if .Media}}<section class="content-detail-media{{if .Sensitive}} sensitive-media{{end}}"><div class="content-detail-heading"><h3>Результат</h3><span>{{.MediaCount}} файл(а)</span></div><div class="content-detail-media-grid">{{range .Media}}{{if eq .MediaType "video"}}<video controls playsinline preload="auto" src="/admin/content/media/{{.ID}}?raw=1"></video>{{else}}<img loading="lazy" src="/admin/content/media/{{.ID}}?raw=1" alt="Результат генерации">{{end}}{{end}}</div></section>{{end}}
+        {{if .MediaExpired}}<section class="content-detail-state is-archived"><strong>Файл результата очищен по сроку хранения</strong><span>Сам результат хранился до {{formatTime .MediaExpiresAt}}. Промт, seed и настройки останутся в журнале до {{formatTime .ExpiresAt}}.</span></section>{{else if eq .GenerationState "error"}}<section class="content-detail-state is-error"><strong>ComfyUI завершил эту генерацию с ошибкой</strong><span>Результат не создан. Проверьте промт, параметры и журнал ComfyUI, затем при необходимости повторите задачу с тем же seed.</span></section>{{else if eq .GenerationState "cancelled"}}<section class="content-detail-state is-cancelled"><strong>Генерация была отменена</strong><span>Результат не создавался. Параметры сохранены, чтобы их можно было повторить или скорректировать.</span></section>{{end}}
         <section class="content-detail-section"><div class="content-block-heading"><h3>{{if eq .Service "ollama"}}Исходный промт для ассистента{{else}}Исходный промт пользователя{{end}}</h3><button type="button" class="content-copy" data-copy-target="#content-detail-prompt-{{.ID}}">Копировать</button></div><pre id="content-detail-prompt-{{.ID}}">{{.Prompt}}</pre></section>
         <section class="content-detail-section"><div class="content-block-heading"><h3>{{if eq .Service "comfyui"}}Негативный промт{{else if eq .Service "ollama"}}Что написал ассистент{{else}}Ответ модели{{end}}</h3>{{if .Response}}<button type="button" class="content-copy" data-copy-target="#content-detail-response-{{.ID}}">Копировать</button>{{end}}</div><pre id="content-detail-response-{{.ID}}" {{if not .Response}}class="content-empty"{{end}}>{{if .Response}}{{.Response}}{{else}}{{if eq .Service "comfyui"}}Не задан{{else}}Ответ не зафиксирован{{end}}{{end}}</pre></section>
         {{with .Assistant}}<section class="content-detail-section content-assistant-detail"><div class="content-block-heading"><h3>Помощь ассистента</h3><span class="badge {{if .Applied}}ok{{end}}">{{if .Applied}}Вариант применён{{else}}Вариант не применён{{end}}</span></div><dl class="content-assistant-facts"><div><dt>Шаблон</dt><dd>{{if .Template}}{{.Template}}{{else}}Не указан{{end}}</dd></div><div><dt>Think</dt><dd>{{if .Think}}Включён{{else}}Выключен{{end}}</dd></div></dl><div class="content-assistant-copy"><div class="content-block-heading"><h3>Начальный промт ассистенту</h3><button type="button" class="content-copy" data-copy-target="#content-assistant-original-{{$event.ID}}">Копировать</button></div><pre id="content-assistant-original-{{$event.ID}}">{{.OriginalPrompt}}</pre></div><div class="content-assistant-copy"><div class="content-block-heading"><h3>Что написал ассистент</h3><button type="button" class="content-copy" data-copy-target="#content-assistant-suggestion-{{$event.ID}}">Копировать</button></div><pre id="content-assistant-suggestion-{{$event.ID}}">{{.Suggestion}}</pre></div></section>{{end}}
         {{if .Metadata}}<section class="content-detail-section"><div class="content-block-heading"><h3>{{if eq .Service "ollama"}}Режим и шаблон ассистента{{else}}Настройки и технические данные{{end}}</h3><button type="button" class="content-copy" data-copy-target="#content-detail-metadata-{{.ID}}">Копировать</button></div><pre id="content-detail-metadata-{{.ID}}" class="content-metadata">{{.Metadata}}</pre></section>{{end}}
-        <footer class="content-detail-footer">{{if .ExternalID}}<span>Идентификатор <code>{{.ExternalID}}</code></span>{{end}}{{if gt .MediaCount 0}}<span class="badge ok">Медиа: {{.MediaCount}}</span>{{end}}</footer>
+        <footer class="content-detail-footer">{{if .ExternalID}}<span>Идентификатор <code>{{.ExternalID}}</code></span>{{end}}{{if gt .MediaCount 0}}<span class="badge ok">Медиа: {{.MediaCount}}</span>{{else if gt .GeneratedMediaCount 0}}<span class="badge">Файлы очищены: {{.GeneratedMediaCount}}</span>{{end}}</footer>
       </article>
     </template>
     {{else}}

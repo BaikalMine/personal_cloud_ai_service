@@ -64,6 +64,21 @@
       {{end}}
     </section>
 
+    {{if ne .Profile.Role "admin"}}
+    <section class="panel span-two generation-policy-panel">
+      <div class="panel-heading"><div><p class="section-kicker">Точная быстрая генерация</p><h2>Разрешённые workflow, модели и LoRA</h2><p class="panel-intro">Ничего не отмечено в группе - доступны все варианты этой группы. Отмечайте, когда нужно сузить выбор для конкретного пользователя.</p></div></div>
+      {{if eq .PolicyStatus "changed"}}<p class="success-box">Индивидуальные правила быстрой генерации сохранены.</p>{{end}}
+      <form method="post" class="generation-policy-form">
+        <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="action" value="update_generation_policy">
+        <fieldset><legend>Workflow</legend><div class="policy-check-grid">{{range .GenerationPresets}}<label><input type="checkbox" name="preset_id" value="{{.ID}}" {{if hasString $.GenerationPolicy.PresetIDs .ID}}checked{{end}}><span><b>{{.Name}}</b><small>{{.Description}}</small></span></label>{{end}}</div></fieldset>
+        <fieldset><legend>Диффузионные модели</legend><div class="policy-check-grid">{{range .QuickModels}}<label><input type="checkbox" name="model_id" value="{{.ID}}" {{if hasString $.GenerationPolicy.ModelIDs .ID}}checked{{end}}><span><b>{{.DisplayName}}</b><small>{{.Family}}</small></span></label>{{end}}</div></fieldset>
+        <fieldset><legend>Группы LoRA для Krea2</legend><div class="policy-check-grid">{{range .LoraGroups}}<label><input type="checkbox" name="krea_lora_group" value="{{.Name}}" {{if hasString $.GenerationPolicy.KreaLoraGroups .Name}}checked{{end}}><span><b>{{.Name}}</b><small>{{len .Loras}} адаптеров</small></span></label>{{else}}<p class="muted">Группы LoRA пока не найдены в ComfyUI.</p>{{end}}</div></fieldset>
+        <fieldset><legend>Группы LoRA для Flux2</legend><div class="policy-check-grid">{{range .FluxLoraGroups}}<label><input type="checkbox" name="flux_lora_group" value="{{.Name}}" {{if hasString $.GenerationPolicy.FluxLoraGroups .Name}}checked{{end}}><span><b>{{.Name}}</b><small>{{len .Loras}} адаптеров</small></span></label>{{else}}<p class="muted">Группы LoRA пока не найдены в ComfyUI.</p>{{end}}</div></fieldset>
+        <button type="submit">Сохранить правила генерации</button>
+      </form>
+    </section>
+    {{end}}
+
     <section class="panel password-panel">
       <div class="panel-heading"><div><p class="section-kicker">Безопасность</p><h2>Установить новый пароль</h2></div></div>
       {{if eq .PasswordStatus "changed"}}<p class="success-box">Пароль изменён, остальные сессии завершены.</p>{{end}}

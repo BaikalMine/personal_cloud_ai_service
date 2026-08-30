@@ -9,7 +9,7 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch==2.7.1
 RUN pip install --no-cache-dir -r requirements.txt
-COPY app.py ./
+COPY app.py worker.py ./
 RUN mkdir -p /models && chown -R appuser:appuser /app /models
 USER appuser
 EXPOSE 8080

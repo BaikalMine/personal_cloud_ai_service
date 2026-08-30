@@ -4,7 +4,7 @@
   <a class="button ghost admin-media-back" href="/admin/content">К AI-контенту</a>
   <section class="admin-media-frame">
     <header><div><p class="section-kicker">AI-контент</p><h1>{{.Filename}}</h1></div><a class="button" href="/admin/content/media/{{.MediaID}}?raw=1&amp;download=1" download>Скачать оригинал</a></header>
-    {{if eq .MediaType "video"}}<video controls playsinline preload="metadata" src="/admin/content/media/{{.MediaID}}?raw=1"></video>{{else}}<img src="/admin/content/media/{{.MediaID}}?raw=1" alt="Результат AI-генерации">{{end}}
+    {{if eq .MediaType "video"}}<video controls playsinline preload="auto" src="/admin/content/media/{{.MediaID}}?raw=1"></video>{{else}}<img src="/admin/content/media/{{.MediaID}}?raw=1" alt="Результат AI-генерации">{{end}}
   </section>
 </main>
 </body></html>

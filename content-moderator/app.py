@@ -1,18 +1,15 @@
 from contextlib import asynccontextmanager
 from io import BytesIO
+import json
+import subprocess
+import sys
 
 from fastapi import FastAPI, HTTPException, Request
 from PIL import Image, UnidentifiedImageError
-from transformers import pipeline
-
-MODEL_NAME = "Falconsai/nsfw_image_detection"
-classifier = None
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    global classifier
-    classifier = pipeline("image-classification", model=MODEL_NAME, device=-1)
     yield
 
 
@@ -21,9 +18,7 @@ app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None
 
 @app.get("/healthz")
 async def healthz():
-    if classifier is None:
-        raise HTTPException(status_code=503, detail="model is loading")
-    return {"ok": True}
+    return {"ok": True, "model_loaded": False}
 
 
 @app.post("/classify")
@@ -38,6 +33,21 @@ async def classify(request: Request):
         image = Image.open(BytesIO(body)).convert("RGB")
     except (UnidentifiedImageError, OSError) as error:
         raise HTTPException(status_code=400, detail="invalid image") from error
-    predictions = classifier(image, top_k=2)
-    nsfw_score = next((float(item["score"]) for item in predictions if item["label"].lower() == "nsfw"), 0.0)
+    try:
+        worker = subprocess.run(
+            [sys.executable, "worker.py"],
+            input=body,
+            capture_output=True,
+            timeout=70,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise HTTPException(status_code=504, detail="classification timed out") from error
+    if worker.returncode != 0:
+        raise HTTPException(status_code=500, detail="classification worker failed")
+    try:
+        result = json.loads(worker.stdout)
+        nsfw_score = float(result["nsfw_score"])
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise HTTPException(status_code=500, detail="invalid classification response") from error
     return {"nsfw_score": nsfw_score}

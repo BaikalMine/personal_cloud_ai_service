@@ -45,12 +45,13 @@ type generationModelGroup struct {
 }
 
 type generationModelCatalog struct {
-	Online         bool
-	AvailableCount int
-	Groups         []generationModelGroup
-	LoraGroups     []generationLoraGroup
-	FluxLoraGroups []generationLoraGroup
-	byID           map[string]generationModel
+	Online            bool
+	AvailableCount    int
+	Groups            []generationModelGroup
+	LoraGroups        []generationLoraGroup
+	FluxLoraGroups    []generationLoraGroup
+	MiniMaxLoraGroups []generationLoraGroup
+	byID              map[string]generationModel
 }
 
 type generationLora struct {
@@ -59,6 +60,8 @@ type generationLora struct {
 	DefaultStrength float64
 	Default         bool
 }
+
+const miniMaxH3LoraDirectory = "MiniMaxH3\\"
 
 type generationLoraGroup struct {
 	Name  string
@@ -142,6 +145,7 @@ func buildGenerationModelCatalog(info map[string]comfyNodeInfo) generationModelC
 	loras := comfyChoiceStrings(info, "LoraLoader", "lora_name")
 	catalog.LoraGroups = buildGenerationLoraGroups(loras)
 	catalog.FluxLoraGroups = buildFlux2LoraGroups(loras)
+	catalog.MiniMaxLoraGroups = buildMiniMaxH3LoraGroups(loras)
 
 	checkpointModels := make([]generationModel, 0, len(checkpoints))
 	for _, name := range checkpoints {
@@ -171,7 +175,10 @@ func buildGenerationModelCatalog(info map[string]comfyNodeInfo) generationModelC
 	)
 	kreaVAE := exactModel(vaes, "qwen_image_vae.safetensors")
 	kreaLora := exactModel(loras, "lenovo_krea2.safetensors")
-	kreaIdentityLora := exactModel(loras, "krea2_identity_edit_v1_1.safetensors")
+	// The installed production edit workflow uses the original v1.2 identity
+	// LoRA. Keep this exact name so a similarly named user LoRA cannot be
+	// selected as the workflow's required identity adapter.
+	kreaIdentityLora := exactModel(loras, "krea2_identity_edit_v1_2.safetensors")
 	fluxEncoder := firstMatchingModel(append(encoders, ggufEncoders...), func(name string) bool {
 		value := strings.ToLower(name)
 		return strings.Contains(value, "qwen_3_8b") || strings.Contains(value, "qwen3_8b") || strings.Contains(value, "qwen3-8b") || strings.Contains(value, "qwen3 8b")
@@ -229,7 +236,7 @@ func buildGenerationModelCatalog(info map[string]comfyNodeInfo) generationModelC
 				DefaultSteps: 25, DefaultCFG: 1, DefaultSampler: "res_multistep", DefaultScheduler: "simple",
 			}
 			model.Available = miniMaxEncoder != "" && miniMaxVideoVAE != "" && miniMaxAudioVAE != "" && miniMaxReferenceModel != "" && hasGenerationNodes(info,
-				"MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo", "MiniMaxH3SigmaShift", "MiniMaxH3MemoryEfficientSageAttentionPatch", "VHS_VideoCombine")
+				"MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo", "MiniMaxH3SigmaShift", "MiniMaxH3MemoryEfficientSageAttentionPatch", "MiniMaxH3TurboLoRA", "MiniMaxH3TurboSampler", "ImageResizeKJv2", "CR LoRA Stack", "CR Apply LoRA Stack", "VHS_VideoCombine")
 			if !model.Available {
 				model.Reason = missingGenerationDependencies(miniMaxEncoder, miniMaxVideoVAE, "MiniMax H3 Qwen3-VL encoder", "MiniMax H3 video VAE")
 			}
@@ -312,6 +319,27 @@ func buildFlux2LoraGroups(values []string) []generationLoraGroup {
 	return []generationLoraGroup{{Name: "Flux2", Loras: loras}}
 }
 
+func buildMiniMaxH3LoraGroups(values []string) []generationLoraGroup {
+	loras := make([]generationLora, 0)
+	for _, name := range values {
+		lower := strings.ToLower(strings.ReplaceAll(name, "/", "\\"))
+		if !strings.HasPrefix(lower, strings.ToLower(miniMaxH3LoraDirectory)) {
+			continue
+		}
+		if strings.EqualFold(name, miniMaxH3TurboLoraName) {
+			continue
+		}
+		loras = append(loras, generationLora{Name: name, DisplayName: generationModelDisplayName(name), DefaultStrength: 1})
+	}
+	if len(loras) == 0 {
+		return nil
+	}
+	sort.Slice(loras, func(i, j int) bool {
+		return strings.ToLower(loras[i].DisplayName) < strings.ToLower(loras[j].DisplayName)
+	})
+	return []generationLoraGroup{{Name: "MiniMax H3", Loras: loras}}
+}
+
 func isKreaLora(lower string) bool {
 	return strings.Contains(lower, "krea") || strings.Contains(lower, "lenovo")
 }
@@ -347,7 +375,7 @@ func generationLoraAllowed(groups []generationLoraGroup, name string) bool {
 }
 
 func buildGenerationPresets(catalog generationModelCatalog) []generationPreset {
-	var krea, flux *generationModel
+	var krea, kreaEdit, flux *generationModel
 	kreaCount, fluxCount := 0, 0
 	for _, group := range catalog.Groups {
 		for index := range group.Models {
@@ -360,6 +388,10 @@ func buildGenerationPresets(catalog generationModelCatalog) []generationPreset {
 				if krea == nil || generationModelPreference(model) > generationModelPreference(*krea) {
 					copy := model
 					krea = &copy
+				}
+				if model.SupportsImage && (kreaEdit == nil || kreaEditModelPreference(model) > kreaEditModelPreference(*kreaEdit)) {
+					copy := model
+					kreaEdit = &copy
 				}
 			case modelFamilyFlux2:
 				if model.Available {
@@ -378,13 +410,13 @@ func buildGenerationPresets(catalog generationModelCatalog) []generationPreset {
 			"Двухэтапная генерация Krea2 с апскейлом и финальной детализацией.", *krea, false)
 		preset.ModelCount = kreaCount
 		presets = append(presets, preset)
-		if krea.SupportsImage {
+		if kreaEdit != nil {
 			edit := presetFromModel("photoflow-krea2-edit", "image-to-image", "Krea 2: редактирование",
-				"Сохраняет внешность на исходном фото и точно применяет инструкцию с качественным апскейлом.", *krea, true)
-			// This is a separate workflow from text PhotoFlow. Its saved KSampler
-			// uses 20 steps, CFG 8, Euler and Simple.
-			edit.DefaultSteps = 20
-			edit.DefaultCFG = 8
+				"Сохраняет исходное фото и применяет инструкцию через оригинальный Krea2 Turbo identity workflow.", *kreaEdit, true)
+			// The original identity-edit recipe is trained for Krea2 Turbo at
+			// 8-12 steps and CFG 1.0; arbitrary Krea fine-tunes visibly diverge.
+			edit.DefaultSteps = 8
+			edit.DefaultCFG = 1
 			edit.DefaultSampler = "euler"
 			edit.DefaultScheduler = "simple"
 			edit.ModelCount = kreaCount
@@ -420,7 +452,6 @@ func buildGenerationPresets(catalog generationModelCatalog) []generationPreset {
 		preset.ModelCount = 1
 		preset.MaxInputImages = 4
 		preset.AllowsImages = true
-		preset.AdminOnly = true
 		presets = append(presets, preset)
 	}
 	return presets
@@ -469,6 +500,24 @@ func generationModelPreference(model generationModel) int {
 	}
 	if !strings.Contains(value, "turbo") {
 		score += 20
+	}
+	return score
+}
+
+func kreaEditModelPreference(model generationModel) int {
+	if !model.Available || !model.SupportsImage {
+		return -1
+	}
+	value := strings.ToLower(model.Name)
+	score := 1000
+	if strings.EqualFold(model.Name, "Krea2\\krea2TurboOfficialComfy_krea2TurboBf16.safetensors") {
+		return score + 10000
+	}
+	if strings.Contains(value, "krea2_turbo_fp8_scaled") {
+		return score + 9000
+	}
+	if strings.Contains(value, "turbo") {
+		return score + 100
 	}
 	return score
 }

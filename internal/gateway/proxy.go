@@ -206,6 +206,15 @@ func (a *App) proxyHandlerWithPath(service, prefix string, upstream *url.URL, au
 			http.Error(w, "некорректный запрос ComfyUI", status)
 			return
 		}
+		if err := a.enforceComfyPromptSafety(r); err != nil {
+			if errors.Is(err, errMinorSexualContent) {
+				a.audit(r.Context(), &user.ID, "generation_safety_blocked", "comfyui", nil, a.clientIP(r), r.UserAgent(), map[string]any{"reason": "minor_sexual_content"})
+				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+				return
+			}
+			http.Error(w, "некорректный запрос ComfyUI", http.StatusBadRequest)
+			return
+		}
 		contentCapture, err := a.beginContentCapture(r, user, service)
 		if err != nil {
 			http.Error(w, "некорректный запрос к сервису", http.StatusBadRequest)

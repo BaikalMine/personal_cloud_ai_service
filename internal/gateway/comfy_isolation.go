@@ -19,6 +19,77 @@ import (
 
 const maxComfyControlBody = 1 << 20
 
+// enforceComfyPromptSafety applies the same server-side policy to jobs queued
+// through the full ComfyUI interface. The body is restored unchanged so later
+// isolation and capture stages can keep processing it normally.
+func (a *App) enforceComfyPromptSafety(r *http.Request) error {
+	if r.Method != http.MethodPost || r.URL.Path != "/prompt" {
+		return nil
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxComfyControlBody+1))
+	if err != nil {
+		return err
+	}
+	_ = r.Body.Close()
+	if len(body) > maxComfyControlBody {
+		return fmt.Errorf("ComfyUI prompt body exceeds %d bytes", maxComfyControlBody)
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	r.ContentLength = int64(len(body))
+	r.Header.Set("Content-Length", strconv.Itoa(len(body)))
+
+	var document struct {
+		Prompt map[string]struct {
+			ClassType string         `json:"class_type"`
+			Inputs    map[string]any `json:"inputs"`
+		} `json:"prompt"`
+	}
+	if err := json.Unmarshal(body, &document); err != nil {
+		return err
+	}
+	for _, node := range document.Prompt {
+		for _, value := range comfyPromptTextInputs(node.ClassType, node.Inputs) {
+			if err := validateGenerationPrompt(value); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func comfyPromptTextInputs(classType string, inputs map[string]any) []string {
+	if len(inputs) == 0 {
+		return nil
+	}
+	classType = strings.ToLower(classType)
+	textNode := strings.Contains(classType, "text") || strings.Contains(classType, "prompt") || strings.Contains(classType, "string")
+	values := make([]string, 0, len(inputs))
+	for name, raw := range inputs {
+		field := strings.ToLower(name)
+		promptField := textNode || field == "text" || strings.Contains(field, "prompt") || strings.Contains(field, "positive") || strings.Contains(field, "negative")
+		if !promptField {
+			continue
+		}
+		collectComfyPromptStrings(raw, &values)
+	}
+	return values
+}
+
+func collectComfyPromptStrings(value any, target *[]string) {
+	switch typed := value.(type) {
+	case string:
+		*target = append(*target, typed)
+	case []any:
+		for _, item := range typed {
+			collectComfyPromptStrings(item, target)
+		}
+	case map[string]any:
+		for _, item := range typed {
+			collectComfyPromptStrings(item, target)
+		}
+	}
+}
+
 func (a *App) authorizeComfyMediaRequest(r *http.Request, user *User) (bool, error) {
 	if user == nil || r.Method != http.MethodGet || r.URL.Path != "/view" && r.URL.Path != "/viewvideo" {
 		return true, nil

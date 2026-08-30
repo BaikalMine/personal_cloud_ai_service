@@ -112,3 +112,19 @@ func TestPromptAssistantContentAuditMigration(t *testing.T) {
 		t.Fatalf("prompt assistant audit migration does not allow the event kind: %s", sql)
 	}
 }
+
+func TestPromptAssistantContentServiceMigration(t *testing.T) {
+	var serviceMigration *migration
+	for index := range migrationCatalog {
+		if migrationCatalog[index].version == 33 {
+			serviceMigration = &migrationCatalog[index]
+			break
+		}
+	}
+	if serviceMigration == nil || serviceMigration.name != "prompt_assistant_content_service" {
+		t.Fatal("prompt assistant content service migration is missing")
+	}
+	if sql := strings.Join(serviceMigration.statements, "\n"); !strings.Contains(sql, "'ollama'") {
+		t.Fatalf("prompt assistant service migration does not allow ollama: %s", sql)
+	}
+}

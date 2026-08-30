@@ -38,6 +38,8 @@ type Config struct {
 	SystemMonitorAgentToken   string
 	UpdateAgentURL            *url.URL
 	UpdateAgentToken          string
+	VirusTotalAPIKey          string
+	FeatureSuggestionsEnabled bool
 	TrustedProxies            []*net.IPNet
 	AdminAllowedNetworks      []*net.IPNet
 	SessionTTL                time.Duration
@@ -135,6 +137,8 @@ func Load() (Config, error) {
 	miningAgentToken := requiredEnv("MINING_AGENT_TOKEN")
 	systemMonitorAgentToken := strings.TrimSpace(env("SYSTEM_MONITOR_AGENT_TOKEN", miningAgentToken))
 	updateAgentToken := requiredEnv("UPDATE_AGENT_TOKEN")
+	virusTotalAPIKey := strings.TrimSpace(env("VIRUSTOTAL_API_KEY", ""))
+	featureSuggestionsEnabled := strings.EqualFold(env("FEATURE_SUGGESTIONS_ENABLED", "false"), "true")
 	if databaseURL == "" {
 		return Config{}, fmt.Errorf("DATABASE_URL is required")
 	}
@@ -195,6 +199,8 @@ func Load() (Config, error) {
 		SystemMonitorAgentToken:   systemMonitorAgentToken,
 		UpdateAgentURL:            updateAgentURL,
 		UpdateAgentToken:          updateAgentToken,
+		VirusTotalAPIKey:          virusTotalAPIKey,
+		FeatureSuggestionsEnabled: featureSuggestionsEnabled,
 		TrustedProxies:            trustedProxies,
 		AdminAllowedNetworks:      adminNetworks,
 		SessionTTL:                sessionTTL,

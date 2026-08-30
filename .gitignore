@@ -10,3 +10,5 @@ coverage.html
 dist/
 bin/
 *.exe
+__pycache__/
+*.py[cod]

@@ -127,6 +127,7 @@ type generationForm struct {
 	LUTEnabled           bool
 	InputImage           string
 	ReferenceImages      [3]string
+	InputAudio           string
 	Positive             string
 	Negative             string
 	Width                int
@@ -144,6 +145,28 @@ type generationForm struct {
 	VideoDurationSeconds int
 	VideoReferenceSize   string
 	VideoSteps           int
+	VideoTurbo           bool
+	VideoScheduler       string
+	VideoShiftVideo      int
+	VideoShiftAudio      int
+	VideoSageAttention   bool
+	VideoClearVRAM       bool
+	VideoRIFEEnabled     bool
+	VideoRIFECheckpoint  string
+	VideoRIFEMultiplier  int
+	VideoRIFEFastMode    bool
+	VideoRIFEEnsemble    bool
+	VideoRIFEDtype       string
+	VideoRIFECompile     bool
+	VideoRIFEBatchSize   int
+	VideoRTXEnabled      bool
+	VideoRTXScale        float64
+	VideoRTXQuality      string
+	VideoColorMatch      bool
+	VideoColorMethod     string
+	VideoColorStrength   float64
+	VideoAudioStart      float64
+	VideoOutputCRF       int
 	AssistantRequested   bool
 	AssistantApplied     bool
 	AssistantTemplate    string
@@ -1130,6 +1153,38 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 	if err != nil {
 		return generationForm{}, errors.New("некорректный norm equalize Flux2")
 	}
+	videoShiftVideo, err := parseInt("video_shift_video", 11)
+	if err != nil {
+		return generationForm{}, errors.New("некорректный video shift MiniMax H3")
+	}
+	videoShiftAudio, err := parseInt("video_shift_audio", 3)
+	if err != nil {
+		return generationForm{}, errors.New("некорректный audio shift MiniMax H3")
+	}
+	videoRIFEMultiplier, err := parseInt("video_rife_multiplier", 2)
+	if err != nil {
+		return generationForm{}, errors.New("некорректный множитель RIFE")
+	}
+	videoRIFEBatchSize, err := parseInt("video_rife_batch_size", 1)
+	if err != nil {
+		return generationForm{}, errors.New("некорректный размер пакета RIFE")
+	}
+	videoRTXScale, err := parseFloat("video_rtx_scale", 2)
+	if err != nil {
+		return generationForm{}, errors.New("некорректный масштаб RTX Super Resolution")
+	}
+	videoColorStrength, err := parseFloat("video_color_strength", 1)
+	if err != nil {
+		return generationForm{}, errors.New("некорректная сила ColorMatch")
+	}
+	videoAudioStart, err := parseFloat("video_audio_start", 0.03)
+	if err != nil {
+		return generationForm{}, errors.New("некорректное смещение аудио")
+	}
+	videoOutputCRF, err := parseInt("video_output_crf", 19)
+	if err != nil {
+		return generationForm{}, errors.New("некорректное качество видео CRF")
+	}
 	upscaleCFG, err := parseFloat("upscale_cfg", 1)
 	if err != nil {
 		return generationForm{}, errors.New("некорректный CFG апскейла")
@@ -1242,12 +1297,19 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 	}
 	return generationForm{
 		TemplateID: strings.TrimSpace(r.Form.Get("template_id")), PresetID: strings.TrimSpace(r.Form.Get("generation_workflow")), ModelID: strings.TrimSpace(r.Form.Get("model")),
-		InputImage: strings.TrimSpace(r.Form.Get("input_image")), Positive: strings.TrimSpace(r.Form.Get("positive_prompt")),
+		InputImage: strings.TrimSpace(r.Form.Get("input_image")), InputAudio: strings.TrimSpace(r.Form.Get("input_audio")), Positive: strings.TrimSpace(r.Form.Get("positive_prompt")),
 		Negative: strings.TrimSpace(r.Form.Get("negative_prompt")), Width: width, Height: height, Steps: steps,
 		CFG: cfg, Denoise: denoise, Sampler: strings.TrimSpace(r.Form.Get("sampler")),
 		Scheduler: strings.TrimSpace(r.Form.Get("scheduler")), Seed: seed,
 		VideoMode: strings.TrimSpace(r.Form.Get("video_mode")), VideoResolution: strings.TrimSpace(r.Form.Get("video_resolution")), VideoAspect: strings.TrimSpace(r.Form.Get("video_aspect")), VideoQuality: videoQuality,
-		VideoDurationSeconds: videoDurationSeconds, VideoReferenceSize: strings.TrimSpace(r.Form.Get("video_reference_size")), VideoSteps: videoSteps,
+		VideoDurationSeconds: videoDurationSeconds, VideoReferenceSize: strings.TrimSpace(r.Form.Get("video_reference_size")), VideoSteps: videoSteps, VideoTurbo: r.Form.Get("video_turbo") == "true",
+		VideoScheduler: strings.TrimSpace(r.Form.Get("video_scheduler")), VideoShiftVideo: videoShiftVideo, VideoShiftAudio: videoShiftAudio,
+		VideoSageAttention: r.Form.Get("video_sage_attention") == "true", VideoClearVRAM: r.Form.Get("video_clear_vram") == "true",
+		VideoRIFEEnabled: r.Form.Get("video_rife_enabled") == "true", VideoRIFECheckpoint: strings.TrimSpace(r.Form.Get("video_rife_checkpoint")), VideoRIFEMultiplier: videoRIFEMultiplier,
+		VideoRIFEFastMode: r.Form.Get("video_rife_fast_mode") == "true", VideoRIFEEnsemble: r.Form.Get("video_rife_ensemble") == "true", VideoRIFEDtype: strings.TrimSpace(r.Form.Get("video_rife_dtype")), VideoRIFECompile: r.Form.Get("video_rife_compile") == "true", VideoRIFEBatchSize: videoRIFEBatchSize,
+		VideoRTXEnabled: r.Form.Get("video_rtx_enabled") == "true", VideoRTXScale: videoRTXScale, VideoRTXQuality: strings.TrimSpace(r.Form.Get("video_rtx_quality")),
+		VideoColorMatch: r.Form.Get("video_color_match") == "true", VideoColorMethod: strings.TrimSpace(r.Form.Get("video_color_method")), VideoColorStrength: videoColorStrength,
+		VideoAudioStart: videoAudioStart, VideoOutputCRF: videoOutputCRF,
 		AssistantRequested: r.Form.Get("assistant_requested") == "true", AssistantApplied: r.Form.Get("assistant_applied") == "true",
 		AssistantTemplate: strings.TrimSpace(r.Form.Get("assistant_template_used")), AssistantThink: r.Form.Get("assistant_think_used") == "true",
 		AssistantOriginal: strings.TrimSpace(r.Form.Get("assistant_original_prompt")), AssistantSuggestion: strings.TrimSpace(r.Form.Get("assistant_suggestion")),

@@ -9,6 +9,7 @@
     {{else}}
       <p class="muted">Укажите данные новой учётной записи.</p>
       <p class="access-preview">Доступ: {{if .Access.GrantQuickGeneration}}<span class="badge ok">Быстрая генерация</span>{{end}} {{if .Access.GrantComfyUI}}<span class="badge">ComfyUI</span>{{end}} {{if .Access.GrantOpenWebUI}}<span class="badge">OpenWebUI</span>{{end}}</p>
+      {{if gt .Access.AccountLifetimeSeconds 0}}<p class="access-note">Это временная учётная запись. Доступ будет удалён через {{accountLifetimeLabel .Access.AccountLifetimeSeconds}} после регистрации; история и медиа сохранятся на обычный срок с пометкой об удалённом пользователе.</p>{{end}}
       {{if .Access.GrantQuickGeneration}}<p class="muted">Лимиты быстрых генераций: {{if gt .Access.GenerationDailyLimit 0}}{{.Access.GenerationDailyLimit}} в сутки{{else}}без суточного лимита{{end}}, {{if gt .Access.GenerationTotalLimit 0}}{{.Access.GenerationTotalLimit}} всего{{else}}без общего лимита{{end}}.</p>{{end}}
       {{if .Error}}<p class="alert">{{.Error}}</p>{{end}}
       <form method="post">

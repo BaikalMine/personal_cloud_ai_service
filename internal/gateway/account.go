@@ -177,6 +177,10 @@ func (a *App) handleAccountQuickGenerationPriority(w http.ResponseWriter, r *htt
 		return
 	}
 	a.audit(r.Context(), &user.ID, "admin_quick_generation_priority_updated", "user", &user.ID, a.clientIP(r), r.UserAgent(), map[string]any{"enabled": enabled})
+	if strings.Contains(r.Header.Get("Accept"), "application/json") {
+		writeJSON(w, http.StatusOK, map[string]any{"enabled": enabled})
+		return
+	}
 	http.Redirect(w, r, "/app", http.StatusSeeOther)
 }
 
