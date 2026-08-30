@@ -271,7 +271,7 @@
       miniMaxVideoSampler.disabled = integratedTurbo || turbo;
     }
     if (miniMaxVideoModeHint && referenceOnly) {
-      miniMaxVideoModeHint.textContent = "Eros Max использует только REF2VA. Добавьте фото, видео или аудио как референс.";
+      miniMaxVideoModeHint.textContent = "Выбрано: Eros Max переносит детали только из референсов. Добавьте хотя бы одно фото, видео или аудио.";
     }
     if (!miniMaxVideoResolutionPreview) return;
     const quality = Number(miniMaxVideoQuality?.value);
@@ -1500,9 +1500,9 @@
     if (referenceOnly && miniMaxMode() !== "references") setMiniMaxMode("references");
     if (miniMaxVideoModeHint) miniMaxVideoModeHint.textContent = miniMaxMode() === "references"
       ? referenceOnly
-        ? "Eros Max использует только REF2VA. Добавьте фото, видео или аудио как референс."
-        : "Фото, видео и звук здесь служат смысловыми ориентирами, а не фиксированными кадрами."
-      : "Без фото работает T2VA. Фото 1 задаёт точный первый кадр, Фото 2 — точный последний.";
+        ? "Выбрано: Eros Max переносит детали только из референсов. Добавьте хотя бы одно фото, видео или аудио."
+        : "Выбрано: файлы задают внешность, предметы, стиль, движение или звук, но не фиксируют начало и финал ролика."
+      : "Выбрано: без фото — ролик по промту; Фото 1 задаёт начало; Фото 2 — точный финал.";
     syncImageSlots();
     syncMiniMaxAudioReference();
     updateWorkflowNext();

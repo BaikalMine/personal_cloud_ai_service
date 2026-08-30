@@ -58,10 +58,32 @@
       </div>
       <p class="generation-model-note" id="generation-workflow-note" hidden>Для выбранного сценария пока нет готовой схемы генерации.</p>
       <section class="minimax-video-mode" id="minimax-video-mode" hidden>
-        <div class="minimax-mode-heading"><div><span>Режим видео</span><strong>Как MiniMax H3 использует исходные материалы</strong></div><small id="minimax-video-mode-hint">Без фото создаётся видео из текста. Одно фото становится точным первым кадром, два фото — первым и последним.</small></div>
-        <div class="minimax-mode-segments" role="radiogroup" aria-label="Режим MiniMax H3">
-          <label><input type="radio" name="video_mode" value="frames" checked><span><b>Ключевые кадры</b><small>T2VA · I2VA · FL2VA</small></span></label>
-          <label><input type="radio" name="video_mode" value="references"><span><b>Референсы</b><small>REF2VA · фото, видео и звук</small></span></label>
+        <div class="minimax-mode-heading"><div><span>Способ создания</span><strong>Что должно управлять роликом?</strong></div><small id="minimax-video-mode-hint" aria-live="polite">Выбрано: без фото — ролик по промту; Фото 1 задаёт начало; Фото 2 — точный финал.</small></div>
+        <div class="minimax-mode-segments" role="radiogroup" aria-label="Способ создания видео MiniMax H3">
+          <label>
+            <input type="radio" name="video_mode" value="frames" aria-describedby="minimax-video-mode-hint" checked>
+            <span class="minimax-mode-option">
+              <span class="minimax-mode-option-head"><b>Создать сцену по тексту или кадрам</b><em>0–2 фото</em></span>
+              <small>Вы задаёте начало и, при необходимости, точный финал ролика.</small>
+              <span class="minimax-mode-cases">
+                <span><b>Без фото</b><small>Видео только по промту</small></span>
+                <span><b>1 фото</b><small>Оживить первый кадр</small></span>
+                <span><b>2 фото</b><small>Перейти от первого кадра к последнему</small></span>
+              </span>
+            </span>
+          </label>
+          <label>
+            <input type="radio" name="video_mode" value="references" aria-describedby="minimax-video-mode-hint">
+            <span class="minimax-mode-option">
+              <span class="minimax-mode-option-head"><b>Перенести детали из референсов</b><em>1–4 фото + медиа</em></span>
+              <small>Модель берёт нужные признаки, но не считает файлы точными начальным и финальным кадрами.</small>
+              <span class="minimax-mode-cases">
+                <span><b>Фото</b><small>Внешность, одежда, предметы и стиль</small></span>
+                <span><b>Видео</b><small>Движение, сцена или ритм</small></span>
+                <span><b>Аудио</b><small>Голос, музыка или окружение</small></span>
+              </span>
+            </span>
+          </label>
         </div>
         <section class="minimax-reference-media" id="minimax-reference-media" hidden>
           <div class="minimax-reference-media-grid">

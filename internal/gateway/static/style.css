@@ -816,15 +816,22 @@ code { color: var(--cyan); }
 .minimax-mode-heading strong { color: var(--text); font-size: 14px; }
 .minimax-mode-heading > small { max-width: 540px; color: var(--muted); font-size: 11px; line-height: 1.5; text-align: right; }
 .minimax-mode-segments { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
-.minimax-mode-segments label { position: relative; min-width: 0; margin: 0; cursor: pointer; }
-.minimax-mode-segments input { position: absolute; opacity: 0; pointer-events: none; }
-.minimax-mode-segments span { min-height: 70px; display: grid; align-content: center; gap: 4px; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-input); }
-.minimax-mode-segments b { color: var(--text); font-size: 13px; }
-.minimax-mode-segments small { color: var(--muted); font-size: 11px; }
-.minimax-mode-segments input:checked + span { border-color: var(--mint); background: #132b24; box-shadow: inset 3px 0 0 var(--mint); }
-.minimax-mode-segments input:checked + span b { color: #c8f5e4; }
-.minimax-mode-segments input:focus-visible + span { outline: 2px solid rgba(85,199,216,.35); outline-offset: 2px; }
-.minimax-mode-segments input:disabled + span { opacity: .45; cursor: not-allowed; }
+.minimax-mode-segments > label { position: relative; min-width: 0; margin: 0; cursor: pointer; }
+.minimax-mode-segments > label > input { position: absolute; opacity: 0; pointer-events: none; }
+.minimax-mode-option { min-height: 196px; display: grid; align-content: start; gap: 7px; padding: 15px 16px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-input); transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease; }
+.minimax-mode-option-head { min-width: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.minimax-mode-option-head b { color: var(--text); font-size: 13px; line-height: 1.35; }
+.minimax-mode-option-head em { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; color: var(--cyan); font-size: 9px; font-style: normal; font-weight: 800; line-height: 1.2; text-transform: uppercase; }
+.minimax-mode-option > small { min-height: 34px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.minimax-mode-cases { display: grid; margin-top: 2px; border-top: 1px solid var(--line); }
+.minimax-mode-cases > span { min-width: 0; display: grid; grid-template-columns: 76px minmax(0, 1fr); align-items: baseline; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.minimax-mode-cases > span:last-child { border-bottom: 0; }
+.minimax-mode-cases b { color: var(--text); font-size: 10px; }
+.minimax-mode-cases small { color: var(--muted); font-size: 10px; line-height: 1.35; }
+.minimax-mode-segments > label > input:checked + .minimax-mode-option { border-color: var(--mint); background: #132b24; box-shadow: inset 3px 0 0 var(--mint); }
+.minimax-mode-segments > label > input:checked + .minimax-mode-option .minimax-mode-option-head b { color: #c8f5e4; }
+.minimax-mode-segments > label > input:focus-visible + .minimax-mode-option { outline: 2px solid rgba(85,199,216,.35); outline-offset: 2px; }
+.minimax-mode-segments > label > input:disabled + .minimax-mode-option { opacity: .45; cursor: not-allowed; }
 .minimax-reference-media { padding-top: 2px; }
 .minimax-reference-media-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .minimax-media-card { min-width: 0; display: grid; align-content: start; gap: 9px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-raised); }
@@ -1640,7 +1647,8 @@ td { vertical-align: middle; }
   .minimax-mode-heading { align-items: stretch; flex-direction: column; gap: 7px; }
   .minimax-mode-heading > small { max-width: none; text-align: left; }
   .minimax-mode-segments { grid-template-columns: 1fr; }
-  .minimax-mode-segments span { min-height: 62px; }
+  .minimax-mode-option { min-height: 0; }
+  .minimax-mode-option-head { align-items: flex-start; }
   .minimax-video-upload-preview { grid-template-columns: 88px minmax(0, 1fr) 30px; }
   .minimax-video-upload-preview video { width: 88px; height: 68px; }
   .video-enhancement-toggle { align-items: flex-start; padding: 13px 0; }
