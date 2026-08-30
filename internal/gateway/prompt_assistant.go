@@ -97,7 +97,7 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	var result string
 	if profile == promptassistant.ProfileMiniMaxH3 {
-		video, contextErr := promptAssistantVideoContext(r, mode)
+		video, contextErr := promptAssistantVideoContext(r, mode, len(references))
 		if contextErr != nil {
 			writeGenerationError(w, http.StatusBadRequest, contextErr.Error())
 			return
@@ -139,7 +139,7 @@ func promptAssistantTemplateID(mode promptassistant.Mode) string {
 	}
 }
 
-func promptAssistantVideoContext(r *http.Request, mode promptassistant.Mode) (promptassistant.VideoContext, error) {
+func promptAssistantVideoContext(r *http.Request, mode promptassistant.Mode, imageCount int) (promptassistant.VideoContext, error) {
 	if mode != promptassistant.ModeTextToVideo {
 		return promptassistant.VideoContext{}, fmt.Errorf("шаблон MiniMax H3 доступен только для видео")
 	}
@@ -158,13 +158,8 @@ func promptAssistantVideoContext(r *http.Request, mode promptassistant.Mode) (pr
 		}
 		duration = value
 	}
-	imageCount := 0
-	if raw := strings.TrimSpace(r.Form.Get("video_image_count")); raw != "" {
-		value, err := strconv.Atoi(raw)
-		if err != nil || value < 0 || value > 4 {
-			return promptassistant.VideoContext{}, fmt.Errorf("некорректное количество фото MiniMax H3")
-		}
-		imageCount = value
+	if imageCount < 0 || imageCount > 4 {
+		return promptassistant.VideoContext{}, fmt.Errorf("некорректное количество фото MiniMax H3")
 	}
 	if videoMode == "frames" && imageCount > 2 {
 		return promptassistant.VideoContext{}, fmt.Errorf("в режиме кадров MiniMax H3 доступно до двух фото")
@@ -184,9 +179,6 @@ func promptAssistantVideoContext(r *http.Request, mode promptassistant.Mode) (pr
 	videoReference := videoValue == "true"
 	if videoReference && videoMode != "references" {
 		return promptassistant.VideoContext{}, fmt.Errorf("видеореференс MiniMax H3 доступен только в режиме референсов")
-	}
-	if videoMode == "references" && imageCount == 0 && !audioReference && !videoReference {
-		return promptassistant.VideoContext{}, fmt.Errorf("для режима референсов добавьте фото, видео или аудио")
 	}
 	return promptassistant.VideoContext{Mode: videoMode, DurationSeconds: duration, ImageCount: imageCount, AudioReference: audioReference, VideoReference: videoReference}, nil
 }
@@ -221,7 +213,13 @@ func (a *App) promptAssistantImageReferences(ctx context.Context, userID int64, 
 		if totalBytes > maxPromptAssistantReferenceBytes {
 			return nil, fmt.Errorf("общий размер изображений для ассистента превышает 64 МБ")
 		}
-		references = append(references, promptassistant.ImageReference{Number: number, Role: role, MIMEType: mimeType, Image: image})
+		referenceNumber := number
+		if mode == promptassistant.ModeTextToVideo {
+			// MiniMax numbers only the references that actually reach the node.
+			// Keep the assistant's <Picture N> identifiers in that same order.
+			referenceNumber = len(references) + 1
+		}
+		references = append(references, promptassistant.ImageReference{Number: referenceNumber, Role: role, MIMEType: mimeType, Image: image})
 	}
 	return references, nil
 }

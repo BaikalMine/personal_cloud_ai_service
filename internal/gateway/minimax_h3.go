@@ -274,9 +274,6 @@ func normalizeMiniMaxH3(input *generationForm) error {
 	if input.VideoMode == miniMaxH3ReferenceMode && input.imageCount() > 4 {
 		return errors.New("MiniMax H3 поддерживает до четырёх фото-референсов")
 	}
-	if input.VideoMode == miniMaxH3ReferenceMode && input.imageCount() == 0 && strings.TrimSpace(input.InputAudio) == "" && strings.TrimSpace(input.InputVideo) == "" {
-		return errors.New("для режима референсов добавьте фото, видео или аудио")
-	}
 	if input.VideoColorMatch && input.imageCount() == 0 {
 		return errors.New("для ColorMatch добавьте хотя бы одно фото")
 	}

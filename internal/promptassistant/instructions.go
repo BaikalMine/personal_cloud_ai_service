@@ -213,7 +213,7 @@ func SystemPromptWithVideoContextAndReferences(mode Mode, profile Profile, refer
 func systemPrompt(mode Mode, profile Profile, references []ImageReference, video VideoContext) string {
 	if mode == ModeTextToVideo && profile == ProfileMiniMaxH3 {
 		prompt := miniMaxH3Instruction + "\n\n" + miniMaxH3FormatInstruction(video)
-		prompt += miniMaxH3ReferenceMapInstruction(references)
+		prompt += miniMaxH3ReferenceMapInstruction(references, video)
 		prompt += minorSafetyInstruction
 		return strings.TrimSpace(prompt)
 	}
@@ -246,7 +246,7 @@ func systemPrompt(mode Mode, profile Profile, references []ImageReference, video
 	return strings.TrimSpace(prompt)
 }
 
-func miniMaxH3ReferenceMapInstruction(references []ImageReference) string {
+func miniMaxH3ReferenceMapInstruction(references []ImageReference, context VideoContext) string {
 	if len(references) == 0 {
 		return ""
 	}
@@ -257,10 +257,23 @@ func miniMaxH3ReferenceMapInstruction(references []ImageReference) string {
 		if reference.Number < 1 || reference.Number > 4 || !ValidImageReferenceRole(reference.Role) {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("- <Picture %d> (image %d): %s", reference.Number, reference.Number, referenceRoleInstruction(reference.Role)))
+		if context.Mode == "references" {
+			lines = append(lines, fmt.Sprintf("- <Picture %d> (attached image %d): %s", reference.Number, reference.Number, referenceRoleInstruction(reference.Role)))
+			continue
+		}
+		frameRole := "the exact opening frame"
+		if reference.Number == 2 {
+			frameRole = "the exact final frame"
+		}
+		lines = append(lines, fmt.Sprintf("- <Picture %d> (attached image %d): %s", reference.Number, reference.Number, frameRole))
 	}
 	if len(lines) == 0 {
 		return ""
+	}
+	if context.Mode != "references" {
+		return "\n\nThe attached keyframes are:\n" + strings.Join(lines, "\n") + `
+
+Inspect every attached keyframe before writing. Ground the opening in the exact visible subject, clothing, pose, framing, setting, lighting, and composition of <Picture 1>. When <Picture 2> is supplied, make the action reach its exact visible subject state, pose, framing, setting, lighting, and composition at the final moment. Do not treat either keyframe as a loose style reference and do not invent a visual detail that contradicts it.`
 	}
 	return "\n\nThe attached pictures and their declared roles are:\n" + strings.Join(lines, "\n") + `
 
@@ -277,24 +290,28 @@ func miniMaxH3FormatInstruction(context VideoContext) string {
 		imageCount = 0
 	}
 	if context.Mode == "references" {
-		audioReference := "No standalone audio reference is attached."
+		audioReference := "No standalone audio reference is attached; do not use an <Audio N> identifier."
 		if context.AudioReference {
-			audioReference = "One standalone <Audio 1> reference is attached. State only the audio role explicitly requested by the user; never claim to hear or transcribe its contents."
+			audioReference = "One standalone <Audio 1> reference is attached and will be passed to MiniMax. When the user assigns it as a voice, music, or ambience reference, bind that exact role to <Audio 1> in the prompt. Never claim to hear, identify, or transcribe details that the user did not provide."
 		}
-		videoReference := "No <Video 1> reference is attached."
+		videoReference := "No <Video 1> reference is attached; do not use a <Video N> identifier."
 		if context.VideoReference {
-			videoReference = "One <Video 1> reference is attached. Use the exact <Video 1> identifier when the user's request assigns it a motion, scene, or timing role; never claim to inspect details that are not supplied in the user's text."
+			videoReference = "One <Video 1> reference is attached and will be passed to MiniMax. Use the exact <Video 1> identifier when the user's request assigns it a motion, scene, camera, or timing role; never claim to inspect details that are not supplied in the user's text."
 		}
-		return fmt.Sprintf(`The selected mode is Ref2VA with %d declared image reference(s). Use exactly this structure:
+		retentionInstruction := "Write N/A - no reference media supplied. Do not invent <Picture N>, <Video N>, or <Audio N> identifiers."
+		if imageCount > 0 || context.AudioReference || context.VideoReference {
+			retentionInstruction = "State separately what every supplied <Picture N>, <Video 1>, and <Audio 1> contributes. Use only identifiers for media that is actually attached."
+		}
+		return fmt.Sprintf(`The selected mode is prompt-driven Ref2VA with %d attached image reference(s). Reference files are optional; this workflow remains valid with no media. Use exactly this structure:
 
 subject_definitions:
-<Subject 1>: define only the identity and attributes the user explicitly supplied.
+Define the important subjects required by the user's request. When a person is present, identify the first person as <Subject 1> and ground visible attributes in the supplied pictures.
 
 summary:
 [reference generation] one concise chronological summary.
 
 retention_analysis:
-State what each supplied <Picture N> contributes, without claiming unseen details. %s %s
+%s %s %s
 
 detailed_description:
 Write the full %d-second chronological shot description.
@@ -303,7 +320,7 @@ overall_soundscape:
 Describe ambience and synchronized physical sounds only.
 
 non_diegetic_music:
-N/A unless requested.`, imageCount, audioReference, videoReference, duration)
+N/A unless requested.`, imageCount, retentionInstruction, audioReference, videoReference, duration)
 	}
 	if imageCount >= 2 {
 		return fmt.Sprintf(`The selected mode is FL2VA. Picture 1 is the exact opening frame and Picture 2 is the exact final frame. Begin exactly with:

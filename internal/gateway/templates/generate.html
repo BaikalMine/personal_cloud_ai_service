@@ -58,28 +58,28 @@
       </div>
       <p class="generation-model-note" id="generation-workflow-note" hidden>Для выбранного сценария пока нет готовой схемы генерации.</p>
       <section class="minimax-video-mode" id="minimax-video-mode" hidden>
-        <div class="minimax-mode-heading"><div><span>Способ создания</span><strong>Что должно управлять роликом?</strong></div><small id="minimax-video-mode-hint" aria-live="polite">Выбрано: без фото — ролик по промту; Фото 1 задаёт начало; Фото 2 — точный финал.</small></div>
+        <div class="minimax-mode-heading"><div><span>Способ создания</span><strong>Как использовать загруженные материалы?</strong></div><small id="minimax-video-mode-hint" aria-live="polite">Выбрано: ролик строится по промту; Фото 1 и Фото 2 при наличии фиксируют точные начало и финал.</small></div>
         <div class="minimax-mode-segments" role="radiogroup" aria-label="Способ создания видео MiniMax H3">
           <label>
             <input type="radio" name="video_mode" value="frames" aria-describedby="minimax-video-mode-hint" checked>
             <span class="minimax-mode-option">
-              <span class="minimax-mode-option-head"><b>Создать сцену по тексту или кадрам</b><em>0–2 фото</em></span>
-              <small>Вы задаёте начало и, при необходимости, точный финал ролика.</small>
+              <span class="minimax-mode-option-head"><b>Промт + точные кадры</b><em>0–2 фото</em></span>
+              <small>Промт задаёт действие и звук. Фото при наличии фиксируют границы ролика.</small>
               <span class="minimax-mode-cases">
-                <span><b>Без фото</b><small>Видео только по промту</small></span>
-                <span><b>1 фото</b><small>Оживить первый кадр</small></span>
-                <span><b>2 фото</b><small>Перейти от первого кадра к последнему</small></span>
+                <span><b>0 фото</b><small>Ролик целиком по промту</small></span>
+                <span><b>1 фото</b><small>Точный первый кадр</small></span>
+                <span><b>2 фото</b><small>Точные начало и финал</small></span>
               </span>
             </span>
           </label>
           <label>
             <input type="radio" name="video_mode" value="references" aria-describedby="minimax-video-mode-hint">
             <span class="minimax-mode-option">
-              <span class="minimax-mode-option-head"><b>Перенести детали из референсов</b><em>1–4 фото + медиа</em></span>
-              <small>Модель берёт нужные признаки, но не считает файлы точными начальным и финальным кадрами.</small>
+              <span class="minimax-mode-option-head"><b>Промт + свободные референсы</b><em>Файлы необязательны</em></span>
+              <small>Промт задаёт ролик. Файлы помогают сохранить нужные признаки, движение или звук.</small>
               <span class="minimax-mode-cases">
-                <span><b>Фото</b><small>Внешность, одежда, предметы и стиль</small></span>
-                <span><b>Видео</b><small>Движение, сцена или ритм</small></span>
+                <span><b>0–4 фото</b><small>Внешность, одежда, предметы и стиль</small></span>
+                <span><b>Видео</b><small>Движение, сцена или работа камеры</small></span>
                 <span><b>Аудио</b><small>Голос, музыка или окружение</small></span>
               </span>
             </span>
@@ -167,10 +167,10 @@
           <summary><span>MiniMax H3 v4: как собрать ролик</span><small>Режим, исходники, промт, память и финальная обработка без терминологии нод.</small></summary>
           <div class="workflow-mini-guide-grid">
             <section><strong>Ключевые кадры: T2VA, I2VA, FL2VA</strong><p>Без фото модель строит ролик только по тексту. Фото 1 становится точным первым кадром. Фото 1 и Фото 2 задают точные начало и финал, поэтому промт должен описывать один достижимый переход между ними.</p></section>
-            <section><strong>Референсы: REF2VA</strong><p>Фото здесь не фиксируют первый кадр: они передают внешность, одежду, предметы, стиль или сцену. Можно приложить до четырёх фото, одно видео и отдельное аудио. В промте они обозначаются как <code>&lt;Picture 1&gt;</code>, <code>&lt;Video 1&gt;</code> и <code>&lt;Audio 1&gt;</code>.</p></section>
+            <section><strong>Свободные референсы: REF2VA</strong><p>Этот режим тоже создаёт видео по промту и может работать без файлов. До четырёх фото передают внешность, одежду, предметы, стиль или сцену; видео — движение и работу камеры; аудио — голос, музыку или окружение. Они обозначаются как <code>&lt;Picture 1&gt;</code>, <code>&lt;Video 1&gt;</code> и <code>&lt;Audio 1&gt;</code>.</p></section>
             <section><strong>Размер кадра</strong><p>При наличии Фото 1 его пропорции используются по умолчанию. Качество 480–1440 ограничивает длинную сторону, а обе стороны выравниваются до 32 px. Без фото выберите формат кадра вручную.</p></section>
             <section><strong>Модели и Turbo</strong><p>FL2VA используется для текста и ключевых кадров, REF2VA — для мультимодальных референсов. Qwen MiniMax CLIP и обе VAE выбираются автоматически. Внешний Turbo опционален; Eros Max уже содержит Turbo и работает только через REF2VA.</p></section>
-            <section><strong>Промт-ассистент</strong><p>Для видео доступен отдельный MiniMax H3 ассистент. Он анализирует все загруженные фото, учитывает выбранный режим и длительность, затем возвращает один редактируемый Context-IR. Для видеореференса явно опишите, какое движение или сцену брать.</p></section>
+            <section><strong>Промт-ассистент</strong><p>Ассистент получает тот же режим и тот же порядок фото, что MiniMax: точные первый и последний кадры либо свободные <code>&lt;Picture 1–4&gt;</code>. Он анализирует каждое фото и собирает один редактируемый Context-IR. Для <code>&lt;Video 1&gt;</code> и <code>&lt;Audio 1&gt;</code> явно напишите, что брать: движение, сцену, голос, музыку или окружение.</p></section>
             <section><strong>Длительность и память</strong><p>5–15 секунд — основной проверенный диапазон; более длинные ролики экспериментальны и заметно тяжелее. Memory Optimization и поэтапная очистка VRAM оставлены включёнными. При артефактах сначала отключайте Sparse Attention.</p></section>
             <section><strong>RIFE, RTX и Sharpen</strong><p>RIFE добавляет промежуточные кадры, RTX увеличивает разрешение, Sharpen подчёркивает детали. Они выполняются именно в таком порядке. Все этапы опциональны: сначала получите удачный базовый ролик, затем включайте нужные улучшения.</p></section>
             <section><strong>Звук и экспорт</strong><p>MiniMax генерирует финальную аудиодорожку вместе с видео. Аудиофайл или звук видеореференса задают ориентир только в REF2VA. Gateway сохраняет H.264 с yuv420p, чтобы ролик открывался в браузере и на Android.</p></section>

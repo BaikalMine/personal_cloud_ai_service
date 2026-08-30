@@ -1614,6 +1614,31 @@ func TestMiniMaxH3SupportsTextToVideoWithoutFirstFrame(t *testing.T) {
 	}
 }
 
+func TestMiniMaxH3SupportsPromptOnlyReferenceMode(t *testing.T) {
+	definitions, err := loadWorkflowDefinitions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition, _ := findWorkflow(definitions, "minimax-h3-video")
+	prompt, err := definition.buildPrompt(generationForm{
+		ModelName: "model", ReferenceModel: "reference", TextEncoder: "clip", VAE: "video-vae", AudioVAE: "audio-vae",
+		Positive: "a prompt-driven reference video", Width: 768, Height: 1344, Steps: 25, CFG: 1, Denoise: 1, Sampler: "euler", Scheduler: "simple",
+		VideoMode: miniMaxH3ReferenceMode, VideoResolution: "portrait", VideoDurationSeconds: 5, VideoSteps: 25,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := prompt["7"].(map[string]any)
+	if got, want := node["class_type"], "MiniMaxH3ReferenceToVideo"; got != want {
+		t.Fatalf("prompt-only reference node = %v, want %q", got, want)
+	}
+	for key := range node["inputs"].(map[string]any) {
+		if strings.HasPrefix(key, "ref_images.") || strings.HasPrefix(key, "ref_videos.") || strings.HasPrefix(key, "ref_audios.") {
+			t.Fatalf("prompt-only reference workflow unexpectedly contains %q", key)
+		}
+	}
+}
+
 func TestRequiresImageEditingSupport(t *testing.T) {
 	if !requiresImageEditingSupport(workflowDefinition{RequiresImage: true, Builder: "flux2_edit"}) {
 		t.Fatal("image-edit workflow must require dedicated image-edit support")

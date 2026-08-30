@@ -154,11 +154,11 @@ func TestEnhanceVideoUsesMiniMaxContextForReferenceAudio(t *testing.T) {
 			t.Fatal(err)
 		}
 		system := body.Messages[0].Content
-		if !strings.Contains(system, "Ref2VA with 3 declared image reference") ||
+		if !strings.Contains(system, "prompt-driven Ref2VA with 2 attached image reference") ||
 			!strings.Contains(system, "<Audio 1> reference is attached") ||
 			!strings.Contains(system, "<Video 1> reference is attached") ||
-			!strings.Contains(system, "<Picture 1> (image 1): the base scene") ||
-			!strings.Contains(system, "<Picture 2> (image 2): the person or character's identity") ||
+			!strings.Contains(system, "<Picture 1> (attached image 1): the base scene") ||
+			!strings.Contains(system, "<Picture 2> (attached image 2): the person or character's identity") ||
 			!strings.Contains(system, "at least three concrete visible attributes") ||
 			!strings.Contains(system, "define a human as <Subject 1>") ||
 			body.Options.NumPredict != miniMaxNumPredict || len(body.Messages[1].Images) != 2 || body.Messages[1].Images[0] != "aW1hZ2UtMQ==" || body.Messages[1].Images[1] != "aW1hZ2UtMg==" {
@@ -172,8 +172,64 @@ func TestEnhanceVideoUsesMiniMaxContextForReferenceAudio(t *testing.T) {
 		t.Fatal(err)
 	}
 	references := []ImageReference{{Number: 1, Role: ImageReferenceBaseScene, MIMEType: "image/png", Image: []byte("image-1")}, {Number: 2, Role: ImageReferenceIdentity, MIMEType: "image/webp", Image: []byte("image-2")}}
-	result, err := NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3, "a dancer turns", references, VideoContext{Mode: "references", DurationSeconds: 10, ImageCount: 3, AudioReference: true, VideoReference: true}, false)
+	result, err := NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3, "a dancer turns", references, VideoContext{Mode: "references", DurationSeconds: 10, ImageCount: 2, AudioReference: true, VideoReference: true}, false)
 	if err != nil || result != "summary: a concise video." {
+		t.Fatalf("result = %q, err = %v", result, err)
+	}
+}
+
+func TestEnhanceVideoUsesPromptOnlyRef2VAStructure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body chatRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		system := body.Messages[0].Content
+		if !strings.Contains(system, "prompt-driven Ref2VA with 0 attached image reference") ||
+			!strings.Contains(system, "Reference files are optional") ||
+			!strings.Contains(system, "N/A - no reference media supplied") ||
+			strings.Contains(system, "<Picture 1> (attached image") || len(body.Messages[1].Images) != 0 {
+			t.Fatalf("wrong prompt-only Ref2VA context: %#v", body)
+		}
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"summary: prompt-only Ref2VA."}}`))
+	}))
+	defer server.Close()
+	base, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3, "a quiet city at dawn", nil, VideoContext{Mode: "references", DurationSeconds: 5}, false)
+	if err != nil || result != "summary: prompt-only Ref2VA." {
+		t.Fatalf("result = %q, err = %v", result, err)
+	}
+}
+
+func TestEnhanceVideoGroundsExactFrameImages(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body chatRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		system := body.Messages[0].Content
+		if !strings.Contains(system, "The attached keyframes are") ||
+			!strings.Contains(system, "<Picture 1> (attached image 1): the exact opening frame") ||
+			!strings.Contains(system, "<Picture 2> (attached image 2): the exact final frame") ||
+			!strings.Contains(system, "Do not treat either keyframe as a loose style reference") || len(body.Messages[1].Images) != 2 {
+			t.Fatalf("wrong FL2VA visual context: %#v", body)
+		}
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"A grounded first-to-last-frame prompt."}}`))
+	}))
+	defer server.Close()
+	base, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	references := []ImageReference{
+		{Number: 1, Role: ImageReferenceBaseScene, MIMEType: "image/png", Image: []byte("first")},
+		{Number: 2, Role: ImageReferenceIdentity, MIMEType: "image/png", Image: []byte("last")},
+	}
+	result, err := NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3, "move from the first frame to the last", references, VideoContext{Mode: "frames", DurationSeconds: 10, ImageCount: 2}, false)
+	if err != nil || result != "A grounded first-to-last-frame prompt." {
 		t.Fatalf("result = %q, err = %v", result, err)
 	}
 }

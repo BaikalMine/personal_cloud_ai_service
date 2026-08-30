@@ -256,7 +256,7 @@
       : "Опциональная официальная LoRA v4: 4–8 шагов для быстрых проб.";
     if (miniMaxVideoModelProfile) miniMaxVideoModelProfile.textContent = integratedTurbo
       ? "H3 Eros Max beta4 · только reference-путь · встроенный Turbo · Euler · 6–8 шагов · Sigma 12 / 7."
-      : "MiniMax H3 FL2VA · кадры или референсы · внешний Turbo опционален · 20–25 шагов без Turbo.";
+      : "MiniMax H3 v4 · FL2VA для точных кадров, REF2VA для свободных референсов · Turbo опционален.";
     const turbo = !integratedTurbo && Boolean(miniMaxVideoTurbo?.checked);
     if (miniMaxVideoSteps) {
       miniMaxVideoSteps.min = integratedTurbo ? "6" : turbo ? "4" : "20";
@@ -271,7 +271,7 @@
       miniMaxVideoSampler.disabled = integratedTurbo || turbo;
     }
     if (miniMaxVideoModeHint && referenceOnly) {
-      miniMaxVideoModeHint.textContent = "Выбрано: Eros Max переносит детали только из референсов. Добавьте хотя бы одно фото, видео или аудио.";
+      miniMaxVideoModeHint.textContent = "Выбрано: Eros Max использует REF2VA. Ролик строится по промту; фото, видео и аудио необязательны.";
     }
     if (!miniMaxVideoResolutionPreview) return;
     const quality = Number(miniMaxVideoQuality?.value);
@@ -905,7 +905,7 @@
     const note = document.getElementById("image-source-note");
     if (isMiniMax && note) {
       note.textContent = referenceMode
-        ? "Добавьте любой набор референсов: до четырёх фото, видео и/или аудио. Для каждого фото можно указать его роль."
+        ? "Файлы необязательны. Можно добавить до четырёх фото, видео и/или аудио; для каждого фото укажите его роль."
         : "Фото необязательны: без них работает текст в видео. Фото 1 задаёт первый кадр, Фото 2 — последний.";
       syncReferenceMap();
       syncMiniMaxAudioReference();
@@ -940,14 +940,12 @@
     const primary = imageSlots[0];
     const hasImage = Boolean(selectedImageFile(primary) || uploadedImages.get(1));
     const needsImage = requiresImage;
-    const needsReference = isMiniMaxSelected() && miniMaxMode() === "references";
-    const hasReference = hasImage || imageSlots.some((item) => selectedImageFile(item) || uploadedImages.get(item.index)) || Boolean(miniMaxAudioFile?.files?.[0] || uploadedAudio || miniMaxVideoFile?.files?.[0] || uploadedVideo);
     const hasPendingUploads = imageSlots.some((item) => (
       item.index <= activeMaxInputImages()
       && Boolean(selectedImageFile(item))
       && !uploadedImages.get(item.index)
     )) || hasPendingMiniMaxAudio() || hasPendingMiniMaxVideo();
-    workflowNext.disabled = !hasWorkflow || (needsImage && !hasImage) || (needsReference && !hasReference);
+    workflowNext.disabled = !hasWorkflow || (needsImage && !hasImage);
     if (!needsImage && !hasPendingUploads) {
       workflowNext.textContent = "Продолжить";
     } else if (hasPendingUploads) {
@@ -1016,8 +1014,7 @@
     syncMiniMaxSharpenFields();
     if (openStep) {
       const needsImage = selectedChoice()?.dataset.requiresImage === "true";
-      const needsReference = selectedGenerationWorkflow()?.dataset.family === "minimax_h3" && miniMaxMode() === "references";
-      showStep((needsImage && !uploadedImages.get(1)) || (needsReference && !uploadedImages.size && !uploadedAudio && !uploadedVideo) ? 2 : 3);
+      showStep(needsImage && !uploadedImages.get(1) ? 2 : 3);
     }
     return Boolean(selectedChoice() && selectedGenerationWorkflow());
   };
@@ -1433,7 +1430,6 @@
       if (mode === "minimax-h3-video") {
         body.set("video_mode", miniMaxMode());
         body.set("video_duration_seconds", form.elements.video_duration_seconds?.value || "5");
-        body.set("video_image_count", String([...uploadedImages.keys()].filter((index) => index <= activeMaxInputImages()).length));
         body.set("video_has_audio", miniMaxAudioIsAvailable() && uploadedAudio ? "true" : "false");
         body.set("video_has_video", miniMaxReferencesAreAvailable() && uploadedVideo ? "true" : "false");
       }
@@ -1500,9 +1496,9 @@
     if (referenceOnly && miniMaxMode() !== "references") setMiniMaxMode("references");
     if (miniMaxVideoModeHint) miniMaxVideoModeHint.textContent = miniMaxMode() === "references"
       ? referenceOnly
-        ? "Выбрано: Eros Max переносит детали только из референсов. Добавьте хотя бы одно фото, видео или аудио."
-        : "Выбрано: файлы задают внешность, предметы, стиль, движение или звук, но не фиксируют начало и финал ролика."
-      : "Выбрано: без фото — ролик по промту; Фото 1 задаёт начало; Фото 2 — точный финал.";
+        ? "Выбрано: Eros Max использует REF2VA. Ролик строится по промту; фото, видео и аудио необязательны."
+        : "Выбрано: ролик строится по промту; фото, видео и аудио при наличии используются как свободные референсы."
+      : "Выбрано: ролик строится по промту; Фото 1 и Фото 2 при наличии фиксируют точные начало и финал.";
     syncImageSlots();
     syncMiniMaxAudioReference();
     updateWorkflowNext();
@@ -1648,10 +1644,7 @@
   workflowNext?.addEventListener("click", async () => {
     if (!generationWorkflowID.value) return;
     const requiresPrimary = requiresImage;
-    const requiresReference = isMiniMaxSelected() && miniMaxMode() === "references";
     const selectedSlots = imageSlots.filter((item) => item.index <= activeMaxInputImages() && selectedImageFile(item));
-    const selectedReferenceMedia = Boolean(selectedSlots.length || miniMaxAudioFile?.files?.[0] || uploadedAudio || miniMaxVideoFile?.files?.[0] || uploadedVideo);
-    if (requiresReference && !selectedReferenceMedia) return;
     if (!selectedSlots.length && !requiresPrimary && !hasPendingMiniMaxAudio() && !hasPendingMiniMaxVideo()) {
       showStep(3);
       positive?.focus({ preventScroll: true });

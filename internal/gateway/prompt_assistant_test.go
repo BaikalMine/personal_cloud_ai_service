@@ -39,15 +39,15 @@ func TestPromptAssistantImageReferencesRejectsUnknownRole(t *testing.T) {
 func TestPromptAssistantVideoContextAcceptsReferenceAudioOnlyInReferenceMode(t *testing.T) {
 	referenceRequest := httptest.NewRequest("POST", "/generate/prompt-assistant", nil)
 	referenceRequest.Form = map[string][]string{
-		"video_mode": {"references"}, "video_duration_seconds": {"10"}, "video_image_count": {"3"}, "video_has_audio": {"true"}, "video_has_video": {"true"},
+		"video_mode": {"references"}, "video_duration_seconds": {"10"}, "video_has_audio": {"true"}, "video_has_video": {"true"},
 	}
-	context, err := promptAssistantVideoContext(referenceRequest, promptassistant.ModeTextToVideo)
+	context, err := promptAssistantVideoContext(referenceRequest, promptassistant.ModeTextToVideo, 3)
 	if err != nil || !context.AudioReference || !context.VideoReference || context.ImageCount != 3 || context.DurationSeconds != 10 {
 		t.Fatalf("context = %#v, err = %v", context, err)
 	}
 	frameRequest := httptest.NewRequest("POST", "/generate/prompt-assistant", nil)
 	frameRequest.Form = map[string][]string{"video_mode": {"frames"}, "video_has_audio": {"true"}}
-	if _, err := promptAssistantVideoContext(frameRequest, promptassistant.ModeTextToVideo); err == nil {
+	if _, err := promptAssistantVideoContext(frameRequest, promptassistant.ModeTextToVideo, 0); err == nil {
 		t.Fatal("frame mode must reject a standalone audio reference")
 	}
 }
@@ -55,10 +55,19 @@ func TestPromptAssistantVideoContextAcceptsReferenceAudioOnlyInReferenceMode(t *
 func TestPromptAssistantVideoContextSupportsTextToVideoWithoutImages(t *testing.T) {
 	request := httptest.NewRequest("POST", "/generate/prompt-assistant", nil)
 	request.Form = map[string][]string{
-		"video_mode": {"frames"}, "video_duration_seconds": {"60"}, "video_image_count": {"0"},
+		"video_mode": {"frames"}, "video_duration_seconds": {"60"},
 	}
-	context, err := promptAssistantVideoContext(request, promptassistant.ModeTextToVideo)
+	context, err := promptAssistantVideoContext(request, promptassistant.ModeTextToVideo, 0)
 	if err != nil || context.ImageCount != 0 || context.DurationSeconds != 60 {
+		t.Fatalf("context = %#v, err = %v", context, err)
+	}
+}
+
+func TestPromptAssistantVideoContextSupportsPromptOnlyReferenceMode(t *testing.T) {
+	request := httptest.NewRequest("POST", "/generate/prompt-assistant", nil)
+	request.Form = map[string][]string{"video_mode": {"references"}}
+	context, err := promptAssistantVideoContext(request, promptassistant.ModeTextToVideo, 0)
+	if err != nil || context.Mode != miniMaxH3ReferenceMode || context.ImageCount != 0 || context.AudioReference || context.VideoReference {
 		t.Fatalf("context = %#v, err = %v", context, err)
 	}
 }
