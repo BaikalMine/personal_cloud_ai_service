@@ -24,6 +24,7 @@ type User struct {
 	GenerationTotalUsed           int64
 	FailedLoginCount              int
 	LockedUntil                   sql.NullTime
+	AccountExpiresAt              sql.NullTime
 	CreatedAt                     time.Time
 	LastLoginAt                   sql.NullTime
 }
@@ -90,6 +91,7 @@ type UserRow struct {
 	GenerationTotalUsed           int64
 	FailedLoginCount              int
 	LockedUntil                   sql.NullTime
+	AccountExpiresAt              sql.NullTime
 	Locked                        bool
 	CreatedAt                     time.Time
 	LastLoginAt                   sql.NullTime

@@ -56,6 +56,40 @@ func main() {
 	miningOverview.Default = &miningOverview.Miners[0]
 	miningOverview.Active = &miningOverview.Miners[0]
 	previewSVG := `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000"><rect width="1600" height="1000" fill="#13201d"/><rect x="120" y="120" width="1360" height="760" rx="28" fill="#20453a"/><circle cx="800" cy="500" r="250" fill="#71dfb9"/><path d="M420 650 700 360l190 180 150-140 260 250z" fill="#0a1714"/></svg>`
+	generationJobs := []map[string]any{
+		{
+			"job_id": "job-video-running", "request_id": "request-video-running", "prompt_id": "prompt-video-running",
+			"state": "running", "job_state": "running", "message": "Генерация видео: шаг 8 из 25", "template_id": "minimax-h3-video",
+			"workflow_id": "minimax-h3-v4", "model_name": `MiniMaxH3\MiniMax_H3_FL2VA_pruned_int8_convrot.safetensors`, "seed": int64(73950205217521),
+			"attempt": 1, "input_count": 2, "prompt": "Камера медленно приближается к героине; волосы и ткань естественно движутся от ветра, лицо и одежда сохраняются без изменений.",
+			"cancellable": true, "retryable": false, "created_at": now.Add(-6 * time.Minute), "updated_at": now.Add(-12 * time.Second),
+			"duration_seconds": int64(348), "media": []map[string]any{},
+		},
+		{
+			"job_id": "job-image-completed", "request_id": "request-image-completed", "prompt_id": "prompt-image-completed",
+			"state": "completed", "job_state": "completed", "message": "Изображение готово и сохранено", "template_id": "text-to-image",
+			"workflow_id": "photoflow-krea2", "model_name": `Krea2\Krea2_gonzalomo_v40.safetensors`, "seed": int64(284797972294826),
+			"attempt": 1, "input_count": 0, "prompt": "Кинематографичный портрет в тихом ночном городе, естественная кожа, мягкий свет витрин и аккуратная глубина резкости.",
+			"cancellable": false, "retryable": true, "created_at": now.Add(-28 * time.Minute), "updated_at": now.Add(-27*time.Minute - 42*time.Second),
+			"finished_at": now.Add(-27*time.Minute - 42*time.Second), "expires_at": now.Add(23*time.Hour + 32*time.Minute), "duration_seconds": int64(18),
+			"media": []map[string]any{{"id": int64(301), "url": "/preview/result.svg", "filename": "AI-Gateway-Krea2-preview.png", "media_type": "image", "expires_unix": now.Add(23*time.Hour + 32*time.Minute).UnixMilli(), "sensitive": false}},
+		},
+		{
+			"job_id": "job-image-failed", "request_id": "request-image-failed", "state": "error", "job_state": "failed",
+			"message": "ComfyUI отклонил workflow: не удалось подготовить обязательный вход модели", "error_code": "workflow_validation_failed", "template_id": "image-to-image",
+			"workflow_id": "photoflow-flux2-edit", "model_name": `Flux2\flux2-klein-9b-fp8.safetensors`, "seed": int64(1019794942414480),
+			"attempt": 2, "input_count": 1, "prompt": "Сохранить внешность и композицию исходного фото, перенести сцену в светлую редакционную студию с холодным рассеянным светом.",
+			"cancellable": false, "retryable": true, "created_at": now.Add(-51 * time.Minute), "updated_at": now.Add(-48 * time.Minute),
+			"finished_at": now.Add(-48 * time.Minute), "expires_at": now.Add(23*time.Hour + 9*time.Minute), "duration_seconds": int64(181), "media": []map[string]any{},
+		},
+		{
+			"job_id": "job-cancelled", "request_id": "request-cancelled", "state": "cancelled", "job_state": "cancelled", "message": "Отменено пользователем", "template_id": "minimax-h3-video",
+			"workflow_id": "minimax-h3-v4", "model_name": `MiniMaxH3\MiniMax_H3_REF2VA_pruned_int8_convrot.safetensors`, "seed": int64(-1),
+			"attempt": 1, "input_count": 4, "prompt": "Первый кадр задаёт сцену; остальные изображения используются как референсы персонажа, одежды и окружения.",
+			"cancellable": false, "retryable": true, "created_at": now.Add(-85 * time.Minute), "updated_at": now.Add(-84*time.Minute - 31*time.Second),
+			"finished_at": now.Add(-84*time.Minute - 31*time.Second), "expires_at": now.Add(22*time.Hour + 35*time.Minute), "duration_seconds": int64(29), "media": []map[string]any{},
+		},
+	}
 
 	mux := http.NewServeMux()
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("internal/gateway/static"))))
@@ -82,6 +116,57 @@ func main() {
 			{"id": 2, "url": "/preview/result.svg", "filename": "AI-Gateway-Flux2-editorial.png", "model_name": "Flux 2 Klein 9B", "created_unix": now.Add(-34 * time.Minute).UnixMilli(), "expires_unix": now.Add(23*time.Hour + 26*time.Minute).UnixMilli(), "sensitive": true},
 			{"id": 3, "url": "/preview/result.svg", "filename": "AI-Gateway-Krea2-product.png", "model_name": "Krea2 Gonzalomo v40", "created_unix": now.Add(-72 * time.Minute).UnixMilli(), "expires_unix": now.Add(22*time.Hour + 48*time.Minute).UnixMilli(), "sensitive": false},
 		}})
+	})
+	mux.HandleFunc("/generate/jobs", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jobs": generationJobs, "revision": int64(17)})
+	})
+	mux.HandleFunc("/generate/jobs/detail", func(w http.ResponseWriter, r *http.Request) {
+		jobID := r.URL.Query().Get("job_id")
+		transitions := []map[string]any{
+			{"state": "draft", "message": "Задание создано", "attempt": 1, "created_at": now.Add(-6 * time.Minute)},
+			{"state": "preparing", "message": "Параметры проверены", "attempt": 1, "created_at": now.Add(-5*time.Minute - 58*time.Second)},
+			{"state": "uploading", "message": "Референсы переданы в ComfyUI", "attempt": 1, "created_at": now.Add(-5*time.Minute - 54*time.Second)},
+			{"state": "queued", "message": "Workflow принят в очередь", "attempt": 1, "created_at": now.Add(-5*time.Minute - 50*time.Second)},
+		}
+		if jobID == "job-video-running" {
+			transitions = append(transitions, map[string]any{"state": "running", "message": "ComfyUI выполняет workflow", "attempt": 1, "created_at": now.Add(-5*time.Minute - 46*time.Second)})
+		} else {
+			transitions = append(transitions,
+				map[string]any{"state": "running", "message": "ComfyUI выполняет workflow", "attempt": 1, "created_at": now.Add(-5*time.Minute - 46*time.Second)},
+				map[string]any{"state": "postprocessing", "message": "Подготавливаем результат", "attempt": 1, "created_at": now.Add(-5*time.Minute - 10*time.Second)},
+				map[string]any{"state": "archiving", "message": "Сохраняем результат и параметры", "attempt": 1, "created_at": now.Add(-5*time.Minute - 4*time.Second)},
+				map[string]any{"state": "completed", "message": "Задание завершено", "attempt": 1, "created_at": now.Add(-5 * time.Minute)},
+			)
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(map[string]any{"transitions": transitions})
+	})
+	mux.HandleFunc("/generate/jobs/events", func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unavailable", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		_, _ = w.Write([]byte("retry: 2000\nevent: ready\ndata: 17\n\n"))
+		flusher.Flush()
+		<-r.Context().Done()
+	})
+	mux.HandleFunc("/generate/jobs/cancel", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = w.Write([]byte(`{"cancelled":false,"job":{"message":"Отмена отправлена в ComfyUI"}}`))
+	})
+	mux.HandleFunc("/generate/jobs/retry", func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		jobID := r.Form.Get("job_id")
+		requiresInputs := jobID != "job-image-completed"
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"parent_job_id": jobID, "requires_inputs": requiresInputs,
+			"values": map[string]string{"template_id": "text-to-image", "generation_workflow": "photoflow-krea2", "model": "krea2:test", "positive_prompt": "Кинематографичный портрет в тихом ночном городе."},
+		})
 	})
 	mux.HandleFunc("/generate/variants", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -291,9 +376,9 @@ func main() {
 	}))
 	users := []domain.UserRow{
 		{ID: 1, Username: "admin", Email: "admin@example.local", Role: "admin", CanUseComfyUI: true, CanUseOpenWebUI: true, Requests: 96, LastLoginAt: sql.NullTime{Time: now.Add(-time.Hour), Valid: true}},
-		{ID: 2, Username: "rayka", Email: "rayka@example.local", Role: "user", CanUseComfyUI: true, CanUseOpenWebUI: true, Requests: 302, LastLoginAt: sql.NullTime{Time: now.Add(-8 * time.Minute), Valid: true}},
+		{ID: 2, Username: "rayka", Email: "rayka@example.local", Role: "user", CanUseComfyUI: true, CanUseOpenWebUI: true, Requests: 302, LastLoginAt: sql.NullTime{Time: now.Add(-8 * time.Minute), Valid: true}, AccountExpiresAt: sql.NullTime{Time: now.Add(5*time.Hour + 43*time.Minute + 18*time.Second), Valid: true}},
 		{ID: 3, Username: "demo4518", Role: "user", CanUseOpenWebUI: true, Requests: 188, LastLoginAt: sql.NullTime{Time: now.Add(-24 * time.Hour), Valid: true}},
-		{ID: 4, Username: "disabled-user-with-long-name", Email: "long.address@example.local", Role: "user", Disabled: true, CanUseComfyUI: true, Requests: 4},
+		{ID: 4, Username: "disabled-user-with-long-name", Email: "long.address@example.local", Role: "user", Disabled: true, CanUseComfyUI: true, Requests: 4, AccountExpiresAt: sql.NullTime{Time: now.Add(-2 * time.Minute), Valid: true}},
 	}
 	mux.HandleFunc("/preview/users", render("admin_users", "Пользователи", map[string]any{"Users": users, "Query": ""}))
 	adminSessions := []domain.SessionRow{
@@ -312,7 +397,7 @@ func main() {
 		{ID: 46, CreatedBy: "admin", MaxUses: 1, UsedCount: 1, ExpiresAt: now.Add(-24 * time.Hour), GrantComfyUI: true, Status: "used", CreatedAt: now.Add(-72 * time.Hour)},
 	}
 	mux.HandleFunc("/preview/invites", render("admin_invites", "Invites UI preview", map[string]any{"Invites": invites, "InviteLink": "https://ai.example.test/invite/preview-token"}))
-	profile := domain.User{ID: 2, Username: "rayka", Email: sql.NullString{String: "rayka@example.local", Valid: true}, Role: "user", CanUseComfyUI: true, CanUseOpenWebUI: true, CreatedAt: now.Add(-720 * time.Hour), LastLoginAt: sql.NullTime{Time: now.Add(-8 * time.Minute), Valid: true}}
+	profile := domain.User{ID: 2, Username: "rayka", Email: sql.NullString{String: "rayka@example.local", Valid: true}, Role: "user", CanUseComfyUI: true, CanUseOpenWebUI: true, CreatedAt: now.Add(-720 * time.Hour), LastLoginAt: sql.NullTime{Time: now.Add(-8 * time.Minute), Valid: true}, AccountExpiresAt: sql.NullTime{Time: now.Add(5*time.Hour + 43*time.Minute + 18*time.Second), Valid: true}}
 	mux.HandleFunc("/preview/user", render("admin_user_detail", "Пользователь rayka", map[string]any{
 		"Profile": profile, "Stats": domain.UserStats{TotalRequests: 302, TotalBytesOut: 4200000000, LastService: "ComfyUI", Chart: chart, ByService: []domain.ServiceUsage{{Service: "comfyui", Requests: 210, Bytes: 4100000000, Errors: 1}, {Service: "openwebui", Requests: 92, Bytes: 8700000}}}, "Activities": activities,
 		"PasswordStatus": "", "AccessStatus": "", "SecurityStatus": "", "AccountLocked": false,

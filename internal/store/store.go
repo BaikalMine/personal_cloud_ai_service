@@ -25,7 +25,7 @@ func (s *Store) FindUserWithPassword(ctx context.Context, identity string) (doma
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, username, email, role, disabled, can_use_comfyui, can_use_openwebui, can_use_quick_generation, can_generate_text_to_image, can_generate_image_to_image, can_generate_video, can_manage_mining, pause_mining_for_quick_generation,
 		       generation_daily_limit, generation_total_limit, generation_total_used,
-		       failed_login_count, locked_until, created_at, last_login_at, password_hash
+		       failed_login_count, locked_until, account_expires_at, created_at, last_login_at, password_hash
 		FROM users
 		WHERE (username = $1 OR (email IS NOT NULL AND LOWER(email) = LOWER($1)))
 		  AND (account_expires_at IS NULL OR account_expires_at > now())
@@ -35,7 +35,7 @@ func (s *Store) FindUserWithPassword(ctx context.Context, identity string) (doma
 		&user.ID, &user.Username, &user.Email, &user.Role, &user.Disabled,
 		&user.CanUseComfyUI, &user.CanUseOpenWebUI, &user.CanUseQuickGeneration, &user.CanGenerateTextToImage, &user.CanGenerateImageToImage, &user.CanGenerateVideo, &user.CanManageMining, &user.PauseMiningForQuickGeneration,
 		&user.GenerationDailyLimit, &user.GenerationTotalLimit, &user.GenerationTotalUsed,
-		&user.FailedLoginCount, &user.LockedUntil,
+		&user.FailedLoginCount, &user.LockedUntil, &user.AccountExpiresAt,
 		&user.CreatedAt, &user.LastLoginAt, &passwordHash,
 	)
 	return user, passwordHash, err
@@ -46,7 +46,7 @@ func (s *Store) UserBySessionHash(ctx context.Context, tokenHash string, idleTim
 	err := s.db.QueryRowContext(ctx, `
 		SELECT u.id, u.username, u.email, u.role, u.disabled, u.can_use_comfyui,
 		       u.can_use_openwebui, u.can_use_quick_generation, u.can_generate_text_to_image, u.can_generate_image_to_image, u.can_generate_video, u.can_manage_mining, u.pause_mining_for_quick_generation, u.generation_daily_limit,
-		       u.generation_total_limit, u.generation_total_used, u.failed_login_count, u.locked_until, u.created_at, u.last_login_at
+		       u.generation_total_limit, u.generation_total_used, u.failed_login_count, u.locked_until, u.account_expires_at, u.created_at, u.last_login_at
 		FROM sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = $1
 		  AND s.expires_at > now()
@@ -57,7 +57,7 @@ func (s *Store) UserBySessionHash(ctx context.Context, tokenHash string, idleTim
 		&user.ID, &user.Username, &user.Email, &user.Role, &user.Disabled,
 		&user.CanUseComfyUI, &user.CanUseOpenWebUI, &user.CanUseQuickGeneration, &user.CanGenerateTextToImage, &user.CanGenerateImageToImage, &user.CanGenerateVideo, &user.CanManageMining, &user.PauseMiningForQuickGeneration,
 		&user.GenerationDailyLimit, &user.GenerationTotalLimit, &user.GenerationTotalUsed,
-		&user.FailedLoginCount, &user.LockedUntil,
+		&user.FailedLoginCount, &user.LockedUntil, &user.AccountExpiresAt,
 		&user.CreatedAt, &user.LastLoginAt,
 	)
 	return user, err
@@ -68,13 +68,13 @@ func (s *Store) UserByID(ctx context.Context, id int64) (domain.User, error) {
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, username, email, role, disabled, can_use_comfyui, can_use_openwebui, can_use_quick_generation, can_generate_text_to_image, can_generate_image_to_image, can_generate_video, can_manage_mining, pause_mining_for_quick_generation,
 		       generation_daily_limit, generation_total_limit, generation_total_used,
-		       failed_login_count, locked_until, created_at, last_login_at
+		       failed_login_count, locked_until, account_expires_at, created_at, last_login_at
 		FROM users WHERE id = $1
 	`, id).Scan(
 		&user.ID, &user.Username, &user.Email, &user.Role, &user.Disabled,
 		&user.CanUseComfyUI, &user.CanUseOpenWebUI, &user.CanUseQuickGeneration, &user.CanGenerateTextToImage, &user.CanGenerateImageToImage, &user.CanGenerateVideo, &user.CanManageMining, &user.PauseMiningForQuickGeneration,
 		&user.GenerationDailyLimit, &user.GenerationTotalLimit, &user.GenerationTotalUsed,
-		&user.FailedLoginCount, &user.LockedUntil,
+		&user.FailedLoginCount, &user.LockedUntil, &user.AccountExpiresAt,
 		&user.CreatedAt, &user.LastLoginAt,
 	)
 	return user, err
@@ -85,7 +85,7 @@ func (s *Store) ListUsers(ctx context.Context, search string) ([]domain.UserRow,
 		SELECT u.id, u.username, COALESCE(u.email,''), u.role, u.disabled,
 		       u.can_use_comfyui, u.can_use_openwebui, u.can_use_quick_generation, u.can_generate_text_to_image, u.can_generate_image_to_image, u.can_generate_video, u.can_manage_mining, u.pause_mining_for_quick_generation,
 		       u.generation_daily_limit, u.generation_total_limit, u.generation_total_used,
-		       u.failed_login_count, u.locked_until,
+		       u.failed_login_count, u.locked_until, u.account_expires_at,
 		       COALESCE(u.locked_until > now(), false), u.created_at, u.last_login_at,
 		       COUNT(pr.id) AS requests
 		FROM users u
@@ -106,7 +106,7 @@ func (s *Store) ListUsers(ctx context.Context, search string) ([]domain.UserRow,
 			&user.ID, &user.Username, &user.Email, &user.Role, &user.Disabled,
 			&user.CanUseComfyUI, &user.CanUseOpenWebUI, &user.CanUseQuickGeneration, &user.CanGenerateTextToImage, &user.CanGenerateImageToImage, &user.CanGenerateVideo, &user.CanManageMining, &user.PauseMiningForQuickGeneration,
 			&user.GenerationDailyLimit, &user.GenerationTotalLimit, &user.GenerationTotalUsed,
-			&user.FailedLoginCount, &user.LockedUntil,
+			&user.FailedLoginCount, &user.LockedUntil, &user.AccountExpiresAt,
 			&user.Locked, &user.CreatedAt, &user.LastLoginAt, &user.Requests,
 		); err != nil {
 			return nil, err

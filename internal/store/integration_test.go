@@ -234,6 +234,25 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	if err != nil || len(retained) != 1 || retained[0].ID != eventID || retained[0].Username != "Удалённый пользователь" {
 		t.Fatalf("anonymized content listing: events=%v err=%v", retained, err)
 	}
+	var futureTemporaryID int64
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO users(username,password_hash,role,account_expires_at)
+		VALUES ('future-temporary-user','test-hash','user',now() + interval '6 hours')
+		RETURNING id
+	`).Scan(&futureTemporaryID); err != nil {
+		t.Fatal(err)
+	}
+	futureTemporaryUsers, err := repository.ListUsers(ctx, "future-temporary-user")
+	if err != nil || len(futureTemporaryUsers) != 1 || !futureTemporaryUsers[0].AccountExpiresAt.Valid || !futureTemporaryUsers[0].AccountExpiresAt.Time.After(time.Now()) {
+		t.Fatalf("temporary user lifetime in list: users=%+v err=%v", futureTemporaryUsers, err)
+	}
+	futureTemporary, err := repository.UserByID(ctx, futureTemporaryID)
+	if err != nil || !futureTemporary.AccountExpiresAt.Valid || !futureTemporary.AccountExpiresAt.Time.After(time.Now()) {
+		t.Fatalf("temporary user lifetime in detail: user=%+v err=%v", futureTemporary, err)
+	}
+	if deleted, err := repository.DeleteUser(ctx, futureTemporaryID, "future-temporary-user"); err != nil || !deleted {
+		t.Fatalf("delete future temporary user: deleted=%v err=%v", deleted, err)
+	}
 	var temporaryID int64
 	if err := db.QueryRowContext(ctx, `
 		INSERT INTO users(username,password_hash,role,account_expires_at)

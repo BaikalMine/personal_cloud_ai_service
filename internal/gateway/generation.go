@@ -120,6 +120,11 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 	mux.Handle("/generate/upload/video", uploadVideo)
 	mux.Handle("/generate/run", run)
 	mux.Handle("/generate/recover", recover)
+	mux.Handle("/generate/jobs", quick(http.HandlerFunc(a.handleGenerationJobs)))
+	mux.Handle("/generate/jobs/detail", quick(http.HandlerFunc(a.handleGenerationJobDetail)))
+	mux.Handle("/generate/jobs/events", quick(http.HandlerFunc(a.handleGenerationJobEvents)))
+	mux.Handle("/generate/jobs/cancel", quick(http.HandlerFunc(a.handleGenerationJobCancel)))
+	mux.Handle("/generate/jobs/retry", quick(http.HandlerFunc(a.handleGenerationJobRetry)))
 	mux.Handle("/generate/prompt-assistant", promptAssistant)
 	mux.Handle("/generate/status", status)
 	mux.Handle("/generate/cancel", cancel)
@@ -283,8 +288,21 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 		writeGenerationError(w, http.StatusBadRequest, "некорректный идентификатор запуска")
 		return
 	}
+	var parentJobID *int64
+	if parentPublicID := strings.TrimSpace(r.Form.Get("parent_job_id")); parentPublicID != "" {
+		parent, parentErr := a.store.GenerationJobByPublicID(r.Context(), user.ID, parentPublicID)
+		if errors.Is(parentErr, sql.ErrNoRows) {
+			writeGenerationError(w, http.StatusBadRequest, "исходное задание для повтора больше недоступно")
+			return
+		}
+		if parentErr != nil {
+			writeGenerationError(w, http.StatusInternalServerError, "не удалось подготовить повтор генерации")
+			return
+		}
+		parentJobID = &parent.ID
+	}
 	job, shouldSubmit, err := a.store.ClaimGenerationJob(r.Context(), domain.CreateGenerationJobParams{
-		PublicID: newRequestID(), UserID: user.ID, UsernameSnapshot: user.Username, RequestID: requestID,
+		PublicID: newRequestID(), UserID: user.ID, UsernameSnapshot: user.Username, RequestID: requestID, ParentJobID: parentJobID,
 	})
 	if err != nil {
 		writeGenerationError(w, http.StatusInternalServerError, "не удалось создать задание генерации")

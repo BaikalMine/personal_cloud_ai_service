@@ -12,6 +12,32 @@
     window.requestAnimationFrame(() => matching.scrollIntoView({ block: "nearest", inline: "center" }));
   }
 
+  const accountExpiryNodes = [...document.querySelectorAll("[data-account-expiry]")];
+  if (accountExpiryNodes.length) {
+    const formatAccountExpiry = (deadline) => {
+      const secondsLeft = Math.ceil((deadline - Date.now()) / 1000);
+      if (!Number.isFinite(secondsLeft) || secondsLeft <= 0) return "Срок истёк · ожидает удаления";
+      const days = Math.floor(secondsLeft / 86400);
+      const hours = Math.floor((secondsLeft % 86400) / 3600);
+      const minutes = Math.floor((secondsLeft % 3600) / 60);
+      const seconds = secondsLeft % 60;
+      if (days > 0) return `Удаление через ${days} д. ${hours} ч.`;
+      if (hours > 0) return `Удаление через ${hours} ч. ${minutes} мин.`;
+      if (minutes > 0) return `Удаление через ${minutes} мин. ${seconds} сек.`;
+      return `Удаление через ${seconds} сек.`;
+    };
+    const refreshAccountExpiry = () => {
+      accountExpiryNodes.forEach((node) => {
+        const deadline = Number(node.dataset.accountExpiry);
+        const expired = Number.isFinite(deadline) && deadline <= Date.now();
+        node.textContent = formatAccountExpiry(deadline);
+        node.classList.toggle("is-expired", expired);
+      });
+    };
+    refreshAccountExpiry();
+    window.setInterval(refreshAccountExpiry, 1000);
+  }
+
   document.querySelectorAll(".menu-toggle[aria-controls]").forEach((button) => {
     const target = document.getElementById(button.getAttribute("aria-controls"));
     if (!target) return;

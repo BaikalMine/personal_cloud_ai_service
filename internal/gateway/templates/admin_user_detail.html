@@ -8,6 +8,12 @@
       <h1>{{.Profile.Username}}</h1>
       <div class="profile-badges">
         <span class="badge">{{roleLabel .Profile.Role}}</span>
+        {{if .Profile.AccountExpiresAt.Valid}}
+          <span class="badge account-kind temporary">Временная</span>
+          <span class="profile-account-expiry" data-account-expiry="{{.Profile.AccountExpiresAt.Time.UnixMilli}}">Вычисляем срок удаления...</span>
+        {{else}}
+          <span class="badge account-kind permanent">Постоянная</span>
+        {{end}}
         {{if .Profile.Disabled}}<span class="badge danger">Отключён</span>{{else if .AccountLocked}}<span class="badge danger">Вход заблокирован</span>{{else}}<span class="badge ok">Активен</span>{{end}}
       </div>
     </div>
@@ -33,6 +39,8 @@
         <div><dt>Логин</dt><dd>{{.Profile.Username}}</dd></div>
         <div><dt>Email</dt><dd>{{if .Profile.Email.Valid}}{{.Profile.Email.String}}{{else}}Не указан{{end}}</dd></div>
         <div><dt>Роль</dt><dd>{{roleLabel .Profile.Role}}</dd></div>
+        <div><dt>Тип аккаунта</dt><dd>{{if .Profile.AccountExpiresAt.Valid}}Временный{{else}}Постоянный{{end}}</dd></div>
+        {{if .Profile.AccountExpiresAt.Valid}}<div><dt>Автоудаление</dt><dd class="account-expiry-detail"><time>{{formatTime .Profile.AccountExpiresAt}}</time><small data-account-expiry="{{.Profile.AccountExpiresAt.Time.UnixMilli}}">Вычисляем оставшееся время...</small></dd></div>{{end}}
         <div><dt>Создан</dt><dd>{{formatTime .Profile.CreatedAt}}</dd></div>
         <div><dt>Последний вход</dt><dd>{{formatTime .Profile.LastLoginAt}}</dd></div>
       </dl>

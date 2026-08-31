@@ -10,22 +10,34 @@
       <button type="submit">Найти</button>
       {{if .Query}}<a class="button ghost" href="/admin/users">Сбросить</a>{{end}}
     </form>
-    <table>
-      <thead><tr><th>Пользователь</th><th>Email</th><th>Роль</th><th>Статус</th><th>Доступ</th><th>Запросы</th><th>Последний вход</th></tr></thead>
+    <div class="table-scroll"><table class="users-table">
+      <thead><tr><th>Пользователь</th><th>Email</th><th>Роль</th><th>Учётная запись</th><th>Статус</th><th>Доступ</th><th>Запросы</th><th>Последний вход</th></tr></thead>
       <tbody>
       {{range .Users}}
         <tr>
           <td data-label="Пользователь"><a class="user-link" href="/admin/users/{{.ID}}"><span class="account-indicator"></span>{{.Username}}</a></td>
           <td data-label="E-mail">{{.Email}}</td>
           <td data-label="Роль"><span class="badge">{{roleLabel .Role}}</span></td>
+          <td data-label="Учётная запись" class="account-lifetime-cell">
+            <div class="account-lifetime">
+              {{if .AccountExpiresAt.Valid}}
+                <span class="badge account-kind temporary">Временная</span>
+                <small class="account-expiry-exact">Удаление: {{formatTime .AccountExpiresAt}}</small>
+                <small class="account-expiry-countdown" data-account-expiry="{{.AccountExpiresAt.Time.UnixMilli}}">Вычисляем оставшееся время...</small>
+              {{else}}
+                <span class="badge account-kind permanent">Постоянная</span>
+                <small class="account-expiry-exact">Без автоматического удаления</small>
+              {{end}}
+            </div>
+          </td>
           <td data-label="Статус">{{if .Disabled}}<span class="badge danger">отключён</span>{{else if .Locked}}<span class="badge danger">заблокирован</span>{{else}}<span class="badge ok">активен</span>{{end}}</td>
           <td data-label="Доступ">{{if eq .Role "admin"}}<span class="badge ok">все сервисы</span>{{else}}{{if .CanUseQuickGeneration}}<span class="badge ok">Быстрая генерация</span>{{end}} {{if .CanUseComfyUI}}<span class="badge">ComfyUI</span>{{end}} {{if .CanUseOpenWebUI}}<span class="badge">OpenWebUI</span>{{end}}{{end}}</td>
           <td data-label="Запросы" class="numeric">{{formatNumber .Requests}}</td>
           <td data-label="Последний вход">{{formatTime .LastLoginAt}}</td>
         </tr>
-      {{else}}<tr><td colspan="7" class="muted">Пользователи не найдены.</td></tr>{{end}}
+      {{else}}<tr><td colspan="8" class="muted">Пользователи не найдены.</td></tr>{{end}}
       </tbody>
-    </table>
+    </table></div>
   </section>
 </main>
 </body></html>

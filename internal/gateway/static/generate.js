@@ -206,8 +206,14 @@
   let promptAssistantAction = "";
   let activeGenerationID = "";
   let activeGenerationRequestID = "";
+  let pendingParentJobID = "";
   let savedRecipes = [];
   let savedVariants = [];
+  let savedJobs = [];
+  let generationJobRevision = 0;
+  let generationJobEvents = null;
+  let generationJobsLive = false;
+  let generationJobsLoading = false;
   let galleryPickerSlot = null;
   let galleryPickerImages = [];
   let galleryPickerImagesLoaded = false;
@@ -2176,6 +2182,7 @@
     body.set("input_audio", miniMaxAudioIsAvailable() ? uploadedAudio : "");
     body.set("input_video", miniMaxReferencesAreAvailable() ? uploadedVideo : "");
     body.set("video_reference_audio", miniMaxReferencesAreAvailable() && uploadedVideo && form.elements.video_reference_audio?.checked ? "true" : "false");
+    if (pendingParentJobID) body.set("parent_job_id", pendingParentJobID);
     return new URLSearchParams(body);
   };
 
@@ -2369,7 +2376,6 @@
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || "Не удалось загрузить историю вариантов");
     savedVariants = Array.isArray(payload.variants) ? payload.variants : [];
-    renderVariants();
     if (imagePicker && !imagePicker.hidden) renderGalleryImagePicker();
     restoreRequestedVariant();
   };
@@ -2383,102 +2389,340 @@
     try { window.localStorage.setItem(generationHistoryCollapsedStorageKey, generationHistoryCollapsed ? "true" : "false"); } catch (_) {}
   };
 
-  const renderVariants = () => {
-    if (!variantsSection || !variantList) return;
-    const filteredVariants = savedVariants.filter((variant) => (!variantStateFilter?.value || variant.state === variantStateFilter.value) && (!variantTemplateFilter?.value || variant.template_id === variantTemplateFilter.value));
-    variantsSection.hidden = savedVariants.length === 0;
-    if (variantCount) {
-      const count = filteredVariants.length === savedVariants.length ? `${savedVariants.length} вариантов` : `Показано ${filteredVariants.length} из ${savedVariants.length}`;
-      variantCount.textContent = `${count} · хранится ${generationRetentionLabel}`;
+  const jobStateLabels = {
+    draft: "Создано",
+    submitting: "Подготовка",
+    preparing: "Подготовка",
+    uploading: "Загрузка файлов",
+    waiting_for_resources: "Ожидает ресурсы",
+    queued: "В очереди",
+    running: "В работе",
+    cancelling: "Отменяется",
+    postprocessing: "Обработка результата",
+    archiving: "Сохранение результата",
+    completed: "Готово",
+    failed: "Ошибка",
+    error: "Ошибка",
+    cancelled: "Отменено",
+    expired: "Истекло",
+  };
+  const jobTemplateLabels = {
+    "text-to-image": "Текст в изображение",
+    "image-to-image": "Фото и промт",
+    "minimax-h3-video": "Видео MiniMax H3",
+  };
+  const jobStateLabel = (state) => jobStateLabels[state] || "Подготовка";
+  const jobTemplateLabel = (template) => jobTemplateLabels[template] || "Генерация";
+  const formatJobDuration = (seconds) => {
+    const value = Math.max(0, Number(seconds) || 0);
+    if (value < 1) return "меньше 1 сек.";
+    if (value < 60) return `${Math.round(value)} сек.`;
+    if (value < 3600) return `${Math.max(1, Math.round(value / 60))} мин.`;
+    const hours = Math.floor(value / 3600);
+    const minutes = Math.round((value % 3600) / 60);
+    return minutes ? `${hours} ч. ${minutes} мин.` : `${hours} ч.`;
+  };
+  const formatJobTime = (value) => {
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return "";
+    return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
+  };
+  const cleanModelName = (value) => String(value || "Модель не определена").replaceAll("\\", "/").split("/").pop().replace(/\.(safetensors|ckpt|gguf)$/i, "");
+
+  const setJobsConnectionState = (connected) => {
+    generationJobsLive = connected;
+    renderJobCount();
+  };
+
+  const jobCountLabel = (count) => {
+    const value = Math.abs(Number(count) || 0);
+    const lastTwo = value % 100;
+    if (lastTwo >= 11 && lastTwo <= 14) return `${value} заданий`;
+    switch (value % 10) {
+      case 1: return `${value} задание`;
+      case 2:
+      case 3:
+      case 4: return `${value} задания`;
+      default: return `${value} заданий`;
     }
-    if (filteredVariants.length === 0) {
+  };
+
+  const renderJobCount = (shown = null) => {
+    if (!variantCount) return;
+    const filteredCount = shown === null ? savedJobs.length : shown;
+    const count = filteredCount === savedJobs.length ? jobCountLabel(savedJobs.length) : `Показано ${filteredCount} из ${savedJobs.length}`;
+    const live = generationJobsLive ? "обновляются автоматически" : "переподключаем обновления";
+    variantCount.textContent = `${count} · ${live} · хранятся ${generationRetentionLabel}`;
+  };
+
+  const renderJobMedia = (job) => {
+    const media = job.media?.find((item) => item.media_type === "image") || job.media?.[0];
+    if (!media) {
+      const placeholder = document.createElement("div");
+      placeholder.className = "generation-job-placeholder";
+      const mark = document.createElement("span");
+      mark.setAttribute("aria-hidden", "true");
+      mark.textContent = job.template_id === "minimax-h3-video" ? "▶" : "◇";
+      const label = document.createElement("small");
+      label.textContent = job.state === "completed" ? "Результат недоступен" : jobStateLabel(job.state);
+      placeholder.append(mark, label);
+      return placeholder;
+    }
+    const preview = document.createElement("button");
+    preview.type = "button";
+    preview.className = "generation-job-preview";
+    preview.setAttribute("aria-label", media.media_type === "video" ? "Открыть видео" : "Открыть изображение");
+    if (media.sensitive) {
+      preview.classList.add("sensitive-media");
+      preview.dataset.sensitiveMedia = "";
+    }
+    if (media.media_type === "video") {
+      const video = document.createElement("video");
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = "metadata";
+      video.src = media.url;
+      const play = document.createElement("span");
+      play.className = "generation-job-play";
+      play.setAttribute("aria-hidden", "true");
+      play.textContent = "▶";
+      preview.append(video, play);
+      wireVideoPreview(preview, media);
+    } else {
+      const image = document.createElement("img");
+      image.loading = "lazy";
+      image.src = media.url;
+      image.alt = "Результат генерации";
+      preview.append(image);
+      preview.addEventListener("click", () => {
+        if (window.aiGatewaySensitiveContent?.reveal(preview)) return;
+        openLightbox(media);
+      });
+    }
+    if (media.sensitive) {
+      const cover = document.createElement("span");
+      cover.className = "sensitive-media-cover";
+      const title = document.createElement("b");
+      title.textContent = "Контент 18+";
+      const hint = document.createElement("small");
+      hint.textContent = "Нажмите, чтобы показать";
+      cover.append(title, hint);
+      preview.append(cover);
+    }
+    return preview;
+  };
+
+  const loadJobDetails = async (details, jobID) => {
+    const content = details.querySelector("[data-job-details-content]");
+    if (!content || details.dataset.loaded === "true" || details.dataset.loading === "true") return;
+    details.dataset.loading = "true";
+    content.textContent = "Загружаем этапы...";
+    try {
+      const response = await fetch(`/generate/jobs/detail?job_id=${encodeURIComponent(jobID)}`, { credentials: "same-origin" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Не удалось загрузить этапы");
+      const transitions = Array.isArray(payload.transitions) ? payload.transitions : [];
+      const list = document.createElement("ol");
+      list.className = "generation-job-timeline";
+      transitions.forEach((transition) => {
+        const item = document.createElement("li");
+        const time = document.createElement("time");
+        time.dateTime = transition.created_at || "";
+        time.textContent = formatJobTime(transition.created_at);
+        const copy = document.createElement("span");
+        const state = document.createElement("strong");
+        state.textContent = jobStateLabel(transition.state === "failed" ? "error" : transition.state);
+        const message = document.createElement("small");
+        message.textContent = transition.message || "Состояние обновлено";
+        copy.append(state, message);
+        item.append(time, copy);
+        list.append(item);
+      });
+      content.replaceChildren(list);
+      details.dataset.loaded = "true";
+    } catch (error) {
+      content.textContent = error.message || "Не удалось загрузить этапы";
+      content.classList.add("has-error");
+    } finally {
+      delete details.dataset.loading;
+    }
+  };
+
+  const cancelJob = async (job, button) => {
+    if (!job?.job_id || button.disabled) return;
+    button.disabled = true;
+    button.textContent = "Отменяем...";
+    try {
+      const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", job_id: job.job_id });
+      const response = await fetch("/generate/jobs/cancel", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body, credentials: "same-origin" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Не удалось отменить задание");
+      if (job.prompt_id && activeGenerationID === job.prompt_id) {
+        clearActiveGeneration();
+        closeProgressSocket();
+        resultTitle.textContent = payload.cancelled ? "Генерация отменена" : "Отмена выполняется";
+        resultStatus.textContent = payload.job?.message || "Состояние задания обновлено.";
+        runProgress.hidden = true;
+        setGenerationActions({ retry: true });
+      }
+      await refreshJobs();
+    } catch (error) {
+      showRepeatNotice("Не удалось отменить задание", error.message || "Gateway временно недоступен.", true);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Отменить";
+    }
+  };
+
+  const retryJob = async (job, button) => {
+    if (!job?.job_id || button.disabled) return;
+    button.disabled = true;
+    button.textContent = "Готовим...";
+    try {
+      const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", job_id: job.job_id });
+      const response = await fetch("/generate/jobs/retry", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body, credentials: "same-origin" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Не удалось восстановить параметры");
+      if (!applySavedValues(payload.values)) throw new Error("Модель или workflow этого задания сейчас недоступны");
+      pendingParentJobID = payload.parent_job_id || "";
+      if (job.prompt_id && activeGenerationID === job.prompt_id) clearActiveGeneration();
+      if (payload.requires_inputs) {
+        showRepeatNotice("Параметры восстановлены", "Заново выберите исходные файлы или референсы, затем запустите генерацию.");
+        window.requestAnimationFrame(() => form.scrollIntoView({ behavior: "smooth", block: "start" }));
+      } else {
+        form.requestSubmit();
+      }
+    } catch (error) {
+      showRepeatNotice("Не удалось повторить задание", error.message || "Параметры больше недоступны.", true);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Повторить";
+    }
+  };
+
+  const renderJobs = () => {
+    if (!variantsSection || !variantList) return;
+    const filteredJobs = savedJobs.filter((job) => (!variantStateFilter?.value || job.state === variantStateFilter.value) && (!variantTemplateFilter?.value || job.template_id === variantTemplateFilter.value));
+    renderJobCount(filteredJobs.length);
+    if (filteredJobs.length === 0) {
       const empty = document.createElement("p");
       empty.className = "generation-variant-empty";
-      empty.textContent = "По этим фильтрам вариантов пока нет.";
+      empty.textContent = savedJobs.length ? "По этим фильтрам заданий нет." : "Заданий пока нет. Первый запуск появится здесь автоматически.";
       variantList.replaceChildren(empty);
-      updateCompareButton();
       return;
     }
-    variantList.replaceChildren(...filteredVariants.map((variant) => {
+    variantList.replaceChildren(...filteredJobs.map((job) => {
       const card = document.createElement("article");
-      card.className = "generation-variant";
-      card.dataset.state = variant.state || "queued";
-      const media = variant.media?.find((item) => item.media_type === "image") || variant.media?.[0];
-      if (media?.sensitive) card.classList.add("sensitive-media");
-      if (media) {
-        const preview = document.createElement("button");
-        preview.type = "button";
-        preview.className = "generation-variant-preview";
-        if (media.sensitive) preview.dataset.sensitiveMedia = "";
-        if (media.media_type === "video") {
-          const video = document.createElement("video");
-          video.muted = true;
-          video.loop = true;
-          video.playsInline = true;
-          video.preload = "auto";
-          video.src = media.url;
-          preview.append(video);
-          wireVideoPreview(preview, media);
-        } else {
-          const image = document.createElement("img");
-          image.loading = "lazy";
-          image.src = media.url;
-          image.alt = variant.model_name || "Результат варианта";
-          preview.append(image);
-          preview.addEventListener("click", () => {
-            if (window.aiGatewaySensitiveContent?.reveal(preview)) return;
-            openLightbox(media);
-          });
-        }
-        if (media.sensitive) {
-          const cover = document.createElement("span");
-          cover.className = "sensitive-media-cover";
-          const title = document.createElement("b");
-          title.textContent = "Контент 18+";
-          const hint = document.createElement("small");
-          hint.textContent = "Нажмите, чтобы показать";
-          cover.append(title, hint);
-          preview.append(cover);
-        }
-        card.append(preview);
-      }
+      card.className = "generation-job";
+      card.dataset.state = job.state || "submitting";
+      card.append(renderJobMedia(job));
       const body = document.createElement("div");
-      body.className = "generation-variant-body";
+      body.className = "generation-job-body";
+      const heading = document.createElement("div");
+      heading.className = "generation-job-heading";
+      const headingCopy = document.createElement("span");
       const title = document.createElement("strong");
-      const modelName = String(variant.model_name || "Сохранённый вариант").replaceAll("\\", "/").split("/").pop();
-      title.textContent = modelName.replace(/\.(safetensors|ckpt|gguf)$/i, "");
-      const meta = document.createElement("small");
-      const duration = Number(variant.duration_seconds || 0);
-      const time = duration > 0 ? ` · ${duration < 60 ? `${duration} сек.` : `${Math.round(duration / 60)} мин.`}` : "";
-      meta.textContent = `Seed ${variant.seed} · ${variant.state === "completed" ? "готово" : variant.state === "error" ? "ошибка" : variant.state === "cancelled" ? "отменено" : variant.state === "queued" ? "в очереди" : "в работе"}${time}`;
+      title.textContent = jobTemplateLabel(job.template_id);
+      const modelName = document.createElement("small");
+      modelName.textContent = cleanModelName(job.model_name);
+      headingCopy.append(title, modelName);
+      const state = document.createElement("span");
+      state.className = "generation-job-state";
+      state.textContent = jobStateLabel(job.state);
+      heading.append(headingCopy, state);
+      const message = document.createElement("p");
+      message.className = "generation-job-message";
+      message.textContent = job.message || "Состояние задания обновляется";
       const prompt = document.createElement("p");
-      prompt.textContent = variant.values?.positive_prompt || "Промт не сохранён";
+      prompt.className = "generation-job-prompt";
+      prompt.textContent = job.prompt || "Промт пока не сохранён";
+      const meta = document.createElement("small");
+      meta.className = "generation-job-meta";
+      const seed = Number(job.seed) >= 0 ? `Seed ${job.seed}` : "Случайный seed";
+      meta.textContent = `${formatJobTime(job.created_at)} · ${seed} · ${formatJobDuration(job.duration_seconds)}`;
+      if (job.expires_at) {
+        const expiry = document.createElement("time");
+        expiry.dataset.generationExpiry = String(new Date(job.expires_at).getTime());
+        expiry.textContent = formatExpiry(Number(expiry.dataset.generationExpiry) - Date.now());
+        meta.append(" · ", expiry);
+      }
       const actions = document.createElement("div");
-      actions.className = "generation-variant-actions";
-      const apply = document.createElement("button");
-      apply.type = "button";
-      apply.className = "button ghost";
-      apply.textContent = "Взять параметры";
-      apply.addEventListener("click", () => applySavedValues(variant.values));
-      actions.append(apply);
-      if (variant.template_id === "text-to-image" && variant.state === "completed") {
+      actions.className = "generation-job-actions";
+      if (job.retryable) {
         const repeat = document.createElement("button");
         repeat.type = "button";
         repeat.className = "button ghost";
-        repeat.textContent = "Повторить с этим seed";
-        repeat.addEventListener("click", () => { if (applySavedValues(variant.values)) form.requestSubmit(); });
+        repeat.textContent = "Повторить";
+        repeat.addEventListener("click", () => retryJob(job, repeat));
         actions.append(repeat);
       }
-      body.append(title, meta, prompt, actions);
-      if (variant.error_message) {
-        const error = document.createElement("small");
-        error.className = "generation-variant-error";
-        error.textContent = variant.error_message;
-        body.append(error);
+      if (job.cancellable) {
+        const cancel = document.createElement("button");
+        cancel.type = "button";
+        cancel.className = "button danger ghost";
+        cancel.textContent = "Отменить";
+        cancel.addEventListener("click", () => cancelJob(job, cancel));
+        actions.append(cancel);
       }
-      card.append(body);
+      const details = document.createElement("details");
+      details.className = "generation-job-details";
+      const summary = document.createElement("summary");
+      summary.textContent = "Этапы";
+      const detailsContent = document.createElement("div");
+      detailsContent.dataset.jobDetailsContent = "";
+      details.append(summary, detailsContent);
+      details.addEventListener("toggle", () => { if (details.open) loadJobDetails(details, job.job_id); });
+      body.append(heading, message, prompt, meta);
+      const footer = document.createElement("div");
+      footer.className = "generation-job-footer";
+      footer.append(actions);
+      card.append(body, footer, details);
       return card;
     }));
+    refreshExpiryLabels();
+  };
+
+  const refreshJobs = async () => {
+    if (generationJobsLoading) return;
+    generationJobsLoading = true;
+    try {
+      const response = await fetch("/generate/jobs", { credentials: "same-origin", cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Не удалось загрузить задания");
+      savedJobs = Array.isArray(payload.jobs) ? payload.jobs : [];
+      generationJobRevision = Math.max(generationJobRevision, Number(payload.revision) || 0);
+      renderJobs();
+    } catch (error) {
+      if (!savedJobs.length && variantList) {
+        const empty = document.createElement("p");
+        empty.className = "generation-variant-empty generation-job-load-error";
+        empty.textContent = error.message || "Не удалось загрузить задания";
+        variantList.replaceChildren(empty);
+      }
+      setJobsConnectionState(false);
+    } finally {
+      generationJobsLoading = false;
+    }
+  };
+
+  const connectGenerationJobEvents = () => {
+    generationJobEvents?.close();
+    if (!("EventSource" in window)) {
+      setJobsConnectionState(false);
+      return;
+    }
+    generationJobEvents = new EventSource(`/generate/jobs/events?since=${encodeURIComponent(generationJobRevision)}`);
+    generationJobEvents.addEventListener("open", () => setJobsConnectionState(true));
+    generationJobEvents.addEventListener("ready", (event) => {
+      generationJobRevision = Math.max(generationJobRevision, Number(event.data) || 0);
+      setJobsConnectionState(true);
+    });
+    generationJobEvents.addEventListener("jobs", (event) => {
+      generationJobRevision = Math.max(generationJobRevision, Number(event.data) || 0);
+      setJobsConnectionState(true);
+      refreshJobs();
+    });
+    generationJobEvents.addEventListener("error", () => setJobsConnectionState(false));
   };
 
   const updateGenerationQuota = (quota) => {
@@ -2531,6 +2775,7 @@
           setGenerationProgress("Готово", "Результат подготовлен", 100);
           renderOutputs(payload.outputs || []);
           try { await refreshLibrary(); } catch (_) {}
+          try { await refreshJobs(); } catch (_) {}
           try { await refreshVariants(); } catch (_) {}
           result.scrollIntoView({ block: "start", behavior: "smooth" });
           return;
@@ -2635,8 +2880,8 @@
   root.querySelectorAll("[data-generation-profile]").forEach((button) => {
     button.addEventListener("click", () => applyGenerationProfile(button.dataset.generationProfile));
   });
-  variantStateFilter?.addEventListener("change", renderVariants);
-  variantTemplateFilter?.addEventListener("change", renderVariants);
+  variantStateFilter?.addEventListener("change", renderJobs);
+  variantTemplateFilter?.addEventListener("change", renderJobs);
   try { generationHistoryCollapsed = window.localStorage.getItem(generationHistoryCollapsedStorageKey) === "true"; } catch (_) {}
   syncGenerationHistoryVisibility();
   variantsToggle?.addEventListener("click", () => {
@@ -2676,6 +2921,7 @@
       resultStatus.textContent = payload.message || "Генерация отменена.";
       runProgress.hidden = true;
       setGenerationActions({ retry: true });
+      refreshJobs();
     } catch (error) {
       resultStatus.textContent = error.message || "Не удалось отменить генерацию";
       result.classList.add("has-error");
@@ -2732,7 +2978,9 @@
         runProgress.hidden = true;
         return;
       }
+      pendingParentJobID = "";
       updateGenerationQuota(payload.quota);
+      refreshJobs();
       activeGenerationRequestID = payload.request_id || activeGenerationRequestID;
       if (!payload.prompt_id) {
         await recoverGeneration(activeGenerationRequestID);
@@ -2781,6 +3029,7 @@
   syncPromptAssistant();
   refreshQueueOverview();
   refreshRecipes().catch((error) => setRecipeState(error.message || "Не удалось загрузить наборы", "error"));
+  refreshJobs().finally(connectGenerationJobEvents);
   refreshVariants().catch(() => {
     if (requestedVariantID && !requestedVariantHandled) showRepeatNotice("Не удалось загрузить вариант", "Проверьте соединение и обновите страницу.", true);
   });
@@ -2799,5 +3048,7 @@
     }
   }
   window.setInterval(refreshQueueOverview, 5000);
-  window.setInterval(() => refreshVariants().catch(() => {}), 15000);
+  window.setInterval(() => refreshJobs().catch(() => {}), 30000);
+  window.setInterval(() => refreshVariants().catch(() => {}), 30000);
+  window.addEventListener("beforeunload", () => generationJobEvents?.close(), { once: true });
 })();
