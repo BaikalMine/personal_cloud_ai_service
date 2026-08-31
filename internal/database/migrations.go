@@ -866,6 +866,88 @@ var migrationCatalog = []migration{
 			 WHERE cancellation_requested_at IS NOT NULL AND state NOT IN ('completed','failed','cancelled','expired')`,
 		},
 	},
+	{
+		version: 42,
+		name:    "end_to_end_observability",
+		statements: []string{
+			`ALTER TABLE generation_jobs ADD COLUMN IF NOT EXISTS correlation_id TEXT NOT NULL DEFAULT ''
+			 CHECK (correlation_id='' OR (char_length(correlation_id) BETWEEN 16 AND 96 AND correlation_id ~ '^[A-Za-z0-9_-]+$'))`,
+			`UPDATE generation_jobs SET correlation_id=public_id WHERE correlation_id=''`,
+			`CREATE INDEX IF NOT EXISTS generation_jobs_correlation_idx ON generation_jobs(correlation_id)`,
+			`ALTER TABLE generation_requests ADD COLUMN IF NOT EXISTS correlation_id TEXT NOT NULL DEFAULT ''
+			 CHECK (correlation_id='' OR (char_length(correlation_id) BETWEEN 16 AND 96 AND correlation_id ~ '^[A-Za-z0-9_-]+$'))`,
+			`UPDATE generation_requests r SET correlation_id=j.correlation_id
+			 FROM generation_jobs j WHERE r.job_id=j.id AND r.correlation_id=''`,
+			`CREATE INDEX IF NOT EXISTS generation_requests_correlation_idx ON generation_requests(correlation_id) WHERE correlation_id<>''`,
+			`ALTER TABLE generation_job_transitions ADD COLUMN IF NOT EXISTS correlation_id TEXT NOT NULL DEFAULT ''
+			 CHECK (correlation_id='' OR (char_length(correlation_id) BETWEEN 16 AND 96 AND correlation_id ~ '^[A-Za-z0-9_-]+$'))`,
+			`ALTER TABLE generation_job_transitions ADD COLUMN IF NOT EXISTS duration_ms BIGINT NOT NULL DEFAULT 0 CHECK (duration_ms >= 0)`,
+			`UPDATE generation_job_transitions t SET correlation_id=j.correlation_id
+			 FROM generation_jobs j WHERE t.job_id=j.id AND t.correlation_id=''`,
+			`WITH ordered AS (
+			 SELECT id,lag(created_at) OVER (PARTITION BY job_id ORDER BY created_at,id) AS previous_at
+			 FROM generation_job_transitions
+			 )
+			 UPDATE generation_job_transitions t
+			 SET duration_ms=GREATEST(0,(EXTRACT(EPOCH FROM (t.created_at-o.previous_at))*1000)::bigint)
+			 FROM ordered o WHERE t.id=o.id AND o.previous_at IS NOT NULL AND t.duration_ms=0`,
+			`CREATE INDEX IF NOT EXISTS generation_job_transitions_correlation_idx ON generation_job_transitions(correlation_id,created_at,id)`,
+			`ALTER TABLE quick_generation_mining_leases ADD COLUMN IF NOT EXISTS correlation_id TEXT NOT NULL DEFAULT ''
+			 CHECK (correlation_id='' OR (char_length(correlation_id) BETWEEN 16 AND 96 AND correlation_id ~ '^[A-Za-z0-9_-]+$'))`,
+			`UPDATE quick_generation_mining_leases l SET correlation_id=j.correlation_id
+			 FROM generation_jobs j WHERE l.generation_job_id=j.id AND l.correlation_id=''`,
+			`CREATE INDEX IF NOT EXISTS quick_generation_mining_leases_correlation_idx ON quick_generation_mining_leases(correlation_id) WHERE correlation_id<>''`,
+			`ALTER TABLE content_events ADD COLUMN IF NOT EXISTS correlation_id TEXT NOT NULL DEFAULT ''
+			 CHECK (correlation_id='' OR (char_length(correlation_id) BETWEEN 16 AND 96 AND correlation_id ~ '^[A-Za-z0-9_-]+$'))`,
+			`UPDATE content_events e SET correlation_id=j.correlation_id
+			 FROM generation_jobs j WHERE e.generation_job_id=j.id AND e.correlation_id=''`,
+			`CREATE INDEX IF NOT EXISTS content_events_correlation_idx ON content_events(correlation_id,created_at DESC) WHERE correlation_id<>''`,
+			`ALTER TABLE proxy_requests ADD COLUMN IF NOT EXISTS request_id TEXT NOT NULL DEFAULT '' CHECK (char_length(request_id) <= 96)`,
+			`ALTER TABLE proxy_requests ADD COLUMN IF NOT EXISTS correlation_id TEXT NOT NULL DEFAULT ''
+			 CHECK (correlation_id='' OR (char_length(correlation_id) BETWEEN 16 AND 96 AND correlation_id ~ '^[A-Za-z0-9_-]+$'))`,
+			`ALTER TABLE proxy_requests ADD COLUMN IF NOT EXISTS generation_job_id BIGINT NULL REFERENCES generation_jobs(id) ON DELETE SET NULL`,
+			`UPDATE proxy_requests pr SET generation_job_id=j.id,correlation_id=j.correlation_id,request_id=j.request_id
+			 FROM generation_jobs j
+			 WHERE pr.user_id=j.user_id AND pr.service='comfyui' AND pr.method='POST'
+			   AND pr.path='/generate/run/' || j.request_id AND pr.generation_job_id IS NULL`,
+			`CREATE INDEX IF NOT EXISTS proxy_requests_correlation_idx ON proxy_requests(correlation_id,created_at DESC) WHERE correlation_id<>''`,
+			`CREATE INDEX IF NOT EXISTS proxy_requests_generation_job_idx ON proxy_requests(generation_job_id,created_at) WHERE generation_job_id IS NOT NULL`,
+			`ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS request_id TEXT NOT NULL DEFAULT '' CHECK (char_length(request_id) <= 96)`,
+			`ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS correlation_id TEXT NOT NULL DEFAULT ''
+			 CHECK (correlation_id='' OR (char_length(correlation_id) BETWEEN 16 AND 96 AND correlation_id ~ '^[A-Za-z0-9_-]+$'))`,
+			`ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS generation_job_id BIGINT NULL REFERENCES generation_jobs(id) ON DELETE SET NULL`,
+			`CREATE INDEX IF NOT EXISTS audit_log_correlation_idx ON audit_log(correlation_id,created_at DESC) WHERE correlation_id<>''`,
+			`CREATE INDEX IF NOT EXISTS audit_log_generation_job_idx ON audit_log(generation_job_id,created_at) WHERE generation_job_id IS NOT NULL`,
+			`CREATE TABLE IF NOT EXISTS service_observations (
+			 id BIGSERIAL PRIMARY KEY,
+			 component TEXT NOT NULL CHECK (char_length(component) BETWEEN 1 AND 80),
+			 operation TEXT NOT NULL DEFAULT 'probe' CHECK (char_length(operation) BETWEEN 1 AND 120),
+			 outcome TEXT NOT NULL CHECK (outcome IN ('ok','degraded','error','timeout','misconfigured')),
+			 latency_ms BIGINT NOT NULL DEFAULT 0 CHECK (latency_ms >= 0),
+			 generation_job_id BIGINT NULL REFERENCES generation_jobs(id) ON DELETE SET NULL,
+			 correlation_id TEXT NOT NULL DEFAULT '' CHECK (correlation_id='' OR (char_length(correlation_id) BETWEEN 16 AND 96 AND correlation_id ~ '^[A-Za-z0-9_-]+$')),
+			 error_code TEXT NOT NULL DEFAULT '' CHECK (char_length(error_code) <= 80),
+			 detail TEXT NOT NULL DEFAULT '' CHECK (char_length(detail) <= 1000),
+			 observed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`CREATE INDEX IF NOT EXISTS service_observations_component_time_idx ON service_observations(component,observed_at DESC,id DESC)`,
+			`CREATE INDEX IF NOT EXISTS service_observations_job_idx ON service_observations(generation_job_id,observed_at,id) WHERE generation_job_id IS NOT NULL`,
+			`CREATE INDEX IF NOT EXISTS service_observations_retention_idx ON service_observations(observed_at,id)`,
+			`CREATE TABLE IF NOT EXISTS gateway_observations (
+			 id BIGSERIAL PRIMARY KEY,
+			 database_bytes BIGINT NOT NULL DEFAULT 0 CHECK (database_bytes >= 0),
+			 active_jobs INTEGER NOT NULL DEFAULT 0 CHECK (active_jobs >= 0),
+			 overdue_jobs INTEGER NOT NULL DEFAULT 0 CHECK (overdue_jobs >= 0),
+			 active_leases INTEGER NOT NULL DEFAULT 0 CHECK (active_leases >= 0),
+			 content_moderation_backlog INTEGER NOT NULL DEFAULT 0 CHECK (content_moderation_backlog >= 0),
+			 media_moderation_backlog INTEGER NOT NULL DEFAULT 0 CHECK (media_moderation_backlog >= 0),
+			 cleanup_status TEXT NOT NULL DEFAULT 'never' CHECK (cleanup_status IN ('never','ok','partial','error')),
+			 cleanup_age_seconds BIGINT NOT NULL DEFAULT 0 CHECK (cleanup_age_seconds >= 0),
+			 recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`CREATE INDEX IF NOT EXISTS gateway_observations_retention_idx ON gateway_observations(recorded_at,id)`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

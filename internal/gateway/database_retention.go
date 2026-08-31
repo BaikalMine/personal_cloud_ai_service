@@ -15,16 +15,18 @@ func (a *App) runDatabaseRetentionCleanup(ctx context.Context) (domain.DatabaseC
 	now := time.Now().UTC()
 	policy := a.retentionPolicy()
 	report, cleanupErr := a.store.CleanupDatabaseRetention(ctx, domain.DatabaseRetentionCutoffs{
-		ProxyRequests:      now.Add(-policy.ProxyRequests),
-		WebSocketSessions:  now.Add(-policy.WebSocketSessions),
-		GenerationRequests: now.Add(-policy.GenerationRequests),
-		GenerationJobs:     now.Add(-policy.GenerationRequests),
-		DailyUsage:         now.Add(-policy.DailyUsage),
-		InviteHistory:      now.Add(-policy.InviteHistory),
-		AuditLog:           now.Add(-policy.AuditLog),
-		HostMetrics:        now.Add(-policy.HostMetrics),
-		GenerationVariants: now.Add(-policy.GenerationHistory),
-		OutputOwnerships:   now,
+		ProxyRequests:       now.Add(-policy.ProxyRequests),
+		WebSocketSessions:   now.Add(-policy.WebSocketSessions),
+		GenerationRequests:  now.Add(-policy.GenerationRequests),
+		GenerationJobs:      now.Add(-policy.GenerationRequests),
+		DailyUsage:          now.Add(-policy.DailyUsage),
+		InviteHistory:       now.Add(-policy.InviteHistory),
+		AuditLog:            now.Add(-policy.AuditLog),
+		HostMetrics:         now.Add(-policy.HostMetrics),
+		ServiceObservations: now.Add(-policy.HostMetrics),
+		GatewayObservations: now.Add(-policy.HostMetrics),
+		GenerationVariants:  now.Add(-policy.GenerationHistory),
+		OutputOwnerships:    now,
 	}, a.cfg.DatabaseCleanupBatchSize, a.cfg.DatabaseCleanupMaxBatches)
 
 	// Preserve the cleanup result even when the cleanup itself consumed its

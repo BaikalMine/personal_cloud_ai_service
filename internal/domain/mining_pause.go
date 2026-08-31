@@ -6,6 +6,7 @@ import "time"
 // generation remains queued or running in ComfyUI.
 type QuickGenerationMiningLease struct {
 	ID              string
+	CorrelationID   string
 	PromptID        string
 	GenerationJobID int64
 	UserID          int64

@@ -63,7 +63,7 @@ func TestDatabaseCleanupViewSortsErrorsFirst(t *testing.T) {
 
 func TestGenerationJobTablesHaveLifecyclePolicies(t *testing.T) {
 	policies := databaseTablePolicies()
-	for _, table := range []string{"generation_jobs", "generation_job_transitions", "generation_job_revision"} {
+	for _, table := range []string{"generation_jobs", "generation_job_transitions", "generation_job_revision", "service_observations", "gateway_observations"} {
 		policy, ok := policies[table]
 		if !ok || policy.Owner == "" || policy.Retention == nil {
 			t.Fatalf("generation job table %q has no lifecycle policy: %+v", table, policy)
@@ -71,6 +71,11 @@ func TestGenerationJobTablesHaveLifecyclePolicies(t *testing.T) {
 	}
 	if policy := policies["generation_jobs"]; !policy.Managed || policy.Configuration != "GENERATION_REQUEST_RETENTION" {
 		t.Fatalf("generation_jobs retention policy = %+v", policy)
+	}
+	for _, table := range []string{"service_observations", "gateway_observations"} {
+		if policy := policies[table]; !policy.Managed || policy.Configuration != "HOST_METRIC_RETENTION" {
+			t.Fatalf("%s retention policy = %+v", table, policy)
+		}
 	}
 }
 

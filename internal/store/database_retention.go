@@ -88,6 +88,18 @@ func (s *Store) CleanupDatabaseRetention(ctx context.Context, cutoffs domain.Dat
 				ORDER BY recorded_at,id LIMIT $2::integer FOR UPDATE SKIP LOCKED
 			)
 			DELETE FROM host_metrics item USING doomed WHERE item.id=doomed.id`},
+		{name: "service_observations", before: cutoffs.ServiceObservations, query: `
+			WITH doomed AS (
+				SELECT id FROM service_observations WHERE observed_at < $1
+				ORDER BY observed_at,id LIMIT $2::integer FOR UPDATE SKIP LOCKED
+			)
+			DELETE FROM service_observations item USING doomed WHERE item.id=doomed.id`},
+		{name: "gateway_observations", before: cutoffs.GatewayObservations, query: `
+			WITH doomed AS (
+				SELECT id FROM gateway_observations WHERE recorded_at < $1
+				ORDER BY recorded_at,id LIMIT $2::integer FOR UPDATE SKIP LOCKED
+			)
+			DELETE FROM gateway_observations item USING doomed WHERE item.id=doomed.id`},
 		{name: "quick_generation_variants", before: cutoffs.GenerationVariants, query: `
 			WITH doomed AS (
 				SELECT id FROM quick_generation_variants
@@ -284,6 +296,8 @@ func databaseOldestQueries() map[string]string {
 		"quick_generation_daily_usage":     `SELECT MIN(usage_date)::timestamptz FROM quick_generation_daily_usage`,
 		"quick_generation_mining_leases":   `SELECT MIN(created_at) FROM quick_generation_mining_leases`,
 		"host_metrics":                     `SELECT MIN(recorded_at) FROM host_metrics`,
+		"service_observations":             `SELECT MIN(observed_at) FROM service_observations`,
+		"gateway_observations":             `SELECT MIN(recorded_at) FROM gateway_observations`,
 		"generation_requests":              `SELECT MIN(created_at) FROM generation_requests`,
 		"generation_jobs":                  `SELECT MIN(created_at) FROM generation_jobs`,
 		"generation_job_transitions":       `SELECT MIN(created_at) FROM generation_job_transitions`,

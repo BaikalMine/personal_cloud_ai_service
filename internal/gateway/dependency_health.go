@@ -307,9 +307,11 @@ func (a *App) refreshDependencyStatuses(ctx context.Context) {
 			latency := time.Since(started)
 			if err != nil {
 				monitor.failure(spec.Key, err.Error(), misconfigured, latency)
+				a.observeServiceCall(ctx, spec.Key, "probe", started, err, misconfigured, "dependency_probe_failed", detail)
 				return
 			}
 			monitor.success(spec.Key, detail, dataAt, latency)
+			a.observeServiceCall(ctx, spec.Key, "probe", started, nil, false, "", detail)
 		}(spec)
 	}
 	wg.Wait()

@@ -20,9 +20,9 @@ func (s *Store) CountUsers(ctx context.Context) (int64, error) {
 func (s *Store) RecordProxyRequest(ctx context.Context, record domain.ProxyRequestRecord) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO proxy_requests
-			(user_id, service, method, path, status_code, duration_ms, bytes_in, bytes_out, is_websocket, client_ip, user_agent)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-	`, record.UserID, record.Service, record.Method, record.Path, record.Status, record.DurationMS,
+			(user_id, request_id, correlation_id, generation_job_id, service, method, path, status_code, duration_ms, bytes_in, bytes_out, is_websocket, client_ip, user_agent)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+	`, record.UserID, record.RequestID, record.CorrelationID, record.GenerationJobID, record.Service, record.Method, record.Path, record.Status, record.DurationMS,
 		record.BytesIn, record.BytesOut, record.WebSocket, record.ClientIP, record.UserAgent)
 	return err
 }
@@ -55,9 +55,9 @@ func (s *Store) RecordAudit(ctx context.Context, event domain.AuditEvent) error 
 		}
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO audit_log (actor_user_id, action, target_type, target_id, ip, user_agent, metadata)
-		VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)
-	`, event.ActorUserID, event.Action, event.TargetType, event.TargetID, event.IP, event.UserAgent, string(metadata))
+		INSERT INTO audit_log (actor_user_id, request_id, correlation_id, generation_job_id, action, target_type, target_id, ip, user_agent, metadata)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)
+	`, event.ActorUserID, event.RequestID, event.CorrelationID, event.GenerationJobID, event.Action, event.TargetType, event.TargetID, event.IP, event.UserAgent, string(metadata))
 	return err
 }
 

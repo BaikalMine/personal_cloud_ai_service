@@ -302,7 +302,14 @@ func formatDuration(v any) string {
 	if ms < 1000 {
 		return fmt.Sprintf("%d мс", ms)
 	}
-	return fmt.Sprintf("%.2f с", float64(ms)/1000)
+	duration := time.Duration(ms) * time.Millisecond
+	if duration < time.Minute {
+		return fmt.Sprintf("%.2f с", duration.Seconds())
+	}
+	if duration < time.Hour {
+		return fmt.Sprintf("%d мин. %d сек.", int(duration/time.Minute), int(duration%time.Minute/time.Second))
+	}
+	return fmt.Sprintf("%d ч. %d мин.", int(duration/time.Hour), int(duration%time.Hour/time.Minute))
 }
 
 func accountLifetimeLabel(seconds int64) string {

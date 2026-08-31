@@ -1,0 +1,65 @@
+{{define "admin_job_trace"}}
+{{template "head" .}}
+{{template "admin_nav" .}}
+<main class="page trace-page" id="main-content">
+  <header class="page-heading trace-heading">
+    <div><a class="back-link" href="/admin/metrics">← Наблюдаемость</a><p class="eyebrow">Полный путь запроса</p><h1>Трасса генерации</h1><p>{{if .Trace.Job.UsernameSnapshot}}{{.Trace.Job.UsernameSnapshot}}{{else}}Пользователь удалён{{end}} · {{formatTime .Trace.Job.CreatedAt}}</p></div>
+    <span class="trace-state is-{{.Trace.Job.State}}">{{generationStateLabel .Trace.Job.State}}</span>
+  </header>
+
+  <section class="metric-grid metrics-four trace-summary" aria-label="Сводка задания">
+    <article class="metric-card tone-blue"><span>Workflow</span><strong class="metric-card-text">{{if .Trace.Job.WorkflowID}}{{.Trace.Job.WorkflowID}}{{else}}Не указан{{end}}</strong><small>{{if .Trace.Job.TemplateID}}{{.Trace.Job.TemplateID}}{{else}}Без шаблона{{end}}</small></article>
+    <article class="metric-card tone-cyan"><span>Модель</span><strong class="metric-card-text">{{if .Trace.Job.ModelName}}{{.Trace.Job.ModelName}}{{else}}Не указана{{end}}</strong><small>seed {{.Trace.Job.Seed}}</small></article>
+    <article class="metric-card tone-amber"><span>Входные файлы</span><strong>{{formatNumber .Trace.Job.InputCount}}</strong><small>попытка {{.Trace.Job.Attempt}}</small></article>
+    <article class="metric-card {{if eq .Trace.Job.State "failed"}}tone-red{{else}}tone-green{{end}}"><span>Текущее состояние</span><strong class="metric-card-text">{{generationStateLabel .Trace.Job.State}}</strong><small>{{.Trace.Job.StatusMessage}}</small></article>
+  </section>
+
+  <section class="panel trace-identifiers">
+    <div class="panel-heading"><div><p class="section-kicker">Связи</p><h2>Идентификаторы</h2><p class="panel-intro">Эти значения проходят через HTTP, Job Center, ComfyUI, аудит и контент.</p></div></div>
+    <dl class="trace-id-grid">
+      <div><dt>Job ID</dt><dd><code>{{.Trace.Job.PublicID}}</code></dd></div>
+      <div><dt>Correlation ID</dt><dd><code>{{.Trace.Job.CorrelationID}}</code></dd></div>
+      <div><dt>Request ID</dt><dd><code>{{.Trace.Job.RequestID}}</code></dd></div>
+      <div><dt>ComfyUI prompt</dt><dd><code>{{if .Trace.Job.PromptID}}{{.Trace.Job.PromptID}}{{else}}Не назначен{{end}}</code></dd></div>
+    </dl>
+  </section>
+
+  {{if .Trace.Job.ErrorCode}}<section class="trace-error" role="alert"><div><strong>{{.Trace.Job.ErrorCode}}</strong><p>{{if .Trace.Job.ErrorMessage}}{{.Trace.Job.ErrorMessage}}{{else}}{{.Trace.Job.StatusMessage}}{{end}}</p></div><span>{{formatTime .Trace.Job.FinishedAt}}</span></section>{{end}}
+
+  <section class="panel trace-timeline-panel">
+    <div class="panel-heading"><div><p class="section-kicker">Durable state machine</p><h2>Этапы задания</h2></div><span class="muted">{{len .Trace.Transitions}} событий</span></div>
+    <ol class="trace-timeline">
+      {{range .Trace.Transitions}}<li class="is-{{.ToState}}"><span class="trace-timeline-marker"></span><div class="trace-timeline-main"><span><strong>{{generationStateLabel .ToState}}</strong><time>{{formatTime .CreatedAt}}</time></span><p>{{.Message}}</p>{{if .ErrorCode}}<small>{{.ErrorCode}}{{if .ErrorMessage}} · {{.ErrorMessage}}{{end}}</small>{{end}}</div><b>{{if .FromState}}{{formatDuration .DurationMS}}{{else}}Старт{{end}}</b></li>{{end}}
+    </ol>
+  </section>
+
+  <section class="panel observability-table-panel">
+    <div class="panel-heading"><div><p class="section-kicker">Зависимости</p><h2>Вызовы сервисов</h2></div></div>
+    <div class="table-scroll"><table class="observability-table"><thead><tr><th>Время</th><th>Компонент</th><th>Операция</th><th>Результат</th><th>Задержка</th><th>Подробности</th></tr></thead><tbody>
+      {{range .Trace.ServiceObservations}}<tr><td data-label="Время">{{formatTime .ObservedAt}}</td><td data-label="Компонент"><strong>{{componentLabel .Component}}</strong></td><td data-label="Операция">{{operationLabel .Operation}}</td><td data-label="Результат"><span class="observation-outcome is-{{.Outcome}}">{{observationOutcome .Outcome}}</span></td><td data-label="Задержка">{{formatDuration .LatencyMS}}</td><td data-label="Подробности"><span class="table-secondary">{{if .Detail}}{{.Detail}}{{else}}-{{end}}</span></td></tr>
+      {{else}}<tr><td colspan="6" class="empty-cell">Для этого задания нет отдельных вызовов сервисов.</td></tr>{{end}}
+    </tbody></table></div>
+  </section>
+
+  <section class="trace-record-grid">
+    <article class="panel trace-record-panel">
+      <div class="panel-heading"><div><p class="section-kicker">HTTP</p><h2>Прокси-запросы</h2></div><b>{{len .Trace.ProxyRequests}}</b></div>
+      <div class="trace-record-list">{{range .Trace.ProxyRequests}}<div><span><strong>{{.Method}} {{.Service}}</strong><small>{{.Path}}</small></span><span><b class="{{if ge .Status 400}}is-negative{{else}}is-positive{{end}}">HTTP {{.Status}}</b><small>{{formatDuration .DurationMS}} · {{formatTime .CreatedAt}}</small></span></div>{{else}}<p class="empty-state">Связанных прокси-запросов нет.</p>{{end}}</div>
+    </article>
+    <article class="panel trace-record-panel">
+      <div class="panel-heading"><div><p class="section-kicker">Контроль</p><h2>Аудит</h2></div><b>{{len .Trace.AuditEvents}}</b></div>
+      <div class="trace-record-list">{{range .Trace.AuditEvents}}<div><span><strong>{{.Action}}</strong><small>{{.TargetType}}</small></span><span><small>{{formatTime .CreatedAt}}</small></span></div>{{else}}<p class="empty-state">Связанных событий аудита нет.</p>{{end}}</div>
+    </article>
+    <article class="panel trace-record-panel">
+      <div class="panel-heading"><div><p class="section-kicker">AI-контент</p><h2>Сохранённые записи</h2></div><b>{{len .Trace.ContentEvents}}</b></div>
+      <div class="trace-record-list">{{range .Trace.ContentEvents}}<div><span><strong>{{.Kind}}</strong><small>{{if .Model}}{{.Model}}{{else}}{{.Service}}{{end}}</small></span><span><b>{{.GenerationState}}</b><small>{{formatNumber .MediaCount}} медиа · {{formatTime .CreatedAt}}</small></span></div>{{else}}<p class="empty-state">Связанных записей контента нет.</p>{{end}}</div>
+    </article>
+  </section>
+
+  <section class="panel trace-resource-panel">
+    <div class="panel-heading"><div><p class="section-kicker">Ресурсы</p><h2>Lease майнинга</h2></div>{{if .Trace.MiningLease}}<span class="dependency-state stale">Активен</span>{{else}}<span class="dependency-state online">Освобождён</span>{{end}}</div>
+    {{with .Trace.MiningLease}}<dl class="trace-id-grid"><div><dt>Lease ID</dt><dd><code>{{.ID}}</code></dd></div><div><dt>Miner ID</dt><dd>{{.MinerID}}</dd></div><div><dt>Создан</dt><dd>{{formatTime .CreatedAt}}</dd></div><div><dt>Возобновить майнинг</dt><dd>{{if .ResumeMining}}Да{{else}}Нет{{end}}</dd></div></dl>{{else}}<p class="empty-state">Активной аренды ресурсов у задания нет.</p>{{end}}
+  </section>
+</main>
+</body></html>
+{{end}}

@@ -286,10 +286,14 @@ func TestSafeAdminMediaType(t *testing.T) {
 func TestSecurityHeadersMiddleware(t *testing.T) {
 	app := &App{}
 	request := httptest.NewRequest(http.MethodGet, "https://ai.example/app", nil)
+	request.Header.Set(correlationHeader, "trace-request-1234567890")
 	response := httptest.NewRecorder()
 	app.securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if requestID(r) == "" {
 			t.Fatal("request ID was not added to the request context")
+		}
+		if correlationID(r) != "trace-request-1234567890" {
+			t.Fatalf("correlation ID = %q", correlationID(r))
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})).ServeHTTP(response, request)
@@ -309,6 +313,9 @@ func TestSecurityHeadersMiddleware(t *testing.T) {
 	}
 	if len(response.Header().Get("X-Request-ID")) != 24 {
 		t.Fatalf("invalid request ID %q", response.Header().Get("X-Request-ID"))
+	}
+	if got := response.Header().Get(correlationHeader); got != "trace-request-1234567890" {
+		t.Fatalf("correlation header = %q", got)
 	}
 	if got := app.requestsTotal.Load(); got != 1 {
 		t.Fatalf("requests total = %d, want 1", got)

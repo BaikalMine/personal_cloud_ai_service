@@ -170,10 +170,15 @@ count. Older manual dumps without a manifest are never removed.
 - `/comfyui/` and `/openwebui/`: authenticated HTTP/WebSocket proxies.
 - `/admin/users`, `/admin/invites`, `/admin/sessions`: identity and access administration.
 - `/admin/services/comfyui` and `/admin/services/openwebui`: 30-day service analytics.
-- `/admin/metrics`, `/admin/audit`, and `/admin/storage`: operational metrics,
-  exportable audit history, table growth, and retention cleanup state.
+- `/admin/metrics`: generation success, queue/execution percentiles, dependency
+  latency, backlog, database growth, readiness, and maintenance exceptions.
+- `/admin/jobs/{public-id}`: one correlated generation trace across job states,
+  ComfyUI calls, proxy telemetry, audit, content, and mining lease.
+- `/admin/audit` and `/admin/storage`: exportable audit history, table growth,
+  lifecycle ownership, and retention cleanup state.
 - `/admin/mining`: miner profiles, icons, scripts, status, start/stop controls, and ZIP updates.
 - `/metrics`: Prometheus text format on the LAN-only admin listener.
+- `/readyz`: required database readiness plus non-blocking optional dependency details.
 
 Administrators can independently grant ComfyUI and OpenWebUI access from each
 user detail page. Administrators themselves always retain access to both

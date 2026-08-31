@@ -50,6 +50,7 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	assertMiningProfiles(t, ctx, repository, adminID)
 	assertDatabaseRetentionLifecycle(t, ctx, db, repository, adminID)
 	assertGenerationJobLifecycle(t, ctx, db, repository, adminID)
+	assertObservabilityLifecycle(t, ctx, repository, adminID)
 
 	inviteHash := security.HashToken("single-use-integration-invite")
 	inviteID, err := repository.CreateInvite(ctx, store.CreateInviteParams{
@@ -692,10 +693,126 @@ func assertGenerationJobLifecycle(t *testing.T, ctx context.Context, db *sql.DB,
 	}
 }
 
+func assertObservabilityLifecycle(t *testing.T, ctx context.Context, repository *store.Store, userID int64) {
+	t.Helper()
+	now := time.Now().UTC()
+	job, created, err := repository.CreateGenerationJob(ctx, domain.CreateGenerationJobParams{
+		PublicID: "job_integration_observability_0001", UserID: userID, UsernameSnapshot: "admin",
+		RequestID: "integration-observability-request",
+	})
+	if err != nil || !created {
+		t.Fatalf("create observability job=%+v created=%v err=%v", job, created, err)
+	}
+	job, err = repository.PrepareGenerationJob(ctx, job.ID, domain.PreparedGenerationJob{
+		WorkflowID: "minimax-h3-video-v4", ModelName: "MiniMax H3", Seed: 42, PayloadCipher: []byte{1}, Dependencies: []string{"comfyui"}, InputCount: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job, err = repository.MarkGenerationJobResourcesReleased(ctx, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	job, changed, err := repository.TransitionGenerationJob(ctx, job.ID, domain.GenerationJobTransitionParams{
+		State: domain.GenerationJobFailed, Message: "Наблюдаемая ошибка", ErrorCode: "integration_observability_failed", ErrorMessage: "expected failure",
+	})
+	if err != nil || !changed || job.FinishedAt == nil {
+		t.Fatalf("fail observability job=%+v changed=%v err=%v", job, changed, err)
+	}
+	jobID := job.ID
+	if err := repository.RecordServiceObservation(ctx, domain.ServiceObservationRecord{
+		Component: "integration-service", Operation: "request", Outcome: "ok", LatencyMS: 25, CorrelationID: "integration-correlation-0001", ObservedAt: now.Add(-time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.RecordServiceObservation(ctx, domain.ServiceObservationRecord{
+		Component: "integration-service", Operation: "request", Outcome: "error", LatencyMS: 75, CorrelationID: "integration-correlation-0002", ErrorCode: "integration_error", Detail: "expected test error", ObservedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.RecordServiceObservation(ctx, domain.ServiceObservationRecord{
+		Component: "comfyui", Operation: "submit_prompt", Outcome: "error", LatencyMS: 96,
+		GenerationJobID: &jobID, CorrelationID: job.CorrelationID, ErrorCode: job.ErrorCode, Detail: job.ErrorMessage, ObservedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.RecordServiceObservation(ctx, domain.ServiceObservationRecord{
+		Component: "ollama", Operation: "enhance_video", Outcome: "ok", LatencyMS: 1500,
+		CorrelationID: job.CorrelationID, ObservedAt: now.Add(-time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.RecordProxyRequest(ctx, domain.ProxyRequestRecord{
+		UserID: userID, RequestID: job.RequestID, CorrelationID: job.CorrelationID, GenerationJobID: &jobID,
+		Service: "comfyui", Method: "POST", Path: "/generate/run/" + job.RequestID, Status: 502, DurationMS: 96,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	actorID := userID
+	if err := repository.RecordAudit(ctx, domain.AuditEvent{
+		ActorUserID: &actorID, RequestID: job.RequestID, CorrelationID: job.CorrelationID, GenerationJobID: &jobID,
+		Action: "quick_generation_failed", TargetType: "comfyui", Metadata: map[string]any{"error_code": job.ErrorCode},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.InsertContentEvent(ctx, domain.ContentEventRecord{
+		UserID: userID, GenerationJobID: &jobID, CorrelationID: job.CorrelationID, Service: "comfyui", Kind: "comfyui_prompt",
+		Model: job.ModelName, GenerationState: "error", PromptCipher: []byte{1}, ResponseCipher: []byte{2}, MetadataCipher: []byte{3}, ExpiresAt: now.Add(-time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	latencies, err := repository.ServiceLatencySummaries(ctx, now.Add(-time.Hour))
+	if err != nil || len(latencies) == 0 {
+		t.Fatalf("service latency summaries=%+v err=%v", latencies, err)
+	}
+	foundLatency := false
+	for _, latency := range latencies {
+		if latency.Component == "integration-service" && latency.Operation == "request" {
+			foundLatency = latency.Samples == 2 && latency.Failures == 1 && latency.P50MS == 25 && latency.P95MS == 75 && latency.LastOutcome == "error"
+		}
+	}
+	if !foundLatency {
+		t.Fatalf("integration latency summary not found: %+v", latencies)
+	}
+	observation, err := repository.CollectGatewayObservation(ctx, 45*time.Minute)
+	if err != nil || observation.DatabaseBytes <= 0 {
+		t.Fatalf("collect gateway observation=%+v err=%v", observation, err)
+	}
+	if err := repository.RecordGatewayObservation(ctx, observation); err != nil {
+		t.Fatal(err)
+	}
+	gatewaySummary, err := repository.GatewayObservationSummary(ctx)
+	if err != nil || gatewaySummary.Latest.DatabaseBytes <= 0 {
+		t.Fatalf("gateway observation summary=%+v err=%v", gatewaySummary, err)
+	}
+	generationSummary, err := repository.GenerationObservabilitySummary(ctx, job.FinishedAt.Add(-time.Minute), now.Add(-45*time.Minute))
+	if err != nil || generationSummary.Failed == 0 {
+		t.Fatalf("generation observation summary=%+v err=%v", generationSummary, err)
+	}
+	outcomes, err := repository.GenerationOutcomeGroups(ctx, job.FinishedAt.Add(-time.Minute), 10)
+	foundOutcome := false
+	for _, outcome := range outcomes {
+		if outcome.WorkflowID == job.WorkflowID && outcome.ModelName == job.ModelName && outcome.Failed > 0 {
+			foundOutcome = true
+		}
+	}
+	if err != nil || !foundOutcome {
+		t.Fatalf("generation outcome groups=%+v err=%v", outcomes, err)
+	}
+	failures, err := repository.GenerationFailureSummaries(ctx, job.FinishedAt.Add(-time.Minute), 10)
+	if err != nil || len(failures) == 0 || failures[0].JobPublicID != job.PublicID {
+		t.Fatalf("generation failures=%+v err=%v", failures, err)
+	}
+	trace, err := repository.AdminGenerationJobTrace(ctx, job.PublicID)
+	if err != nil || trace.Job.PublicID == "" || trace.Job.FinishedAt == nil || len(trace.Transitions) == 0 ||
+		len(trace.ServiceObservations) < 2 || len(trace.ProxyRequests) == 0 || len(trace.AuditEvents) == 0 || len(trace.ContentEvents) == 0 {
+		t.Fatalf("generation trace=%+v err=%v", trace, err)
+	}
+}
+
 func resetIntegrationDatabase(t *testing.T, db *sql.DB) {
 	t.Helper()
 	if _, err := db.Exec(`
-		TRUNCATE miners, comfy_output_cleanup_tombstones, comfy_input_assets, comfy_userdata, comfy_settings, comfy_output_ownership, content_media, content_events, websocket_sessions, proxy_requests,
+		TRUNCATE service_observations, gateway_observations, miners, comfy_output_cleanup_tombstones, comfy_input_assets, comfy_userdata, comfy_settings, comfy_output_ownership, content_media, content_events, websocket_sessions, proxy_requests,
 			audit_log, invite_uses, invites, sessions, users RESTART IDENTITY CASCADE
 		;
 		INSERT INTO miners (name, script_path, process_name, enabled, is_default)
@@ -735,6 +852,10 @@ func assertDatabaseRetentionLifecycle(t *testing.T, ctx context.Context, db *sql
 		        ($1,'retention_current','system',now())`,
 		`INSERT INTO host_metrics(recorded_at,cpu_percent,memory_used_bytes,memory_total_bytes)
 		 VALUES (now() - interval '72 hours',91,1,2),(now(),92,1,2)`,
+		`INSERT INTO service_observations(component,operation,outcome,latency_ms,observed_at)
+		 VALUES ('retention-test','probe','ok',1,now() - interval '72 hours'),('retention-test','probe','ok',2,now())`,
+		`INSERT INTO gateway_observations(database_bytes,active_jobs,recorded_at)
+		 VALUES (100,1,now() - interval '72 hours'),(200,2,now())`,
 		`INSERT INTO quick_generation_variants(user_id,prompt_id,seed,payload_cipher,state,created_at,finished_at,state_changed_at)
 		 VALUES ($1,'retention-old-variant',1,decode('00','hex'),'completed',now() - interval '72 hours',now() - interval '71 hours',now() - interval '71 hours'),
 		        ($1,'retention-current-variant',2,decode('00','hex'),'completed',now(),now(),now()),
@@ -773,6 +894,7 @@ func assertDatabaseRetentionLifecycle(t *testing.T, ctx context.Context, db *sql
 		ProxyRequests: cutoff, WebSocketSessions: cutoff, GenerationRequests: cutoff,
 		GenerationJobs: cutoff,
 		DailyUsage:     cutoff, InviteHistory: cutoff, AuditLog: cutoff, HostMetrics: cutoff,
+		ServiceObservations: cutoff, GatewayObservations: cutoff,
 		GenerationVariants: cutoff, OutputOwnerships: now,
 	}
 	first, err := repository.CleanupDatabaseRetention(ctx, cutoffs, 100, 1)
@@ -782,7 +904,8 @@ func assertDatabaseRetentionLifecycle(t *testing.T, ctx context.Context, db *sql
 	for table, expected := range map[string]int64{
 		"proxy_requests": 100, "websocket_sessions": 1, "generation_requests": 1,
 		"quick_generation_daily_usage": 1, "invites": 1, "audit_log": 1,
-		"host_metrics": 1, "quick_generation_variants": 1, "comfy_output_ownership": 1,
+		"host_metrics": 1, "service_observations": 1, "gateway_observations": 1,
+		"quick_generation_variants": 1, "comfy_output_ownership": 1,
 		"generation_jobs": 1,
 	} {
 		if first.DeletedRows[table] != expected {
@@ -818,6 +941,8 @@ func assertDatabaseRetentionLifecycle(t *testing.T, ctx context.Context, db *sql
 		`SELECT count(*) FROM invites WHERE token_hash='retention-current-invite'`:                                                          1,
 		`SELECT count(*) FROM audit_log WHERE action='retention_current'`:                                                                   1,
 		`SELECT count(*) FROM host_metrics WHERE recorded_at >= now() - interval '1 hour'`:                                                  1,
+		`SELECT count(*) FROM service_observations WHERE component='retention-test'`:                                                        1,
+		`SELECT count(*) FROM gateway_observations WHERE database_bytes=200`:                                                                1,
 		`SELECT count(*) FROM quick_generation_variants WHERE prompt_id IN ('retention-current-variant','retention-active-variant')`:        2,
 		`SELECT count(*) FROM generation_jobs WHERE request_id IN ('retention-job-current','retention-job-active')`:                         2,
 		`SELECT count(*) FROM comfy_output_ownership WHERE filename='current.png'`:                                                          1,
@@ -865,6 +990,8 @@ func cleanupDatabaseRetentionFixtures(t *testing.T, db *sql.DB, userID int64) {
 		{`DELETE FROM invites WHERE token_hash IN ('retention-old-invite','retention-current-invite')`, nil},
 		{`DELETE FROM audit_log WHERE action IN ('retention_old','retention_current')`, nil},
 		{`DELETE FROM host_metrics WHERE cpu_percent IN (91,92) AND memory_total_bytes=2`, nil},
+		{`DELETE FROM service_observations WHERE component='retention-test'`, nil},
+		{`DELETE FROM gateway_observations WHERE database_bytes IN (100,200)`, nil},
 		{`DELETE FROM quick_generation_variants WHERE prompt_id IN ('retention-old-variant','retention-current-variant','retention-active-variant')`, nil},
 		{`DELETE FROM generation_jobs WHERE request_id IN ('retention-job-old','retention-job-current','retention-job-active')`, nil},
 		{`DELETE FROM comfy_output_ownership WHERE prompt_id='retention-ownership-event'`, nil},

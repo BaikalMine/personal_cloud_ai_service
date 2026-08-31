@@ -18,11 +18,11 @@ func (s *Store) InsertContentEvent(ctx context.Context, event domain.ContentEven
 	var id int64
 	err := s.db.QueryRowContext(ctx, `
 		INSERT INTO content_events
-			(user_id, generation_job_id, service, kind, external_id, model, generation_state, prompt_cipher, response_cipher, metadata_cipher, is_sensitive, sensitivity_classified_at, expires_at)
-		VALUES ($1,$2,$3,$4,NULLIF($5,''),$6,$7,$8,$9,$10,$11,now(),$12)
+			(user_id, generation_job_id, correlation_id, service, kind, external_id, model, generation_state, prompt_cipher, response_cipher, metadata_cipher, is_sensitive, sensitivity_classified_at, expires_at)
+		VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9,$10,$11,$12,now(),$13)
 		ON CONFLICT DO NOTHING
 		RETURNING id
-	`, event.UserID, event.GenerationJobID, event.Service, event.Kind, event.ExternalID, event.Model, event.GenerationState,
+	`, event.UserID, event.GenerationJobID, event.CorrelationID, event.Service, event.Kind, event.ExternalID, event.Model, event.GenerationState,
 		event.PromptCipher, event.ResponseCipher, event.MetadataCipher, event.Sensitive, event.ExpiresAt).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) && event.GenerationJobID != nil {
 		err = s.db.QueryRowContext(ctx, `SELECT id FROM content_events
@@ -40,7 +40,7 @@ func (s *Store) ContentRevision(ctx context.Context) (int64, error) {
 func (s *Store) ListContentEvents(ctx context.Context, limit int, username, service string) ([]domain.ContentEventRow, error) {
 	limit = boundedLimit(limit, 1, 500)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT e.id, COALESCE(e.user_id,0), COALESCE(u.username,'Удалённый пользователь'), e.service, e.kind, COALESCE(e.external_id,''), e.model,
+		SELECT e.id, COALESCE(e.user_id,0), COALESCE(u.username,'Удалённый пользователь'), e.generation_job_id,e.correlation_id,e.service, e.kind, COALESCE(e.external_id,''), e.model,
 		       e.generation_state, e.prompt_cipher, e.response_cipher, e.metadata_cipher, e.is_sensitive,
 		       e.generated_media_count, COALESCE(e.media_expires_at,'epoch'::timestamptz), COUNT(m.id), e.created_at, e.expires_at
 		FROM content_events e
@@ -61,10 +61,15 @@ func (s *Store) ListContentEvents(ctx context.Context, limit int, username, serv
 	var events []domain.ContentEventRow
 	for rows.Next() {
 		var event domain.ContentEventRow
-		if err := rows.Scan(&event.ID, &event.UserID, &event.Username, &event.Service, &event.Kind,
+		var generationJobID sql.NullInt64
+		if err := rows.Scan(&event.ID, &event.UserID, &event.Username, &generationJobID, &event.CorrelationID, &event.Service, &event.Kind,
 			&event.ExternalID, &event.Model, &event.GenerationState, &event.PromptCipher, &event.ResponseCipher,
 			&event.MetadataCipher, &event.Sensitive, &event.GeneratedMediaCount, &event.MediaExpiresAt, &event.MediaCount, &event.CreatedAt, &event.ExpiresAt); err != nil {
 			return nil, err
+		}
+		if generationJobID.Valid {
+			value := generationJobID.Int64
+			event.GenerationJobID = &value
 		}
 		events = append(events, event)
 	}
@@ -180,7 +185,7 @@ func (s *Store) SetContentGenerationState(ctx context.Context, userID int64, pro
 func (s *Store) ListPendingVisualSensitiveMedia(ctx context.Context, limit int) ([]domain.PendingSensitiveMedia, error) {
 	limit = boundedLimit(limit, 1, 20)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id,m.event_id,m.mime_type,m.payload_cipher
+		SELECT m.id,m.event_id,e.generation_job_id,e.correlation_id,m.mime_type,m.payload_cipher
 		FROM content_media m
 		JOIN content_events e ON e.id=m.event_id
 		WHERE m.media_type='image' AND m.visual_sensitivity_classified_at IS NULL
@@ -195,7 +200,7 @@ func (s *Store) ListPendingVisualSensitiveMedia(ctx context.Context, limit int) 
 	items := make([]domain.PendingSensitiveMedia, 0)
 	for rows.Next() {
 		var item domain.PendingSensitiveMedia
-		if err := rows.Scan(&item.ID, &item.EventID, &item.MIMEType, &item.PayloadCipher); err != nil {
+		if err := rows.Scan(&item.ID, &item.EventID, &item.GenerationJobID, &item.CorrelationID, &item.MIMEType, &item.PayloadCipher); err != nil {
 			return nil, err
 		}
 		items = append(items, item)

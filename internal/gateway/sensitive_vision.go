@@ -36,14 +36,21 @@ func (a *App) queueSensitiveMediaClassification() {
 				return
 			}
 			for _, item := range items {
+				jobID := int64(0)
+				if item.GenerationJobID != nil {
+					jobID = *item.GenerationJobID
+				}
+				itemCtx := traceContext(ctx, item.CorrelationID, jobID, "")
 				image, err := a.contentCipher.DecryptBytes(item.PayloadCipher)
 				if err != nil {
 					log.Printf("decrypt media %d for visual sensitivity classification: %v", item.ID, err)
 					continue
 				}
-				imageCtx, imageCancel := context.WithTimeout(ctx, sensitiveMediaClassificationTimeout)
+				imageCtx, imageCancel := context.WithTimeout(itemCtx, sensitiveMediaClassificationTimeout)
+				started := time.Now()
 				sensitive, err := a.contentModerator.ClassifyImage(imageCtx, image, item.MIMEType)
 				imageCancel()
+				a.observeServiceCall(itemCtx, dependencyModerator, "classify_image", started, err, false, "moderation_failed", "")
 				if err != nil {
 					if errors.Is(err, moderation.ErrUnsupportedImage) {
 						// Large or unsupported files stay behind the privacy curtain.

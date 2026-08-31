@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -26,18 +27,22 @@ func (a *App) serviceStatuses(ctx context.Context) []ServiceStatus {
 		go func() {
 			defer wg.Done()
 			check := checks[index]
+			started := time.Now()
 			status := a.checkService(ctx, check.name, check.url, check.auth)
 			statuses[index] = status
 			if check.url == nil {
+				a.observeServiceCall(ctx, check.key, "health", started, errors.New(status.Detail), true, "dependency_not_configured", status.Detail)
 				return
 			}
 			if status.Online {
 				now := time.Now().UTC()
 				a.dependencyMonitor().success(check.key, status.Detail, &now, status.Latency)
+				a.observeServiceCall(ctx, check.key, "health", started, nil, false, "", status.Detail)
 				return
 			}
 			misconfigured := status.Status == http.StatusUnauthorized || status.Status == http.StatusForbidden
 			a.dependencyMonitor().failure(check.key, status.Detail, misconfigured, status.Latency)
+			a.observeServiceCall(ctx, check.key, "health", started, errors.New(status.Detail), misconfigured, "dependency_health_failed", status.Detail)
 		}()
 	}
 	wg.Wait()

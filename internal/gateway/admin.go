@@ -69,6 +69,8 @@ func (a *App) handleAdminRoutes(w http.ResponseWriter, r *http.Request) {
 		a.handleAdminSessionAction(w, r, strings.TrimPrefix(path, "sessions/"))
 	case path == "metrics":
 		a.handleAdminMetricsPage(w, r)
+	case strings.HasPrefix(path, "jobs/"):
+		a.handleAdminGenerationJobTrace(w, r, strings.TrimPrefix(path, "jobs/"))
 	case path == "storage":
 		a.handleAdminStorage(w, r)
 	case path == "system/overview":
@@ -1041,10 +1043,16 @@ func (a *App) handleAdminMetricsPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ошибка базы данных", http.StatusInternalServerError)
 		return
 	}
+	observability, err := a.loadAdminObservability(r.Context())
+	if err != nil {
+		http.Error(w, "не удалось собрать наблюдаемость", http.StatusInternalServerError)
+		return
+	}
 	a.render(w, r, "admin_metrics", map[string]any{
-		"Title":        "Метрики",
-		"Stats":        stats,
-		"ServiceStats": serviceStats,
+		"Title":         "Наблюдаемость",
+		"Stats":         stats,
+		"ServiceStats":  serviceStats,
+		"Observability": observability,
 	})
 }
 

@@ -3,27 +3,33 @@ package domain
 import "time"
 
 type ProxyRequestRecord struct {
-	UserID     int64
-	Service    string
-	Method     string
-	Path       string
-	Status     int
-	DurationMS int64
-	BytesIn    int64
-	BytesOut   int64
-	WebSocket  bool
-	ClientIP   string
-	UserAgent  string
+	UserID          int64
+	RequestID       string
+	CorrelationID   string
+	GenerationJobID *int64
+	Service         string
+	Method          string
+	Path            string
+	Status          int
+	DurationMS      int64
+	BytesIn         int64
+	BytesOut        int64
+	WebSocket       bool
+	ClientIP        string
+	UserAgent       string
 }
 
 type AuditEvent struct {
-	ActorUserID *int64
-	Action      string
-	TargetType  string
-	TargetID    *int64
-	IP          string
-	UserAgent   string
-	Metadata    map[string]any
+	ActorUserID     *int64
+	RequestID       string
+	CorrelationID   string
+	GenerationJobID *int64
+	Action          string
+	TargetType      string
+	TargetID        *int64
+	IP              string
+	UserAgent       string
+	Metadata        map[string]any
 }
 
 type Activity struct {

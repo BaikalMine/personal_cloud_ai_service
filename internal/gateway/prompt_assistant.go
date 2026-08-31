@@ -3,7 +3,7 @@ package gateway
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"runtime/debug"
 	"strconv"
@@ -98,7 +98,10 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), assistantTimeout)
 	defer cancel()
 	var result string
+	operation := "enhance_image"
+	assistantStarted := time.Now()
 	if profile == promptassistant.ProfileMiniMaxH3 {
+		operation = "enhance_video"
 		video, contextErr := promptAssistantVideoContext(r, mode, len(references))
 		if contextErr != nil {
 			writeGenerationError(w, http.StatusBadRequest, contextErr.Error())
@@ -108,8 +111,12 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 	} else {
 		result, err = a.promptAssistant.Enhance(ctx, mode, profile, prompt, references, think)
 	}
+	a.observeServiceCall(r.Context(), dependencyOllama, operation, assistantStarted, err, false, "assistant_request_failed", "")
 	if err != nil {
-		log.Printf("prompt assistant: %v", err)
+		logGateway(r.Context(), slog.LevelError, "prompt_assistant_failed", "Prompt assistant request failed",
+			"operation", operation,
+			"error", err,
+		)
 		writeGenerationError(w, http.StatusBadGateway, "не удалось получить вариант от локальной модели")
 		return
 	}
@@ -118,7 +125,7 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 		writeGenerationError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	response := map[string]any{"prompt": result, "model": a.cfg.PromptAssistantModel}
+	response := map[string]any{"prompt": result, "model": a.cfg.PromptAssistantModel, "correlation_id": correlationID(r)}
 	if miningWarning != "" {
 		response["mining_warning"] = miningWarning
 	}

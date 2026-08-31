@@ -85,6 +85,7 @@ func CanTransitionGenerationJob(from, to GenerationJobState) bool {
 type GenerationJob struct {
 	ID                      int64
 	PublicID                string
+	CorrelationID           string
 	UserID                  *int64
 	UsernameSnapshot        string
 	RequestID               string
@@ -115,19 +116,22 @@ type GenerationJob struct {
 }
 
 type GenerationJobTransition struct {
-	ID           int64
-	JobID        int64
-	FromState    GenerationJobState
-	ToState      GenerationJobState
-	Message      string
-	ErrorCode    string
-	ErrorMessage string
-	Attempt      int
-	CreatedAt    time.Time
+	ID            int64
+	JobID         int64
+	CorrelationID string
+	FromState     GenerationJobState
+	ToState       GenerationJobState
+	Message       string
+	ErrorCode     string
+	ErrorMessage  string
+	Attempt       int
+	DurationMS    int64
+	CreatedAt     time.Time
 }
 
 type CreateGenerationJobParams struct {
 	PublicID         string
+	CorrelationID    string
 	UserID           int64
 	UsernameSnapshot string
 	RequestID        string

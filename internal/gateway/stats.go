@@ -39,6 +39,45 @@ func (a *App) handlePrometheusMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "gateway_active_websockets %d\n", a.activeWS.Load())
 	fmt.Fprintf(w, "gateway_login_failures_total %d\n", a.loginFailures.Load())
 	fmt.Fprintf(w, "gateway_users_total %d\n", usersTotal)
+
+	if summary, summaryErr := a.store.GenerationObservabilitySummary(r.Context(), time.Now().Add(-24*time.Hour), time.Now().Add(-generationOverdueAfter)); summaryErr == nil {
+		fmt.Fprintf(w, "gateway_generation_jobs_active %d\n", summary.ActiveJobs)
+		fmt.Fprintf(w, "gateway_generation_jobs_overdue %d\n", summary.OverdueJobs)
+		fmt.Fprintf(w, "gateway_generation_jobs_completed_24h %d\n", summary.Completed)
+		fmt.Fprintf(w, "gateway_generation_jobs_failed_24h %d\n", summary.Failed)
+		fmt.Fprintf(w, "gateway_generation_queue_p50_ms %d\n", summary.QueueP50MS)
+		fmt.Fprintf(w, "gateway_generation_queue_p95_ms %d\n", summary.QueueP95MS)
+		fmt.Fprintf(w, "gateway_generation_execution_p50_ms %d\n", summary.ExecutionP50MS)
+		fmt.Fprintf(w, "gateway_generation_execution_p95_ms %d\n", summary.ExecutionP95MS)
+	}
+	if summary, summaryErr := a.store.GatewayObservationSummary(r.Context()); summaryErr == nil {
+		fmt.Fprintf(w, "gateway_database_bytes %d\n", summary.Latest.DatabaseBytes)
+		fmt.Fprintf(w, "gateway_database_growth_24h_bytes %d\n", summary.DatabaseGrowth24Hours)
+		fmt.Fprintf(w, "gateway_mining_leases_active %d\n", summary.Latest.ActiveLeases)
+		fmt.Fprintf(w, "gateway_content_moderation_backlog %d\n", summary.Latest.ContentModerationBacklog)
+		fmt.Fprintf(w, "gateway_media_moderation_backlog %d\n", summary.Latest.MediaModerationBacklog)
+		fmt.Fprintf(w, "gateway_cleanup_age_seconds %d\n", summary.Latest.CleanupAgeSeconds)
+	}
+	for _, dependency := range a.dependencyStatuses() {
+		online := 0
+		if dependency.State == DependencyOnline {
+			online = 1
+		}
+		fmt.Fprintf(w, "gateway_dependency_ready{component=%q} %d\n", dependency.Key, online)
+		fmt.Fprintf(w, "gateway_dependency_last_latency_ms{component=%q} %d\n", dependency.Key, dependency.LatencyMillis)
+	}
+	for _, histogram := range a.serviceLatencyRegistry().snapshot() {
+		for index, upperBound := range serviceLatencyBucketsMS {
+			fmt.Fprintf(w, "gateway_service_latency_ms_bucket{component=%q,operation=%q,le=%q} %d\n",
+				histogram.Component, histogram.Operation, fmt.Sprint(upperBound), histogram.Buckets[index])
+		}
+		fmt.Fprintf(w, "gateway_service_latency_ms_bucket{component=%q,operation=%q,le=%q} %d\n",
+			histogram.Component, histogram.Operation, "+Inf", histogram.Count)
+		fmt.Fprintf(w, "gateway_service_latency_ms_sum{component=%q,operation=%q} %d\n",
+			histogram.Component, histogram.Operation, histogram.SumMS)
+		fmt.Fprintf(w, "gateway_service_latency_ms_count{component=%q,operation=%q} %d\n",
+			histogram.Component, histogram.Operation, histogram.Count)
+	}
 }
 
 func (a *App) recordProxyRequest(ctx context.Context, userID int64, service, method, path string, status int, duration time.Duration, bytesIn, bytesOut int64, ws bool, ip, userAgent string) {
@@ -48,17 +87,20 @@ func (a *App) recordProxyRequest(ctx context.Context, userID int64, service, met
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
 	err := a.store.RecordProxyRequest(writeCtx, domain.ProxyRequestRecord{
-		UserID:     userID,
-		Service:    service,
-		Method:     method,
-		Path:       truncate(path, 1000),
-		Status:     status,
-		DurationMS: duration.Milliseconds(),
-		BytesIn:    bytesIn,
-		BytesOut:   bytesOut,
-		WebSocket:  ws,
-		ClientIP:   ip,
-		UserAgent:  truncate(userAgent, 500),
+		UserID:          userID,
+		RequestID:       requestIDFromContext(ctx),
+		CorrelationID:   correlationIDFromContext(ctx),
+		GenerationJobID: generationJobIDFromContext(ctx),
+		Service:         service,
+		Method:          method,
+		Path:            truncate(path, 1000),
+		Status:          status,
+		DurationMS:      duration.Milliseconds(),
+		BytesIn:         bytesIn,
+		BytesOut:        bytesOut,
+		WebSocket:       ws,
+		ClientIP:        ip,
+		UserAgent:       truncate(userAgent, 500),
 	})
 	if err != nil {
 		log.Printf("record proxy request: %v", err)
@@ -90,13 +132,16 @@ func (a *App) incProxyCount(service string, status int) {
 
 func (a *App) audit(ctx context.Context, actor *int64, action, targetType string, targetID *int64, ip, userAgent string, metadata map[string]any) {
 	err := a.store.RecordAudit(ctx, domain.AuditEvent{
-		ActorUserID: actor,
-		Action:      action,
-		TargetType:  targetType,
-		TargetID:    targetID,
-		IP:          ip,
-		UserAgent:   truncate(userAgent, 500),
-		Metadata:    metadata,
+		ActorUserID:     actor,
+		RequestID:       requestIDFromContext(ctx),
+		CorrelationID:   correlationIDFromContext(ctx),
+		GenerationJobID: generationJobIDFromContext(ctx),
+		Action:          action,
+		TargetType:      targetType,
+		TargetID:        targetID,
+		IP:              ip,
+		UserAgent:       truncate(userAgent, 500),
+		Metadata:        metadata,
 	})
 	if err != nil {
 		log.Printf("record audit event %q: %v", action, err)

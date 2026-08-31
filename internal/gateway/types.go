@@ -31,8 +31,11 @@ const (
 type ctxKey string
 
 const (
-	userCtxKey   ctxKey = "user"
-	requestIDKey ctxKey = "request_id"
+	userCtxKey       ctxKey = "user"
+	requestIDKey     ctxKey = "request_id"
+	correlationIDKey ctxKey = "correlation_id"
+	generationJobKey ctxKey = "generation_job_id"
+	comfyPromptIDKey ctxKey = "comfy_prompt_id"
 )
 
 type Config = config.Config
@@ -70,9 +73,11 @@ type App struct {
 	websocketMu            sync.Mutex
 	maintenanceOnce        sync.Once
 	dependencyOnce         sync.Once
+	observabilityOnce      sync.Once
 	maintenanceWorkers     *maintenanceRegistry
 	maintenanceDone        chan struct{}
 	dependencyHealth       *dependencyMonitor
+	serviceLatencies       *serviceLatencyRegistry
 	objectInfoOnce         sync.Once
 	objectInfoCache        *comfyObjectInfoCache
 	comfyQueueWasBusy      bool

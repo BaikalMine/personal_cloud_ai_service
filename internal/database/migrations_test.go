@@ -254,3 +254,25 @@ func TestGenerationJobExecutionResourcesMigration(t *testing.T) {
 		}
 	}
 }
+
+func TestEndToEndObservabilityMigration(t *testing.T) {
+	var observabilityMigration *migration
+	for index := range migrationCatalog {
+		if migrationCatalog[index].version == 42 {
+			observabilityMigration = &migrationCatalog[index]
+			break
+		}
+	}
+	if observabilityMigration == nil || observabilityMigration.name != "end_to_end_observability" {
+		t.Fatal("end-to-end observability migration is missing")
+	}
+	sql := strings.Join(observabilityMigration.statements, "\n")
+	for _, expected := range []string{
+		"correlation_id", "duration_ms", "generation_job_id", "service_observations",
+		"gateway_observations", "content_moderation_backlog", "cleanup_age_seconds",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("observability migration does not contain %q: %s", expected, sql)
+		}
+	}
+}

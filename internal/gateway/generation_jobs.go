@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -38,6 +38,7 @@ func generationStatusForJob(job domain.GenerationJob, status generationStatus) g
 	status.PromptID = job.PromptID
 	status.JobID = job.PublicID
 	status.RequestID = job.RequestID
+	status.CorrelationID = job.CorrelationID
 	status.JobState = string(job.State)
 	status.State = generationJobClientState(job)
 	if job.CancellationRequestedAt != nil || job.State.Terminal() || status.Message == "" {
@@ -51,7 +52,7 @@ func generationStatusForJob(job domain.GenerationJob, status generationStatus) g
 
 func (a *App) generationJobResponse(ctx context.Context, job domain.GenerationJob) map[string]any {
 	response := map[string]any{
-		"job_id": job.PublicID, "request_id": job.RequestID, "job_state": job.State,
+		"job_id": job.PublicID, "request_id": job.RequestID, "correlation_id": job.CorrelationID, "job_state": job.State,
 		"state": generationJobClientState(job), "message": job.StatusMessage,
 	}
 	if job.PromptID != "" {
@@ -303,6 +304,7 @@ func (a *App) findComfyPromptByGenerationJob(ctx context.Context, publicID strin
 }
 
 func (a *App) recoverGenerationJobPrompt(ctx context.Context, job domain.GenerationJob) (domain.GenerationJob, bool, error) {
+	ctx = generationJobTraceContext(ctx, job)
 	if job.PromptID != "" {
 		return job, false, nil
 	}
@@ -314,6 +316,7 @@ func (a *App) recoverGenerationJobPrompt(ctx context.Context, job domain.Generat
 	if err != nil {
 		return job, false, err
 	}
+	ctx = generationJobTraceContext(ctx, job)
 	if _, err := a.store.CommitQuickGenerationForJob(ctx, job.ID); err != nil {
 		return job, false, err
 	}
@@ -331,6 +334,7 @@ func (a *App) recoverGenerationJobPrompt(ctx context.Context, job domain.Generat
 }
 
 func (a *App) expireGenerationJob(ctx context.Context, job domain.GenerationJob, message string) (domain.GenerationJob, error) {
+	ctx = generationJobTraceContext(ctx, job)
 	released, complete, err := a.releaseGenerationJobResources(ctx, job)
 	if err != nil {
 		return job, err
@@ -348,6 +352,7 @@ func (a *App) expireGenerationJob(ctx context.Context, job domain.GenerationJob,
 }
 
 func (a *App) continueGenerationJobCancellation(ctx context.Context, job domain.GenerationJob) (domain.GenerationJob, bool, error) {
+	ctx = generationJobTraceContext(ctx, job)
 	if job.State.Terminal() {
 		return job, job.State == domain.GenerationJobCancelled, nil
 	}
@@ -434,6 +439,7 @@ func generationJobStateMessage(state domain.GenerationJobState) string {
 }
 
 func (a *App) advanceGenerationJob(ctx context.Context, job domain.GenerationJob, target domain.GenerationJobState, finalMessage string) (domain.GenerationJob, error) {
+	ctx = generationJobTraceContext(ctx, job)
 	for job.State != target {
 		if job.State.Terminal() {
 			return job, fmt.Errorf("generation job %s is already terminal", job.PublicID)
@@ -473,6 +479,7 @@ func (a *App) advanceGenerationJob(ctx context.Context, job domain.GenerationJob
 }
 
 func (a *App) releaseGenerationJobResources(ctx context.Context, job domain.GenerationJob) (domain.GenerationJob, bool, error) {
+	ctx = generationJobTraceContext(ctx, job)
 	if _, err := a.store.ReleaseQuickGenerationForJob(ctx, job.ID); err != nil {
 		return job, false, err
 	}
@@ -487,13 +494,17 @@ func (a *App) releaseGenerationJobResources(ctx context.Context, job domain.Gene
 }
 
 func (a *App) failGenerationJob(ctx context.Context, job domain.GenerationJob, code, message string, cause error) domain.GenerationJob {
+	ctx = generationJobTraceContext(ctx, job)
 	technical := ""
 	if cause != nil {
 		technical = cause.Error()
 	}
 	released, complete, err := a.releaseGenerationJobResources(ctx, job)
 	if err != nil {
-		log.Printf("release failed generation job %s resources: %v", job.PublicID, err)
+		logGateway(ctx, slog.LevelError, "generation_job_resource_release_failed", "Failed to release generation job resources",
+			"job_public_id", job.PublicID,
+			"error", err,
+		)
 		return job
 	}
 	job = released
@@ -510,7 +521,10 @@ func (a *App) failGenerationJob(ctx context.Context, job domain.GenerationJob, c
 		State: domain.GenerationJobFailed, Message: message, ErrorCode: code, ErrorMessage: technical,
 	})
 	if err != nil {
-		log.Printf("fail generation job %s: %v", job.PublicID, err)
+		logGateway(ctx, slog.LevelError, "generation_job_failure_persist_failed", "Failed to persist generation job failure",
+			"job_public_id", job.PublicID,
+			"error", err,
+		)
 		return job
 	}
 	if job.UserID != nil && job.PromptID != "" {
@@ -520,6 +534,7 @@ func (a *App) failGenerationJob(ctx context.Context, job domain.GenerationJob, c
 }
 
 func (a *App) reconcileGenerationJobStatus(ctx context.Context, job domain.GenerationJob, status generationStatus) (domain.GenerationJob, error) {
+	ctx = generationJobTraceContext(ctx, job)
 	if job.State.Terminal() {
 		return job, nil
 	}

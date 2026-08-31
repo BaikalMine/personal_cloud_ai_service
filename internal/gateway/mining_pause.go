@@ -43,7 +43,7 @@ func (a *App) pauseMiningForQuickGeneration(ctx context.Context, user *User, job
 			}
 		}
 		lease := domain.QuickGenerationMiningLease{
-			ID: newRequestID(), GenerationJobID: jobID, UserID: user.ID, MinerID: existing.MinerID,
+			ID: newRequestID(), CorrelationID: correlationIDFromContext(ctx), GenerationJobID: jobID, UserID: user.ID, MinerID: existing.MinerID,
 			ScriptPath: existing.ScriptPath, ProcessName: existing.ProcessName, ResumeMining: existing.ResumeMining || wasRunning,
 		}
 		if err := a.store.CreateQuickGenerationMiningLease(ctx, lease); err != nil {
@@ -67,7 +67,7 @@ func (a *App) pauseMiningForQuickGeneration(ctx context.Context, user *User, job
 	}
 	target := overview.Active
 	lease := domain.QuickGenerationMiningLease{
-		ID: newRequestID(), GenerationJobID: jobID, UserID: user.ID, MinerID: target.ID,
+		ID: newRequestID(), CorrelationID: correlationIDFromContext(ctx), GenerationJobID: jobID, UserID: user.ID, MinerID: target.ID,
 		ScriptPath: target.ScriptPath, ProcessName: target.ProcessName, ResumeMining: true,
 	}
 	if err := a.store.CreateQuickGenerationMiningLease(ctx, lease); err != nil {

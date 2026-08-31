@@ -6,16 +6,18 @@ import "time"
 // runtime retention policy. Store code only receives timestamps, so policy
 // configuration remains owned by the Gateway layer.
 type DatabaseRetentionCutoffs struct {
-	ProxyRequests      time.Time
-	WebSocketSessions  time.Time
-	GenerationRequests time.Time
-	GenerationJobs     time.Time
-	DailyUsage         time.Time
-	InviteHistory      time.Time
-	AuditLog           time.Time
-	HostMetrics        time.Time
-	GenerationVariants time.Time
-	OutputOwnerships   time.Time
+	ProxyRequests       time.Time
+	WebSocketSessions   time.Time
+	GenerationRequests  time.Time
+	GenerationJobs      time.Time
+	DailyUsage          time.Time
+	InviteHistory       time.Time
+	AuditLog            time.Time
+	HostMetrics         time.Time
+	ServiceObservations time.Time
+	GatewayObservations time.Time
+	GenerationVariants  time.Time
+	OutputOwnerships    time.Time
 }
 
 type DatabaseCleanupReport struct {

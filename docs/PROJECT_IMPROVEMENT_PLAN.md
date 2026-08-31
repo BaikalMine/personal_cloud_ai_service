@@ -479,7 +479,7 @@ SSE уже работает, что решает пользовательску�
 
 Реализовано:
 
-- 16 независимых workers для job reconciliation, mining leases, метрик Windows, памяти ComfyUI, dependency health, WebSocket authorization, VirusTotal, архивации, хэшей и всех категорий cleanup;
+- 17 независимых workers для job reconciliation, mining leases, метрик Windows, снимков наблюдаемости, памяти ComfyUI, dependency health, WebSocket authorization, VirusTotal, архивации, хэшей и всех категорий cleanup;
 - отдельные interval, timeout, initial delay, экспоненциальный bounded backoff и защита от перекрывающегося запуска для каждого worker;
 - потокобезопасный in-memory registry с `last_started`, `last_finished`, `last_success`, duration, items, consecutive failures, last error и next run;
 - остановка всех циклов через общий context с ожиданием завершения перед выходом Gateway;
@@ -489,6 +489,8 @@ SSE уже работает, что решает пользовательску�
 Эксплуатационный контракт и полный список процессов описаны в `docs/MAINTENANCE_WORKERS.md`.
 
 ### G1.3. Сквозная наблюдаемость — L
+
+Статус: выполнено 31 августа 2026 года.
 
 Изменения:
 
@@ -511,6 +513,18 @@ SSE уже работает, что решает пользовательску�
 - использование RAM/CPU/GPU с отметками начала и окончания задач.
 
 Готово, когда по одной ошибочной карточке можно найти полный путь запроса без сопоставления строк вручную.
+
+Реализовано:
+
+- JSON-логи и единый correlation ID для HTTP, durable job, Comfy prompt, mining lease, аудита и AI-контента;
+- постоянные `service_observations` и `gateway_observations` с управляемым сроком хранения;
+- latency histogram в Prometheus и сохранённые p50/p95 по компонентам и операциям;
+- 30-секундные снимки очереди, просроченных заданий, backlog модерации, leases, размера БД и возраста cleanup;
+- `/readyz`, где БД обязательна, а недоступность внешней зависимости переводит ответ в degraded без отключения Gateway;
+- административная страница наблюдаемости и отдельная трасса `/admin/jobs/{public-id}`;
+- адаптивная визуальная проверка обеих страниц на desktop и mobile, unit и PostgreSQL integration coverage.
+
+Эксплуатационный контракт описан в `docs/OBSERVABILITY.md`.
 
 ### G1.4. Уменьшить пиковую память — L
 

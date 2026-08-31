@@ -5,6 +5,7 @@ import "time"
 type ContentEventRecord struct {
 	UserID          int64
 	GenerationJobID *int64
+	CorrelationID   string
 	Service         string
 	Kind            string
 	ExternalID      string
@@ -21,6 +22,8 @@ type ContentEventRow struct {
 	ID                  int64
 	UserID              int64
 	Username            string
+	GenerationJobID     *int64
+	CorrelationID       string
 	Service             string
 	Kind                string
 	ExternalID          string
@@ -59,10 +62,12 @@ type ContentMediaRow struct {
 }
 
 type PendingSensitiveMedia struct {
-	ID            int64
-	EventID       int64
-	MIMEType      string
-	PayloadCipher []byte
+	ID              int64
+	EventID         int64
+	GenerationJobID *int64
+	CorrelationID   string
+	MIMEType        string
+	PayloadCipher   []byte
 }
 
 type UserGenerationMedia struct {

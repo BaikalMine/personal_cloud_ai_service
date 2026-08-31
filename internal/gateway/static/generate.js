@@ -204,6 +204,7 @@
   let promptAssistantOriginal = "";
   let promptAssistantSuggestion = "";
   let promptAssistantAction = "";
+  let promptAssistantCorrelationID = "";
   let activeGenerationID = "";
   let activeGenerationRequestID = "";
   let pendingParentJobID = "";
@@ -1223,6 +1224,7 @@
     promptAssistantOriginal = "";
     promptAssistantSuggestion = "";
     promptAssistantAction = "";
+    promptAssistantCorrelationID = "";
     if (promptAssistantReview) promptAssistantReview.hidden = true;
     if (promptAssistantDraft) promptAssistantDraft.value = "";
   };
@@ -1479,6 +1481,7 @@
 	promptAssistantOriginal = original;
 	promptAssistantSuggestion = "";
 	promptAssistantAction = "";
+	promptAssistantCorrelationID = "";
     const mode = templateID.value;
     if (!original || (mode !== "text-to-image" && mode !== "image-to-image" && mode !== "minimax-h3-video")) {
       setPromptAssistantState("Сначала выберите схему генерации и введите позитивный промт.", "error");
@@ -1520,6 +1523,7 @@
       if (!response.ok || !payload.prompt) throw new Error(payload.error || "Не удалось подготовить вариант");
       promptAssistantDraft.value = payload.prompt;
 	  promptAssistantSuggestion = payload.prompt;
+	  promptAssistantCorrelationID = payload.correlation_id || "";
       promptAssistantReview.hidden = false;
       setPromptAssistantState(`Вариант подготовлен моделью ${payload.model || "e4b"}. Подтвердите или отредактируйте его.`, "review");
       promptAssistantDraft.focus({ preventScroll: true });
@@ -2178,6 +2182,7 @@
     body.set("assistant_think_used", promptAssistantOriginal && promptAssistantThink?.checked ? "true" : "false");
     body.set("assistant_original_prompt", promptAssistantOriginal);
     body.set("assistant_suggestion", promptAssistantSuggestion);
+    if (promptAssistantCorrelationID) body.set("correlation_id", promptAssistantCorrelationID);
     ["input_image", "input_image_2", "input_image_3", "input_image_4"].forEach((name, index) => body.set(name, uploadedImages.get(index + 1) || ""));
     body.set("input_audio", miniMaxAudioIsAvailable() ? uploadedAudio : "");
     body.set("input_video", miniMaxReferencesAreAvailable() ? uploadedVideo : "");
@@ -2967,7 +2972,9 @@
     try {
       const body = buildGenerationPayload();
       body.set("client_request_id", activeGenerationRequestID);
-      const response = await fetch("/generate/run", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body, credentials: "same-origin" });
+      const headers = { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" };
+      if (promptAssistantCorrelationID) headers["X-Correlation-ID"] = promptAssistantCorrelationID;
+      const response = await fetch("/generate/run", { method: "POST", headers, body, credentials: "same-origin" });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         clearActiveGeneration();

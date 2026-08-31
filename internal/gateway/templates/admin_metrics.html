@@ -1,24 +1,91 @@
 {{define "admin_metrics"}}
 {{template "head" .}}
 {{template "admin_nav" .}}
-<main class="page" id="main-content">
-  <section class="hero admin-hero"><div><p class="eyebrow">Наблюдаемость</p><h1>Метрики</h1></div><span class="live-badge"><i></i>Данные обновлены</span></section>
-  <section class="metric-grid metrics-four">
-    <article class="metric-card tone-blue"><span>Сегодня</span><strong>{{formatNumber .Stats.RequestsToday}}</strong><small>запросов</small></article>
-    <article class="metric-card tone-cyan"><span>За 7 дней</span><strong>{{formatNumber .Stats.Requests7Days}}</strong><small>запросов</small></article>
-    <article class="metric-card tone-indigo"><span>Активные WebSocket-соединения</span><strong>{{formatNumber .Stats.ActiveWebSockets}}</strong><small>сейчас подключено</small></article>
-    <article class="metric-card tone-red"><span>Доля ошибок</span><strong>{{.Stats.ErrorRate}}</strong><small>за 7 дней</small></article>
+<main class="page observability-page" id="main-content">
+  <header class="page-heading observability-heading">
+    <div><p class="eyebrow">Состояние системы</p><h1>Наблюдаемость</h1><p>Генерации, очереди и зависимости за последние 24 часа.</p></div>
+    <span class="live-badge"><i></i>Снимок {{formatTime .Observability.GeneratedAt}}</span>
+  </header>
+
+  <section class="metric-grid metrics-four observability-summary" aria-label="Главные показатели генерации">
+    <article class="metric-card tone-cyan"><span>Активные задания</span><strong>{{formatNumber .Observability.Generation.ActiveJobs}}</strong><small>сейчас в работе и очереди</small></article>
+    <article class="metric-card tone-green"><span>Успешность</span><strong>{{.Observability.Generation.SuccessRate}}%</strong><small>{{formatNumber .Observability.Generation.Completed}} завершено · {{formatNumber .Observability.Generation.Failed}} с ошибкой</small></article>
+    <article class="metric-card {{if gt .Observability.Generation.OverdueJobs 0}}tone-red{{else}}tone-blue{{end}}"><span>Старше {{formatDurationLong .Observability.OverdueAfter}}</span><strong>{{formatNumber .Observability.Generation.OverdueJobs}}</strong><small>требуют внимания</small></article>
+    <article class="metric-card tone-amber"><span>Аренды майнинга</span><strong>{{formatNumber .Observability.Gateway.Latest.ActiveLeases}}</strong><small>ресурсы временно закреплены</small></article>
   </section>
-  <section class="panel">
-    <div class="panel-heading"><div><p class="section-kicker">Сначала свежие</p><h2>Запросы по дням</h2></div><span class="muted">14 дней</span></div>
-    {{template "chart" .Stats.Trend}}
+
+  <section class="observability-band" aria-label="Время обработки и состояние данных">
+    <article class="panel observability-panel">
+      <div class="panel-heading"><div><p class="section-kicker">Путь генерации</p><h2>Очередь и выполнение</h2></div><span class="muted">p50 / p95</span></div>
+      <dl class="observability-facts">
+        <div><dt>До начала выполнения</dt><dd><strong>{{formatDuration .Observability.Generation.QueueP50MS}}</strong><span>{{formatDuration .Observability.Generation.QueueP95MS}}</span></dd></div>
+        <div><dt>Работа workflow</dt><dd><strong>{{formatDuration .Observability.Generation.ExecutionP50MS}}</strong><span>{{formatDuration .Observability.Generation.ExecutionP95MS}}</span></dd></div>
+        <div><dt>Отменено</dt><dd><strong>{{formatNumber .Observability.Generation.Cancelled}}</strong><span>за 24 часа</span></dd></div>
+        <div><dt>Истекло</dt><dd><strong>{{formatNumber .Observability.Generation.Expired}}</strong><span>за 24 часа</span></dd></div>
+      </dl>
+    </article>
+    <article class="panel observability-panel">
+      <div class="panel-heading"><div><p class="section-kicker">Хранилище и контроль</p><h2>Состояние Gateway</h2></div><span class="dependency-state {{if eq .Observability.Gateway.Latest.CleanupStatus "ok"}}online{{else}}stale{{end}}">Cleanup: {{.Observability.Gateway.Latest.CleanupStatus}}</span></div>
+      <dl class="observability-facts">
+        <div><dt>Размер БД</dt><dd><strong>{{formatBytes .Observability.Gateway.Latest.DatabaseBytes}}</strong><span>{{formatSignedBytes .Observability.Gateway.DatabaseGrowth24Hours}} за 24 ч.</span></dd></div>
+        <div><dt>Промты на проверке</dt><dd><strong>{{formatNumber .Observability.Gateway.Latest.ContentModerationBacklog}}</strong><span>текстовые записи</span></dd></div>
+        <div><dt>Медиа на проверке</dt><dd><strong>{{formatNumber .Observability.Gateway.Latest.MediaModerationBacklog}}</strong><span>изображения</span></dd></div>
+        <div><dt>Возраст cleanup</dt><dd><strong>{{formatAgeSeconds .Observability.Gateway.Latest.CleanupAgeSeconds}}</strong><span>с последнего прохода</span></dd></div>
+      </dl>
+      {{with .Observability.Host}}<div class="host-inline"><span><small>CPU</small><strong>{{printf "%.0f%%" .CPUPercent}}</strong></span><span><small>ОЗУ</small><strong>{{formatBytes .MemoryUsedBytes}}</strong></span><span><small>GPU</small><strong>{{if .GPUAvailable}}{{printf "%.0f%%" .GPUPercent}}{{else}}Нет данных{{end}}</strong></span></div>{{end}}
+    </article>
   </section>
-  <section class="panel">
-    <div class="panel-heading"><div><p class="section-kicker">30 дней</p><h2>Сервисы</h2></div></div>
-    <table><thead><tr><th>Сервис</th><th>Запросы</th><th>Пользователи</th><th>Передано</th><th>Ошибки</th></tr></thead><tbody>
-    {{range .ServiceStats}}<tr><td data-label="Сервис"><a class="service-link" href="/admin/services/{{.Service}}"><i class="service-icon {{.Service}}"></i>{{.Service}}</a></td><td data-label="Запросы" class="numeric">{{formatNumber .Requests}}</td><td data-label="Пользователи" class="numeric">{{formatNumber .Users}}</td><td data-label="Передано">{{formatBytes .Bytes}}</td><td data-label="Ошибки"><span class="error-count {{if gt .Errors 0}}has-errors{{end}}">{{formatNumber .Errors}}</span></td></tr>{{else}}<tr><td colspan="5" class="muted">Нет данных.</td></tr>{{end}}
-    </tbody></table>
+
+  <section class="panel observability-table-panel">
+    <div class="panel-heading"><div><p class="section-kicker">Качество запусков</p><h2>Workflow и модели</h2><p class="panel-intro">Успешность считается по завершённым и ошибочным заданиям; отмены показаны отдельно.</p></div></div>
+    <div class="table-scroll"><table class="observability-table"><thead><tr><th>Workflow</th><th>Модель</th><th>Всего</th><th>Готово</th><th>Ошибки</th><th>Отменено</th><th>Успешность</th></tr></thead><tbody>
+      {{range .Observability.Outcomes}}<tr><td data-label="Workflow"><strong>{{.WorkflowID}}</strong></td><td data-label="Модель"><span class="table-secondary">{{.ModelName}}</span></td><td data-label="Всего" class="numeric">{{formatNumber .Total}}</td><td data-label="Готово" class="numeric is-positive">{{formatNumber .Completed}}</td><td data-label="Ошибки" class="numeric {{if gt .Failed 0}}is-negative{{end}}">{{formatNumber .Failed}}</td><td data-label="Отменено" class="numeric">{{formatNumber .Cancelled}}</td><td data-label="Успешность"><span class="success-meter"><i style="width: {{pct .SuccessRate}}%"></i></span><b>{{.SuccessRate}}%</b></td></tr>
+      {{else}}<tr><td colspan="7" class="empty-cell">За последние 24 часа завершённых заданий нет.</td></tr>{{end}}
+    </tbody></table></div>
   </section>
+
+  <section class="panel observability-failures">
+    <div class="panel-heading"><div><p class="section-kicker">Требуют разбора</p><h2>Последние ошибки</h2><p class="panel-intro">Откройте строку, чтобы увидеть полный путь одного задания.</p></div><span class="muted">24 часа</span></div>
+    <div class="failure-list">
+      {{range .Observability.Failures}}<a class="failure-row" href="/admin/jobs/{{.JobPublicID}}"><span class="failure-time">{{formatTime .FailedAt}}</span><span class="failure-main"><strong>{{if .ErrorCode}}{{.ErrorCode}}{{else}}Ошибка выполнения{{end}}</strong><small>{{if .ErrorMessage}}{{.ErrorMessage}}{{else}}Подробности записаны в переходах задания{{end}}</small></span><span class="failure-context"><b>{{if .Username}}{{.Username}}{{else}}Пользователь удалён{{end}}</b><small>{{if .ModelName}}{{.ModelName}}{{else}}{{.WorkflowID}}{{end}}</small></span><span class="failure-open" aria-hidden="true">›</span></a>
+      {{else}}<p class="empty-state">За последние 24 часа ошибок генерации нет.</p>{{end}}
+    </div>
+  </section>
+
+  <section class="panel observability-table-panel">
+    <div class="panel-heading"><div><p class="section-kicker">Внешние вызовы</p><h2>Задержки зависимостей</h2><p class="panel-intro">Сохранённые измерения продолжают быть доступны после перезапуска Gateway.</p></div><span class="muted">p50 / p95</span></div>
+    <div class="table-scroll"><table class="observability-table"><thead><tr><th>Компонент</th><th>Операция</th><th>Измерений</th><th>Ошибок</th><th>p50</th><th>p95</th><th>Последний результат</th></tr></thead><tbody>
+      {{range .Observability.Latencies}}<tr><td data-label="Компонент"><strong>{{componentLabel .Component}}</strong></td><td data-label="Операция">{{operationLabel .Operation}}</td><td data-label="Измерений" class="numeric">{{formatNumber .Samples}}</td><td data-label="Ошибок" class="numeric {{if gt .Failures 0}}is-negative{{end}}">{{formatNumber .Failures}}</td><td data-label="p50">{{formatDuration .P50MS}}</td><td data-label="p95">{{formatDuration .P95MS}}</td><td data-label="Последний результат"><span class="observation-outcome is-{{.LastOutcome}}">{{observationOutcome .LastOutcome}}</span><small class="table-note">{{formatTime .LastObservedAt}} · {{formatDuration .LastLatencyMS}}</small></td></tr>
+      {{else}}<tr><td colspan="7" class="empty-cell">Измерения появятся после первого прохода фоновых проверок.</td></tr>{{end}}
+    </tbody></table></div>
+  </section>
+
+  <section class="observability-band">
+    <article class="panel observability-panel">
+      <div class="panel-heading"><div><p class="section-kicker">Зависимости</p><h2>Текущая готовность</h2></div><a class="text-link" href="/readyz">JSON</a></div>
+      <div class="compact-status-list">{{range .Observability.Dependencies}}<div><span><strong>{{.Name}}</strong><small>{{.Detail}}</small></span><b class="dependency-state {{.State}}">{{.StateLabel}}</b></div>{{end}}</div>
+    </article>
+    <article class="panel observability-panel">
+      <div class="panel-heading"><div><p class="section-kicker">Фоновые процессы</p><h2>Задачи с отклонениями</h2></div><a class="text-link" href="/admin">Полный список</a></div>
+      <div class="compact-status-list">{{range .Observability.WorkerIssues}}<div><span><strong>{{.Name}}</strong><small>{{if .LastError}}{{.LastError}}{{else}}Последний проход: {{formatTime .LastFinishedAt}}{{end}}</small></span><b class="maintenance-worker-status is-{{.Status}}">{{.StatusLabel}}</b></div>{{else}}<p class="empty-state">Все {{.Observability.HealthyWorkers}} фоновых задач работают без ошибок.</p>{{end}}</div>
+    </article>
+  </section>
+
+  <details class="panel observability-legacy">
+    <summary><span><strong>HTTP и сервисная активность</strong><small>Прокси-запросы, трафик и ошибки доступа</small></span><b>Открыть</b></summary>
+    <div class="observability-legacy-body">
+      <section class="metric-grid metrics-four">
+        <article class="metric-card tone-blue"><span>Сегодня</span><strong>{{formatNumber .Stats.RequestsToday}}</strong><small>запросов</small></article>
+        <article class="metric-card tone-cyan"><span>За 7 дней</span><strong>{{formatNumber .Stats.Requests7Days}}</strong><small>запросов</small></article>
+        <article class="metric-card tone-indigo"><span>WebSocket</span><strong>{{formatNumber .Stats.ActiveWebSockets}}</strong><small>активно сейчас</small></article>
+        <article class="metric-card tone-red"><span>Доля ошибок</span><strong>{{.Stats.ErrorRate}}</strong><small>за 7 дней</small></article>
+      </section>
+      <div class="table-scroll"><table><thead><tr><th>Сервис</th><th>Запросы</th><th>Пользователи</th><th>Передано</th><th>Ошибки</th></tr></thead><tbody>
+        {{range .ServiceStats}}<tr><td data-label="Сервис"><a class="service-link" href="/admin/services/{{.Service}}"><i class="service-icon {{.Service}}"></i>{{.Service}}</a></td><td data-label="Запросы" class="numeric">{{formatNumber .Requests}}</td><td data-label="Пользователи" class="numeric">{{formatNumber .Users}}</td><td data-label="Передано">{{formatBytes .Bytes}}</td><td data-label="Ошибки"><span class="error-count {{if gt .Errors 0}}has-errors{{end}}">{{formatNumber .Errors}}</span></td></tr>
+        {{else}}<tr><td colspan="5" class="empty-cell">Нет данных.</td></tr>{{end}}
+      </tbody></table></div>
+    </div>
+  </details>
 </main>
 </body></html>
 {{end}}

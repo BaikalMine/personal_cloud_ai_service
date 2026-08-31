@@ -302,6 +302,7 @@ func main() {
 		{Key: "generation_jobs", Name: "Задания генераций", Status: "running", StatusLabel: "Выполняется", Interval: 30 * time.Second, Timeout: 20 * time.Second, Running: true, LastStartedAt: timePointer(now.Add(-2 * time.Second)), LastSuccessAt: timePointer(workerSuccess), LastDurationMillis: 842, LastItems: 3},
 		{Key: "mining_leases", Name: "Аренды майнинга", Status: "healthy", StatusLabel: "Работает", Interval: 30 * time.Second, Timeout: 15 * time.Second, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 74, LastItems: 1},
 		{Key: "host_metrics", Name: "Метрики Windows", Status: "retrying", StatusLabel: "Повтор после ошибки", Interval: 30 * time.Second, Timeout: 8 * time.Second, LastFinishedAt: timePointer(lastError), NextRunAt: timePointer(workerNext), LastDurationMillis: 3012, ConsecutiveFailures: 2, LastError: "Windows-agent временно недоступен"},
+		{Key: "observability_snapshot", Name: "Снимок наблюдаемости", Status: "healthy", StatusLabel: "Работает", Interval: 30 * time.Second, Timeout: 8 * time.Second, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 28, LastItems: 1},
 		{Key: "comfy_memory", Name: "Освобождение памяти ComfyUI", Status: "healthy", StatusLabel: "Работает", Interval: 10 * time.Second, Timeout: 8 * time.Second, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 118, LastItems: 0},
 		{Key: "dependency_health", Name: "Состояние зависимостей", Status: "healthy", StatusLabel: "Работает", Interval: 10 * time.Second, Timeout: 4 * time.Second, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 346, LastItems: 6},
 		{Key: "websocket_authorization", Name: "Авторизация WebSocket", Status: "healthy", StatusLabel: "Работает", Interval: time.Minute, Timeout: 8 * time.Second, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 12, LastItems: 0},
@@ -335,10 +336,63 @@ func main() {
 		},
 	}))
 	serviceStats := []domain.ServiceUsage{{Service: "comfyui", Requests: 516, Users: 3, Bytes: 6400000000, Errors: 2}, {Service: "openwebui", Requests: 308, Users: 3, Bytes: 18400000, Errors: 1}}
-	mux.HandleFunc("/preview/metrics", render("admin_metrics", "Метрики", map[string]any{
-		"Stats":        domain.AdminStats{RequestsToday: 147, Requests7Days: 824, ActiveWebSockets: 2, ErrorRate: "0,8%", Trend: chart},
-		"ServiceStats": serviceStats,
+	observability := map[string]any{
+		"Generation": domain.GenerationObservabilitySummary{ActiveJobs: 2, OverdueJobs: 1, Completed: 18, Failed: 2, Cancelled: 1, SuccessRate: 90, QueueP50MS: 13800, QueueP95MS: 64200, ExecutionP50MS: 186000, ExecutionP95MS: 1274000, ObservationHours: 24},
+		"Gateway": domain.GatewayObservationSummary{
+			Latest:                domain.GatewayObservation{DatabaseBytes: 238 << 20, ActiveJobs: 2, OverdueJobs: 1, ActiveLeases: 1, ContentModerationBacklog: 0, MediaModerationBacklog: 3, CleanupStatus: "ok", CleanupAgeSeconds: 682, RecordedAt: now.Add(-18 * time.Second)},
+			DatabaseGrowth24Hours: 18 << 20,
+		},
+		"Outcomes": []domain.GenerationOutcomeGroup{
+			{WorkflowID: "minimax-h3-video-v4", ModelName: "MiniMax_H3_FL2VA_pruned_int8", Total: 9, Completed: 8, Failed: 1, SuccessRate: 89},
+			{WorkflowID: "krea2-text-to-image", ModelName: "Krea2_v40.safetensors", Total: 8, Completed: 8, SuccessRate: 100},
+			{WorkflowID: "flux2-image-edit", ModelName: "Flux2-dev", Total: 4, Completed: 2, Failed: 1, Cancelled: 1, SuccessRate: 67},
+		},
+		"Failures": []domain.GenerationFailureSummary{
+			{JobPublicID: "job-preview-minimax-000001", CorrelationID: "correlation-preview-minimax-000001", Username: "rayka", WorkflowID: "minimax-h3-video-v4", ModelName: "MiniMax_H3_FL2VA_pruned_int8", ErrorCode: "comfy_execution_failed", ErrorMessage: "RTXVideoSuperResolution: отсутствует обязательный параметр resize_type", FailedAt: now.Add(-37 * time.Minute)},
+			{JobPublicID: "job-preview-flux2-0000002", CorrelationID: "correlation-preview-flux2-0000002", Username: "demo4518", WorkflowID: "flux2-image-edit", ModelName: "Flux2-dev", ErrorCode: "workflow_validation_failed", ErrorMessage: "Выбранная модель не поддерживает этот вход", FailedAt: now.Add(-3 * time.Hour)},
+		},
+		"Latencies": []domain.ServiceLatencySummary{
+			{Component: "comfyui", Operation: "submit_prompt", Samples: 22, Failures: 1, P50MS: 84, P95MS: 430, LastLatencyMS: 91, LastOutcome: "ok", LastObservedAt: now.Add(-8 * time.Minute)},
+			{Component: "comfyui", Operation: "generation_status", Samples: 184, P50MS: 42, P95MS: 130, LastLatencyMS: 39, LastOutcome: "ok", LastObservedAt: now.Add(-22 * time.Second)},
+			{Component: "ollama", Operation: "enhance_video", Samples: 7, Failures: 1, P50MS: 12800, P95MS: 47100, LastLatencyMS: 15300, LastOutcome: "ok", LastObservedAt: now.Add(-19 * time.Minute)},
+			{Component: "moderator", Operation: "classify_image", Samples: 15, Failures: 2, P50MS: 1640, P95MS: 74000, LastLatencyMS: 75000, LastOutcome: "timeout", LastErrorCode: "moderation_failed", LastDetail: "context deadline exceeded", LastObservedAt: now.Add(-31 * time.Minute)},
+			{Component: "database", Operation: "gateway_snapshot", Samples: 120, P50MS: 18, P95MS: 44, LastLatencyMS: 21, LastOutcome: "ok", LastObservedAt: now.Add(-18 * time.Second)},
+		},
+		"Leases":         []domain.QuickGenerationMiningLease{{ID: "lease-preview-001", CorrelationID: "correlation-preview-minimax-000001", GenerationJobID: 41, UserID: 2, MinerID: 1, ResumeMining: true, CreatedAt: now.Add(-4 * time.Minute)}},
+		"Dependencies":   dependencies,
+		"Workers":        workers,
+		"WorkerIssues":   []gateway.MaintenanceWorkerState{workers[0], workers[2]},
+		"HealthyWorkers": 15,
+		"Host":           &lastHost,
+		"GeneratedAt":    now,
+		"OverdueAfter":   45 * time.Minute,
+	}
+	mux.HandleFunc("/preview/metrics", render("admin_metrics", "Наблюдаемость", map[string]any{
+		"Stats":         domain.AdminStats{RequestsToday: 147, Requests7Days: 824, ActiveWebSockets: 2, ErrorRate: "0,8%", Trend: chart},
+		"ServiceStats":  serviceStats,
+		"Observability": observability,
 	}))
+	traceJob := domain.GenerationJob{ID: 41, PublicID: "job-preview-minimax-000001", CorrelationID: "correlation-preview-minimax-000001", UsernameSnapshot: "rayka", RequestID: "request-preview-minimax-000001", PromptID: "9a0b0e16-67b2-46c2-ae10-dc09901bb919", TemplateID: "minimax-h3-video", WorkflowID: "minimax-h3-video-v4", ModelName: "MiniMax_H3_FL2VA_pruned_int8", Seed: 3950205217521, State: domain.GenerationJobFailed, StatusMessage: "ComfyUI завершил генерацию с ошибкой", ErrorCode: "comfy_execution_failed", ErrorMessage: "RTXVideoSuperResolution: отсутствует обязательный параметр resize_type", Attempt: 1, InputCount: 2, CreatedAt: now.Add(-58 * time.Minute), StateChangedAt: now.Add(-37 * time.Minute), FinishedAt: timePointer(now.Add(-37 * time.Minute))}
+	trace := domain.GenerationJobTrace{
+		Job: traceJob,
+		Transitions: []domain.GenerationJobTransition{
+			{JobID: 41, CorrelationID: traceJob.CorrelationID, ToState: domain.GenerationJobDraft, Message: "Запуск создан", CreatedAt: traceJob.CreatedAt},
+			{JobID: 41, CorrelationID: traceJob.CorrelationID, FromState: domain.GenerationJobDraft, ToState: domain.GenerationJobPreparing, Message: "Проверяем параметры и workflow", DurationMS: 320, CreatedAt: traceJob.CreatedAt.Add(320 * time.Millisecond)},
+			{JobID: 41, CorrelationID: traceJob.CorrelationID, FromState: domain.GenerationJobPreparing, ToState: domain.GenerationJobWaitingForResources, Message: "Ожидаем ресурсы", DurationMS: 1840, CreatedAt: traceJob.CreatedAt.Add(2160 * time.Millisecond)},
+			{JobID: 41, CorrelationID: traceJob.CorrelationID, FromState: domain.GenerationJobWaitingForResources, ToState: domain.GenerationJobQueued, Message: "Генерация поставлена в очередь ComfyUI", DurationMS: 9100, CreatedAt: traceJob.CreatedAt.Add(11260 * time.Millisecond)},
+			{JobID: 41, CorrelationID: traceJob.CorrelationID, FromState: domain.GenerationJobQueued, ToState: domain.GenerationJobRunning, Message: "ComfyUI выполняет workflow", DurationMS: 58000, CreatedAt: traceJob.CreatedAt.Add(69 * time.Second)},
+			{JobID: 41, CorrelationID: traceJob.CorrelationID, FromState: domain.GenerationJobRunning, ToState: domain.GenerationJobFailed, Message: "ComfyUI завершил генерацию с ошибкой", ErrorCode: traceJob.ErrorCode, ErrorMessage: traceJob.ErrorMessage, DurationMS: 1189000, CreatedAt: now.Add(-37 * time.Minute)},
+		},
+		ServiceObservations: []domain.ServiceObservationRecord{
+			{Component: "comfyui", Operation: "submit_prompt", Outcome: "ok", LatencyMS: 96, CorrelationID: traceJob.CorrelationID, ObservedAt: traceJob.CreatedAt.Add(11 * time.Second)},
+			{Component: "comfyui", Operation: "generation_status", Outcome: "ok", LatencyMS: 41, CorrelationID: traceJob.CorrelationID, ObservedAt: now.Add(-38 * time.Minute)},
+		},
+		ProxyRequests: []domain.TraceProxyRequest{{ID: 81, RequestID: traceJob.RequestID, CorrelationID: traceJob.CorrelationID, Service: "comfyui", Method: "POST", Path: "/generate/run/" + traceJob.RequestID, Status: 202, DurationMS: 12740, CreatedAt: traceJob.CreatedAt}},
+		AuditEvents:   []domain.TraceAuditEvent{{ID: 51, RequestID: traceJob.RequestID, CorrelationID: traceJob.CorrelationID, Action: "quick_generation_started", TargetType: "comfyui", Metadata: `{}`, CreatedAt: traceJob.CreatedAt.Add(12 * time.Second)}},
+		ContentEvents: []domain.TraceContentEvent{{ID: 65, CorrelationID: traceJob.CorrelationID, Service: "comfyui", Kind: "comfyui_prompt", ExternalID: traceJob.PromptID, Model: traceJob.ModelName, GenerationState: "error", CreatedAt: traceJob.CreatedAt.Add(12 * time.Second)}},
+		MiningLease:   &domain.QuickGenerationMiningLease{ID: "lease-preview-001", CorrelationID: traceJob.CorrelationID, GenerationJobID: 41, UserID: 2, MinerID: 1, ResumeMining: true, CreatedAt: traceJob.CreatedAt.Add(2 * time.Second)},
+	}
+	mux.HandleFunc("/preview/job-trace", render("admin_job_trace", "Трасса генерации", map[string]any{"Trace": trace}))
 	storageManaged := []map[string]any{
 		{"Name": "content_media", "Label": "Медиа генераций", "Owner": "Контроль контента", "Retention": "24 часа", "Configuration": "GENERATION_RETENTION", "Managed": true, "EstimatedRows": int64(9), "TotalBytes": int64(225116160), "OldestAt": timePointer(now.Add(-22 * time.Hour))},
 		{"Name": "proxy_requests", "Label": "Запросы к сервисам", "Owner": "Телеметрия Gateway", "Retention": "90 дней", "Configuration": "PROXY_REQUEST_RETENTION", "Managed": true, "EstimatedRows": int64(19931), "TotalBytes": int64(8781824), "OldestAt": timePointer(now.Add(-38 * 24 * time.Hour))},

@@ -18,7 +18,7 @@ var (
 )
 
 const generationJobColumns = `
-	id,public_id,user_id,username_snapshot,request_id,parent_job_id,prompt_id,
+	id,public_id,correlation_id,user_id,username_snapshot,request_id,parent_job_id,prompt_id,
 	template_id,workflow_id,model_name,seed,payload_cipher,state,status_message,
 	error_code,error_message,attempt,dependencies,input_count,state_changed_at,
 	started_at,finished_at,resources_released_at,quota_reserved_on,quota_committed_at,
@@ -37,7 +37,7 @@ func scanGenerationJob(scanner generationJobScanner) (domain.GenerationJob, erro
 	var startedAt, finishedAt, resourcesReleasedAt sql.NullTime
 	var quotaReservedOn, quotaCommittedAt, cancellationRequestedAt, cancellationConfirmedAt sql.NullTime
 	err := scanner.Scan(
-		&job.ID, &job.PublicID, &userID, &job.UsernameSnapshot, &job.RequestID, &parentJobID, &promptID,
+		&job.ID, &job.PublicID, &job.CorrelationID, &userID, &job.UsernameSnapshot, &job.RequestID, &parentJobID, &promptID,
 		&job.TemplateID, &job.WorkflowID, &job.ModelName, &job.Seed, &job.PayloadCipher, &state, &job.StatusMessage,
 		&job.ErrorCode, &job.ErrorMessage, &job.Attempt, &dependencies, &job.InputCount, &job.StateChangedAt,
 		&startedAt, &finishedAt, &resourcesReleasedAt, &quotaReservedOn, &quotaCommittedAt,
@@ -97,6 +97,10 @@ func scanGenerationJob(scanner generationJobScanner) (domain.GenerationJob, erro
 
 func (s *Store) CreateGenerationJob(ctx context.Context, params domain.CreateGenerationJobParams) (domain.GenerationJob, bool, error) {
 	params.PublicID = strings.TrimSpace(params.PublicID)
+	params.CorrelationID = strings.TrimSpace(params.CorrelationID)
+	if params.CorrelationID == "" {
+		params.CorrelationID = params.PublicID
+	}
 	params.RequestID = strings.TrimSpace(params.RequestID)
 	params.UsernameSnapshot = strings.TrimSpace(params.UsernameSnapshot)
 	if params.UserID <= 0 || params.PublicID == "" || params.RequestID == "" {
@@ -119,10 +123,10 @@ func (s *Store) CreateGenerationJob(ctx context.Context, params domain.CreateGen
 		}
 	}
 
-	query := `INSERT INTO generation_jobs(public_id,user_id,username_snapshot,request_id,parent_job_id,state,status_message)
-		VALUES($1,$2,$3,$4,$5,'draft','Запуск создан') ON CONFLICT DO NOTHING RETURNING ` + generationJobColumns
+	query := `INSERT INTO generation_jobs(public_id,correlation_id,user_id,username_snapshot,request_id,parent_job_id,state,status_message)
+		VALUES($1,$2,$3,$4,$5,$6,'draft','Запуск создан') ON CONFLICT DO NOTHING RETURNING ` + generationJobColumns
 	job, err := scanGenerationJob(tx.QueryRowContext(ctx, query,
-		params.PublicID, params.UserID, params.UsernameSnapshot, params.RequestID, params.ParentJobID,
+		params.PublicID, params.CorrelationID, params.UserID, params.UsernameSnapshot, params.RequestID, params.ParentJobID,
 	))
 	created := err == nil
 	if errors.Is(err, sql.ErrNoRows) {
@@ -134,8 +138,8 @@ func (s *Store) CreateGenerationJob(ctx context.Context, params domain.CreateGen
 		return domain.GenerationJob{}, false, err
 	}
 	if created {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO generation_job_transitions(job_id,from_state,to_state,message,attempt)
-			VALUES($1,'','draft',$2,1)`, job.ID, job.StatusMessage); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO generation_job_transitions(job_id,correlation_id,from_state,to_state,message,attempt)
+			VALUES($1,$2,'','draft',$3,1)`, job.ID, job.CorrelationID, job.StatusMessage); err != nil {
 			return domain.GenerationJob{}, false, err
 		}
 		if err := incrementGenerationJobRevision(ctx, tx); err != nil {
@@ -153,6 +157,10 @@ func (s *Store) CreateGenerationJob(ctx context.Context, params domain.CreateGen
 // closing the crash window between the two legacy inserts.
 func (s *Store) ClaimGenerationJob(ctx context.Context, params domain.CreateGenerationJobParams) (domain.GenerationJob, bool, error) {
 	params.PublicID = strings.TrimSpace(params.PublicID)
+	params.CorrelationID = strings.TrimSpace(params.CorrelationID)
+	if params.CorrelationID == "" {
+		params.CorrelationID = params.PublicID
+	}
 	params.RequestID = strings.TrimSpace(params.RequestID)
 	params.UsernameSnapshot = strings.TrimSpace(params.UsernameSnapshot)
 	if params.UserID <= 0 || params.PublicID == "" || params.RequestID == "" {
@@ -163,15 +171,15 @@ func (s *Store) ClaimGenerationJob(ctx context.Context, params domain.CreateGene
 		return domain.GenerationJob{}, false, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO generation_requests(user_id,request_id)
-		VALUES($1,$2) ON CONFLICT(user_id,request_id) DO NOTHING`, params.UserID, params.RequestID); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO generation_requests(user_id,request_id,correlation_id)
+		VALUES($1,$2,$3) ON CONFLICT(user_id,request_id) DO NOTHING`, params.UserID, params.RequestID, params.CorrelationID); err != nil {
 		return domain.GenerationJob{}, false, err
 	}
 	job, err := scanGenerationJob(tx.QueryRowContext(ctx, `SELECT `+generationJobColumns+`
 		FROM generation_jobs WHERE user_id=$1 AND request_id=$2 FOR UPDATE`, params.UserID, params.RequestID))
 	if err == nil {
-		if _, err := tx.ExecContext(ctx, `UPDATE generation_requests SET job_id=$1
-			WHERE user_id=$2 AND request_id=$3 AND job_id IS NULL`, job.ID, params.UserID, params.RequestID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE generation_requests SET job_id=$1,correlation_id=$4
+			WHERE user_id=$2 AND request_id=$3 AND job_id IS NULL`, job.ID, params.UserID, params.RequestID, job.CorrelationID); err != nil {
 			return domain.GenerationJob{}, false, err
 		}
 		if err := tx.Commit(); err != nil {
@@ -207,9 +215,9 @@ func (s *Store) ClaimGenerationJob(ctx context.Context, params domain.CreateGene
 		dependencies = `["comfyui"]`
 	}
 	job, err = scanGenerationJob(tx.QueryRowContext(ctx, `INSERT INTO generation_jobs
-		(public_id,user_id,username_snapshot,request_id,parent_job_id,prompt_id,state,status_message,dependencies)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) ON CONFLICT DO NOTHING RETURNING `+generationJobColumns,
-		params.PublicID, params.UserID, params.UsernameSnapshot, params.RequestID, params.ParentJobID,
+		(public_id,correlation_id,user_id,username_snapshot,request_id,parent_job_id,prompt_id,state,status_message,dependencies)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb) ON CONFLICT DO NOTHING RETURNING `+generationJobColumns,
+		params.PublicID, params.CorrelationID, params.UserID, params.UsernameSnapshot, params.RequestID, params.ParentJobID,
 		promptID, initialState, message, dependencies,
 	))
 	created := err == nil
@@ -221,13 +229,13 @@ func (s *Store) ClaimGenerationJob(ctx context.Context, params domain.CreateGene
 	if err != nil {
 		return domain.GenerationJob{}, false, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE generation_requests SET job_id=$1
-		WHERE user_id=$2 AND request_id=$3`, job.ID, params.UserID, params.RequestID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE generation_requests SET job_id=$1,correlation_id=$4
+		WHERE user_id=$2 AND request_id=$3`, job.ID, params.UserID, params.RequestID, job.CorrelationID); err != nil {
 		return domain.GenerationJob{}, false, err
 	}
 	if created {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO generation_job_transitions(job_id,from_state,to_state,message,attempt)
-			VALUES($1,'',$2,$3,1)`, job.ID, job.State, job.StatusMessage); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO generation_job_transitions(job_id,correlation_id,from_state,to_state,message,attempt)
+			VALUES($1,$2,'',$3,$4,1)`, job.ID, job.CorrelationID, job.State, job.StatusMessage); err != nil {
 			return domain.GenerationJob{}, false, err
 		}
 		if err := incrementGenerationJobRevision(ctx, tx); err != nil {
@@ -311,13 +319,13 @@ func (s *Store) BindGenerationJobPrompt(ctx context.Context, jobID int64, prompt
 		return domain.GenerationJob{}, err
 	}
 	if job.UserID != nil {
-		if _, err := tx.ExecContext(ctx, `UPDATE generation_requests SET job_id=$1,prompt_id=$2,updated_at=now()
-			WHERE user_id=$3 AND request_id=$4 AND (prompt_id IS NULL OR prompt_id=$2)`, job.ID, promptID, *job.UserID, job.RequestID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE generation_requests SET job_id=$1,prompt_id=$2,correlation_id=$5,updated_at=now()
+			WHERE user_id=$3 AND request_id=$4 AND (prompt_id IS NULL OR prompt_id=$2)`, job.ID, promptID, *job.UserID, job.RequestID, job.CorrelationID); err != nil {
 			return domain.GenerationJob{}, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE quick_generation_mining_leases SET generation_job_id=$1
-		WHERE prompt_id=$2 AND generation_job_id IS NULL`, job.ID, promptID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE quick_generation_mining_leases SET generation_job_id=$1,correlation_id=$3
+		WHERE prompt_id=$2 AND generation_job_id IS NULL`, job.ID, promptID, job.CorrelationID); err != nil {
 		return domain.GenerationJob{}, err
 	}
 	if changed {
@@ -405,9 +413,13 @@ func (s *Store) TransitionGenerationJob(ctx context.Context, jobID int64, params
 	if err != nil {
 		return domain.GenerationJob{}, false, err
 	}
+	durationMS := time.Since(current.StateChangedAt).Milliseconds()
+	if durationMS < 0 {
+		durationMS = 0
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO generation_job_transitions
-		(job_id,from_state,to_state,message,error_code,error_message,attempt)
-		VALUES($1,$2,$3,$4,$5,$6,$7)`, job.ID, current.State, job.State, job.StatusMessage, job.ErrorCode, job.ErrorMessage, job.Attempt); err != nil {
+		(job_id,correlation_id,from_state,to_state,message,error_code,error_message,attempt,duration_ms)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, job.ID, job.CorrelationID, current.State, job.State, job.StatusMessage, job.ErrorCode, job.ErrorMessage, job.Attempt, durationMS); err != nil {
 		return domain.GenerationJob{}, false, err
 	}
 	if err := incrementGenerationJobRevision(ctx, tx); err != nil {
@@ -571,9 +583,10 @@ func (s *Store) LinkGenerationJobVariant(ctx context.Context, jobID int64, promp
 }
 
 func (s *Store) LinkGenerationJobContentEvent(ctx context.Context, jobID int64, userID int64, promptID string) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE content_events SET generation_job_id=$1
-		WHERE user_id=$2 AND service='comfyui' AND kind='comfyui_prompt' AND external_id=$3
-		  AND (generation_job_id IS NULL OR generation_job_id=$1)`, jobID, userID, strings.TrimSpace(promptID))
+	result, err := s.db.ExecContext(ctx, `UPDATE content_events e SET generation_job_id=$1,correlation_id=j.correlation_id
+		FROM generation_jobs j
+		WHERE e.user_id=$2 AND e.service='comfyui' AND e.kind='comfyui_prompt' AND e.external_id=$3
+		  AND j.id=$1 AND (e.generation_job_id IS NULL OR e.generation_job_id=$1)`, jobID, userID, strings.TrimSpace(promptID))
 	if err != nil {
 		return err
 	}
@@ -627,8 +640,8 @@ func (s *Store) ListActiveGenerationJobs(ctx context.Context, limit int) ([]doma
 }
 
 func (s *Store) GenerationJobTransitions(ctx context.Context, jobID, userID int64) ([]domain.GenerationJobTransition, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT t.id,t.job_id,t.from_state,t.to_state,
-		t.message,t.error_code,t.error_message,t.attempt,t.created_at
+	rows, err := s.db.QueryContext(ctx, `SELECT t.id,t.job_id,t.correlation_id,t.from_state,t.to_state,
+		t.message,t.error_code,t.error_message,t.attempt,t.duration_ms,t.created_at
 		FROM generation_job_transitions t JOIN generation_jobs j ON j.id=t.job_id
 		WHERE t.job_id=$1 AND j.user_id=$2 ORDER BY t.created_at,t.id`, jobID, userID)
 	if err != nil {
@@ -639,7 +652,7 @@ func (s *Store) GenerationJobTransitions(ctx context.Context, jobID, userID int6
 	for rows.Next() {
 		var item domain.GenerationJobTransition
 		var fromState, toState string
-		if err := rows.Scan(&item.ID, &item.JobID, &fromState, &toState, &item.Message, &item.ErrorCode, &item.ErrorMessage, &item.Attempt, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.JobID, &item.CorrelationID, &fromState, &toState, &item.Message, &item.ErrorCode, &item.ErrorMessage, &item.Attempt, &item.DurationMS, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		item.FromState = domain.GenerationJobState(fromState)

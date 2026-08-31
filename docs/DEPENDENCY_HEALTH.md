@@ -42,3 +42,12 @@ the browser recovery loop.
 The maintenance loop performs background probes. Admin dashboard requests may
 claim only checks that are already due, so loading the page does not create a
 second probe storm.
+
+## Readiness
+
+`/healthz` remains the minimal database liveness check. `/readyz` returns a
+structured JSON report with the required database check and all optional
+dependency states. A database failure returns HTTP `503`; an unavailable or
+misconfigured optional dependency keeps HTTP `200`, sets `degraded: true`, and
+remains visible in the report. `HEAD /readyz` returns the same status and
+headers without a response body.

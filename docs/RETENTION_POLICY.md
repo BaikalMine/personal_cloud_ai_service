@@ -14,6 +14,8 @@ source of product behavior.
 | AI-content metadata (`content_events`) | `AI_CONTENT_RETENTION` | 7 days | Content review. The event remains after media expiry and renders an archived state instead of a broken preview. |
 | ComfyUI inputs (`comfy_input_assets`) | `COMFY_INPUT_RETENTION` | 72 hours | File isolation. User-owned references expire after their last permitted use. |
 | Host samples (`host_metrics`) | `HOST_METRIC_RETENTION` | 7 days | Monitoring. The dashboard can display a shorter chart window. |
+| Dependency latency (`service_observations`) | `HOST_METRIC_RETENTION` | 7 days | Observability. Stores component/operation outcome, latency and optional generation correlation. |
+| Gateway snapshots (`gateway_observations`) | `HOST_METRIC_RETENTION` | 7 days | Observability. Stores queue, backlog, leases, database size and cleanup freshness. |
 | Audit (`audit_log`) | `AUDIT_LOG_RETENTION` | 90 days | Operations/security. Export is available before deletion. |
 | HTTP telemetry (`proxy_requests`) | `PROXY_REQUEST_RETENTION` | 90 days | Gateway telemetry, including accepted quick-generation requests. |
 | Closed WebSockets (`websocket_sessions`) | `WEBSOCKET_SESSION_RETENTION` | 30 days | Gateway telemetry. Open sessions are never removed. |

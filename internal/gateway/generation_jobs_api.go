@@ -23,6 +23,7 @@ const (
 type generationJobView struct {
 	JobID           string                `json:"job_id"`
 	RequestID       string                `json:"request_id"`
+	CorrelationID   string                `json:"correlation_id"`
 	PromptID        string                `json:"prompt_id,omitempty"`
 	State           string                `json:"state"`
 	JobState        string                `json:"job_state"`
@@ -46,11 +47,13 @@ type generationJobView struct {
 }
 
 type generationJobTransitionView struct {
-	State     string    `json:"state"`
-	Message   string    `json:"message"`
-	ErrorCode string    `json:"error_code,omitempty"`
-	Attempt   int       `json:"attempt"`
-	CreatedAt time.Time `json:"created_at"`
+	State         string    `json:"state"`
+	Message       string    `json:"message"`
+	ErrorCode     string    `json:"error_code,omitempty"`
+	Attempt       int       `json:"attempt"`
+	DurationMS    int64     `json:"duration_ms"`
+	CorrelationID string    `json:"correlation_id"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 func (a *App) generationJobView(job domain.GenerationJob) generationJobView {
@@ -66,7 +69,7 @@ func (a *App) generationJobView(job domain.GenerationJob) generationJobView {
 		duration = 0
 	}
 	view := generationJobView{
-		JobID: job.PublicID, RequestID: job.RequestID, PromptID: job.PromptID,
+		JobID: job.PublicID, RequestID: job.RequestID, CorrelationID: job.CorrelationID, PromptID: job.PromptID,
 		State: generationJobClientState(job), JobState: string(job.State), Message: job.StatusMessage,
 		ErrorCode: job.ErrorCode, TemplateID: job.TemplateID, WorkflowID: job.WorkflowID,
 		ModelName: job.ModelName, Seed: job.Seed, Attempt: job.Attempt, InputCount: job.InputCount,
@@ -168,7 +171,7 @@ func (a *App) handleGenerationJobDetail(w http.ResponseWriter, r *http.Request) 
 	for _, transition := range transitions {
 		items = append(items, generationJobTransitionView{
 			State: string(transition.ToState), Message: transition.Message, ErrorCode: transition.ErrorCode,
-			Attempt: transition.Attempt, CreatedAt: transition.CreatedAt,
+			Attempt: transition.Attempt, DurationMS: transition.DurationMS, CorrelationID: transition.CorrelationID, CreatedAt: transition.CreatedAt,
 		})
 	}
 	views, err := a.generationJobViews(r.Context(), []domain.GenerationJob{job}, user.ID)
@@ -268,19 +271,20 @@ func (a *App) handleGenerationJobCancel(w http.ResponseWriter, r *http.Request) 
 		writeGenerationError(w, http.StatusInternalServerError, "не удалось загрузить задание")
 		return
 	}
+	jobCtx := generationJobTraceContext(r.Context(), job)
 	if job.State.Terminal() {
 		writeJSON(w, http.StatusOK, map[string]any{"job": a.generationJobView(job), "cancelled": job.State == domain.GenerationJobCancelled})
 		return
 	}
-	job, _, err = a.store.RequestGenerationJobCancellation(r.Context(), job.ID, user.ID)
+	job, _, err = a.store.RequestGenerationJobCancellation(jobCtx, job.ID, user.ID)
 	if err != nil {
 		writeGenerationError(w, http.StatusConflict, "это задание уже нельзя отменить")
 		return
 	}
-	job, cancelled, err := a.continueGenerationJobCancellation(r.Context(), job)
+	job, cancelled, err := a.continueGenerationJobCancellation(jobCtx, job)
 	if err != nil {
 		if errors.Is(err, errGenerationCancellationNotSent) {
-			if cleared, _, clearErr := a.store.ClearGenerationJobCancellation(r.Context(), job.ID, user.ID, "Генерация продолжается"); clearErr == nil {
+			if cleared, _, clearErr := a.store.ClearGenerationJobCancellation(jobCtx, job.ID, user.ID, "Генерация продолжается"); clearErr == nil {
 				job = cleared
 			}
 		}
@@ -288,7 +292,7 @@ func (a *App) handleGenerationJobCancel(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if cancelled {
-		a.audit(r.Context(), &user.ID, "quick_generation_cancelled", "comfyui", nil, a.clientIP(r), r.UserAgent(), map[string]any{"prompt_id": job.PromptID, "job_id": job.PublicID})
+		a.audit(jobCtx, &user.ID, "quick_generation_cancelled", "comfyui", nil, a.clientIP(r), r.UserAgent(), map[string]any{"prompt_id": job.PromptID, "job_id": job.PublicID})
 	}
 	status := http.StatusAccepted
 	if job.State.Terminal() {

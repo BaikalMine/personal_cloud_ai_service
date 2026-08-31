@@ -33,6 +33,10 @@ func (a *App) maintenanceWorkerSpecs() []maintenanceWorkerSpec {
 			RetryDelay: shortRetry, MaxBackoff: 2 * time.Minute, Run: a.captureHostMetric,
 		},
 		{
+			Key: "observability_snapshot", Name: "Снимок наблюдаемости", Interval: gatewayObservationInterval, Timeout: 8 * time.Second, InitialDelay: 2500 * time.Millisecond,
+			RetryDelay: shortRetry, MaxBackoff: 2 * time.Minute, Run: a.captureGatewayObservation,
+		},
+		{
 			Key: "comfy_memory", Name: "Освобождение памяти ComfyUI", Interval: comfyMemoryMonitorInterval, Timeout: 8 * time.Second, InitialDelay: 3 * time.Second,
 			RetryDelay: shortRetry, MaxBackoff: time.Minute, Run: a.observeComfyQueueForMemoryRelease,
 		},

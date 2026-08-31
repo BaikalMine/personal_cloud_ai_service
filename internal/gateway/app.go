@@ -7,8 +7,10 @@ import (
 	"embed"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"html/template"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -37,6 +39,7 @@ type Templates struct {
 }
 
 func Run() error {
+	configureGatewayLogging()
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -125,6 +128,7 @@ func Run() error {
 		websocketConnections: make(map[*trackedWebSocket]struct{}),
 		maintenanceWorkers:   newMaintenanceRegistry(time.Now),
 		maintenanceDone:      make(chan struct{}),
+		serviceLatencies:     newServiceLatencyRegistry(),
 		proxyCounts:          map[string]int64{},
 	}
 
@@ -190,6 +194,9 @@ func ParseTemplates() (*Templates, error) {
 		"formatBytes":          formatBytes,
 		"formatNumber":         formatNumber,
 		"formatDuration":       formatDuration,
+		"formatDurationLong":   formatDurationLong,
+		"formatAgeSeconds":     formatAgeSeconds,
+		"formatSignedBytes":    formatSignedBytes,
 		"accountLifetimeLabel": accountLifetimeLabel,
 		"fileLabel":            russianFileLabel,
 		"pct":                  pct,
@@ -199,6 +206,10 @@ func ParseTemplates() (*Templates, error) {
 		"auditActionLabel":     auditActionLabel,
 		"auditTargetLabel":     auditTargetLabel,
 		"auditMetadataLabel":   auditMetadataLabel,
+		"generationStateLabel": generationJobStateLabel,
+		"observationOutcome":   serviceObservationOutcomeLabel,
+		"componentLabel":       observabilityComponentLabel,
+		"operationLabel":       observabilityOperationLabel,
 		"hasString":            hasString,
 	}).ParseFS(embeddedFS, "templates/*.html")
 	if err != nil {
@@ -233,6 +244,7 @@ func (a *App) publicMux() http.Handler {
 	mux.HandleFunc("/static/gallery.js", a.handleStaticJS)
 	mux.HandleFunc("/static/fonts/", a.handleStaticFont)
 	mux.HandleFunc("/healthz", a.handleHealthz)
+	mux.HandleFunc("/readyz", a.handleReadyz)
 	mux.HandleFunc("/login", a.handleLogin)
 	mux.HandleFunc("/logout", a.handleLogout)
 	mux.HandleFunc("/invite/", a.handleInvite)
@@ -273,6 +285,7 @@ func (a *App) adminMux() http.Handler {
 	mux.HandleFunc("/static/gallery.js", a.handleStaticJS)
 	mux.HandleFunc("/static/fonts/", a.handleStaticFont)
 	mux.HandleFunc("/healthz", a.handleHealthz)
+	mux.HandleFunc("/readyz", a.handleReadyz)
 	mux.HandleFunc("/login", a.handleLogin)
 	mux.HandleFunc("/logout", a.handleLogout)
 	mux.Handle("/account/profile", a.requireAuth(http.HandlerFunc(a.handleAccountProfile)))
@@ -291,9 +304,15 @@ func (a *App) adminMux() http.Handler {
 
 func (a *App) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
 		a.requestsTotal.Add(1)
 		id := newRequestID()
+		correlation := strings.TrimSpace(r.Header.Get(correlationHeader))
+		if !validCorrelationID(correlation) {
+			correlation = id
+		}
 		w.Header().Set("X-Request-ID", id)
+		w.Header().Set(correlationHeader, correlation)
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "same-origin")
@@ -301,16 +320,24 @@ func (a *App) securityHeaders(next http.Handler) http.Handler {
 		if a.requestProto(r) == "https" {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
+		ctx := context.WithValue(r.Context(), requestIDKey, id)
+		ctx = context.WithValue(ctx, correlationIDKey, correlation)
+		stateWriter := &captureWriter{ResponseWriter: w}
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				log.Printf("panic request_id=%s method=%s path=%s: %v", id, r.Method, r.URL.Path, recovered)
+				logGateway(ctx, slog.LevelError, "http_panic", "Unhandled request panic", "method", r.Method, "path", r.URL.Path, "panic", fmt.Sprint(recovered))
 				_, proxyRequest := requestedService(r)
 				if !proxyRequest && !strings.HasPrefix(r.URL.Path, "/comfyui/") && !strings.HasPrefix(r.URL.Path, "/openwebui/") {
-					http.Error(w, "внутренняя ошибка сервера", http.StatusInternalServerError)
+					http.Error(stateWriter, "внутренняя ошибка сервера", http.StatusInternalServerError)
 				}
 			}
+			status := stateWriter.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+			logHTTPRequest(ctx, r, status, stateWriter.bytes, started)
 		}()
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), requestIDKey, id)))
+		next.ServeHTTP(stateWriter, r.WithContext(ctx))
 	})
 }
 
@@ -394,6 +421,49 @@ func (a *App) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("ok\n"))
 }
 
+func (a *App) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", http.MethodGet+", "+http.MethodHead)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	started := time.Now()
+	databaseErr := a.store.Ping(ctx)
+	a.observeServiceCall(r.Context(), "database", "readiness", started, databaseErr, false, "database_ping_failed", "")
+	dependencies := a.dependencyStatuses()
+	status, degraded := readinessStatus(databaseErr, dependencies)
+	w.Header().Set("Cache-Control", "no-store")
+	if r.Method == http.MethodHead {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(status)
+		return
+	}
+	writeJSON(w, status, map[string]any{
+		"ready":       databaseErr == nil,
+		"degraded":    degraded,
+		"checked_at":  time.Now().UTC(),
+		"required":    map[string]any{"database": map[string]any{"ready": databaseErr == nil, "latency_ms": time.Since(started).Milliseconds()}},
+		"optional":    dependencies,
+		"correlation": correlationID(r),
+	})
+}
+
+func readinessStatus(databaseErr error, dependencies []DependencyStatus) (int, bool) {
+	degraded := false
+	for _, dependency := range dependencies {
+		if dependency.State != DependencyOnline {
+			degraded = true
+			break
+		}
+	}
+	if databaseErr != nil {
+		return http.StatusServiceUnavailable, degraded
+	}
+	return http.StatusOK, degraded
+}
+
 func (a *App) handleRoot(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -437,8 +507,5 @@ func (a *App) renderStatus(w http.ResponseWriter, r *http.Request, status int, n
 }
 
 func requestID(r *http.Request) string {
-	if id, ok := r.Context().Value(requestIDKey).(string); ok {
-		return id
-	}
-	return ""
+	return requestIDFromContext(r.Context())
 }

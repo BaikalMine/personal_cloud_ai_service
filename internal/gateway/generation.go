@@ -12,6 +12,7 @@ import (
 	"image"
 	"io"
 	"log"
+	"log/slog"
 	"mime"
 	"net/http"
 	"net/url"
@@ -57,6 +58,7 @@ type generationStatus struct {
 	PromptID             string             `json:"prompt_id"`
 	JobID                string             `json:"job_id,omitempty"`
 	RequestID            string             `json:"request_id,omitempty"`
+	CorrelationID        string             `json:"correlation_id,omitempty"`
 	JobState             string             `json:"job_state,omitempty"`
 	State                string             `json:"state"`
 	Message              string             `json:"message"`
@@ -288,6 +290,14 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 		writeGenerationError(w, http.StatusBadRequest, "некорректный идентификатор запуска")
 		return
 	}
+	correlation := strings.TrimSpace(r.Form.Get("correlation_id"))
+	if correlation == "" {
+		correlation = correlationID(r)
+	}
+	if !validCorrelationID(correlation) {
+		writeGenerationError(w, http.StatusBadRequest, "некорректный идентификатор трассировки")
+		return
+	}
 	var parentJobID *int64
 	if parentPublicID := strings.TrimSpace(r.Form.Get("parent_job_id")); parentPublicID != "" {
 		parent, parentErr := a.store.GenerationJobByPublicID(r.Context(), user.ID, parentPublicID)
@@ -302,74 +312,75 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 		parentJobID = &parent.ID
 	}
 	job, shouldSubmit, err := a.store.ClaimGenerationJob(r.Context(), domain.CreateGenerationJobParams{
-		PublicID: newRequestID(), UserID: user.ID, UsernameSnapshot: user.Username, RequestID: requestID, ParentJobID: parentJobID,
+		PublicID: newRequestID(), CorrelationID: correlation, UserID: user.ID, UsernameSnapshot: user.Username, RequestID: requestID, ParentJobID: parentJobID,
 	})
 	if err != nil {
 		writeGenerationError(w, http.StatusInternalServerError, "не удалось создать задание генерации")
 		return
 	}
+	jobCtx := generationJobTraceContext(r.Context(), job)
 	if !shouldSubmit {
-		response := a.generationJobResponse(r.Context(), job)
+		response := a.generationJobResponse(jobCtx, job)
 		response["message"] = "Восстановлена уже отправленная генерация"
 		writeJSON(w, http.StatusAccepted, response)
 		return
 	}
-	job, _, err = a.store.TransitionGenerationJob(r.Context(), job.ID, domain.GenerationJobTransitionParams{
+	job, _, err = a.store.TransitionGenerationJob(jobCtx, job.ID, domain.GenerationJobTransitionParams{
 		State: domain.GenerationJobPreparing, Message: "Проверяем параметры и workflow",
 	})
 	if err != nil {
 		writeGenerationJobError(w, http.StatusInternalServerError, job, "не удалось подготовить задание")
 		return
 	}
-	preparation, err := a.prepareGeneration(r.Context(), user, input, true)
+	preparation, err := a.prepareGeneration(jobCtx, user, input, true)
 	if err != nil {
 		code := "generation_preflight_failed"
 		status := http.StatusBadRequest
 		if errors.Is(err, errMinorSexualContent) {
 			code = "minor_content_blocked"
 			status = http.StatusUnprocessableEntity
-			a.audit(r.Context(), &user.ID, "generation_safety_blocked", "quick_generation", nil, a.clientIP(r), r.UserAgent(), map[string]any{"reason": "minor_sexual_content", "job_id": job.PublicID})
+			a.audit(jobCtx, &user.ID, "generation_safety_blocked", "quick_generation", nil, a.clientIP(r), r.UserAgent(), map[string]any{"reason": "minor_sexual_content", "job_id": job.PublicID})
 		}
-		job = a.failGenerationJob(r.Context(), job, code, err.Error(), err)
+		job = a.failGenerationJob(jobCtx, job, code, err.Error(), err)
 		writeGenerationJobError(w, status, job, err.Error())
 		return
 	}
 	input, definition, prompt := preparation.Input, preparation.Definition, preparation.Prompt
 	inputCount := generationJobInputCount(input)
 	if inputCount > 0 {
-		job, _, err = a.store.TransitionGenerationJob(r.Context(), job.ID, domain.GenerationJobTransitionParams{
+		job, _, err = a.store.TransitionGenerationJob(jobCtx, job.ID, domain.GenerationJobTransitionParams{
 			State: domain.GenerationJobUploading, Message: "Проверяем и закрепляем референсы",
 		})
 		if err != nil {
-			job = a.failGenerationJob(r.Context(), job, "generation_input_state_failed", "Не удалось закрепить референсы", err)
+			job = a.failGenerationJob(jobCtx, job, "generation_input_state_failed", "Не удалось закрепить референсы", err)
 			writeGenerationJobError(w, http.StatusInternalServerError, job, "не удалось подготовить референсы")
 			return
 		}
 	}
 	payloadCipher, err := a.generationJobPayloadCipher(input, r.Form)
 	if err != nil {
-		job = a.failGenerationJob(r.Context(), job, "generation_payload_failed", "Не удалось сохранить параметры запуска", err)
+		job = a.failGenerationJob(jobCtx, job, "generation_payload_failed", "Не удалось сохранить параметры запуска", err)
 		writeGenerationJobError(w, http.StatusInternalServerError, job, "не удалось сохранить параметры запуска")
 		return
 	}
-	job, err = a.store.PrepareGenerationJob(r.Context(), job.ID, domain.PreparedGenerationJob{
+	job, err = a.store.PrepareGenerationJob(jobCtx, job.ID, domain.PreparedGenerationJob{
 		TemplateID: input.TemplateID, WorkflowID: input.PresetID, ModelName: input.ModelName, Seed: input.Seed,
 		PayloadCipher: payloadCipher, Dependencies: generationJobDependencies(input, user), InputCount: inputCount,
 	})
 	if err != nil {
-		job = a.failGenerationJob(r.Context(), job, "generation_payload_store_failed", "Не удалось сохранить параметры запуска", err)
+		job = a.failGenerationJob(jobCtx, job, "generation_payload_store_failed", "Не удалось сохранить параметры запуска", err)
 		writeGenerationJobError(w, http.StatusInternalServerError, job, "не удалось сохранить параметры запуска")
 		return
 	}
-	job, _, err = a.store.TransitionGenerationJob(r.Context(), job.ID, domain.GenerationJobTransitionParams{
+	job, _, err = a.store.TransitionGenerationJob(jobCtx, job.ID, domain.GenerationJobTransitionParams{
 		State: domain.GenerationJobWaitingForResources, Message: "Ожидаем ресурсы",
 	})
 	if err != nil {
-		job = a.failGenerationJob(r.Context(), job, "generation_resource_state_failed", "Не удалось подготовить ресурсы", err)
+		job = a.failGenerationJob(jobCtx, job, "generation_resource_state_failed", "Не удалось подготовить ресурсы", err)
 		writeGenerationJobError(w, http.StatusInternalServerError, job, "не удалось подготовить ресурсы")
 		return
 	}
-	_, _, err = a.store.ReserveQuickGenerationForJob(r.Context(), job.ID, user.ID)
+	_, _, err = a.store.ReserveQuickGenerationForJob(jobCtx, job.ID, user.ID)
 	if err != nil {
 		status, message := quickGenerationLimitError(err)
 		code := "generation_quota_failed"
@@ -380,44 +391,46 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 		} else if errors.Is(err, store.ErrQuickGenerationForbidden) {
 			code = "generation_access_revoked"
 		}
-		job = a.failGenerationJob(r.Context(), job, code, message, err)
+		job = a.failGenerationJob(jobCtx, job, code, message, err)
 		writeGenerationJobError(w, status, job, message)
 		return
 	}
-	miningLease, miningWarning, err := a.pauseMiningForQuickGeneration(r.Context(), user, job.ID)
+	miningLease, miningWarning, err := a.pauseMiningForQuickGeneration(jobCtx, user, job.ID)
 	if err != nil {
 		message := "Не удалось освободить ресурсы для приоритетной генерации"
-		job = a.failGenerationJob(r.Context(), job, "mining_pause_failed", message, err)
+		job = a.failGenerationJob(jobCtx, job, "mining_pause_failed", message, err)
 		writeGenerationJobError(w, http.StatusServiceUnavailable, job, message+": "+err.Error())
 		return
 	}
-	promptID, err := a.submitComfyPrompt(r.Context(), user.ID, job.PublicID, prompt)
+	promptID, err := a.submitComfyPrompt(jobCtx, user.ID, job.PublicID, prompt)
 	if err != nil {
-		job = a.failGenerationJob(r.Context(), job, "comfy_submission_failed", "ComfyUI не принял workflow", err)
+		job = a.failGenerationJob(jobCtx, job, "comfy_submission_failed", "ComfyUI не принял workflow", err)
 		writeGenerationJobError(w, http.StatusBadGateway, job, "ComfyUI не принял workflow: "+err.Error())
 		return
 	}
-	if err := a.attachMiningPauseToGeneration(r.Context(), miningLease, promptID); err != nil {
+	jobCtx = traceContext(jobCtx, job.CorrelationID, job.ID, promptID)
+	if err := a.attachMiningPauseToGeneration(jobCtx, miningLease, promptID); err != nil {
 		log.Printf("attach mining-pause lease to generation %s: %v", promptID, err)
 	}
 	a.rememberGeneration(promptID, user.ID)
-	boundJob, bindErr := a.store.BindGenerationJobPrompt(r.Context(), job.ID, promptID)
+	boundJob, bindErr := a.store.BindGenerationJobPrompt(jobCtx, job.ID, promptID)
 	if bindErr != nil {
 		log.Printf("bind generation job %s to prompt %s: %v", job.PublicID, promptID, bindErr)
 	} else {
 		job = boundJob
-		if _, commitErr := a.store.CommitQuickGenerationForJob(r.Context(), job.ID); commitErr != nil {
+		jobCtx = generationJobTraceContext(jobCtx, job)
+		if _, commitErr := a.store.CommitQuickGenerationForJob(jobCtx, job.ID); commitErr != nil {
 			log.Printf("commit quota for generation job %s: %v", job.PublicID, commitErr)
 		}
-		a.recordGenerationEvent(r.Context(), job.ID, user.ID, promptID, definition, input)
-		a.rememberGenerationVariant(r.Context(), job.ID, user.ID, promptID, input, r.Form)
-		if linkErr := a.store.LinkGenerationJobContentEvent(r.Context(), job.ID, user.ID, promptID); linkErr != nil {
+		a.recordGenerationEvent(jobCtx, job.ID, user.ID, promptID, definition, input)
+		a.rememberGenerationVariant(jobCtx, job.ID, user.ID, promptID, input, r.Form)
+		if linkErr := a.store.LinkGenerationJobContentEvent(jobCtx, job.ID, user.ID, promptID); linkErr != nil {
 			log.Printf("link generation job %s content projection: %v", job.PublicID, linkErr)
 		}
-		if linkErr := a.store.LinkGenerationJobVariant(r.Context(), job.ID, promptID); linkErr != nil {
+		if linkErr := a.store.LinkGenerationJobVariant(jobCtx, job.ID, promptID); linkErr != nil {
 			log.Printf("link generation job %s variant projection: %v", job.PublicID, linkErr)
 		}
-		if queuedJob, _, transitionErr := a.store.TransitionGenerationJob(r.Context(), job.ID, domain.GenerationJobTransitionParams{
+		if queuedJob, _, transitionErr := a.store.TransitionGenerationJob(jobCtx, job.ID, domain.GenerationJobTransitionParams{
 			State: domain.GenerationJobQueued, Message: "Генерация поставлена в очередь ComfyUI",
 		}); transitionErr != nil {
 			log.Printf("queue generation job %s: %v", job.PublicID, transitionErr)
@@ -429,15 +442,15 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 	if bytesIn < 0 {
 		bytesIn = 0
 	}
-	a.recordProxyRequest(r.Context(), user.ID, "comfyui", http.MethodPost, quickGenerationTelemetryPath(requestID), http.StatusAccepted, time.Since(started), bytesIn, 0, false, a.clientIP(r), r.UserAgent())
+	a.recordProxyRequest(jobCtx, user.ID, "comfyui", http.MethodPost, quickGenerationTelemetryPath(requestID), http.StatusAccepted, time.Since(started), bytesIn, 0, false, a.clientIP(r), r.UserAgent())
 	a.incProxyCount("comfyui", http.StatusAccepted)
-	response := a.generationJobResponse(r.Context(), job)
+	response := a.generationJobResponse(jobCtx, job)
 	response["prompt_id"] = promptID
 	if bindErr != nil {
 		response["state"] = "submitting"
 		response["message"] = "ComfyUI принял генерацию. Восстанавливаем серверную запись."
 	}
-	if quota, quotaErr := a.generationQuotaView(r.Context(), user.ID); quotaErr != nil {
+	if quota, quotaErr := a.generationQuotaView(jobCtx, user.ID); quotaErr != nil {
 		log.Printf("load quick generation quota for user %d: %v", user.ID, quotaErr)
 	} else {
 		response["quota"] = quota
@@ -683,24 +696,32 @@ func (a *App) handleRecoverGeneration(w http.ResponseWriter, r *http.Request) {
 		writeGenerationError(w, http.StatusInternalServerError, "не удалось восстановить запуск")
 		return
 	}
+	jobCtx := generationJobTraceContext(r.Context(), job)
 	if job.PromptID == "" && !job.State.Terminal() {
-		recovered, found, recoverErr := a.recoverGenerationJobPrompt(r.Context(), job)
+		recovered, found, recoverErr := a.recoverGenerationJobPrompt(jobCtx, job)
 		if recoverErr != nil {
-			log.Printf("recover generation job %s prompt: %v", job.PublicID, recoverErr)
+			logGateway(jobCtx, slog.LevelError, "generation_job_recovery_failed", "Failed to recover generation job prompt",
+				"job_public_id", job.PublicID,
+				"error", recoverErr,
+			)
 		} else if found {
 			job = recovered
+			jobCtx = generationJobTraceContext(jobCtx, job)
 		}
 	}
 	if job.PromptID != "" && !job.State.Terminal() {
-		if status, statusErr := a.fetchGenerationStatus(r.Context(), job.PromptID, user.ID); statusErr == nil {
-			if updated, reconcileErr := a.reconcileGenerationJobStatus(r.Context(), job, status); reconcileErr == nil {
+		if status, statusErr := a.fetchGenerationStatus(jobCtx, job.PromptID, user.ID); statusErr == nil {
+			if updated, reconcileErr := a.reconcileGenerationJobStatus(jobCtx, job, status); reconcileErr == nil {
 				job = updated
 			} else {
-				log.Printf("reconcile recovered generation job %s: %v", job.PublicID, reconcileErr)
+				logGateway(jobCtx, slog.LevelError, "generation_job_reconcile_failed", "Failed to reconcile recovered generation job",
+					"job_public_id", job.PublicID,
+					"error", reconcileErr,
+				)
 			}
 		}
 	}
-	response := a.generationJobResponse(r.Context(), job)
+	response := a.generationJobResponse(jobCtx, job)
 	statusCode := http.StatusOK
 	if job.PromptID == "" && !job.State.Terminal() {
 		statusCode = http.StatusAccepted
@@ -739,21 +760,22 @@ func (a *App) handleCancelGeneration(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	jobCtx := generationJobTraceContext(r.Context(), job)
 	if job.State.Terminal() {
-		response := a.generationJobResponse(r.Context(), job)
+		response := a.generationJobResponse(jobCtx, job)
 		response["cancelled"] = job.State == domain.GenerationJobCancelled
 		writeJSON(w, http.StatusOK, response)
 		return
 	}
-	job, _, err = a.store.RequestGenerationJobCancellation(r.Context(), job.ID, user.ID)
+	job, _, err = a.store.RequestGenerationJobCancellation(jobCtx, job.ID, user.ID)
 	if err != nil {
 		writeGenerationError(w, http.StatusConflict, "генерацию уже нельзя отменить")
 		return
 	}
-	job, cancelled, err := a.continueGenerationJobCancellation(r.Context(), job)
+	job, cancelled, err := a.continueGenerationJobCancellation(jobCtx, job)
 	if err != nil {
 		if errors.Is(err, errGenerationCancellationNotSent) {
-			if cleared, _, clearErr := a.store.ClearGenerationJobCancellation(r.Context(), job.ID, user.ID, "Генерация продолжается"); clearErr == nil {
+			if cleared, _, clearErr := a.store.ClearGenerationJobCancellation(jobCtx, job.ID, user.ID, "Генерация продолжается"); clearErr == nil {
 				job = cleared
 			}
 		}
@@ -761,9 +783,9 @@ func (a *App) handleCancelGeneration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cancelled {
-		a.audit(r.Context(), &user.ID, "quick_generation_cancelled", "comfyui", nil, a.clientIP(r), r.UserAgent(), map[string]any{"prompt_id": promptID, "job_id": job.PublicID})
+		a.audit(jobCtx, &user.ID, "quick_generation_cancelled", "comfyui", nil, a.clientIP(r), r.UserAgent(), map[string]any{"prompt_id": promptID, "job_id": job.PublicID})
 	}
-	response := a.generationJobResponse(r.Context(), job)
+	response := a.generationJobResponse(jobCtx, job)
 	response["cancelled"] = cancelled
 	statusCode := http.StatusAccepted
 	if job.State.Terminal() {
@@ -934,12 +956,13 @@ func (a *App) handleGenerateStatus(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	jobCtx := generationJobTraceContext(r.Context(), job)
 	if job.State.Terminal() {
 		writeJSON(w, http.StatusOK, generationStatusForJob(job, generationStatus{}))
 		return
 	}
 	if job.CancellationRequestedAt != nil {
-		updated, _, cancelErr := a.continueGenerationJobCancellation(r.Context(), job)
+		updated, _, cancelErr := a.continueGenerationJobCancellation(jobCtx, job)
 		if cancelErr != nil {
 			log.Printf("continue cancellation for generation job %s: %v", job.PublicID, cancelErr)
 		} else {
@@ -948,15 +971,15 @@ func (a *App) handleGenerateStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, generationStatusForJob(job, generationStatus{}))
 		return
 	}
-	status, err := a.fetchGenerationStatus(r.Context(), promptID, user.ID)
+	status, err := a.fetchGenerationStatus(jobCtx, promptID, user.ID)
 	if err != nil {
 		writeGenerationError(w, http.StatusBadGateway, "не удалось получить состояние генерации: "+err.Error())
 		return
 	}
-	if projectionErr := a.ensureGenerationJobProjections(r.Context(), job); projectionErr != nil {
+	if projectionErr := a.ensureGenerationJobProjections(jobCtx, job); projectionErr != nil {
 		log.Printf("ensure generation job %s projections: %v", job.PublicID, projectionErr)
 	}
-	updated, reconcileErr := a.reconcileGenerationJobStatus(r.Context(), job, status)
+	updated, reconcileErr := a.reconcileGenerationJobStatus(jobCtx, job, status)
 	if reconcileErr != nil {
 		log.Printf("reconcile generation job %s status: %v", job.PublicID, reconcileErr)
 	} else {
@@ -1004,7 +1027,11 @@ func (a *App) handleGenerationQueue(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, overview)
 }
 
-func (a *App) submitComfyPrompt(ctx context.Context, userID int64, jobPublicID string, prompt map[string]any) (string, error) {
+func (a *App) submitComfyPrompt(ctx context.Context, userID int64, jobPublicID string, prompt map[string]any) (promptID string, err error) {
+	started := time.Now()
+	defer func() {
+		a.observeServiceCall(ctx, dependencyComfyUI, "submit_prompt", started, err, false, "comfy_submit_failed", "")
+	}()
 	releaseAdmission, err := a.acquireComfyPromptAdmission(ctx, userID)
 	if err != nil {
 		return "", err
@@ -1083,7 +1110,11 @@ func comfyPromptDocument(clientID, jobPublicID string, prompt map[string]any) ma
 	}
 }
 
-func (a *App) fetchGenerationStatus(ctx context.Context, promptID string, userID int64) (generationStatus, error) {
+func (a *App) fetchGenerationStatus(ctx context.Context, promptID string, userID int64) (status generationStatus, err error) {
+	started := time.Now()
+	defer func() {
+		a.observeServiceCall(ctx, dependencyComfyUI, "generation_status", started, err, false, "comfy_status_failed", "")
+	}()
 	endpoint := *a.cfg.ComfyUIUpstream
 	endpoint.Path = singleJoiningSlash(endpoint.Path, "/history/"+url.PathEscape(promptID))
 	endpoint.RawQuery = ""
@@ -1116,7 +1147,7 @@ func (a *App) fetchGenerationStatus(ctx context.Context, promptID string, userID
 		return generationStatus{}, err
 	}
 	rawEntry, exists := history[promptID]
-	status := generationStatus{PromptID: promptID, State: "queued", Message: "Генерация ожидает запуска"}
+	status = generationStatus{PromptID: promptID, State: "queued", Message: "Генерация ожидает запуска"}
 	if !exists {
 		queued, running, position, total, queueErr := a.generationQueueState(ctx, promptID)
 		if queueErr == nil {
@@ -1320,7 +1351,11 @@ func (a *App) scheduleComfyMemoryRelease() {
 	}()
 }
 
-func (a *App) fetchGenerationQueue(ctx context.Context) (comfyQueueSnapshot, error) {
+func (a *App) fetchGenerationQueue(ctx context.Context) (queue comfyQueueSnapshot, err error) {
+	started := time.Now()
+	defer func() {
+		a.observeServiceCall(ctx, dependencyComfyUI, "queue", started, err, false, "comfy_queue_failed", "")
+	}()
 	endpoint := *a.cfg.ComfyUIUpstream
 	endpoint.Path = singleJoiningSlash(endpoint.Path, "/queue")
 	endpoint.RawQuery = ""
@@ -1348,7 +1383,6 @@ func (a *App) fetchGenerationQueue(ctx context.Context) (comfyQueueSnapshot, err
 		}
 		return comfyQueueSnapshot{}, errors.New("ответ queue слишком большой")
 	}
-	var queue comfyQueueSnapshot
 	if err := json.Unmarshal(body, &queue); err != nil {
 		return comfyQueueSnapshot{}, err
 	}
@@ -1884,62 +1918,88 @@ func (a *App) refreshTrackedGenerationStatuses(ctx context.Context) (int64, erro
 			return processed, errors.Join(append(reconciliationErrors, ctx.Err())...)
 		}
 		processed++
+		jobCtx := generationJobTraceContext(ctx, job)
 		if job.UserID == nil {
-			a.failGenerationJob(ctx, job, "generation_owner_deleted", "Владелец задания удалён", errors.New("generation owner was deleted"))
+			a.failGenerationJob(jobCtx, job, "generation_owner_deleted", "Владелец задания удалён", errors.New("generation owner was deleted"))
 			continue
 		}
 		if job.PromptID == "" {
 			if job.CancellationRequestedAt != nil {
-				if _, _, cancelErr := a.continueGenerationJobCancellation(ctx, job); cancelErr != nil {
-					log.Printf("cancel promptless generation job %s: %v", job.PublicID, cancelErr)
+				if _, _, cancelErr := a.continueGenerationJobCancellation(jobCtx, job); cancelErr != nil {
+					logGateway(jobCtx, slog.LevelError, "generation_job_cancellation_failed", "Failed to cancel generation job without prompt",
+						"job_public_id", job.PublicID,
+						"error", cancelErr,
+					)
 					reconciliationErrors = append(reconciliationErrors, fmt.Errorf("cancel %s: %w", job.PublicID, cancelErr))
 				}
 				continue
 			}
-			recovered, found, recoverErr := a.recoverGenerationJobPrompt(ctx, job)
+			recovered, found, recoverErr := a.recoverGenerationJobPrompt(jobCtx, job)
 			if recoverErr != nil {
-				log.Printf("recover generation job %s prompt: %v", job.PublicID, recoverErr)
+				logGateway(jobCtx, slog.LevelError, "generation_job_recovery_failed", "Failed to recover generation job prompt",
+					"job_public_id", job.PublicID,
+					"error", recoverErr,
+				)
 				reconciliationErrors = append(reconciliationErrors, fmt.Errorf("recover %s: %w", job.PublicID, recoverErr))
 				continue
 			}
 			if !found {
 				if now.Sub(job.StateChangedAt) > 2*time.Minute {
-					if _, expireErr := a.expireGenerationJob(ctx, job, "ComfyUI не подтвердил запуск"); expireErr != nil {
-						log.Printf("expire unconfirmed generation job %s: %v", job.PublicID, expireErr)
+					if _, expireErr := a.expireGenerationJob(jobCtx, job, "ComfyUI не подтвердил запуск"); expireErr != nil {
+						logGateway(jobCtx, slog.LevelError, "generation_job_expiration_failed", "Failed to expire unconfirmed generation job",
+							"job_public_id", job.PublicID,
+							"error", expireErr,
+						)
 						reconciliationErrors = append(reconciliationErrors, fmt.Errorf("expire unconfirmed %s: %w", job.PublicID, expireErr))
 					}
 				}
 				continue
 			}
 			job = recovered
+			jobCtx = generationJobTraceContext(jobCtx, job)
 		}
-		if projectionErr := a.ensureGenerationJobProjections(ctx, job); projectionErr != nil {
-			log.Printf("ensure generation job %s projections: %v", job.PublicID, projectionErr)
+		if projectionErr := a.ensureGenerationJobProjections(jobCtx, job); projectionErr != nil {
+			logGateway(jobCtx, slog.LevelError, "generation_job_projection_failed", "Failed to ensure generation job projections",
+				"job_public_id", job.PublicID,
+				"error", projectionErr,
+			)
 			reconciliationErrors = append(reconciliationErrors, fmt.Errorf("project %s: %w", job.PublicID, projectionErr))
 		}
 		if job.CancellationRequestedAt != nil {
-			if _, _, cancelErr := a.continueGenerationJobCancellation(ctx, job); cancelErr != nil {
-				log.Printf("continue generation job %s cancellation: %v", job.PublicID, cancelErr)
+			if _, _, cancelErr := a.continueGenerationJobCancellation(jobCtx, job); cancelErr != nil {
+				logGateway(jobCtx, slog.LevelError, "generation_job_cancellation_failed", "Failed to continue generation job cancellation",
+					"job_public_id", job.PublicID,
+					"error", cancelErr,
+				)
 				reconciliationErrors = append(reconciliationErrors, fmt.Errorf("continue cancellation %s: %w", job.PublicID, cancelErr))
 			}
 			continue
 		}
-		status, err := a.fetchGenerationStatus(ctx, job.PromptID, *job.UserID)
+		status, err := a.fetchGenerationStatus(jobCtx, job.PromptID, *job.UserID)
 		if err != nil {
-			log.Printf("refresh ComfyUI generation job %s: %v", job.PublicID, err)
+			logGateway(jobCtx, slog.LevelError, "generation_job_status_refresh_failed", "Failed to refresh ComfyUI generation job status",
+				"job_public_id", job.PublicID,
+				"error", err,
+			)
 			reconciliationErrors = append(reconciliationErrors, fmt.Errorf("refresh %s: %w", job.PublicID, err))
 			continue
 		}
 		if !status.Known && now.Sub(job.StateChangedAt) > 5*time.Minute {
-			if _, expireErr := a.expireGenerationJob(ctx, job, "Задание исчезло из очереди ComfyUI"); expireErr != nil {
-				log.Printf("expire lost generation job %s: %v", job.PublicID, expireErr)
+			if _, expireErr := a.expireGenerationJob(jobCtx, job, "Задание исчезло из очереди ComfyUI"); expireErr != nil {
+				logGateway(jobCtx, slog.LevelError, "generation_job_expiration_failed", "Failed to expire missing generation job",
+					"job_public_id", job.PublicID,
+					"error", expireErr,
+				)
 				reconciliationErrors = append(reconciliationErrors, fmt.Errorf("expire lost %s: %w", job.PublicID, expireErr))
 			}
 			continue
 		}
-		updated, reconcileErr := a.reconcileGenerationJobStatus(ctx, job, status)
+		updated, reconcileErr := a.reconcileGenerationJobStatus(jobCtx, job, status)
 		if reconcileErr != nil {
-			log.Printf("reconcile generation job %s: %v", job.PublicID, reconcileErr)
+			logGateway(jobCtx, slog.LevelError, "generation_job_reconcile_failed", "Failed to reconcile generation job",
+				"job_public_id", job.PublicID,
+				"error", reconcileErr,
+			)
 			reconciliationErrors = append(reconciliationErrors, fmt.Errorf("reconcile %s: %w", job.PublicID, reconcileErr))
 			continue
 		}
@@ -2038,7 +2098,7 @@ func (a *App) recordGenerationEvent(ctx context.Context, jobID, userID int64, pr
 	if jobID > 0 {
 		generationJobID = &jobID
 	}
-	if _, err := a.store.InsertContentEvent(ctx, domain.ContentEventRecord{UserID: userID, GenerationJobID: generationJobID, Service: "comfyui", Kind: "comfyui_prompt", ExternalID: promptID, Model: input.ModelName, GenerationState: "queued", PromptCipher: promptCipher, ResponseCipher: negativeCipher, MetadataCipher: metadataCipher, Sensitive: isSensitiveGeneration(input), ExpiresAt: time.Now().Add(a.retentionPolicy().AIContent)}); err != nil {
+	if _, err := a.store.InsertContentEvent(ctx, domain.ContentEventRecord{UserID: userID, GenerationJobID: generationJobID, CorrelationID: correlationIDFromContext(ctx), Service: "comfyui", Kind: "comfyui_prompt", ExternalID: promptID, Model: input.ModelName, GenerationState: "queued", PromptCipher: promptCipher, ResponseCipher: negativeCipher, MetadataCipher: metadataCipher, Sensitive: isSensitiveGeneration(input), ExpiresAt: time.Now().Add(a.retentionPolicy().AIContent)}); err != nil {
 		log.Printf("store generation event: %v", err)
 	}
 }
