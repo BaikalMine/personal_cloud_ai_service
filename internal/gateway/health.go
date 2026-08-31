@@ -12,12 +12,13 @@ import (
 func (a *App) serviceStatuses(ctx context.Context) []ServiceStatus {
 	statuses := make([]ServiceStatus, 2)
 	checks := []struct {
+		key  string
 		name string
 		url  *url.URL
 		auth string
 	}{
-		{name: "ComfyUI", url: a.cfg.ComfyUIUpstream, auth: a.cfg.ComfyUIUpstreamAuthHeader},
-		{name: "OpenWebUI", url: a.cfg.OpenWebUIUpstream, auth: a.cfg.OpenWebUIUpstreamAuth},
+		{key: dependencyComfyUI, name: "ComfyUI", url: a.cfg.ComfyUIUpstream, auth: a.cfg.ComfyUIUpstreamAuthHeader},
+		{key: dependencyOpenWebUI, name: "OpenWebUI", url: a.cfg.OpenWebUIUpstream, auth: a.cfg.OpenWebUIUpstreamAuth},
 	}
 	var wg sync.WaitGroup
 	for index := range checks {
@@ -25,7 +26,18 @@ func (a *App) serviceStatuses(ctx context.Context) []ServiceStatus {
 		go func() {
 			defer wg.Done()
 			check := checks[index]
-			statuses[index] = a.checkService(ctx, check.name, check.url, check.auth)
+			status := a.checkService(ctx, check.name, check.url, check.auth)
+			statuses[index] = status
+			if check.url == nil {
+				return
+			}
+			if status.Online {
+				now := time.Now().UTC()
+				a.dependencyMonitor().success(check.key, status.Detail, &now, status.Latency)
+				return
+			}
+			misconfigured := status.Status == http.StatusUnauthorized || status.Status == http.StatusForbidden
+			a.dependencyMonitor().failure(check.key, status.Detail, misconfigured, status.Latency)
 		}()
 	}
 	wg.Wait()
@@ -34,6 +46,10 @@ func (a *App) serviceStatuses(ctx context.Context) []ServiceStatus {
 
 func (a *App) checkService(parent context.Context, name string, upstream *url.URL, authHeader string) ServiceStatus {
 	status := ServiceStatus{Name: name}
+	if upstream == nil {
+		status.Detail = "не настроен"
+		return status
+	}
 	started := time.Now()
 	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 	defer cancel()
@@ -55,7 +71,7 @@ func (a *App) checkService(parent context.Context, name string, upstream *url.UR
 	}
 	defer resp.Body.Close()
 	status.Status = resp.StatusCode
-	status.Online = resp.StatusCode < http.StatusInternalServerError
+	status.Online = resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusBadRequest
 	if !status.Online {
 		status.Detail = fmt.Sprintf("HTTP %d", resp.StatusCode)
 	} else {

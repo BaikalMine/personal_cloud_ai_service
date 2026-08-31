@@ -5,7 +5,7 @@
   <section class="hero admin-hero">
     <div><p class="eyebrow">Центр управления</p><h1>Обзор системы</h1></div>
     <div class="service-health">
-      {{range .Services}}<span class="health-item {{if .Online}}online{{else}}offline{{end}}"><i></i>{{.Name}} <b>{{if .Online}}готов{{else}}недоступен{{end}}</b></span>{{end}}
+      {{range .System.Dependencies}}<span class="health-item {{.State}}" data-dependency-summary="{{.Key}}"><i></i>{{.Name}} <b>{{.StateLabel}}</b></span>{{end}}
     </div>
   </section>
   <section class="metric-grid">
@@ -18,7 +18,7 @@
   </section>
   <section class="system-monitoring" data-system-monitoring aria-live="polite">
     <div class="panel system-monitoring-head">
-      <div class="panel-heading"><div><p class="section-kicker">Windows-хост</p><h2>Ресурсы сервера</h2><p class="muted">Обновление каждые 10 секунд. История хранится 7 дней.</p></div><span class="system-status {{if .System.AgentAvailable}}online{{else}}offline{{end}}" data-system-status>{{if .System.AgentAvailable}}Данные получены{{else}}Агент недоступен{{end}}</span></div>
+      <div class="panel-heading"><div><p class="section-kicker">Windows-хост</p><h2>Ресурсы сервера</h2><p class="muted">История хранится 7 дней и остаётся видимой при потере связи. <span data-system-last-data>{{with .System.Agent.LastDataAt}}Последние данные: {{formatTime .}}{{else}}Свежих данных пока нет{{end}}</span></p></div><span class="system-status {{.System.Agent.State}}" data-system-status>{{.System.Agent.StateLabel}}</span></div>
       <div class="system-gauges" data-system-gauges>
         <article class="system-gauge-card"><div class="system-gauge tone-cyan" data-gauge="cpu" style="--value:{{if .System.Host}}{{printf "%.1f" .System.Host.CPUPercent}}{{else}}0{{end}}"><div><strong data-gauge-value="cpu">{{if .System.Host}}{{printf "%.0f" .System.Host.CPUPercent}}{{else}}-{{end}}%</strong><small>ЦП</small></div></div><p>Нагрузка процессора</p></article>
         <article class="system-gauge-card"><div class="system-gauge tone-mint" data-gauge="memory" style="--value:{{if and .System.Host (gt .System.Host.MemoryTotalBytes 0)}}{{printf "%.1f" (divFloat .System.Host.MemoryUsedBytes .System.Host.MemoryTotalBytes)}}{{else}}0{{end}}"><div><strong data-gauge-value="memory">{{if .System.Host}}{{formatBytes .System.Host.MemoryUsedBytes}}{{else}}-{{end}}</strong><small data-gauge-detail="memory">{{if .System.Host}}из {{formatBytes .System.Host.MemoryTotalBytes}}{{end}}</small></div></div><p>Оперативная память</p></article>
@@ -26,6 +26,22 @@
         <article class="system-gauge-card"><div class="system-gauge tone-violet" data-gauge="gpu_memory" style="--value:{{if and .System.Host (gt .System.Host.GPUMemoryTotalBytes 0)}}{{printf "%.1f" (divFloat .System.Host.GPUMemoryUsedBytes .System.Host.GPUMemoryTotalBytes)}}{{else}}0{{end}}"><div><strong data-gauge-value="gpu_memory">{{if and .System.Host .System.Host.GPUAvailable}}{{formatBytes .System.Host.GPUMemoryUsedBytes}}{{else}}-{{end}}</strong><small data-gauge-detail="gpu_memory">{{if and .System.Host .System.Host.GPUAvailable}}из {{formatBytes .System.Host.GPUMemoryTotalBytes}}{{end}}</small></div></div><p>Видеопамять</p></article>
       </div>
     </div>
+    <section class="panel dependency-health" data-dependency-health>
+      <div class="panel-heading"><div><p class="section-kicker">Текущая связь</p><h2>Зависимости Gateway</h2><p class="muted">Heartbeat и свежесть рабочих данных проверяются отдельно.</p></div></div>
+      <div class="dependency-list" data-dependency-list>
+        {{range .System.Dependencies}}
+        <article class="dependency-row" data-dependency-key="{{.Key}}">
+          <div class="dependency-identity"><span><strong>{{.Name}}</strong><small data-dependency-detail>{{.Detail}}</small></span><b class="dependency-state {{.State}}" data-dependency-state>{{.StateLabel}}</b></div>
+          <dl class="dependency-facts">
+            <div><dt>Последний ответ</dt><dd data-dependency-success>{{with .LastSuccessAt}}{{formatTime .}}{{else}}-{{end}}</dd></div>
+            <div><dt>Последние данные</dt><dd data-dependency-data>{{with .LastDataAt}}{{formatTime .}}{{else}}-{{end}}</dd></div>
+            <div><dt>Последняя ошибка</dt><dd data-dependency-error>{{if .LastError}}{{.LastError}}{{else}}Нет{{end}}</dd></div>
+            <div><dt>Следующая проверка</dt><dd data-dependency-next {{with .NextCheckAt}}data-next-check="{{.Format "2006-01-02T15:04:05.000Z07:00"}}"{{end}}>{{if gt .RetryInSeconds 0}}через {{.RetryInSeconds}} сек.{{else}}сейчас{{end}}</dd></div>
+          </dl>
+        </article>
+        {{end}}
+      </div>
+    </section>
     <div class="dashboard-grid system-detail-grid">
       <div class="panel span-two">
         <div class="panel-heading"><div><p class="section-kicker">Последние 24 часа</p><h2>Динамика нагрузки</h2></div><span class="muted" data-system-history-caption>Накопление данных...</span></div>
@@ -46,7 +62,7 @@
       <article class="metric-card tone-blue"><span>Размер базы данных</span><strong data-database-size>{{formatBytes .System.DatabaseBytes}}</strong><small>PostgreSQL Gateway</small></article>
       <article class="metric-card tone-green"><span>Пользователи онлайн</span><strong data-online-count>{{formatNumber .Stats.ActiveUsers}}</strong><small>за последние 5 минут</small></article>
       <article class="metric-card tone-cyan"><span>Записей мониторинга</span><strong data-history-count>{{formatNumber (len .System.History)}}</strong><small>за последние 24 часа</small></article>
-      <article class="metric-card tone-amber"><span>Состояние агента</span><strong data-agent-state>{{if .System.AgentAvailable}}готов{{else}}ожидание{{end}}</strong><small data-agent-message>{{if .System.AgentMessage}}{{.System.AgentMessage}}{{else}}локальный Windows-агент{{end}}</small></article>
+      <article class="metric-card tone-amber"><span>Мониторинг Windows</span><strong data-agent-state>{{.System.Agent.StateLabel}}</strong><small data-agent-message>{{.System.Agent.Detail}}</small></article>
     </div>
   </section>
   <section class="dashboard-grid">

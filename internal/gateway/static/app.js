@@ -469,20 +469,72 @@
         renderHistory(systemMonitoring._history || []);
       });
     });
+    const dependencyStateClasses = ["online", "stale", "offline", "misconfigured"];
+    const setDependencyState = (node, state) => {
+      if (!node) return;
+      dependencyStateClasses.forEach((name) => node.classList.toggle(name, name === state));
+    };
+    const dependencyTime = (value) => value ? new Date(value).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-";
+    const refreshDependencyCountdowns = () => {
+      document.querySelectorAll("[data-dependency-next]").forEach((node) => {
+        const deadline = Date.parse(node.dataset.nextCheck || "");
+        if (!Number.isFinite(deadline)) {
+          node.textContent = "после настройки";
+          return;
+        }
+        const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+        node.textContent = seconds > 0 ? `через ${seconds} сек.` : "сейчас";
+      });
+    };
+    const renderDependencies = (dependencies) => {
+      dependencies.forEach((dependency) => {
+        const row = systemMonitoring.querySelector(`[data-dependency-key="${CSS.escape(dependency.key)}"]`);
+        if (row) {
+          const stateNode = row.querySelector("[data-dependency-state]");
+          if (stateNode) {
+            stateNode.textContent = dependency.state_label;
+            setDependencyState(stateNode, dependency.state);
+          }
+          const detail = row.querySelector("[data-dependency-detail]");
+          if (detail) detail.textContent = dependency.detail || "Проверяем состояние.";
+          const success = row.querySelector("[data-dependency-success]");
+          if (success) success.textContent = dependencyTime(dependency.last_success_at);
+          const data = row.querySelector("[data-dependency-data]");
+          if (data) data.textContent = dependencyTime(dependency.last_data_at);
+          const error = row.querySelector("[data-dependency-error]");
+          if (error) error.textContent = dependency.last_error || "Нет";
+          const next = row.querySelector("[data-dependency-next]");
+          if (next) {
+            if (dependency.next_check_at) next.dataset.nextCheck = dependency.next_check_at;
+            else delete next.dataset.nextCheck;
+          }
+        }
+        const summary = document.querySelector(`[data-dependency-summary="${CSS.escape(dependency.key)}"]`);
+        if (summary) {
+          setDependencyState(summary, dependency.state);
+          const label = summary.querySelector("b");
+          if (label) label.textContent = dependency.state_label;
+        }
+      });
+      refreshDependencyCountdowns();
+    };
     const renderSystem = (overview) => {
       const host = overview.host;
       const status = systemMonitoring.querySelector("[data-system-status]");
-      const state = systemMonitoring.querySelector("[data-agent-state]");
+      const stateNode = systemMonitoring.querySelector("[data-agent-state]");
       const message = systemMonitoring.querySelector("[data-agent-message]");
+      const lastData = systemMonitoring.querySelector("[data-system-last-data]");
       const database = systemMonitoring.querySelector("[data-database-size]");
+      const agent = overview.agent || { state: overview.agent_available ? "online" : "offline", state_label: overview.agent_available ? "В сети" : "Нет связи", detail: overview.agent_message || "" };
       if (database) database.textContent = bytes(overview.database_bytes);
       if (status) {
-        status.textContent = overview.agent_available ? "Данные получены" : "Агент недоступен";
-        status.classList.toggle("online", Boolean(overview.agent_available));
-        status.classList.toggle("offline", !overview.agent_available);
+        status.textContent = agent.state_label;
+        setDependencyState(status, agent.state);
       }
-      if (state) state.textContent = overview.agent_available ? "готов" : "ожидание";
-      if (message) message.textContent = overview.agent_message || "локальный Windows-агент";
+      dependencyStateClasses.forEach((name) => systemMonitoring.classList.toggle(`is-${name}`, name === agent.state));
+      if (stateNode) stateNode.textContent = agent.state_label;
+      if (message) message.textContent = agent.detail || "Проверяем Windows-агент.";
+      if (lastData) lastData.textContent = agent.last_data_at ? `Последние данные: ${dependencyTime(agent.last_data_at)}` : "Свежих данных пока нет";
       if (host) {
         setGauge("cpu", host.cpu_percent, `${Math.round(percent(host.cpu_percent))}%`);
         const memoryPercent = host.memory_total_bytes ? host.memory_used_bytes * 100 / host.memory_total_bytes : 0;
@@ -494,6 +546,7 @@
         if (gpuName) gpuName.textContent = host.gpu_name || "Вычисления GPU";
       }
       renderOnlineUsers(overview.online_users || []);
+      renderDependencies(overview.dependencies || []);
       systemMonitoring._history = overview.history || [];
       renderHistory(systemMonitoring._history);
     };
@@ -508,6 +561,8 @@
     };
     refreshSystem();
     window.setInterval(refreshSystem, 10000);
+    refreshDependencyCountdowns();
+    window.setInterval(refreshDependencyCountdowns, 1000);
   }
 
   const inviteComposer = document.querySelector("[data-invite-composer]");

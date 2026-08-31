@@ -2683,7 +2683,15 @@
       body.set("client_request_id", activeGenerationRequestID);
       const response = await fetch("/generate/run", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body, credentials: "same-origin" });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "Не удалось запустить генерацию");
+      if (!response.ok) {
+        clearActiveGeneration();
+        setGenerationActions({ retry: true });
+        resultTitle.textContent = "Не удалось выполнить генерацию";
+        resultStatus.textContent = payload.error || "Gateway отклонил запуск. Параметры сохранены, можно повторить попытку.";
+        result.classList.add("has-error");
+        runProgress.hidden = true;
+        return;
+      }
       updateGenerationQuota(payload.quota);
       activeGenerationRequestID = payload.request_id || activeGenerationRequestID;
       if (!payload.prompt_id) {

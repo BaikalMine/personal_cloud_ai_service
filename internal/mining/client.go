@@ -20,6 +20,7 @@ var ErrUnavailable = errors.New("mining agent is unavailable")
 type State struct {
 	Available   bool      `json:"available"`
 	Running     bool      `json:"running"`
+	CollectedAt time.Time `json:"collected_at,omitempty"`
 	PIDs        []int     `json:"pids,omitempty"`
 	ScriptPath  string    `json:"script_path,omitempty"`
 	ProcessName string    `json:"process_name,omitempty"`
@@ -107,6 +108,28 @@ func NewClient(baseURL *url.URL, token string) *Client {
 
 func (c *Client) Configured() bool {
 	return c != nil && c.baseURL != nil && c.token != ""
+}
+
+func (c *Client) Health(ctx context.Context) error {
+	if !c.Configured() {
+		return ErrUnavailable
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.resolve("/healthz").String(), nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("User-Agent", "ai-access-gateway/health")
+	response, err := c.http.Do(request)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	defer response.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 8<<10))
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("agent health returned %s", response.Status)
+	}
+	return nil
 }
 
 func (c *Client) State(ctx context.Context, processName string) (State, error) {
@@ -295,6 +318,9 @@ func (c *Client) do(ctx context.Context, method string, target *url.URL, body io
 		return state, fmt.Errorf("mining agent returned %s", response.Status)
 	}
 	state.Available = true
+	if state.CollectedAt.IsZero() {
+		state.CollectedAt = time.Now().UTC()
+	}
 	return state, nil
 }
 

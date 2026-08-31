@@ -7,6 +7,8 @@ the proxied ComfyUI and OpenWebUI interfaces remain unchanged.
 
 The current-state audit and phased product/engineering roadmap are maintained
 in [`docs/PROJECT_IMPROVEMENT_PLAN.md`](docs/PROJECT_IMPROVEMENT_PLAN.md).
+Runtime dependency states and freshness thresholds are documented in
+[`docs/DEPENDENCY_HEALTH.md`](docs/DEPENDENCY_HEALTH.md).
 
 ## Layout
 

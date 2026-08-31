@@ -47,6 +47,7 @@ func main() {
 	}}
 	miningOverview := gateway.MiningOverview{
 		Available: true, Running: true, Miners: minerViews, Message: "Майнинг работает и использует вычислительные ресурсы.",
+		Agent: gateway.DependencyStatus{Key: "mining-agent", Name: "Управление майнингом", State: gateway.DependencyOnline, StateLabel: "В сети", Detail: "Heartbeat получен."},
 		Script: mining.Script{
 			Path: minerViews[0].ScriptPath, SHA256: "23cb47f58a53cdfce153f6c746b6d8e89ad72b5b9af42a956e7d885d652d963a",
 			Content: "@echo off\r\ncd %~dp0\r\ncls\r\n\r\nSRBMiner-MULTI.exe --algorithm-gpu pearlhash --pool ru.pearl.herominers.com:1200 --wallet PEARL_WALLET\r\npause\r\n",
@@ -192,9 +193,34 @@ func main() {
 			GenerationTotalLimit: 50,
 		},
 	}))
+	hostHistory := []domain.HostMetric{
+		{RecordedAt: now.Add(-18 * time.Minute), CPUPercent: 34, MemoryUsedBytes: 24 << 30, MemoryTotalBytes: 64 << 30, GPUAvailable: true, GPUName: "NVIDIA GeForce RTX", GPUPercent: 62, GPUMemoryUsedBytes: 13 << 30, GPUMemoryTotalBytes: 24 << 30},
+		{RecordedAt: now.Add(-12 * time.Minute), CPUPercent: 51, MemoryUsedBytes: 27 << 30, MemoryTotalBytes: 64 << 30, GPUAvailable: true, GPUName: "NVIDIA GeForce RTX", GPUPercent: 84, GPUMemoryUsedBytes: 18 << 30, GPUMemoryTotalBytes: 24 << 30},
+		{RecordedAt: now.Add(-7 * time.Minute), CPUPercent: 28, MemoryUsedBytes: 26 << 30, MemoryTotalBytes: 64 << 30, GPUAvailable: true, GPUName: "NVIDIA GeForce RTX", GPUPercent: 46, GPUMemoryUsedBytes: 12 << 30, GPUMemoryTotalBytes: 24 << 30},
+		{RecordedAt: now.Add(-2 * time.Minute), CPUPercent: 19, MemoryUsedBytes: 25 << 30, MemoryTotalBytes: 64 << 30, GPUAvailable: true, GPUName: "NVIDIA GeForce RTX", GPUPercent: 17, GPUMemoryUsedBytes: 9 << 30, GPUMemoryTotalBytes: 24 << 30},
+	}
+	lastHost := hostHistory[len(hostHistory)-1]
+	lastSuccess := now.Add(-4 * time.Second)
+	nextCheck := now.Add(10 * time.Minute)
+	lastError := now.Add(-19 * time.Second)
+	dependencies := []gateway.DependencyStatus{
+		{Key: "comfyui", Name: "ComfyUI", State: gateway.DependencyOnline, StateLabel: "В сети", Detail: "Соединение подтверждено.", LastSuccessAt: timePointer(lastSuccess), LastDataAt: timePointer(lastSuccess), NextCheckAt: timePointer(nextCheck), RetryInSeconds: 6, LatencyMillis: 18},
+		{Key: "openwebui", Name: "OpenWebUI", State: gateway.DependencyOnline, StateLabel: "В сети", Detail: "Соединение подтверждено.", LastSuccessAt: timePointer(lastSuccess), LastDataAt: timePointer(lastSuccess), NextCheckAt: timePointer(nextCheck), RetryInSeconds: 6, LatencyMillis: 22},
+		{Key: "ollama", Name: "Промт-ассистент", State: gateway.DependencyOffline, StateLabel: "Нет связи", Detail: "Подключение отклонено.", LastErrorAt: timePointer(lastError), LastError: "connection refused", NextCheckAt: timePointer(nextCheck), RetryInSeconds: 6},
+		{Key: "moderator", Name: "Проверка 18+", State: gateway.DependencyOnline, StateLabel: "В сети", Detail: "Соединение подтверждено.", LastSuccessAt: timePointer(lastSuccess), LastDataAt: timePointer(lastSuccess), NextCheckAt: timePointer(nextCheck), RetryInSeconds: 6, LatencyMillis: 31},
+		{Key: "mining-agent", Name: "Управление майнингом", State: gateway.DependencyOnline, StateLabel: "В сети", Detail: "Heartbeat получен.", LastSuccessAt: timePointer(lastSuccess), LastDataAt: timePointer(lastSuccess), NextCheckAt: timePointer(nextCheck), RetryInSeconds: 6, LatencyMillis: 9},
+		{Key: "system-monitor", Name: "Мониторинг Windows", State: gateway.DependencyStale, StateLabel: "Данные устарели", Detail: "Последние данные устарели; ждём следующую успешную проверку.", LastSuccessAt: timePointer(lastSuccess), LastDataAt: timePointer(lastHost.RecordedAt), LastErrorAt: timePointer(lastError), LastError: "Не удалось получить метрики Windows.", NextCheckAt: timePointer(nextCheck), RetryInSeconds: 6, RequiresFreshData: true, LatencyMillis: 15},
+	}
 	mux.HandleFunc("/preview/admin", render("admin_dashboard", "Обзор системы", map[string]any{
-		"Services": []gateway.ServiceStatus{{Name: "ComfyUI", Online: true}, {Name: "OpenWebUI", Online: true}, {Name: "Ollama", Online: true}},
-		"System":   gateway.SystemOverview{},
+		"System": gateway.SystemOverview{
+			DatabaseBytes: 184 << 20,
+			OnlineUsers: []domain.OnlineUser{
+				{Username: "rayka", Role: "user", LastSeenAt: now.Add(-time.Minute)},
+				{Username: "admin", Role: "admin", LastSeenAt: now.Add(-2 * time.Minute)},
+			},
+			Host: &lastHost, History: hostHistory, AgentAvailable: false,
+			AgentMessage: dependencies[len(dependencies)-1].Detail, Agent: dependencies[len(dependencies)-1], Dependencies: dependencies,
+		},
 		"Stats": domain.AdminStats{
 			ActiveUsers: 3, RequestsToday: 147, Requests7Days: 824, ActiveWebSockets: 2, AverageDuration: 1160, ErrorRate: "0,8%",
 			TopUsersRequests: []domain.TopUser{{Username: "rayka", Value: 302}, {Username: "demo4518", Value: 188}, {Username: "admin", Value: 96}},

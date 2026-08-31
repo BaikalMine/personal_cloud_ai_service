@@ -68,6 +68,8 @@ type App struct {
 	comfyQueueMu           sync.Mutex
 	comfyPromptAdmissionMu sync.Mutex
 	websocketMu            sync.Mutex
+	dependencyOnce         sync.Once
+	dependencyHealth       *dependencyMonitor
 	comfyQueueWasBusy      bool
 	generationJobs         map[string]*generationJob
 	websocketConnections   map[*trackedWebSocket]struct{}
@@ -117,12 +119,14 @@ type OnlineUser = domain.OnlineUser
 type HostMetric = domain.HostMetric
 
 type SystemOverview struct {
-	DatabaseBytes  int64        `json:"database_bytes"`
-	OnlineUsers    []OnlineUser `json:"online_users"`
-	Host           *HostMetric  `json:"host,omitempty"`
-	History        []HostMetric `json:"history"`
-	AgentAvailable bool         `json:"agent_available"`
-	AgentMessage   string       `json:"agent_message,omitempty"`
+	DatabaseBytes  int64              `json:"database_bytes"`
+	OnlineUsers    []OnlineUser       `json:"online_users"`
+	Host           *HostMetric        `json:"host,omitempty"`
+	History        []HostMetric       `json:"history"`
+	AgentAvailable bool               `json:"agent_available"`
+	AgentMessage   string             `json:"agent_message,omitempty"`
+	Agent          DependencyStatus   `json:"agent"`
+	Dependencies   []DependencyStatus `json:"dependencies"`
 }
 
 type UserRow = domain.UserRow
@@ -145,6 +149,7 @@ type MinerView struct {
 type MiningOverview struct {
 	Available bool
 	Running   bool
+	Agent     DependencyStatus
 	Active    *MinerView
 	Default   *MinerView
 	Miners    []MinerView

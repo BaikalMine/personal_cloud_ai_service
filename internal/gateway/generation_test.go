@@ -45,6 +45,30 @@ func TestGenerateTemplateRenders(t *testing.T) {
 	}
 }
 
+func TestGenerationClientStopsRecoveryAfterConfirmedRunFailure(t *testing.T) {
+	script, err := embeddedFS.ReadFile("static/generate.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(string(script), `const response = await fetch("/generate/run"`)
+	if start < 0 {
+		t.Fatal("generation submit response block was not found")
+	}
+	end := strings.Index(string(script[start:]), "updateGenerationQuota(payload.quota)")
+	if end < 0 {
+		t.Fatal("generation submit response block was not found")
+	}
+	block := string(script[start : start+end])
+	for _, marker := range []string{"if (!response.ok)", "clearActiveGeneration()", "setGenerationActions({ retry: true })", "runProgress.hidden = true", "return;"} {
+		if !strings.Contains(block, marker) {
+			t.Fatalf("confirmed failure block is missing %q", marker)
+		}
+	}
+	if strings.Contains(block, `throw new Error(payload.error`) {
+		t.Fatal("confirmed HTTP failure still enters ambiguous request recovery")
+	}
+}
+
 func TestQuickGenerationUploadForwardsNamespacedImageToComfyUI(t *testing.T) {
 	var receivedSubfolder, receivedName string
 	imagePayload := testPNG(t)

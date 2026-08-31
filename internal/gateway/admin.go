@@ -31,6 +31,9 @@ func (a *App) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	probeCtx, probeCancel := context.WithTimeout(r.Context(), 4*time.Second)
+	a.refreshDependencyStatuses(probeCtx)
+	probeCancel()
 	stats, err := a.store.AdminStats(r.Context())
 	if err != nil {
 		http.Error(w, "ошибка базы данных", http.StatusInternalServerError)
@@ -42,10 +45,9 @@ func (a *App) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.render(w, r, "admin_dashboard", map[string]any{
-		"Title":    "Администрирование",
-		"Stats":    stats,
-		"System":   system,
-		"Services": a.serviceStatuses(r.Context()),
+		"Title":  "Администрирование",
+		"Stats":  stats,
+		"System": system,
 	})
 }
 
@@ -159,6 +161,9 @@ func (a *App) handleAdminSystemOverview(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
+	probeCtx, probeCancel := context.WithTimeout(r.Context(), 4*time.Second)
+	a.refreshDependencyStatuses(probeCtx)
+	probeCancel()
 	overview, err := a.systemOverview(r.Context())
 	if err != nil {
 		http.Error(w, "ошибка системной статистики", http.StatusInternalServerError)

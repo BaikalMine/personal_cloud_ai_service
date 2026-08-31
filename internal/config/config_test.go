@@ -17,6 +17,9 @@ func TestLoadValidConfiguration(t *testing.T) {
 	t.Setenv("SESSION_IDLE_TIMEOUT", "12h")
 	t.Setenv("ACCOUNT_LOCK_THRESHOLD", "7")
 	t.Setenv("ACCOUNT_LOCK_DURATION", "20m")
+	t.Setenv("DEPENDENCY_CHECK_INTERVAL", "12s")
+	t.Setenv("DEPENDENCY_STALE_AFTER", "36s")
+	t.Setenv("DEPENDENCY_OFFLINE_AFTER", "4m")
 	t.Setenv("GENERATION_RETENTION", "30h")
 	t.Setenv("AI_CONTENT_RETENTION", "240h")
 	t.Setenv("COMFY_INPUT_RETENTION", "96h")
@@ -44,6 +47,9 @@ func TestLoadValidConfiguration(t *testing.T) {
 	}
 	if cfg.SessionIdleTimeout != 12*time.Hour || cfg.AccountLockThreshold != 7 || cfg.AccountLockDuration != 20*time.Minute {
 		t.Fatalf("unexpected auth policy: %+v", cfg)
+	}
+	if cfg.DependencyCheckInterval != 12*time.Second || cfg.DependencyStaleAfter != 36*time.Second || cfg.DependencyOfflineAfter != 4*time.Minute {
+		t.Fatalf("unexpected dependency health policy: %+v", cfg)
 	}
 	if cfg.Retention.GenerationHistory != 30*time.Hour || cfg.Retention.GenerationMedia != 30*time.Hour || cfg.Retention.AIContent != 240*time.Hour || cfg.Retention.ComfyInputs != 96*time.Hour || cfg.Retention.HostMetrics != 240*time.Hour || cfg.Retention.AuditLog != 2400*time.Hour {
 		t.Fatalf("unexpected retention policy: %+v", cfg.Retention)
@@ -103,5 +109,16 @@ func TestSecureCookieRequiresHTTPSOrigin(t *testing.T) {
 func TestRejectsCredentialsInsideUpstreamURL(t *testing.T) {
 	if _, err := parseUpstream("http://user:password@example.test"); err == nil {
 		t.Fatal("expected credentials in upstream URL to be rejected")
+	}
+}
+
+func TestRejectsInvalidDependencyHealthIntervals(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://gateway:test@postgres:5432/gateway?sslmode=disable")
+	t.Setenv("ADMIN_PASSWORD", "strong-admin-password")
+	t.Setenv("SESSION_SECRET", "01234567890123456789012345678901")
+	t.Setenv("DEPENDENCY_CHECK_INTERVAL", "20s")
+	t.Setenv("DEPENDENCY_STALE_AFTER", "30s")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected stale interval validation error")
 	}
 }

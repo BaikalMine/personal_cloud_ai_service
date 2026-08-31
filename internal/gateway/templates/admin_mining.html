@@ -4,7 +4,7 @@
 <main class="page" id="main-content">
   <section class="hero admin-hero">
     <div><p class="eyebrow">Управление ресурсами</p><h1>Майнинг</h1></div>
-    <span class="mining-status {{if .Mining.Running}}running{{else if .Mining.Available}}stopped{{else}}unavailable{{end}}"><i></i>{{if .Mining.Running}}Работает{{else if .Mining.Available}}Остановлен{{else}}Агент недоступен{{end}}</span>
+    <span class="mining-status {{if .Mining.Running}}running{{else if .Mining.Available}}stopped{{else}}{{.Mining.Agent.State}}{{end}}"><i></i>{{if .Mining.Running}}Работает{{else if .Mining.Available}}Остановлен{{else}}{{.Mining.Agent.StateLabel}}{{end}}</span>
   </section>
 
   {{if .Error}}<p class="alert">{{.Error}}</p>{{end}}

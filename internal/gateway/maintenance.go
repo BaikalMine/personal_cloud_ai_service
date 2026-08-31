@@ -21,6 +21,9 @@ func (a *App) runMaintenance(ctx context.Context) {
 	metricCtx, metricCancel := context.WithTimeout(ctx, 8*time.Second)
 	a.captureHostMetric(metricCtx)
 	metricCancel()
+	dependencyCtx, dependencyCancel := context.WithTimeout(ctx, 4*time.Second)
+	a.refreshDependencyStatuses(dependencyCtx)
+	dependencyCancel()
 	virusTotalCtx, virusTotalCancel := context.WithTimeout(ctx, 2*time.Minute)
 	a.refreshFeatureSuggestionScans(virusTotalCtx)
 	virusTotalCancel()
@@ -30,6 +33,12 @@ func (a *App) runMaintenance(ctx context.Context) {
 	defer generationTicker.Stop()
 	comfyMemoryTicker := time.NewTicker(comfyMemoryMonitorInterval)
 	defer comfyMemoryTicker.Stop()
+	dependencyInterval := a.cfg.DependencyCheckInterval
+	if dependencyInterval <= 0 {
+		dependencyInterval = defaultDependencyCheckInterval
+	}
+	dependencyTicker := time.NewTicker(dependencyInterval)
+	defer dependencyTicker.Stop()
 	websocketTicker := time.NewTicker(websocketAuthorizationRefreshInterval)
 	defer websocketTicker.Stop()
 	for {
@@ -47,6 +56,10 @@ func (a *App) runMaintenance(ctx context.Context) {
 		case <-comfyMemoryTicker.C:
 			memoryCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 			a.observeComfyQueueForMemoryRelease(memoryCtx)
+			cancel()
+		case <-dependencyTicker.C:
+			dependencyCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+			a.refreshDependencyStatuses(dependencyCtx)
 			cancel()
 		case <-websocketTicker.C:
 			websocketCtx, cancel := context.WithTimeout(ctx, 8*time.Second)

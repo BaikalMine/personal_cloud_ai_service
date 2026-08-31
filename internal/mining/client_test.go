@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 )
 
 func TestClientAuthenticatesAndControlsAgent(t *testing.T) {
@@ -37,6 +38,36 @@ func TestClientAuthenticatesAndControlsAgent(t *testing.T) {
 	}
 	if !state.Available || !state.Running || len(state.PIDs) != 1 || state.PIDs[0] != 42 {
 		t.Fatalf("unexpected state: %+v", state)
+	}
+}
+
+func TestClientHealthChecksAgentWithoutCommandPayload(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/healthz" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer server.Close()
+	baseURL, _ := url.Parse(server.URL)
+	if err := NewClient(baseURL, "test-token").Health(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClientBackfillsCollectedAtFromLegacyAgent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(State{Running: true})
+	}))
+	defer server.Close()
+	baseURL, _ := url.Parse(server.URL)
+	before := time.Now().UTC()
+	state, err := NewClient(baseURL, "test-token").State(context.Background(), "miner.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.CollectedAt.Before(before) || state.CollectedAt.After(time.Now().UTC().Add(time.Second)) {
+		t.Fatalf("legacy collected_at = %v", state.CollectedAt)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"ai-access-gateway/internal/mining"
 	"ai-access-gateway/internal/store"
@@ -32,8 +33,10 @@ func (a *App) miningOverview(ctx context.Context, includeDisabled, includeScript
 		return MiningOverview{Message: "Не удалось загрузить настройки майнинга."}
 	}
 	overview := MiningOverview{Available: a.mining != nil && a.mining.Configured(), Miners: make([]MinerView, 0, len(miners))}
+	overview.Agent = a.dependencyStatus(dependencyMiningAgent)
 	if len(miners) == 0 {
 		overview.Message = "Профиль майнинга ещё не настроен."
+		overview.Available = overview.Agent.State == DependencyOnline
 		return overview
 	}
 	if !overview.Available {
@@ -42,11 +45,15 @@ func (a *App) miningOverview(ctx context.Context, includeDisabled, includeScript
 	for _, miner := range miners {
 		view := MinerView{Miner: miner}
 		if overview.Available {
+			started := time.Now()
 			state, stateErr := a.mining.State(ctx, miner.ProcessName)
 			view.State = state
 			if stateErr != nil {
+				a.dependencyMonitor().failure(dependencyMiningAgent, dependencyCallError(state.Message, stateErr), false, time.Since(started))
 				overview.Available = false
-				overview.Message = state.Message
+				overview.Message = dependencyCallError(state.Message, stateErr)
+			} else {
+				a.dependencyMonitor().success(dependencyMiningAgent, "Состояние майнера получено.", &state.CollectedAt, time.Since(started))
 			}
 		}
 		overview.Miners = append(overview.Miners, view)
@@ -76,6 +83,12 @@ func (a *App) miningOverview(ctx context.Context, includeDisabled, includeScript
 			script.Message = "Не удалось прочитать содержимое скрипта."
 		}
 		overview.Script = script
+	}
+	overview.Agent = a.dependencyStatus(dependencyMiningAgent)
+	if !overview.Available && overview.Agent.State == DependencyOnline {
+		overview.Agent.State = DependencyStale
+		overview.Agent.StateLabel = "Проверяем связь"
+		overview.Agent.Detail = overview.Message
 	}
 	return overview
 }

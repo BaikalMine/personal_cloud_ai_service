@@ -2,29 +2,32 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"log"
+	"strings"
 	"time"
+
+	"ai-access-gateway/internal/mining"
 )
 
 func (a *App) captureHostMetric(ctx context.Context) {
-	metrics, err := a.systemMonitor.System(ctx)
-	if err != nil {
+	if a.systemMonitor == nil {
+		a.dependencyMonitor().failure(dependencySystemMonitor, "Windows-агент мониторинга не настроен.", true, 0)
 		return
 	}
-	metric := HostMetric{
-		RecordedAt:          metrics.CollectedAt,
-		CPUPercent:          clampPercent(metrics.CPUPercent),
-		MemoryUsedBytes:     metrics.MemoryUsedBytes,
-		MemoryTotalBytes:    metrics.MemoryTotalBytes,
-		GPUAvailable:        metrics.GPUAvailable,
-		GPUName:             metrics.GPUName,
-		GPUPercent:          clampPercent(metrics.GPUPercent),
-		GPUMemoryUsedBytes:  metrics.GPUMemoryUsedBytes,
-		GPUMemoryTotalBytes: metrics.GPUMemoryTotalBytes,
+	started := time.Now()
+	metrics, err := a.systemMonitor.System(ctx)
+	if err != nil {
+		a.dependencyMonitor().failure(
+			dependencySystemMonitor,
+			dependencyCallError(metrics.Message, err),
+			errors.Is(err, mining.ErrUnavailable) && (a.systemMonitor == nil || !a.systemMonitor.Configured()),
+			time.Since(started),
+		)
+		return
 	}
-	if metric.RecordedAt.IsZero() {
-		metric.RecordedAt = time.Now().UTC()
-	}
+	metric := hostMetricFromSystem(metrics)
+	a.dependencyMonitor().success(dependencySystemMonitor, "Показатели Windows получены.", &metric.RecordedAt, time.Since(started))
 	if metric.MemoryTotalBytes <= 0 {
 		return
 	}
@@ -47,15 +50,34 @@ func (a *App) systemOverview(ctx context.Context) (SystemOverview, error) {
 	}
 	if len(overview.History) > 0 {
 		overview.Host = &overview.History[len(overview.History)-1]
-		overview.AgentAvailable = true
-		return overview, nil
+	} else if a.systemMonitor != nil && a.systemMonitor.Configured() {
+		started := time.Now()
+		metrics, metricErr := a.systemMonitor.System(ctx)
+		if metricErr != nil {
+			a.dependencyMonitor().failure(dependencySystemMonitor, dependencyCallError(metrics.Message, metricErr), false, time.Since(started))
+		} else {
+			metric := hostMetricFromSystem(metrics)
+			a.dependencyMonitor().success(dependencySystemMonitor, "Показатели Windows получены.", &metric.RecordedAt, time.Since(started))
+			if metric.MemoryTotalBytes > 0 {
+				overview.Host = &metric
+				overview.History = []HostMetric{metric}
+				if err := a.store.RecordHostMetric(ctx, metric); err != nil {
+					log.Printf("record initial host metric: %v", err)
+				}
+			}
+		}
 	}
+	if overview.Host != nil {
+		a.dependencyMonitor().observeData(dependencySystemMonitor, overview.Host.RecordedAt)
+	}
+	overview.Agent = a.dependencyStatus(dependencySystemMonitor)
+	overview.AgentAvailable = overview.Agent.State == DependencyOnline
+	overview.AgentMessage = overview.Agent.Detail
+	overview.Dependencies = a.dependencyStatuses()
+	return overview, nil
+}
 
-	metrics, metricErr := a.systemMonitor.System(ctx)
-	if metricErr != nil {
-		overview.AgentMessage = metrics.Message
-		return overview, nil
-	}
+func hostMetricFromSystem(metrics mining.SystemMetrics) HostMetric {
 	metric := HostMetric{
 		RecordedAt:          metrics.CollectedAt,
 		CPUPercent:          clampPercent(metrics.CPUPercent),
@@ -70,15 +92,17 @@ func (a *App) systemOverview(ctx context.Context) (SystemOverview, error) {
 	if metric.RecordedAt.IsZero() {
 		metric.RecordedAt = time.Now().UTC()
 	}
-	if metric.MemoryTotalBytes > 0 {
-		overview.Host = &metric
-		overview.History = []HostMetric{metric}
-		overview.AgentAvailable = true
-		if err := a.store.RecordHostMetric(ctx, metric); err != nil {
-			log.Printf("record initial host metric: %v", err)
-		}
+	return metric
+}
+
+func dependencyCallError(message string, err error) string {
+	if message = strings.TrimSpace(message); message != "" {
+		return message
 	}
-	return overview, nil
+	if err != nil {
+		return err.Error()
+	}
+	return "Проверка завершилась с ошибкой."
 }
 
 func clampPercent(value float64) float64 {

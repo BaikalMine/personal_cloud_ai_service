@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"ai-access-gateway/internal/mining"
 )
@@ -116,6 +117,9 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state.Available = true
+	if state.CollectedAt.IsZero() {
+		state.CollectedAt = time.Now().UTC()
+	}
 	writeState(w, http.StatusOK, state)
 }
 
@@ -183,6 +187,9 @@ func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request, command f
 		return
 	}
 	state.Available = true
+	if state.CollectedAt.IsZero() {
+		state.CollectedAt = time.Now().UTC()
+	}
 	writeState(w, http.StatusOK, state)
 }
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"ai-access-gateway/internal/domain"
@@ -25,8 +26,11 @@ func (a *App) pauseMiningForQuickGeneration(ctx context.Context, user *User) (*d
 	existing, err := a.store.ActiveQuickGenerationMiningLease(ctx)
 	if err == nil {
 		overview := a.miningOverview(ctx, true, false)
+		if len(overview.Miners) == 0 {
+			return nil, "", nil
+		}
 		if !overview.Available {
-			return nil, "Агент майнинга недоступен: генерация запущена, но остановка майнинга не подтверждена.", nil
+			return nil, miningPriorityDegradationWarning(overview), nil
 		}
 		wasRunning := overview.Running
 		if wasRunning && overview.Active != nil {
@@ -52,8 +56,11 @@ func (a *App) pauseMiningForQuickGeneration(ctx context.Context, user *User) (*d
 	}
 
 	overview := a.miningOverview(ctx, true, false)
+	if len(overview.Miners) == 0 {
+		return nil, "", nil
+	}
 	if !overview.Available {
-		return nil, "Агент майнинга недоступен: генерация запущена, но остановка майнинга не подтверждена.", nil
+		return nil, miningPriorityDegradationWarning(overview), nil
 	}
 	if !overview.Running || overview.Active == nil {
 		return nil, "", nil
@@ -81,6 +88,21 @@ func (a *App) pauseMiningForQuickGeneration(ctx context.Context, user *User) (*d
 		"lease_id": lease.ID, "username": user.Username, "process_name": target.ProcessName,
 	})
 	return &lease, "", nil
+}
+
+func miningPriorityDegradationWarning(overview MiningOverview) string {
+	detail := strings.TrimSpace(overview.Agent.Detail)
+	if detail == "" {
+		detail = strings.TrimSpace(overview.Message)
+	}
+	if detail == "" {
+		detail = "Windows-agent не отвечает"
+	}
+	warning := "Приоритет включён, но остановка майнинга не подтверждена. Генерация продолжена в обычном режиме. Причина: " + detail
+	if overview.Agent.RetryInSeconds > 0 {
+		warning += fmt.Sprintf(" Следующая проверка через %d сек.", overview.Agent.RetryInSeconds)
+	}
+	return warning
 }
 
 func (a *App) attachMiningPauseToGeneration(ctx context.Context, lease *domain.QuickGenerationMiningLease, promptID string) error {

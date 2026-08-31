@@ -19,6 +19,9 @@ const (
 	defaultComfyInputRetention = 72 * time.Hour
 	defaultHostMetricRetention = 7 * 24 * time.Hour
 	defaultAuditLogRetention   = 90 * 24 * time.Hour
+	defaultDependencyCheck     = 10 * time.Second
+	defaultDependencyStale     = 45 * time.Second
+	defaultDependencyOffline   = 3 * time.Minute
 )
 
 // RetentionPolicy is the single source of truth for data lifetime. Generation
@@ -109,6 +112,9 @@ type Config struct {
 	SessionIdleTimeout        time.Duration
 	AccountLockThreshold      int
 	AccountLockDuration       time.Duration
+	DependencyCheckInterval   time.Duration
+	DependencyStaleAfter      time.Duration
+	DependencyOfflineAfter    time.Duration
 	Retention                 RetentionPolicy
 }
 
@@ -193,6 +199,27 @@ func Load() (Config, error) {
 	if accountLockDuration < time.Minute || accountLockDuration > 24*time.Hour {
 		return Config{}, fmt.Errorf("ACCOUNT_LOCK_DURATION must be between 1m and 24h")
 	}
+	dependencyCheckInterval, err := durationEnv("DEPENDENCY_CHECK_INTERVAL", defaultDependencyCheck)
+	if err != nil {
+		return Config{}, err
+	}
+	if dependencyCheckInterval < 5*time.Second || dependencyCheckInterval > 5*time.Minute {
+		return Config{}, fmt.Errorf("DEPENDENCY_CHECK_INTERVAL must be between 5s and 5m")
+	}
+	dependencyStaleAfter, err := durationEnv("DEPENDENCY_STALE_AFTER", defaultDependencyStale)
+	if err != nil {
+		return Config{}, err
+	}
+	if dependencyStaleAfter < 2*dependencyCheckInterval || dependencyStaleAfter > 30*time.Minute {
+		return Config{}, fmt.Errorf("DEPENDENCY_STALE_AFTER must be at least two check intervals and no more than 30m")
+	}
+	dependencyOfflineAfter, err := durationEnv("DEPENDENCY_OFFLINE_AFTER", defaultDependencyOffline)
+	if err != nil {
+		return Config{}, err
+	}
+	if dependencyOfflineAfter <= dependencyStaleAfter || dependencyOfflineAfter > 2*time.Hour {
+		return Config{}, fmt.Errorf("DEPENDENCY_OFFLINE_AFTER must be greater than DEPENDENCY_STALE_AFTER and no more than 2h")
+	}
 	retention, err := loadRetentionPolicy()
 	if err != nil {
 		return Config{}, err
@@ -275,6 +302,9 @@ func Load() (Config, error) {
 		SessionIdleTimeout:        sessionIdleTimeout,
 		AccountLockThreshold:      accountLockThreshold,
 		AccountLockDuration:       accountLockDuration,
+		DependencyCheckInterval:   dependencyCheckInterval,
+		DependencyStaleAfter:      dependencyStaleAfter,
+		DependencyOfflineAfter:    dependencyOfflineAfter,
 		Retention:                 retention,
 	}, nil
 }
