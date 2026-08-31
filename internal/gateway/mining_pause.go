@@ -16,7 +16,7 @@ import (
 // pauseMiningForQuickGeneration reserves the active mining profile before a
 // priority-pool user submits work to ComfyUI. Multiple leases keep the miner
 // paused until the final related generation finishes.
-func (a *App) pauseMiningForQuickGeneration(ctx context.Context, user *User) (*domain.QuickGenerationMiningLease, string, error) {
+func (a *App) pauseMiningForQuickGeneration(ctx context.Context, user *User, jobID int64) (*domain.QuickGenerationMiningLease, string, error) {
 	if user == nil || !user.PauseMiningForQuickGeneration {
 		return nil, "", nil
 	}
@@ -43,7 +43,7 @@ func (a *App) pauseMiningForQuickGeneration(ctx context.Context, user *User) (*d
 			}
 		}
 		lease := domain.QuickGenerationMiningLease{
-			ID: newRequestID(), UserID: user.ID, MinerID: existing.MinerID,
+			ID: newRequestID(), GenerationJobID: jobID, UserID: user.ID, MinerID: existing.MinerID,
 			ScriptPath: existing.ScriptPath, ProcessName: existing.ProcessName, ResumeMining: existing.ResumeMining || wasRunning,
 		}
 		if err := a.store.CreateQuickGenerationMiningLease(ctx, lease); err != nil {
@@ -67,7 +67,7 @@ func (a *App) pauseMiningForQuickGeneration(ctx context.Context, user *User) (*d
 	}
 	target := overview.Active
 	lease := domain.QuickGenerationMiningLease{
-		ID: newRequestID(), UserID: user.ID, MinerID: target.ID,
+		ID: newRequestID(), GenerationJobID: jobID, UserID: user.ID, MinerID: target.ID,
 		ScriptPath: target.ScriptPath, ProcessName: target.ProcessName, ResumeMining: true,
 	}
 	if err := a.store.CreateQuickGenerationMiningLease(ctx, lease); err != nil {
@@ -119,40 +119,52 @@ func (a *App) attachMiningPauseToGeneration(ctx context.Context, lease *domain.Q
 	return nil
 }
 
-func (a *App) releaseMiningPauseForGeneration(ctx context.Context, promptID string) {
+func (a *App) releaseMiningPauseForGeneration(ctx context.Context, promptID string) bool {
 	lease, err := a.store.QuickGenerationMiningLeaseByPrompt(ctx, promptID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return
+		return true
 	}
 	if err != nil {
 		log.Printf("load mining-pause lease for %s: %v", promptID, err)
-		return
+		return false
 	}
-	a.releaseMiningPause(ctx, lease.ID)
+	return a.releaseMiningPause(ctx, lease.ID)
 }
 
-func (a *App) releaseMiningPause(ctx context.Context, leaseID string) {
+func (a *App) releaseMiningPauseForJob(ctx context.Context, jobID int64) bool {
+	lease, err := a.store.QuickGenerationMiningLeaseByJobID(ctx, jobID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true
+	}
+	if err != nil {
+		log.Printf("load mining-pause lease for job %d: %v", jobID, err)
+		return false
+	}
+	return a.releaseMiningPause(ctx, lease.ID)
+}
+
+func (a *App) releaseMiningPause(ctx context.Context, leaseID string) bool {
 	a.miningPauseMu.Lock()
 	defer a.miningPauseMu.Unlock()
 	lease, remaining, err := a.store.DeleteQuickGenerationMiningLease(ctx, leaseID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return
+		return true
 	}
 	if err != nil {
 		log.Printf("remove mining-pause lease %s: %v", leaseID, err)
-		return
+		return false
 	}
 	if remaining > 0 || !lease.ResumeMining {
-		return
+		return true
 	}
 	overview := a.miningOverview(ctx, true, false)
 	if !overview.Available {
 		log.Printf("resume mining after quick generation: %s", overview.Message)
 		a.restoreMiningPauseLease(ctx, lease)
-		return
+		return false
 	}
 	if overview.Running {
-		return
+		return true
 	}
 	state, err := a.mining.Start(ctx, mining.Request{ScriptPath: lease.ScriptPath, ProcessName: lease.ProcessName})
 	if err != nil || !state.Running {
@@ -162,11 +174,12 @@ func (a *App) releaseMiningPause(ctx context.Context, leaseID string) {
 			log.Printf("resume mining after quick generation: miner did not start")
 		}
 		a.restoreMiningPauseLease(ctx, lease)
-		return
+		return false
 	}
 	a.audit(ctx, &lease.UserID, "mining_resumed_after_quick_generation", "miner", &lease.MinerID, "", "", map[string]any{
 		"lease_id": lease.ID, "prompt_id": lease.PromptID, "process_name": lease.ProcessName,
 	})
+	return true
 }
 
 // restoreMiningPauseLease keeps a terminal lease durable when the agent cannot
@@ -186,6 +199,11 @@ func (a *App) refreshQuickGenerationMiningLeases(ctx context.Context) {
 		return
 	}
 	for _, lease := range leases {
+		if lease.GenerationJobID > 0 {
+			// Durable jobs own their quota and mining release as one transaction-like
+			// lifecycle. The job reconciler is the only component allowed to finish it.
+			continue
+		}
 		if lease.PromptID == "" {
 			if time.Since(lease.CreatedAt) > 2*time.Minute {
 				a.releaseMiningPause(ctx, lease.ID)

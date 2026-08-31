@@ -4,6 +4,7 @@ import "time"
 
 type ContentEventRecord struct {
 	UserID          int64
+	GenerationJobID *int64
 	Service         string
 	Kind            string
 	ExternalID      string

@@ -235,3 +235,22 @@ func TestDurableGenerationJobsMigration(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerationJobExecutionResourcesMigration(t *testing.T) {
+	var resourceMigration *migration
+	for index := range migrationCatalog {
+		if migrationCatalog[index].version == 41 {
+			resourceMigration = &migrationCatalog[index]
+			break
+		}
+	}
+	if resourceMigration == nil || resourceMigration.name != "generation_job_execution_resources" {
+		t.Fatal("generation job execution resources migration is missing")
+	}
+	sql := strings.Join(resourceMigration.statements, "\n")
+	for _, expected := range []string{"quota_reserved_on", "quota_committed_at", "cancellation_requested_at", "cancellation_confirmed_at", "content_events_generation_job_prompt_idx", "generation_jobs_cancellation_idx"} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("generation job execution migration does not contain %q: %s", expected, sql)
+		}
+	}
+}

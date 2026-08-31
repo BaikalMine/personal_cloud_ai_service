@@ -18,11 +18,16 @@ func (s *Store) InsertContentEvent(ctx context.Context, event domain.ContentEven
 	var id int64
 	err := s.db.QueryRowContext(ctx, `
 		INSERT INTO content_events
-			(user_id, service, kind, external_id, model, generation_state, prompt_cipher, response_cipher, metadata_cipher, is_sensitive, sensitivity_classified_at, expires_at)
-		VALUES ($1,$2,$3,NULLIF($4,''),$5,$6,$7,$8,$9,$10,now(),$11)
+			(user_id, generation_job_id, service, kind, external_id, model, generation_state, prompt_cipher, response_cipher, metadata_cipher, is_sensitive, sensitivity_classified_at, expires_at)
+		VALUES ($1,$2,$3,$4,NULLIF($5,''),$6,$7,$8,$9,$10,$11,now(),$12)
+		ON CONFLICT DO NOTHING
 		RETURNING id
-	`, event.UserID, event.Service, event.Kind, event.ExternalID, event.Model, event.GenerationState,
+	`, event.UserID, event.GenerationJobID, event.Service, event.Kind, event.ExternalID, event.Model, event.GenerationState,
 		event.PromptCipher, event.ResponseCipher, event.MetadataCipher, event.Sensitive, event.ExpiresAt).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) && event.GenerationJobID != nil {
+		err = s.db.QueryRowContext(ctx, `SELECT id FROM content_events
+			WHERE generation_job_id=$1 AND service=$2 AND kind=$3`, *event.GenerationJobID, event.Service, event.Kind).Scan(&id)
+	}
 	return id, err
 }
 

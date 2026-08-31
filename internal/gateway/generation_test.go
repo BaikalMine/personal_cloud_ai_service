@@ -1217,6 +1217,9 @@ func TestSubmitComfyPromptInjectsUserClientID(t *testing.T) {
 		if _, ok := extra["workflow"].(map[string]any); !ok {
 			t.Fatalf("workflow metadata is missing: %#v", extra)
 		}
+		if document.ExtraData["gateway_job_id"] != "job_test_abcdef012345" {
+			t.Fatalf("gateway job correlation is missing: %#v", document.ExtraData)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"prompt_id":"abcdef0123456789"}`))
 	}))
@@ -1226,7 +1229,7 @@ func TestSubmitComfyPromptInjectsUserClientID(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := &App{cfg: Config{ComfyUIUpstream: upstream, SessionSecret: "01234567890123456789012345678901"}}
-	promptID, err := app.submitComfyPrompt(context.Background(), 17, map[string]any{"1": map[string]any{"class_type": "Test"}})
+	promptID, err := app.submitComfyPrompt(context.Background(), 17, "job_test_abcdef012345", map[string]any{"1": map[string]any{"class_type": "Test"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1253,7 +1256,7 @@ func TestFetchGenerationStatusParsesHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.State != "completed" || len(status.Outputs) != 1 || status.Outputs[0].Filename != "result.png" {
+	if !status.Known || status.State != "completed" || len(status.Outputs) != 1 || status.Outputs[0].Filename != "result.png" {
 		t.Fatalf("unexpected status: %#v", status)
 	}
 }
@@ -1279,8 +1282,110 @@ func TestFetchGenerationStatusReportsQueuePosition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.State != "queued" || status.QueuePosition != 2 || status.QueueTotal != 2 {
+	if !status.Known || status.State != "queued" || status.QueuePosition != 2 || status.QueueTotal != 2 {
 		t.Fatalf("unexpected queue status: %#v", status)
+	}
+}
+
+func TestFetchGenerationStatusDistinguishesUnknownPrompt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/history/abcdef0123456789":
+			_, _ = w.Write([]byte(`{}`))
+		case "/queue":
+			_, _ = w.Write([]byte(`{"queue_running":[],"queue_pending":[]}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	upstream, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := &App{cfg: Config{ComfyUIUpstream: upstream}}
+	status, err := app.fetchGenerationStatus(context.Background(), "abcdef0123456789", 17)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Known || status.State != "queued" {
+		t.Fatalf("unknown prompt status = %#v", status)
+	}
+}
+
+func TestFindComfyPromptByGenerationJobInQueue(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/queue" {
+			t.Fatalf("history must not be queried after a queue match: %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"queue_running":[],"queue_pending":[[7,"abcdef0123456789",{}, {"gateway_job_id":"job_test_abcdef012345"}]]}`))
+	}))
+	defer server.Close()
+	upstream, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := &App{cfg: Config{ComfyUIUpstream: upstream}}
+	promptID, found, err := app.findComfyPromptByGenerationJob(context.Background(), "job_test_abcdef012345")
+	if err != nil || !found || promptID != "abcdef0123456789" {
+		t.Fatalf("queue recovery prompt=%q found=%v err=%v", promptID, found, err)
+	}
+}
+
+func TestFindComfyPromptByGenerationJobInHistory(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/queue":
+			_, _ = w.Write([]byte(`{"queue_running":[],"queue_pending":[]}`))
+		case "/history":
+			_, _ = w.Write([]byte(`{"fedcba9876543210":{"prompt":[8,"fedcba9876543210",{}, {"gateway_job_id":"job_history_abcdef0123"}]}}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	upstream, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := &App{cfg: Config{ComfyUIUpstream: upstream}}
+	promptID, found, err := app.findComfyPromptByGenerationJob(context.Background(), "job_history_abcdef0123")
+	if err != nil || !found || promptID != "fedcba9876543210" {
+		t.Fatalf("history recovery prompt=%q found=%v err=%v", promptID, found, err)
+	}
+}
+
+func TestGenerationJobValuesPreserveMiniMaxH3V4Controls(t *testing.T) {
+	form := url.Values{
+		"csrf":                          {"omit"},
+		"video_memory_optimize":         {"true"},
+		"video_memory_chunk_rows":       {"4096"},
+		"video_sparse_attention":        {"true"},
+		"video_sparse_early_schedule":   {"Ramp"},
+		"video_rife_enabled":            {"true"},
+		"video_rife_checkpoint":         {"rife49.pth"},
+		"video_rtx_enabled":             {"true"},
+		"video_rtx_scale":               {"2"},
+		"video_color_match":             {"true"},
+		"video_sharpen_enabled":         {"true"},
+		"video_output_crf":              {"19"},
+		"input_image":                   {"gateway/image.png"},
+		"input_audio":                   {"gateway/voice.mp3"},
+		"assistant_original_prompt":     {"original"},
+		"assistant_suggestion":          {"enhanced"},
+		"untrusted_unrelated_parameter": {"omit"},
+	}
+	values := generationJobValues(form, 42)
+	for _, name := range []string{"video_memory_optimize", "video_memory_chunk_rows", "video_sparse_attention", "video_sparse_early_schedule", "video_rife_enabled", "video_rife_checkpoint", "video_rtx_enabled", "video_rtx_scale", "video_color_match", "video_sharpen_enabled", "video_output_crf", "input_image", "input_audio", "assistant_original_prompt", "assistant_suggestion", "seed"} {
+		if values[name] == "" {
+			t.Fatalf("durable generation payload dropped %q: %#v", name, values)
+		}
+	}
+	if _, exists := values["csrf"]; exists {
+		t.Fatal("durable generation payload retained CSRF")
+	}
+	if _, exists := values["untrusted_unrelated_parameter"]; exists {
+		t.Fatal("durable generation payload retained unrelated input")
 	}
 }
 

@@ -21,7 +21,8 @@ const generationJobColumns = `
 	id,public_id,user_id,username_snapshot,request_id,parent_job_id,prompt_id,
 	template_id,workflow_id,model_name,seed,payload_cipher,state,status_message,
 	error_code,error_message,attempt,dependencies,input_count,state_changed_at,
-	started_at,finished_at,resources_released_at,created_at,updated_at`
+	started_at,finished_at,resources_released_at,quota_reserved_on,quota_committed_at,
+	cancellation_requested_at,cancellation_confirmed_at,created_at,updated_at`
 
 type generationJobScanner interface {
 	Scan(dest ...any) error
@@ -34,11 +35,13 @@ func scanGenerationJob(scanner generationJobScanner) (domain.GenerationJob, erro
 	var state string
 	var dependencies []byte
 	var startedAt, finishedAt, resourcesReleasedAt sql.NullTime
+	var quotaReservedOn, quotaCommittedAt, cancellationRequestedAt, cancellationConfirmedAt sql.NullTime
 	err := scanner.Scan(
 		&job.ID, &job.PublicID, &userID, &job.UsernameSnapshot, &job.RequestID, &parentJobID, &promptID,
 		&job.TemplateID, &job.WorkflowID, &job.ModelName, &job.Seed, &job.PayloadCipher, &state, &job.StatusMessage,
 		&job.ErrorCode, &job.ErrorMessage, &job.Attempt, &dependencies, &job.InputCount, &job.StateChangedAt,
-		&startedAt, &finishedAt, &resourcesReleasedAt, &job.CreatedAt, &job.UpdatedAt,
+		&startedAt, &finishedAt, &resourcesReleasedAt, &quotaReservedOn, &quotaCommittedAt,
+		&cancellationRequestedAt, &cancellationConfirmedAt, &job.CreatedAt, &job.UpdatedAt,
 	)
 	if err != nil {
 		return domain.GenerationJob{}, err
@@ -69,6 +72,22 @@ func scanGenerationJob(scanner generationJobScanner) (domain.GenerationJob, erro
 	if resourcesReleasedAt.Valid {
 		value := resourcesReleasedAt.Time
 		job.ResourcesReleasedAt = &value
+	}
+	if quotaReservedOn.Valid {
+		value := quotaReservedOn.Time
+		job.QuotaReservedOn = &value
+	}
+	if quotaCommittedAt.Valid {
+		value := quotaCommittedAt.Time
+		job.QuotaCommittedAt = &value
+	}
+	if cancellationRequestedAt.Valid {
+		value := cancellationRequestedAt.Time
+		job.CancellationRequestedAt = &value
+	}
+	if cancellationConfirmedAt.Valid {
+		value := cancellationConfirmedAt.Time
+		job.CancellationConfirmedAt = &value
 	}
 	if err := json.Unmarshal(dependencies, &job.Dependencies); err != nil {
 		return domain.GenerationJob{}, fmt.Errorf("decode generation job dependencies: %w", err)
@@ -127,6 +146,98 @@ func (s *Store) CreateGenerationJob(ctx context.Context, params domain.CreateGen
 		return domain.GenerationJob{}, false, err
 	}
 	return job, created, nil
+}
+
+// ClaimGenerationJob atomically reserves the browser idempotency key and its
+// canonical job. A stale request row without a job is adopted by one caller,
+// closing the crash window between the two legacy inserts.
+func (s *Store) ClaimGenerationJob(ctx context.Context, params domain.CreateGenerationJobParams) (domain.GenerationJob, bool, error) {
+	params.PublicID = strings.TrimSpace(params.PublicID)
+	params.RequestID = strings.TrimSpace(params.RequestID)
+	params.UsernameSnapshot = strings.TrimSpace(params.UsernameSnapshot)
+	if params.UserID <= 0 || params.PublicID == "" || params.RequestID == "" {
+		return domain.GenerationJob{}, false, errors.New("generation job identity is required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.GenerationJob{}, false, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO generation_requests(user_id,request_id)
+		VALUES($1,$2) ON CONFLICT(user_id,request_id) DO NOTHING`, params.UserID, params.RequestID); err != nil {
+		return domain.GenerationJob{}, false, err
+	}
+	job, err := scanGenerationJob(tx.QueryRowContext(ctx, `SELECT `+generationJobColumns+`
+		FROM generation_jobs WHERE user_id=$1 AND request_id=$2 FOR UPDATE`, params.UserID, params.RequestID))
+	if err == nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE generation_requests SET job_id=$1
+			WHERE user_id=$2 AND request_id=$3 AND job_id IS NULL`, job.ID, params.UserID, params.RequestID); err != nil {
+			return domain.GenerationJob{}, false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return domain.GenerationJob{}, false, err
+		}
+		return job, false, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return domain.GenerationJob{}, false, err
+	}
+	if params.ParentJobID != nil {
+		var parentExists bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
+			SELECT 1 FROM generation_jobs WHERE id=$1 AND user_id=$2
+		)`, *params.ParentJobID, params.UserID).Scan(&parentExists); err != nil {
+			return domain.GenerationJob{}, false, err
+		}
+		if !parentExists {
+			return domain.GenerationJob{}, false, ErrGenerationJobParentConflict
+		}
+	}
+	var promptID sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT prompt_id FROM generation_requests
+		WHERE user_id=$1 AND request_id=$2 FOR UPDATE`, params.UserID, params.RequestID).Scan(&promptID); err != nil {
+		return domain.GenerationJob{}, false, err
+	}
+	initialState := domain.GenerationJobDraft
+	message := "Запуск создан"
+	dependencies := `[]`
+	if promptID.Valid && strings.TrimSpace(promptID.String) != "" {
+		initialState = domain.GenerationJobQueued
+		message = "Восстановлен принятый ComfyUI prompt"
+		dependencies = `["comfyui"]`
+	}
+	job, err = scanGenerationJob(tx.QueryRowContext(ctx, `INSERT INTO generation_jobs
+		(public_id,user_id,username_snapshot,request_id,parent_job_id,prompt_id,state,status_message,dependencies)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) ON CONFLICT DO NOTHING RETURNING `+generationJobColumns,
+		params.PublicID, params.UserID, params.UsernameSnapshot, params.RequestID, params.ParentJobID,
+		promptID, initialState, message, dependencies,
+	))
+	created := err == nil
+	if errors.Is(err, sql.ErrNoRows) {
+		job, err = scanGenerationJob(tx.QueryRowContext(ctx, `SELECT `+generationJobColumns+`
+			FROM generation_jobs WHERE user_id=$1 AND request_id=$2 FOR UPDATE`, params.UserID, params.RequestID))
+		created = false
+	}
+	if err != nil {
+		return domain.GenerationJob{}, false, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE generation_requests SET job_id=$1
+		WHERE user_id=$2 AND request_id=$3`, job.ID, params.UserID, params.RequestID); err != nil {
+		return domain.GenerationJob{}, false, err
+	}
+	if created {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO generation_job_transitions(job_id,from_state,to_state,message,attempt)
+			VALUES($1,'',$2,$3,1)`, job.ID, job.State, job.StatusMessage); err != nil {
+			return domain.GenerationJob{}, false, err
+		}
+		if err := incrementGenerationJobRevision(ctx, tx); err != nil {
+			return domain.GenerationJob{}, false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.GenerationJob{}, false, err
+	}
+	return job, created && job.PromptID == "", nil
 }
 
 func (s *Store) GenerationJobByRequest(ctx context.Context, userID int64, requestID string) (domain.GenerationJob, error) {
@@ -316,7 +427,9 @@ func (s *Store) MarkGenerationJobResourcesReleased(ctx context.Context, jobID in
 	defer tx.Rollback()
 	job, err := scanGenerationJob(tx.QueryRowContext(ctx, `UPDATE generation_jobs
 		SET resources_released_at=now(),updated_at=now()
-		WHERE id=$1 AND resources_released_at IS NULL RETURNING `+generationJobColumns, jobID))
+		WHERE id=$1 AND resources_released_at IS NULL
+		  AND NOT EXISTS (SELECT 1 FROM quick_generation_mining_leases WHERE generation_job_id=$1)
+		RETURNING `+generationJobColumns, jobID))
 	changed := err == nil
 	if errors.Is(err, sql.ErrNoRows) {
 		job, err = scanGenerationJob(tx.QueryRowContext(ctx, `SELECT `+generationJobColumns+`
@@ -324,6 +437,9 @@ func (s *Store) MarkGenerationJobResourcesReleased(ctx context.Context, jobID in
 	}
 	if err != nil {
 		return domain.GenerationJob{}, err
+	}
+	if !changed && job.ResourcesReleasedAt == nil {
+		return domain.GenerationJob{}, fmt.Errorf("%w: generation job still has a mining lease", ErrGenerationJobStateConflict)
 	}
 	if changed {
 		if err := incrementGenerationJobRevision(ctx, tx); err != nil {
@@ -334,6 +450,109 @@ func (s *Store) MarkGenerationJobResourcesReleased(ctx context.Context, jobID in
 		return domain.GenerationJob{}, err
 	}
 	return job, nil
+}
+
+func (s *Store) RequestGenerationJobCancellation(ctx context.Context, jobID, userID int64) (domain.GenerationJob, bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.GenerationJob{}, false, err
+	}
+	defer tx.Rollback()
+	current, err := scanGenerationJob(tx.QueryRowContext(ctx, `SELECT `+generationJobColumns+`
+		FROM generation_jobs WHERE id=$1 AND user_id=$2 FOR UPDATE`, jobID, userID))
+	if err != nil {
+		return domain.GenerationJob{}, false, err
+	}
+	if !current.State.Cancellable() {
+		return domain.GenerationJob{}, false, fmt.Errorf("%w: state %s is not cancellable", ErrGenerationJobStateConflict, current.State)
+	}
+	if current.CancellationRequestedAt != nil {
+		if err := tx.Commit(); err != nil {
+			return domain.GenerationJob{}, false, err
+		}
+		return current, false, nil
+	}
+	job, err := scanGenerationJob(tx.QueryRowContext(ctx, `UPDATE generation_jobs
+		SET cancellation_requested_at=now(),status_message='Отменяем генерацию',updated_at=now()
+		WHERE id=$1 RETURNING `+generationJobColumns, jobID))
+	if err != nil {
+		return domain.GenerationJob{}, false, err
+	}
+	if err := incrementGenerationJobRevision(ctx, tx); err != nil {
+		return domain.GenerationJob{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.GenerationJob{}, false, err
+	}
+	return job, true, nil
+}
+
+func (s *Store) ClearGenerationJobCancellation(ctx context.Context, jobID, userID int64, message string) (domain.GenerationJob, bool, error) {
+	message = strings.TrimSpace(message)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.GenerationJob{}, false, err
+	}
+	defer tx.Rollback()
+	job, err := scanGenerationJob(tx.QueryRowContext(ctx, `UPDATE generation_jobs
+		SET cancellation_requested_at=NULL,cancellation_confirmed_at=NULL,status_message=$3,updated_at=now()
+		WHERE id=$1 AND user_id=$2 AND cancellation_requested_at IS NOT NULL
+		  AND state NOT IN ('completed','failed','cancelled','expired')
+		RETURNING `+generationJobColumns, jobID, userID, message))
+	if errors.Is(err, sql.ErrNoRows) {
+		job, err = scanGenerationJob(tx.QueryRowContext(ctx, `SELECT `+generationJobColumns+`
+			FROM generation_jobs WHERE id=$1 AND user_id=$2`, jobID, userID))
+		if err != nil {
+			return domain.GenerationJob{}, false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return domain.GenerationJob{}, false, err
+		}
+		return job, false, nil
+	}
+	if err != nil {
+		return domain.GenerationJob{}, false, err
+	}
+	if err := incrementGenerationJobRevision(ctx, tx); err != nil {
+		return domain.GenerationJob{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.GenerationJob{}, false, err
+	}
+	return job, true, nil
+}
+
+func (s *Store) ConfirmGenerationJobCancellation(ctx context.Context, jobID int64) (domain.GenerationJob, bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.GenerationJob{}, false, err
+	}
+	defer tx.Rollback()
+	job, err := scanGenerationJob(tx.QueryRowContext(ctx, `UPDATE generation_jobs
+		SET cancellation_confirmed_at=now(),status_message='Отмена подтверждена',updated_at=now()
+		WHERE id=$1 AND cancellation_requested_at IS NOT NULL AND cancellation_confirmed_at IS NULL
+		  AND state NOT IN ('completed','failed','cancelled','expired')
+		RETURNING `+generationJobColumns, jobID))
+	if errors.Is(err, sql.ErrNoRows) {
+		job, err = scanGenerationJob(tx.QueryRowContext(ctx, `SELECT `+generationJobColumns+` FROM generation_jobs WHERE id=$1`, jobID))
+		if err != nil {
+			return domain.GenerationJob{}, false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return domain.GenerationJob{}, false, err
+		}
+		return job, false, nil
+	}
+	if err != nil {
+		return domain.GenerationJob{}, false, err
+	}
+	if err := incrementGenerationJobRevision(ctx, tx); err != nil {
+		return domain.GenerationJob{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.GenerationJob{}, false, err
+	}
+	return job, true, nil
 }
 
 func (s *Store) LinkGenerationJobVariant(ctx context.Context, jobID int64, promptID string) error {

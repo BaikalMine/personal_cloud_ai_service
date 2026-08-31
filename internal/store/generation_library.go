@@ -60,10 +60,21 @@ func (s *Store) DeleteGenerationRecipe(ctx context.Context, userID, id int64) (b
 }
 
 func (s *Store) InsertGenerationVariant(ctx context.Context, userID int64, promptID, templateID, workflowID, modelName string, seed int64, payloadCipher []byte) error {
+	return s.insertGenerationVariant(ctx, 0, userID, promptID, templateID, workflowID, modelName, seed, payloadCipher)
+}
+
+func (s *Store) InsertGenerationVariantForJob(ctx context.Context, jobID, userID int64, promptID, templateID, workflowID, modelName string, seed int64, payloadCipher []byte) error {
+	if jobID <= 0 {
+		return errors.New("generation job id is required")
+	}
+	return s.insertGenerationVariant(ctx, jobID, userID, promptID, templateID, workflowID, modelName, seed, payloadCipher)
+}
+
+func (s *Store) insertGenerationVariant(ctx context.Context, jobID, userID int64, promptID, templateID, workflowID, modelName string, seed int64, payloadCipher []byte) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO quick_generation_variants (user_id,prompt_id,template_id,workflow_id,model_name,seed,payload_cipher)
-		VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (prompt_id) DO NOTHING
-	`, userID, strings.TrimSpace(promptID), strings.TrimSpace(templateID), strings.TrimSpace(workflowID), strings.TrimSpace(modelName), seed, payloadCipher)
+		INSERT INTO quick_generation_variants (user_id,prompt_id,template_id,workflow_id,model_name,seed,payload_cipher,job_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,NULLIF($8,0)) ON CONFLICT (prompt_id) DO NOTHING
+	`, userID, strings.TrimSpace(promptID), strings.TrimSpace(templateID), strings.TrimSpace(workflowID), strings.TrimSpace(modelName), seed, payloadCipher, jobID)
 	return err
 }
 

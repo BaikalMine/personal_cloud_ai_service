@@ -79,7 +79,7 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	think := thinkValue == "true"
-	miningLease, miningWarning, err := a.pauseMiningForQuickGeneration(r.Context(), user)
+	miningLease, miningWarning, err := a.pauseMiningForQuickGeneration(r.Context(), user, 0)
 	if err != nil {
 		writeGenerationError(w, http.StatusServiceUnavailable, "не удалось освободить ресурсы для приоритетной работы ассистента: "+err.Error())
 		return

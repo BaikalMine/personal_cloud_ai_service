@@ -369,6 +369,7 @@ func assertGenerationJobLifecycle(t *testing.T, ctx context.Context, db *sql.DB,
 		publicID  = "job_integration_primary_0001"
 		promptID  = "integration-job-prompt-0001"
 	)
+	var committedUsageDate time.Time
 	defer func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -381,31 +382,42 @@ func assertGenerationJobLifecycle(t *testing.T, ctx context.Context, db *sql.DB,
 		if _, err := db.ExecContext(cleanupCtx, `DELETE FROM generation_requests WHERE request_id LIKE 'integration-job-%'`); err != nil {
 			t.Errorf("clean generation job requests: %v", err)
 		}
+		if _, err := db.ExecContext(cleanupCtx, `DELETE FROM quick_generation_mining_leases WHERE id='integration-job-lease'`); err != nil {
+			t.Errorf("clean generation job mining lease: %v", err)
+		}
+		if !committedUsageDate.IsZero() {
+			if _, err := db.ExecContext(cleanupCtx, `UPDATE quick_generation_daily_usage
+				SET used_count=GREATEST(used_count-1,0) WHERE user_id=$1 AND usage_date=$2`, userID, committedUsageDate); err != nil {
+				t.Errorf("clean generation job daily usage: %v", err)
+			}
+			if _, err := db.ExecContext(cleanupCtx, `DELETE FROM quick_generation_daily_usage WHERE user_id=$1 AND used_count=0`, userID); err != nil {
+				t.Errorf("clean zero generation job daily usage: %v", err)
+			}
+			if _, err := db.ExecContext(cleanupCtx, `UPDATE users SET generation_total_used=GREATEST(generation_total_used-1,0) WHERE id=$1`, userID); err != nil {
+				t.Errorf("clean generation job total usage: %v", err)
+			}
+		}
 	}()
 
-	existing, recoveredPromptID, err := repository.ClaimGenerationRequest(ctx, userID, requestID)
-	if err != nil || existing || recoveredPromptID != "" {
-		t.Fatalf("claim generation request: existing=%v prompt=%q err=%v", existing, recoveredPromptID, err)
-	}
 	revisionBefore, err := repository.GenerationJobRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	job, created, err := repository.CreateGenerationJob(ctx, domain.CreateGenerationJobParams{
+	job, claimed, err := repository.ClaimGenerationJob(ctx, domain.CreateGenerationJobParams{
 		PublicID: publicID, UserID: userID, UsernameSnapshot: "admin", RequestID: requestID,
 	})
-	if err != nil || !created || job.State != domain.GenerationJobDraft {
-		t.Fatalf("create generation job: job=%+v created=%v err=%v", job, created, err)
+	if err != nil || !claimed || job.State != domain.GenerationJobDraft {
+		t.Fatalf("claim generation job: job=%+v claimed=%v err=%v", job, claimed, err)
 	}
 	revisionAfterCreate, err := repository.GenerationJobRevision(ctx)
 	if err != nil || revisionAfterCreate <= revisionBefore {
 		t.Fatalf("generation job revision after create=%d before=%d err=%v", revisionAfterCreate, revisionBefore, err)
 	}
-	recovered, created, err := repository.CreateGenerationJob(ctx, domain.CreateGenerationJobParams{
+	recovered, claimed, err := repository.ClaimGenerationJob(ctx, domain.CreateGenerationJobParams{
 		PublicID: "job_integration_duplicate_0001", UserID: userID, UsernameSnapshot: "admin", RequestID: requestID,
 	})
-	if err != nil || created || recovered.ID != job.ID || recovered.PublicID != publicID {
-		t.Fatalf("recover generation job: job=%+v created=%v err=%v", recovered, created, err)
+	if err != nil || claimed || recovered.ID != job.ID || recovered.PublicID != publicID {
+		t.Fatalf("recover generation job: job=%+v claimed=%v err=%v", recovered, claimed, err)
 	}
 	foreignUserID := userID + 1000000
 	if _, _, err := repository.CreateGenerationJob(ctx, domain.CreateGenerationJobParams{
@@ -434,6 +446,51 @@ func assertGenerationJobLifecycle(t *testing.T, ctx context.Context, db *sql.DB,
 	if err != nil || !changed || job.State != domain.GenerationJobWaitingForResources {
 		t.Fatalf("resource transition: job=%+v changed=%v err=%v", job, changed, err)
 	}
+	quotaBefore, err := repository.QuickGenerationQuota(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation, reserved, err := repository.ReserveQuickGenerationForJob(ctx, job.ID, userID)
+	if err != nil || !reserved || reservation.UsageDate.IsZero() {
+		t.Fatalf("reserve generation job quota: reservation=%+v reserved=%v err=%v", reservation, reserved, err)
+	}
+	repeatedReservation, reserved, err := repository.ReserveQuickGenerationForJob(ctx, job.ID, userID)
+	if err != nil || reserved || !repeatedReservation.UsageDate.Equal(reservation.UsageDate) {
+		t.Fatalf("repeat generation job quota: reservation=%+v reserved=%v err=%v", repeatedReservation, reserved, err)
+	}
+	quotaAfterReservation, err := repository.QuickGenerationQuota(ctx, userID)
+	if err != nil || quotaAfterReservation.TotalUsed != quotaBefore.TotalUsed+1 || quotaAfterReservation.DailyUsed != quotaBefore.DailyUsed+1 {
+		t.Fatalf("generation quota after reservation=%+v before=%+v err=%v", quotaAfterReservation, quotaBefore, err)
+	}
+	job, requested, err := repository.RequestGenerationJobCancellation(ctx, job.ID, userID)
+	if err != nil || !requested || job.CancellationRequestedAt == nil {
+		t.Fatalf("request generation job cancellation: job=%+v requested=%v err=%v", job, requested, err)
+	}
+	if _, requested, err := repository.RequestGenerationJobCancellation(ctx, job.ID, userID); err != nil || requested {
+		t.Fatalf("repeat generation job cancellation requested=%v err=%v", requested, err)
+	}
+	job, cleared, err := repository.ClearGenerationJobCancellation(ctx, job.ID, userID, "Ожидаем ресурсы")
+	if err != nil || !cleared || job.CancellationRequestedAt != nil {
+		t.Fatalf("clear generation job cancellation: job=%+v cleared=%v err=%v", job, cleared, err)
+	}
+	var minerID int64
+	var minerScript, minerProcess string
+	if err := db.QueryRowContext(ctx, `SELECT id,script_path,process_name FROM miners WHERE is_default`).Scan(&minerID, &minerScript, &minerProcess); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.CreateQuickGenerationMiningLease(ctx, domain.QuickGenerationMiningLease{
+		ID: "integration-job-lease", GenerationJobID: job.ID, UserID: userID, MinerID: minerID,
+		ScriptPath: minerScript, ProcessName: minerProcess, ResumeMining: false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := repository.QuickGenerationMiningLeaseByJobID(ctx, job.ID)
+	if err != nil || lease.GenerationJobID != job.ID || lease.PromptID != "" {
+		t.Fatalf("generation job mining lease=%+v err=%v", lease, err)
+	}
+	if attached, err := repository.AttachQuickGenerationMiningLease(ctx, lease.ID, promptID); err != nil || !attached {
+		t.Fatalf("attach generation job mining lease=%v err=%v", attached, err)
+	}
 	job, err = repository.BindGenerationJobPrompt(ctx, job.ID, promptID)
 	if err != nil || job.PromptID != promptID {
 		t.Fatalf("bind generation job prompt: job=%+v err=%v", job, err)
@@ -448,6 +505,17 @@ func assertGenerationJobLifecycle(t *testing.T, ctx context.Context, db *sql.DB,
 	revisionAfterRepeatedBind, err := repository.GenerationJobRevision(ctx)
 	if err != nil || revisionAfterRepeatedBind != revisionAfterBind {
 		t.Fatalf("idempotent prompt bind revision=%d want=%d err=%v", revisionAfterRepeatedBind, revisionAfterBind, err)
+	}
+	committed, err := repository.CommitQuickGenerationForJob(ctx, job.ID)
+	if err != nil || !committed {
+		t.Fatalf("commit generation job quota=%v err=%v", committed, err)
+	}
+	committedUsageDate = reservation.UsageDate
+	if committed, err := repository.CommitQuickGenerationForJob(ctx, job.ID); err != nil || committed {
+		t.Fatalf("repeat generation job quota commit=%v err=%v", committed, err)
+	}
+	if releasedQuota, err := repository.ReleaseQuickGenerationForJob(ctx, job.ID); err != nil || releasedQuota {
+		t.Fatalf("committed generation job quota released=%v err=%v", releasedQuota, err)
 	}
 	var linkedJobID int64
 	if err := db.QueryRowContext(ctx, `SELECT job_id FROM generation_requests WHERE user_id=$1 AND request_id=$2`, userID, requestID).Scan(&linkedJobID); err != nil || linkedJobID != job.ID {
@@ -469,6 +537,14 @@ func assertGenerationJobLifecycle(t *testing.T, ctx context.Context, db *sql.DB,
 	}
 	if err := repository.LinkGenerationJobContentEvent(ctx, job.ID, userID, promptID); err != nil {
 		t.Fatal(err)
+	}
+	duplicateEventID, err := repository.InsertContentEvent(ctx, domain.ContentEventRecord{
+		UserID: userID, GenerationJobID: &job.ID, Service: "comfyui", Kind: "comfyui_prompt", ExternalID: promptID,
+		Model: "MiniMax H3", GenerationState: "queued", PromptCipher: []byte{5}, ResponseCipher: []byte{6},
+		MetadataCipher: []byte{7}, ExpiresAt: time.Now().Add(24 * time.Hour),
+	})
+	if err != nil || duplicateEventID != eventID {
+		t.Fatalf("idempotent generation content projection id=%d want=%d err=%v", duplicateEventID, eventID, err)
 	}
 	var variantJobID, contentJobID int64
 	if err := db.QueryRowContext(ctx, `SELECT job_id FROM quick_generation_variants WHERE prompt_id=$1`, promptID).Scan(&variantJobID); err != nil {
@@ -496,6 +572,15 @@ func assertGenerationJobLifecycle(t *testing.T, ctx context.Context, db *sql.DB,
 		State: domain.GenerationJobCompleted, Message: "Готово",
 	}); !errors.Is(err, store.ErrGenerationJobStateConflict) {
 		t.Fatalf("completion before resource release error=%v", err)
+	}
+	if _, _, err := repository.RequestGenerationJobCancellation(ctx, job.ID, userID); !errors.Is(err, store.ErrGenerationJobStateConflict) {
+		t.Fatalf("terminal generation job cancellation error=%v", err)
+	}
+	if _, err := repository.MarkGenerationJobResourcesReleased(ctx, job.ID); !errors.Is(err, store.ErrGenerationJobStateConflict) {
+		t.Fatalf("resource release with active mining lease error=%v", err)
+	}
+	if _, _, err := repository.DeleteQuickGenerationMiningLease(ctx, "integration-job-lease"); err != nil {
+		t.Fatalf("delete generation job mining lease: %v", err)
 	}
 	revisionBeforeRelease, err := repository.GenerationJobRevision(ctx)
 	if err != nil {
@@ -561,6 +646,21 @@ func assertGenerationJobLifecycle(t *testing.T, ctx context.Context, db *sql.DB,
 	})
 	if err != nil || !created || retry.ParentJobID == nil || *retry.ParentJobID != job.ID {
 		t.Fatalf("create retry generation job: job=%+v created=%v err=%v", retry, created, err)
+	}
+	for _, transition := range []domain.GenerationJobTransitionParams{
+		{State: domain.GenerationJobPreparing, Message: "Проверяем повтор"},
+		{State: domain.GenerationJobWaitingForResources, Message: "Ожидаем ресурсы"},
+	} {
+		retry, changed, err = repository.TransitionGenerationJob(ctx, retry.ID, transition)
+		if err != nil || !changed {
+			t.Fatalf("prepare retry generation job: job=%+v changed=%v err=%v", retry, changed, err)
+		}
+	}
+	if _, reserved, err := repository.ReserveQuickGenerationForJob(ctx, retry.ID, userID); err != nil || !reserved {
+		t.Fatalf("reserve retry generation quota=%v err=%v", reserved, err)
+	}
+	if releasedQuota, err := repository.ReleaseQuickGenerationForJob(ctx, retry.ID); err != nil || !releasedQuota {
+		t.Fatalf("release uncommitted retry quota=%v err=%v", releasedQuota, err)
 	}
 	if _, err := repository.MarkGenerationJobResourcesReleased(ctx, retry.ID); err != nil {
 		t.Fatal(err)

@@ -72,8 +72,8 @@ func TestDurableGenerationJobsMigrationBackfill(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM generation_job_transitions`).Scan(&transitionCount); err != nil || transitionCount != jobCount {
 		t.Fatalf("backfilled generation job transitions=%d want=%d err=%v", transitionCount, jobCount, err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version=40`).Scan(&migrationCount); err != nil || migrationCount != 1 {
-		t.Fatalf("migration 40 records=%d want=1 err=%v", migrationCount, err)
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version IN (40,41)`).Scan(&migrationCount); err != nil || migrationCount != 2 {
+		t.Fatalf("generation job migration records=%d want=2 err=%v", migrationCount, err)
 	}
 
 	var state, requestID string

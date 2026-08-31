@@ -253,7 +253,7 @@ func (a *App) handleGenerationVariants(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"variants": items})
 }
 
-func (a *App) rememberGenerationVariant(ctx context.Context, userID int64, promptID string, input generationForm, values url.Values) {
+func (a *App) rememberGenerationVariant(ctx context.Context, jobID, userID int64, promptID string, input generationForm, values url.Values) {
 	if a.contentCipher == nil || a.store == nil {
 		return
 	}
@@ -267,7 +267,12 @@ func (a *App) rememberGenerationVariant(ctx context.Context, userID int64, promp
 		logGenerationCompanionError("encrypt generation variant", err)
 		return
 	}
-	if err := a.store.InsertGenerationVariant(ctx, userID, promptID, input.TemplateID, input.PresetID, input.ModelName, input.Seed, cipher); err != nil {
+	if jobID > 0 {
+		err = a.store.InsertGenerationVariantForJob(ctx, jobID, userID, promptID, input.TemplateID, input.PresetID, input.ModelName, input.Seed, cipher)
+	} else {
+		err = a.store.InsertGenerationVariant(ctx, userID, promptID, input.TemplateID, input.PresetID, input.ModelName, input.Seed, cipher)
+	}
+	if err != nil {
 		logGenerationCompanionError("store generation variant", err)
 	}
 }
@@ -377,7 +382,11 @@ func allowedGenerationRecipeField(name string) bool {
 		return true
 	}
 	switch name {
-	case "template_id", "generation_workflow", "model", "positive_prompt", "negative_prompt", "width", "height", "steps", "cfg", "denoise", "sampler", "scheduler", "seed", "video_mode", "video_resolution", "video_aspect", "video_use_source_aspect", "video_swap_dimensions", "video_resize_method", "video_proportion", "video_crop_location", "video_pad_color", "video_quality", "video_duration_seconds", "video_reference_size", "video_reference_start", "video_reference_duration", "video_reference_audio", "video_filename", "video_steps", "aspect_ratio", "output_megapixels", "dimension_multiple", "max_longest_side", "base_megapixels", "loras_configured", "upscale_steps", "upscale_denoise", "upscale_auto_denoise", "upscale_sampler", "detail_steps", "detail_denoise", "detail_cfg", "detail_sampler", "detail_scheduler", "color_transfer", "color_method", "color_mode", "color_strength", "source_megapixels", "preserve_original_size", "edit_use_custom_size", "edit_aspect_preset", "edit_swap_dimensions", "edit_resize_method", "edit_proportion", "edit_crop_location", "edit_pad_color", "reference_boost", "grounding_pixels", "upscale_factor", "flux_guidance", "flux_detailer_steps", "flux_active_scale", "flux_token_whiten", "flux_norm_equalize", "flux_upscale_mode", "upscale_cfg", "upscale_scheduler", "post_denoise_blur", "post_denoise_edge", "post_denoise_radius", "post_denoise_strength", "skin_preset", "skin_strength", "skin_coolness", "skin_brightness", "skin_rosy", "skin_evenness", "skin_shadow_lift", "skin_smooth", "skin_texture_preserve", "skin_saturation", "skin_highlight_protect", "skin_mask_sensitivity", "skin_mask_feather", "adjust_hue", "adjust_saturation", "adjust_brightness", "adjust_contrast", "adjust_sharpness", "lut_name", "lut_strength", "lut_enabled":
+	case "template_id", "generation_workflow", "model", "positive_prompt", "negative_prompt", "width", "height", "steps", "cfg", "denoise", "sampler", "scheduler", "seed",
+		"video_mode", "video_resolution", "video_aspect", "video_use_source_aspect", "video_swap_dimensions", "video_resize_method", "video_proportion", "video_crop_location", "video_pad_color", "video_quality", "video_duration_seconds", "video_reference_size", "video_reference_start", "video_reference_duration", "video_reference_audio", "video_filename", "video_steps", "video_turbo", "video_sampler", "video_scheduler", "video_shift_video", "video_shift_audio",
+		"video_sage_attention", "video_clear_vram", "video_memory_optimize", "video_memory_mlp", "video_memory_chunk_rows", "video_memory_precision", "video_memory_qkv", "video_memory_attention", "video_aimdo_enabled", "video_aimdo_residency", "video_sparse_attention", "video_sparse_budget", "video_sparse_early_schedule", "video_sparse_early_steps", "video_sparse_early_kv", "video_sparse_late_steps", "video_sparse_late_kv", "video_sparse_backend",
+		"video_rife_enabled", "video_rife_checkpoint", "video_rife_multiplier", "video_rife_fast_mode", "video_rife_ensemble", "video_rife_dtype", "video_rife_compile", "video_rife_batch_size", "video_rtx_enabled", "video_rtx_scale", "video_rtx_quality", "video_color_match", "video_color_method", "video_color_strength", "video_sharpen_enabled", "video_sharpen_method", "video_sharpen_strength", "video_sharpen_radius", "video_sharpen_threshold", "video_sharpen_iterations", "video_audio_start", "video_output_crf",
+		"aspect_ratio", "output_megapixels", "dimension_multiple", "max_longest_side", "base_megapixels", "loras_configured", "upscale_steps", "upscale_denoise", "upscale_auto_denoise", "upscale_sampler", "detail_steps", "detail_denoise", "detail_cfg", "detail_sampler", "detail_scheduler", "color_transfer", "color_method", "color_mode", "color_strength", "source_megapixels", "preserve_original_size", "edit_use_custom_size", "edit_aspect_preset", "edit_swap_dimensions", "edit_resize_method", "edit_proportion", "edit_crop_location", "edit_pad_color", "reference_boost", "grounding_pixels", "upscale_factor", "flux_guidance", "flux_detailer_steps", "flux_active_scale", "flux_token_whiten", "flux_norm_equalize", "flux_upscale_mode", "upscale_cfg", "upscale_scheduler", "post_denoise_blur", "post_denoise_edge", "post_denoise_radius", "post_denoise_strength", "skin_preset", "skin_strength", "skin_coolness", "skin_brightness", "skin_rosy", "skin_evenness", "skin_shadow_lift", "skin_smooth", "skin_texture_preserve", "skin_saturation", "skin_highlight_protect", "skin_mask_sensitivity", "skin_mask_feather", "adjust_hue", "adjust_saturation", "adjust_brightness", "adjust_contrast", "adjust_sharpness", "lut_name", "lut_strength", "lut_enabled":
 		return true
 	default:
 		return false

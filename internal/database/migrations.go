@@ -844,6 +844,28 @@ var migrationCatalog = []migration{
 			`INSERT INTO generation_job_revision(id,revision) VALUES (1,1) ON CONFLICT (id) DO NOTHING`,
 		},
 	},
+	{
+		version: 41,
+		name:    "generation_job_execution_resources",
+		statements: []string{
+			`ALTER TABLE generation_jobs ADD COLUMN IF NOT EXISTS quota_reserved_on DATE NULL`,
+			`ALTER TABLE generation_jobs ADD COLUMN IF NOT EXISTS quota_committed_at TIMESTAMPTZ NULL`,
+			`ALTER TABLE generation_jobs ADD COLUMN IF NOT EXISTS cancellation_requested_at TIMESTAMPTZ NULL`,
+			`ALTER TABLE generation_jobs ADD COLUMN IF NOT EXISTS cancellation_confirmed_at TIMESTAMPTZ NULL`,
+			`WITH duplicates AS (
+				SELECT id,row_number() OVER (PARTITION BY generation_job_id ORDER BY id) AS position
+				FROM content_events
+				WHERE generation_job_id IS NOT NULL AND service='comfyui' AND kind='comfyui_prompt'
+			 )
+			 UPDATE content_events e SET generation_job_id=NULL
+			 FROM duplicates d WHERE e.id=d.id AND d.position>1`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS content_events_generation_job_prompt_idx
+			 ON content_events(generation_job_id)
+			 WHERE generation_job_id IS NOT NULL AND service='comfyui' AND kind='comfyui_prompt'`,
+			`CREATE INDEX IF NOT EXISTS generation_jobs_cancellation_idx ON generation_jobs(cancellation_requested_at,id)
+			 WHERE cancellation_requested_at IS NOT NULL AND state NOT IN ('completed','failed','cancelled','expired')`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
