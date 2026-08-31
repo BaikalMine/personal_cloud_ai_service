@@ -2179,6 +2179,37 @@
     return new URLSearchParams(body);
   };
 
+  const preflightField = (name) => {
+    if (!name) return null;
+    const field = form.elements.namedItem(name);
+    if (field instanceof HTMLElement) return field;
+    if (field && typeof field.length === "number") {
+      return [...field].find((candidate) => candidate instanceof HTMLElement) || null;
+    }
+    return null;
+  };
+
+  const revealPreflightField = (name) => {
+    const field = preflightField(name);
+    if (!field) return false;
+    const panel = field.closest("[data-step]");
+    const step = Number(panel?.dataset.step || 0);
+    if (step > 0 && step !== currentStep) showStep(step);
+    for (let details = field.closest("details"); details; details = details.parentElement?.closest("details")) {
+      details.open = true;
+    }
+    const target = field.closest("label, .video-enhancement, .workflow-settings-section") || field;
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    window.setTimeout(() => {
+      target.classList.remove("preflight-field-target");
+      target.scrollIntoView({ block: "center", behavior });
+      target.classList.add("preflight-field-target");
+      if (!field.disabled) field.focus({ preventScroll: true });
+      window.setTimeout(() => target.classList.remove("preflight-field-target"), 1800);
+    }, 120);
+    return true;
+  };
+
   const renderPreflight = (payload) => {
     if (!preflight || !preflightChecks) return;
     const checks = Array.isArray(payload?.checks) ? payload.checks : [];
@@ -2193,6 +2224,15 @@
       const message = document.createElement("span");
       message.textContent = check.message || "";
       item.append(label, message);
+      if (preflightField(check.field)) {
+        const action = document.createElement("button");
+        action.type = "button";
+        action.className = "generation-preflight-jump";
+        action.textContent = "Открыть настройку";
+        action.setAttribute("aria-label", `Открыть настройку: ${check.label || check.field}`);
+        action.addEventListener("click", () => revealPreflightField(check.field));
+        item.append(action);
+      }
       return item;
     }));
     if (!payload?.ok && payload?.recovery_profile) {

@@ -381,6 +381,7 @@ type generationPreparation struct {
 	Definition workflowDefinition
 	Model      generationModel
 	Prompt     map[string]any
+	ObjectInfo comfyObjectInfoSnapshot
 }
 
 // prepareGeneration is deliberately shared by the preflight endpoint and the
@@ -542,7 +543,10 @@ func (a *App) prepareGeneration(ctx context.Context, user *User, input generatio
 	if err != nil {
 		return generationPreparation{}, err
 	}
-	return generationPreparation{Input: input, Definition: definition, Model: model, Prompt: prompt}, nil
+	if issues := validateComfyPrompt(catalog.ObjectInfo.Schema, prompt); len(issues) > 0 {
+		return generationPreparation{}, &workflowCompatibilityError{Issues: issues}
+	}
+	return generationPreparation{Input: input, Definition: definition, Model: model, Prompt: prompt, ObjectInfo: catalog.ObjectInfo}, nil
 }
 
 // requiresImageEditingSupport distinguishes an image-edit pipeline from a

@@ -70,6 +70,8 @@ type App struct {
 	websocketMu            sync.Mutex
 	dependencyOnce         sync.Once
 	dependencyHealth       *dependencyMonitor
+	objectInfoOnce         sync.Once
+	objectInfoCache        *comfyObjectInfoCache
 	comfyQueueWasBusy      bool
 	generationJobs         map[string]*generationJob
 	websocketConnections   map[*trackedWebSocket]struct{}

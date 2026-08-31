@@ -74,6 +74,8 @@ func (a *App) handleAdminRoutes(w http.ResponseWriter, r *http.Request) {
 		a.handleAdminMining(w, r)
 	case path == "updates":
 		a.handleAdminUpdates(w, r)
+	case path == "workflows":
+		a.handleAdminWorkflows(w, r)
 	case strings.HasPrefix(path, "content/media/"):
 		a.handleAdminContentMedia(w, r, strings.TrimPrefix(path, "content/media/"))
 	case path == "content/events":
@@ -191,13 +193,15 @@ func (a *App) handleAdminUpdates(w http.ResponseWriter, r *http.Request) {
 		if !validUpdateRequest(request) {
 			message = "Выберите хотя бы один компонент для проверки или обновления."
 		} else if action == "install" {
-			status, _ = a.updates.Install(r.Context(), request)
+			var installErr error
+			status, installErr = a.updates.Install(r.Context(), request)
 			message = status.Message
 			actor := a.currentUser(r)
 			a.audit(r.Context(), &actor.ID, "updates_install_requested", "system", nil, a.clientIP(r), r.UserAgent(), map[string]any{"components": request.Components})
 			if message == "" {
 				message = "Команда обновления принята. Если обновлялся сам Gateway, страница может кратко перезагрузиться."
 			}
+			message = a.appendComfyUpdateCompatibilitySummary(r.Context(), message, request, installErr)
 		} else {
 			status, _ = a.updates.Check(r.Context(), request)
 			message = status.Message
@@ -220,6 +224,15 @@ func (a *App) handleAdminUpdates(w http.ResponseWriter, r *http.Request) {
 	a.render(w, r, "admin_updates", map[string]any{
 		"Title": "Обновления", "Updates": status, "Overview": overview, "Message": message,
 	})
+}
+
+func (a *App) appendComfyUpdateCompatibilitySummary(ctx context.Context, message string, request updates.Request, installErr error) string {
+	message = strings.TrimSpace(message)
+	if installErr != nil || !hasString(request.Components, updates.ComponentComfyUI) {
+		return message
+	}
+	report := a.currentWorkflowCompatibility(ctx, true)
+	return strings.TrimSpace(message + " " + report.updateSummary())
 }
 
 // updateRequestFromForm keeps a direct card action isolated from the batch checkboxes.

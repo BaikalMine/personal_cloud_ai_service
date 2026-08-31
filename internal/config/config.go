@@ -22,6 +22,8 @@ const (
 	defaultDependencyCheck     = 10 * time.Second
 	defaultDependencyStale     = 45 * time.Second
 	defaultDependencyOffline   = 3 * time.Minute
+	defaultComfyObjectInfoTTL  = 30 * time.Second
+	defaultComfyObjectInfoMax  = 24 * time.Hour
 )
 
 // RetentionPolicy is the single source of truth for data lifetime. Generation
@@ -115,6 +117,8 @@ type Config struct {
 	DependencyCheckInterval   time.Duration
 	DependencyStaleAfter      time.Duration
 	DependencyOfflineAfter    time.Duration
+	ComfyObjectInfoCacheTTL   time.Duration
+	ComfyObjectInfoMaxStale   time.Duration
 	Retention                 RetentionPolicy
 }
 
@@ -220,6 +224,20 @@ func Load() (Config, error) {
 	if dependencyOfflineAfter <= dependencyStaleAfter || dependencyOfflineAfter > 2*time.Hour {
 		return Config{}, fmt.Errorf("DEPENDENCY_OFFLINE_AFTER must be greater than DEPENDENCY_STALE_AFTER and no more than 2h")
 	}
+	comfyObjectInfoCacheTTL, err := durationEnv("COMFY_OBJECT_INFO_CACHE_TTL", defaultComfyObjectInfoTTL)
+	if err != nil {
+		return Config{}, err
+	}
+	if comfyObjectInfoCacheTTL < 5*time.Second || comfyObjectInfoCacheTTL > 10*time.Minute {
+		return Config{}, fmt.Errorf("COMFY_OBJECT_INFO_CACHE_TTL must be between 5s and 10m")
+	}
+	comfyObjectInfoMaxStale, err := durationEnv("COMFY_OBJECT_INFO_MAX_STALE", defaultComfyObjectInfoMax)
+	if err != nil {
+		return Config{}, err
+	}
+	if comfyObjectInfoMaxStale < comfyObjectInfoCacheTTL || comfyObjectInfoMaxStale > 7*24*time.Hour {
+		return Config{}, fmt.Errorf("COMFY_OBJECT_INFO_MAX_STALE must be at least COMFY_OBJECT_INFO_CACHE_TTL and no more than 7d")
+	}
 	retention, err := loadRetentionPolicy()
 	if err != nil {
 		return Config{}, err
@@ -305,6 +323,8 @@ func Load() (Config, error) {
 		DependencyCheckInterval:   dependencyCheckInterval,
 		DependencyStaleAfter:      dependencyStaleAfter,
 		DependencyOfflineAfter:    dependencyOfflineAfter,
+		ComfyObjectInfoCacheTTL:   comfyObjectInfoCacheTTL,
+		ComfyObjectInfoMaxStale:   comfyObjectInfoMaxStale,
 		Retention:                 retention,
 	}, nil
 }

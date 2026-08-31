@@ -72,14 +72,28 @@ func (a *App) handleGenerationPreflight(w http.ResponseWriter, r *http.Request) 
 	}
 	preparation, err := a.prepareGeneration(r.Context(), a.currentUser(r), input, false)
 	if err != nil {
+		var compatibilityErr *workflowCompatibilityError
+		if errors.As(err, &compatibilityErr) {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "checks": compatibilityErr.Issues})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "checks": []map[string]string{{"level": "error", "label": "Готовность workflow", "message": err.Error()}}, "recovery_profile": "balanced", "recovery_label": "Вернуть безопасный профиль"})
 		return
 	}
 	checks := []map[string]string{
 		{"level": "ok", "label": "Модель", "message": preparation.Model.DisplayName + " доступна"},
-		{"level": "ok", "label": "Workflow и LoRA", "message": "узлы, зависимости и выбранные адаптеры проверены"},
-		{"level": "ok", "label": "Параметры", "message": "Gateway собрал и проверил граф выбранной схемы"},
+		{"level": "ok", "label": "Workflow и LoRA", "message": fmt.Sprintf("проверено %d узлов итогового графа, их входы и соединения", len(preparation.Prompt))},
+		{"level": "ok", "label": "Параметры", "message": "обязательные поля, типы, диапазоны и доступные значения сверены со схемой ComfyUI"},
 	}
+	schemaCheck := map[string]string{"level": "ok", "label": "Каталог нод", "message": preparation.ObjectInfo.sourceLabel() + "; версия схемы " + shortFingerprint(preparation.ObjectInfo.Fingerprint)}
+	if preparation.ObjectInfo.Source == comfyObjectInfoLastKnownGood {
+		schemaCheck["level"] = "warning"
+		schemaCheck["message"] = fmt.Sprintf("используется последний рабочий каталог от %s; версия %s", preparation.ObjectInfo.FetchedAt.Local().Format("02.01.2006 15:04"), shortFingerprint(preparation.ObjectInfo.Fingerprint))
+		if preparation.ObjectInfo.LastError != "" {
+			schemaCheck["message"] += ". Новая проверка недоступна: " + preparation.ObjectInfo.LastError
+		}
+	}
+	checks = append(checks, schemaCheck)
 	if input.Seed < 0 {
 		checks = append(checks, map[string]string{"level": "info", "label": "Seed", "message": "будет выбран новый случайный seed при запуске"})
 	} else {

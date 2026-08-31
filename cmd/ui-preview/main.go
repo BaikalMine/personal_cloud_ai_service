@@ -249,6 +249,23 @@ func main() {
 		"Overview": gateway.UpdateOverview{Available: 1, Current: 2},
 		"Message":  "",
 	}))
+	mux.HandleFunc("/preview/workflows", render("admin_workflows", "Совместимость workflow", map[string]any{
+		"Report": map[string]any{
+			"Snapshot":    map[string]any{"FetchedAt": now.Add(-2 * time.Minute)},
+			"SourceLabel": "свежий каталог ComfyUI",
+			"Fingerprint": "c42b3f9a7d81",
+			"NodeCount":   418,
+			"Compatible":  7,
+			"Failed":      1,
+			"Unavailable": 1,
+			"Results": []map[string]any{
+				{"Status": "error", "Scenario": "Полная обработка видео", "Family": "MiniMax H3 v4", "Description": "RIFE, RTX, ColorMatch и Sharpen", "Model": "MiniMax H3 FL2VA INT8 ConvRot", "NodeCount": 31, "Issues": []map[string]any{{"Label": "Финальный апскейл", "Message": "У ноды отсутствует обязательный параметр resize_type.", "ClassType": "RTXVideoSuperResolution", "InputName": "resize_type"}}},
+				{"Status": "unavailable", "Scenario": "Готовность модели", "Family": "Flux2", "Description": "Модель отсутствует в установленном ComfyUI", "Model": "Flux 2 Klein 9B", "NodeCount": 0, "Issues": []map[string]any{{"Label": "Зависимости модели", "Message": "Checkpoint не найден в каталоге diffusion_models."}}},
+				{"Status": "ok", "Scenario": "Первый и последний кадр", "Family": "MiniMax H3 v4", "Description": "FL2VA с двумя точными кадрами", "Model": "MiniMax H3 FL2VA INT8 ConvRot", "NodeCount": 24, "Issues": []map[string]any{}},
+			},
+		},
+		"Message": "",
+	}))
 	users := []domain.UserRow{
 		{ID: 1, Username: "admin", Email: "admin@example.local", Role: "admin", CanUseComfyUI: true, CanUseOpenWebUI: true, Requests: 96, LastLoginAt: sql.NullTime{Time: now.Add(-time.Hour), Valid: true}},
 		{ID: 2, Username: "rayka", Email: "rayka@example.local", Role: "user", CanUseComfyUI: true, CanUseOpenWebUI: true, Requests: 302, LastLoginAt: sql.NullTime{Time: now.Add(-8 * time.Minute), Valid: true}},

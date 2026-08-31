@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"io"
-	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -56,6 +54,7 @@ type generationModelCatalog struct {
 	FluxLoraGroups    []generationLoraGroup
 	MiniMaxLoraGroups []generationLoraGroup
 	byID              map[string]generationModel
+	ObjectInfo        comfyObjectInfoSnapshot
 }
 
 type generationLora struct {
@@ -99,48 +98,30 @@ type generationPreset struct {
 type comfyNodeInfo struct {
 	Input struct {
 		Required map[string]json.RawMessage `json:"required"`
+		Optional map[string]json.RawMessage `json:"optional"`
+		Hidden   map[string]json.RawMessage `json:"hidden"`
 	} `json:"input"`
+	Output       []json.RawMessage `json:"output"`
+	DisplayName  string            `json:"display_name"`
+	PythonModule string            `json:"python_module"`
+	Category     string            `json:"category"`
 }
 
 func (a *App) comfyGenerationModels(ctx context.Context) generationModelCatalog {
 	catalog := generationModelCatalog{byID: make(map[string]generationModel)}
-	if a.cfg.ComfyUIUpstream == nil {
-		return catalog
-	}
-	endpoint := *a.cfg.ComfyUIUpstream
-	endpoint.Path = singleJoiningSlash(endpoint.Path, "/object_info")
-	endpoint.RawQuery = ""
-	requestCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, endpoint.String(), http.NoBody)
+	snapshot, err := a.comfyObjectInfo(ctx, false)
 	if err != nil {
 		return catalog
 	}
-	if a.cfg.ComfyUIUpstreamAuthHeader != "" {
-		request.Header.Set("Authorization", a.cfg.ComfyUIUpstreamAuthHeader)
-	}
-	response, err := (&http.Client{Timeout: 3 * time.Second, CheckRedirect: rejectUpstreamRedirect}).Do(request)
-	if err != nil {
-		return catalog
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return catalog
-	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, maxComfyObjectInfo+1))
-	if err != nil || len(body) > maxComfyObjectInfo {
-		return catalog
-	}
-	var info map[string]comfyNodeInfo
-	if json.Unmarshal(body, &info) != nil {
-		return catalog
-	}
-	catalog.Online = true
-	return buildGenerationModelCatalog(info)
+	catalog = buildGenerationModelCatalog(snapshot.Info)
+	catalog.ObjectInfo = snapshot
+	catalog.Online = snapshot.Source != comfyObjectInfoLastKnownGood
+	return catalog
 }
 
 func buildGenerationModelCatalog(info map[string]comfyNodeInfo) generationModelCatalog {
 	catalog := generationModelCatalog{Online: true, byID: make(map[string]generationModel)}
+	catalog.ObjectInfo = comfyObjectInfoSnapshot{Info: info, Schema: buildComfySchemaCatalog(info, time.Time{}, ""), Source: comfyObjectInfoLive}
 	checkpoints := comfyChoiceStrings(info, "CheckpointLoaderSimple", "ckpt_name")
 	diffusion := comfyChoiceStrings(info, "UNETLoader", "unet_name")
 	encoders := comfyChoiceStrings(info, "CLIPLoader", "clip_name")

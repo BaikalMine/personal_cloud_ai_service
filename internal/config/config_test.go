@@ -20,6 +20,8 @@ func TestLoadValidConfiguration(t *testing.T) {
 	t.Setenv("DEPENDENCY_CHECK_INTERVAL", "12s")
 	t.Setenv("DEPENDENCY_STALE_AFTER", "36s")
 	t.Setenv("DEPENDENCY_OFFLINE_AFTER", "4m")
+	t.Setenv("COMFY_OBJECT_INFO_CACHE_TTL", "45s")
+	t.Setenv("COMFY_OBJECT_INFO_MAX_STALE", "12h")
 	t.Setenv("GENERATION_RETENTION", "30h")
 	t.Setenv("AI_CONTENT_RETENTION", "240h")
 	t.Setenv("COMFY_INPUT_RETENTION", "96h")
@@ -50,6 +52,9 @@ func TestLoadValidConfiguration(t *testing.T) {
 	}
 	if cfg.DependencyCheckInterval != 12*time.Second || cfg.DependencyStaleAfter != 36*time.Second || cfg.DependencyOfflineAfter != 4*time.Minute {
 		t.Fatalf("unexpected dependency health policy: %+v", cfg)
+	}
+	if cfg.ComfyObjectInfoCacheTTL != 45*time.Second || cfg.ComfyObjectInfoMaxStale != 12*time.Hour {
+		t.Fatalf("unexpected ComfyUI schema cache policy: %+v", cfg)
 	}
 	if cfg.Retention.GenerationHistory != 30*time.Hour || cfg.Retention.GenerationMedia != 30*time.Hour || cfg.Retention.AIContent != 240*time.Hour || cfg.Retention.ComfyInputs != 96*time.Hour || cfg.Retention.HostMetrics != 240*time.Hour || cfg.Retention.AuditLog != 2400*time.Hour {
 		t.Fatalf("unexpected retention policy: %+v", cfg.Retention)
@@ -120,5 +125,16 @@ func TestRejectsInvalidDependencyHealthIntervals(t *testing.T) {
 	t.Setenv("DEPENDENCY_STALE_AFTER", "30s")
 	if _, err := Load(); err == nil {
 		t.Fatal("expected stale interval validation error")
+	}
+}
+
+func TestRejectsObjectInfoMaxStaleShorterThanCacheTTL(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://gateway:test@postgres:5432/gateway?sslmode=disable")
+	t.Setenv("ADMIN_PASSWORD", "strong-admin-password")
+	t.Setenv("SESSION_SECRET", "01234567890123456789012345678901")
+	t.Setenv("COMFY_OBJECT_INFO_CACHE_TTL", "2m")
+	t.Setenv("COMFY_OBJECT_INFO_MAX_STALE", "1m")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected object-info cache ordering validation error")
 	}
 }

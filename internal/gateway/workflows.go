@@ -284,6 +284,7 @@ func (definition workflowDefinition) buildPrompt(input generationForm) (map[stri
 	for nodeID, node := range cloned {
 		cloned[nodeID] = replaceWorkflowValues(node, values).(map[string]any)
 	}
+	adaptWorkflowModelLoaders(definition.ID, cloned, input)
 	pruneOptionalImageNodes(definition.ID, cloned, input)
 	applyWorkflowLoras(definition.ID, cloned, input)
 	applyWorkflowUpscale(definition.ID, cloned, input)
@@ -292,6 +293,15 @@ func (definition workflowDefinition) buildPrompt(input generationForm) (map[stri
 		prompt[nodeID] = node
 	}
 	return prompt, nil
+}
+
+func adaptWorkflowModelLoaders(workflowID string, nodes map[string]map[string]any, input generationForm) {
+	if workflowID != "text-to-image-flux2" || !strings.HasSuffix(strings.ToLower(input.TextEncoder), ".gguf") {
+		return
+	}
+	if loader, ok := nodes["2"]; ok {
+		loader["class_type"] = "ClipLoaderGGUF"
+	}
 }
 
 func applyWorkflowLoras(workflowID string, nodes map[string]map[string]any, input generationForm) {

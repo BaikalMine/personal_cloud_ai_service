@@ -1,0 +1,73 @@
+{{define "admin_workflows"}}
+{{template "head" .}}
+{{template "admin_nav" .}}
+<main class="page compatibility-page" id="main-content">
+  <header class="compatibility-page-head">
+    <div>
+      <p class="eyebrow">Быстрая генерация</p>
+      <h1>Совместимость workflow</h1>
+      <p>Итоговые графы Gateway сверяются с установленными нодами, входами и типами ComfyUI до запуска пользовательской задачи.</p>
+    </div>
+    <form method="post" class="compatibility-refresh-form">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <button type="submit">Обновить каталог и проверить</button>
+    </form>
+  </header>
+
+  {{if .Message}}<p class="alert">{{.Message}}</p>{{end}}
+  {{if .Report.Error}}
+  <section class="compatibility-source is-error" aria-live="polite">
+    <div><span>Каталог ComfyUI</span><strong>Недоступен</strong></div>
+    <p>{{.Report.Error}}</p>
+  </section>
+  {{else}}
+  <section class="compatibility-source {{if .Report.Stale}}is-stale{{end}}" aria-label="Состояние каталога ComfyUI">
+    <div><span>Источник</span><strong>{{.Report.SourceLabel}}</strong></div>
+    <div><span>Получен</span><strong>{{formatTime .Report.Snapshot.FetchedAt}}</strong></div>
+    <div><span>Ноды</span><strong>{{.Report.NodeCount}}</strong></div>
+    <div><span>Версия схемы</span><code>{{.Report.Fingerprint}}</code></div>
+    {{if .Report.Stale}}<p>ComfyUI не отдал свежую схему. Результаты ниже рассчитаны по последнему рабочему каталогу и не считаются окончательной проверкой после обновления.</p>{{end}}
+  </section>
+
+  <section class="compatibility-workspace">
+    <header class="compatibility-summary">
+      <div><span>Совместимы</span><strong>{{.Report.Compatible}}</strong></div>
+      <div class="has-error"><span>Ошибки</span><strong>{{.Report.Failed}}</strong></div>
+      <div class="has-warning"><span>Недоступны</span><strong>{{.Report.Unavailable}}</strong></div>
+      <nav aria-label="Связанные действия"><a href="/admin/updates">Обновления</a><a href="{{.PublicBaseURL}}/generate">Открыть генерацию</a></nav>
+    </header>
+
+    <div class="table-scroll compatibility-table-wrap">
+      <table class="compatibility-table">
+        <thead><tr><th>Состояние</th><th>Сценарий</th><th>Модель</th><th>Граф</th><th>Диагностика</th></tr></thead>
+        <tbody>
+        {{range .Report.Results}}
+          <tr class="compatibility-row is-{{.Status}}">
+            <td data-label="Состояние"><span class="compatibility-state is-{{.Status}}">{{if eq .Status "ok"}}Совместим{{else if eq .Status "unavailable"}}Недоступен{{else}}Ошибка{{end}}</span></td>
+            <td data-label="Сценарий"><strong>{{.Scenario}}</strong><small>{{.Family}} · {{.Description}}</small></td>
+            <td data-label="Модель"><span class="compatibility-model">{{.Model}}</span></td>
+            <td data-label="Граф">{{if gt .NodeCount 0}}<strong>{{.NodeCount}}</strong><small>узлов проверено</small>{{else}}<span class="muted">не собран</span>{{end}}</td>
+            <td data-label="Диагностика">
+              {{if .Issues}}
+              <details class="compatibility-issues" {{if eq .Status "error"}}open{{end}}>
+                <summary>{{len .Issues}} {{if eq (len .Issues) 1}}проблема{{else}}проблемы{{end}}</summary>
+                <ol>
+                {{range .Issues}}
+                  <li><strong>{{.Label}}</strong><span>{{.Message}}</span>{{if .ClassType}}<code>{{.ClassType}}{{if .InputName}} · {{.InputName}}{{end}}</code>{{end}}</li>
+                {{end}}
+                </ol>
+              </details>
+              {{else}}<span class="compatibility-pass">Обязательные входы, значения и соединения совпадают со схемой.</span>{{end}}
+            </td>
+          </tr>
+        {{else}}
+          <tr><td colspan="5" class="empty-state">Сценарии пока не найдены.</td></tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {{end}}
+</main>
+</body></html>
+{{end}}
