@@ -259,6 +259,7 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
+	started := time.Now()
 	r.Body = http.MaxBytesReader(w, r.Body, maxGenerationRequest)
 	if !a.validCSRF(r) {
 		writeGenerationError(w, http.StatusForbidden, "проверка безопасности не пройдена")
@@ -347,6 +348,12 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 	a.rememberGeneration(promptID, user.ID)
 	a.recordGenerationEvent(r.Context(), user.ID, promptID, definition, input)
 	a.rememberGenerationVariant(r.Context(), user.ID, promptID, input, r.Form)
+	bytesIn := r.ContentLength
+	if bytesIn < 0 {
+		bytesIn = 0
+	}
+	a.recordProxyRequest(r.Context(), user.ID, "comfyui", http.MethodPost, quickGenerationTelemetryPath(requestID), http.StatusAccepted, time.Since(started), bytesIn, 0, false, a.clientIP(r), r.UserAgent())
+	a.incProxyCount("comfyui", http.StatusAccepted)
 	response := a.generationRunResponse(r.Context(), promptID)
 	response["request_id"] = requestID
 	if quota, quotaErr := a.generationQuotaView(r.Context(), user.ID); quotaErr != nil {
@@ -361,6 +368,10 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 		response["mining_warning"] = miningWarning
 	}
 	writeJSON(w, http.StatusAccepted, response)
+}
+
+func quickGenerationTelemetryPath(requestID string) string {
+	return "/generate/run/" + strings.TrimSpace(requestID)
 }
 
 func validGenerationRequestID(value string) bool {

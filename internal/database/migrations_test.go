@@ -166,3 +166,22 @@ func TestUnifiedContentRetentionDefaultsMigration(t *testing.T) {
 		}
 	}
 }
+
+func TestQuickGenerationRequestTelemetryMigration(t *testing.T) {
+	var telemetryMigration *migration
+	for index := range migrationCatalog {
+		if migrationCatalog[index].version == 38 {
+			telemetryMigration = &migrationCatalog[index]
+			break
+		}
+	}
+	if telemetryMigration == nil || telemetryMigration.name != "quick_generation_request_telemetry" {
+		t.Fatal("quick generation request telemetry migration is missing")
+	}
+	sql := strings.Join(telemetryMigration.statements, "\n")
+	for _, expected := range []string{"generation_requests", "prompt_id IS NOT NULL", "proxy_requests", "'/generate/run/'", "status_code", "202", "CREATE UNIQUE INDEX"} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("quick generation telemetry migration does not contain %q: %s", expected, sql)
+		}
+	}
+}

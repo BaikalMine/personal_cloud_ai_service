@@ -683,6 +683,25 @@ var migrationCatalog = []migration{
 			 WHERE e.id=summary.event_id`,
 		},
 	},
+	{
+		version: 38,
+		name:    "quick_generation_request_telemetry",
+		statements: []string{
+			`CREATE UNIQUE INDEX IF NOT EXISTS proxy_requests_quick_generation_request_idx
+			 ON proxy_requests(user_id,path)
+			 WHERE service='comfyui' AND method='POST' AND path LIKE '/generate/run/%'`,
+			`INSERT INTO proxy_requests
+				(user_id,service,method,path,status_code,duration_ms,bytes_in,bytes_out,is_websocket,client_ip,user_agent,created_at)
+			 SELECT gr.user_id,'comfyui','POST','/generate/run/' || gr.request_id,202,0,0,0,false,'','',gr.created_at
+			 FROM generation_requests gr
+			 WHERE gr.prompt_id IS NOT NULL
+			   AND NOT EXISTS (
+				 SELECT 1 FROM proxy_requests pr
+				 WHERE pr.user_id=gr.user_id AND pr.service='comfyui' AND pr.method='POST'
+				   AND pr.path='/generate/run/' || gr.request_id
+			   )`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

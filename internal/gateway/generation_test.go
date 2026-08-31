@@ -45,6 +45,13 @@ func TestGenerateTemplateRenders(t *testing.T) {
 	}
 }
 
+func TestQuickGenerationTelemetryPathUsesClientRequestID(t *testing.T) {
+	const requestID = "generation-0123456789abcdef"
+	if got, want := quickGenerationTelemetryPath("  "+requestID+"  "), "/generate/run/"+requestID; got != want {
+		t.Fatalf("quick generation telemetry path = %q, want %q", got, want)
+	}
+}
+
 func TestGenerationClientStopsRecoveryAfterConfirmedRunFailure(t *testing.T) {
 	script, err := embeddedFS.ReadFile("static/generate.js")
 	if err != nil {
