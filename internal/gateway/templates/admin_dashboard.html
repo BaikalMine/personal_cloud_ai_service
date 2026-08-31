@@ -42,6 +42,31 @@
         {{end}}
       </div>
     </section>
+    <section class="panel maintenance-health" data-maintenance-workers aria-labelledby="maintenance-workers-title">
+      <div class="panel-heading maintenance-heading">
+        <div><p class="section-kicker">Фоновые процессы</p><h2 id="maintenance-workers-title">Обслуживание Gateway</h2><p class="muted">Каждая задача работает независимо и повторяется со своим таймаутом.</p></div>
+        <span class="maintenance-summary" data-worker-summary>{{len .System.Workers}} процессов</span>
+      </div>
+      <div class="maintenance-worker-list">
+        {{range .System.Workers}}
+        <article class="maintenance-worker-row is-{{.Status}}" data-worker-key="{{.Key}}">
+          <div class="maintenance-worker-identity">
+            <span><strong>{{.Name}}</strong><small>Каждые {{.IntervalText}} · таймаут {{.TimeoutText}}</small></span>
+            <b class="maintenance-worker-status is-{{.Status}}" data-worker-status>{{.StatusLabel}}</b>
+          </div>
+          <dl class="maintenance-worker-facts">
+            <div><dt>Последний успех</dt><dd data-worker-success>{{with .LastSuccessAt}}{{formatTime .}}{{else}}-{{end}}</dd></div>
+            <div><dt>Длительность</dt><dd data-worker-duration>{{if gt .LastDurationMillis 0}}{{.LastDurationMillis}} мс{{else}}-{{end}}</dd></div>
+            <div><dt>Обработано</dt><dd data-worker-items>{{formatNumber .LastItems}}</dd></div>
+            <div><dt>Следующий запуск</dt><dd data-worker-next {{with .NextRunAt}}data-next-run="{{.Format "2006-01-02T15:04:05.000Z07:00"}}"{{end}}>{{with .NextRunAt}}{{formatTime .}}{{else}}-{{end}}</dd></div>
+          </dl>
+          <p class="maintenance-worker-error" data-worker-error {{if not .LastError}}hidden{{end}}>{{.LastError}}</p>
+        </article>
+        {{else}}
+        <p class="muted maintenance-worker-empty">Workers запускаются вместе с Gateway.</p>
+        {{end}}
+      </div>
+    </section>
     <div class="dashboard-grid system-detail-grid">
       <div class="panel span-two">
         <div class="panel-heading"><div><p class="section-kicker">Последние 24 часа</p><h2>Динамика нагрузки</h2></div><span class="muted" data-system-history-caption>Накопление данных...</span></div>
@@ -76,9 +101,11 @@
     </div>
     <div class="panel span-two">
       <div class="panel-heading"><div><p class="section-kicker">30 дней</p><h2>Использование сервисов</h2></div></div>
+      <div class="table-scroll">
       <table><thead><tr><th>Сервис</th><th>Запросы</th><th>Пользователи</th><th>Передано</th><th>Ошибки</th></tr></thead><tbody>
       {{range .Stats.UsageByService}}<tr><td data-label="Сервис"><a class="service-link" href="/admin/services/{{.Service}}"><i class="service-icon {{.Service}}"></i>{{.Service}}</a></td><td data-label="Запросы" class="numeric">{{formatNumber .Requests}}</td><td data-label="Пользователи" class="numeric">{{formatNumber .Users}}</td><td data-label="Передано">{{formatBytes .Bytes}}</td><td data-label="Ошибки"><span class="error-count {{if gt .Errors 0}}has-errors{{end}}">{{formatNumber .Errors}}</span></td></tr>{{else}}<tr><td class="muted" colspan="5">Нет данных</td></tr>{{end}}
       </tbody></table>
+      </div>
     </div>
     <div class="panel">
       <div class="panel-heading"><div><p class="section-kicker">7 дней</p><h2>По трафику</h2></div></div>

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"log"
 	"time"
 
@@ -10,7 +11,7 @@ import (
 
 const databaseRetentionTimeout = 2 * time.Minute
 
-func (a *App) runDatabaseRetentionCleanup(ctx context.Context) domain.DatabaseCleanupReport {
+func (a *App) runDatabaseRetentionCleanup(ctx context.Context) (domain.DatabaseCleanupReport, error) {
 	now := time.Now().UTC()
 	policy := a.retentionPolicy()
 	report, cleanupErr := a.store.CleanupDatabaseRetention(ctx, domain.DatabaseRetentionCutoffs{
@@ -26,7 +27,9 @@ func (a *App) runDatabaseRetentionCleanup(ctx context.Context) domain.DatabaseCl
 		OutputOwnerships:   now,
 	}, a.cfg.DatabaseCleanupBatchSize, a.cfg.DatabaseCleanupMaxBatches)
 
-	stateCtx, stateCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Preserve the cleanup result even when the cleanup itself consumed its
+	// deadline. This write remains bounded and is awaited by the worker.
+	stateCtx, stateCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	stateErr := a.store.SaveDatabaseCleanupState(stateCtx, report)
 	stateCancel()
 	if cleanupErr != nil {
@@ -37,5 +40,5 @@ func (a *App) runDatabaseRetentionCleanup(ctx context.Context) domain.DatabaseCl
 	if stateErr != nil {
 		log.Printf("save database retention cleanup state: %v", stateErr)
 	}
-	return report
+	return report, errors.Join(cleanupErr, stateErr)
 }

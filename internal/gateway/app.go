@@ -123,6 +123,8 @@ func Run() error {
 		comfyPromptSlots:     make(chan struct{}, maxComfyPromptAdmissionWaiters),
 		generationJobs:       make(map[string]*generationJob),
 		websocketConnections: make(map[*trackedWebSocket]struct{}),
+		maintenanceWorkers:   newMaintenanceRegistry(time.Now),
+		maintenanceDone:      make(chan struct{}),
 		proxyCounts:          map[string]int64{},
 	}
 
@@ -130,7 +132,10 @@ func Run() error {
 	adminSrv := newHTTPServer(cfg.AdminAddr, app.securityHeaders(app.adminMux()))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	go app.runMaintenance(ctx)
+	go func() {
+		defer close(app.maintenanceDone)
+		app.runMaintenance(ctx)
+	}()
 	go func() {
 		classificationCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
@@ -147,18 +152,25 @@ func Run() error {
 		log.Printf("admin listener on %s", cfg.AdminAddr)
 		errs <- adminSrv.ListenAndServe()
 	}()
+	var serveErr error
 	select {
 	case err = <-errs:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return err
+			serveErr = err
 		}
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = publicSrv.Shutdown(shutdownCtx)
-		_ = adminSrv.Shutdown(shutdownCtx)
 	}
-	return nil
+	stop()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = publicSrv.Shutdown(shutdownCtx)
+	_ = adminSrv.Shutdown(shutdownCtx)
+	select {
+	case <-app.maintenanceDone:
+	case <-shutdownCtx.Done():
+		log.Printf("maintenance workers did not stop before shutdown timeout")
+	}
+	return serveErr
 }
 
 func newHTTPServer(addr string, handler http.Handler) *http.Server {

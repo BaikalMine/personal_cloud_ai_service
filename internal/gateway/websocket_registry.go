@@ -90,9 +90,9 @@ func (a *App) closeMatchingWebSockets(matches func(*trackedWebSocket) bool) int 
 	return len(connections)
 }
 
-func (a *App) pruneUnauthorizedWebSockets(ctx context.Context) {
+func (a *App) pruneUnauthorizedWebSockets(ctx context.Context) (int64, error) {
 	if a == nil || a.store == nil {
-		return
+		return 0, nil
 	}
 	a.websocketMu.Lock()
 	hashes := make([]string, 0, len(a.websocketConnections))
@@ -105,16 +105,17 @@ func (a *App) pruneUnauthorizedWebSockets(ctx context.Context) {
 	}
 	a.websocketMu.Unlock()
 	if len(hashes) == 0 {
-		return
+		return 0, nil
 	}
 	active, err := a.store.ActiveSessionHashes(ctx, hashes, a.cfg.SessionIdleTimeout)
 	if err != nil {
-		return
+		return 0, err
 	}
-	a.closeMatchingWebSockets(func(item *trackedWebSocket) bool {
+	closed := a.closeMatchingWebSockets(func(item *trackedWebSocket) bool {
 		_, ok := active[item.sessionHash]
 		return !ok
 	})
+	return int64(closed), nil
 }
 
 func (a *App) authorizeRegisteredWebSocket(ctx context.Context, tracked *trackedWebSocket) bool {

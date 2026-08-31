@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -365,13 +364,4 @@ func shortFingerprint(value string) string {
 		return value
 	}
 	return value[:12]
-}
-
-func sortedSchemaNodeNames(catalog comfySchemaCatalog) []string {
-	names := make([]string, 0, len(catalog.Nodes))
-	for name := range catalog.Nodes {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
 }

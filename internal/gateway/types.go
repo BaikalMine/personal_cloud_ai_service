@@ -68,7 +68,10 @@ type App struct {
 	comfyQueueMu           sync.Mutex
 	comfyPromptAdmissionMu sync.Mutex
 	websocketMu            sync.Mutex
+	maintenanceOnce        sync.Once
 	dependencyOnce         sync.Once
+	maintenanceWorkers     *maintenanceRegistry
+	maintenanceDone        chan struct{}
 	dependencyHealth       *dependencyMonitor
 	objectInfoOnce         sync.Once
 	objectInfoCache        *comfyObjectInfoCache
@@ -121,14 +124,15 @@ type OnlineUser = domain.OnlineUser
 type HostMetric = domain.HostMetric
 
 type SystemOverview struct {
-	DatabaseBytes  int64              `json:"database_bytes"`
-	OnlineUsers    []OnlineUser       `json:"online_users"`
-	Host           *HostMetric        `json:"host,omitempty"`
-	History        []HostMetric       `json:"history"`
-	AgentAvailable bool               `json:"agent_available"`
-	AgentMessage   string             `json:"agent_message,omitempty"`
-	Agent          DependencyStatus   `json:"agent"`
-	Dependencies   []DependencyStatus `json:"dependencies"`
+	DatabaseBytes  int64                    `json:"database_bytes"`
+	OnlineUsers    []OnlineUser             `json:"online_users"`
+	Host           *HostMetric              `json:"host,omitempty"`
+	History        []HostMetric             `json:"history"`
+	AgentAvailable bool                     `json:"agent_available"`
+	AgentMessage   string                   `json:"agent_message,omitempty"`
+	Agent          DependencyStatus         `json:"agent"`
+	Dependencies   []DependencyStatus       `json:"dependencies"`
+	Workers        []MaintenanceWorkerState `json:"workers"`
 }
 
 type UserRow = domain.UserRow

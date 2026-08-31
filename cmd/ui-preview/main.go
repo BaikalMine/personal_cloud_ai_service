@@ -296,6 +296,26 @@ func main() {
 		{Key: "mining-agent", Name: "Управление майнингом", State: gateway.DependencyOnline, StateLabel: "В сети", Detail: "Heartbeat получен.", LastSuccessAt: timePointer(lastSuccess), LastDataAt: timePointer(lastSuccess), NextCheckAt: timePointer(nextCheck), RetryInSeconds: 6, LatencyMillis: 9},
 		{Key: "system-monitor", Name: "Мониторинг Windows", State: gateway.DependencyStale, StateLabel: "Данные устарели", Detail: "Последние данные устарели; ждём следующую успешную проверку.", LastSuccessAt: timePointer(lastSuccess), LastDataAt: timePointer(lastHost.RecordedAt), LastErrorAt: timePointer(lastError), LastError: "Не удалось получить метрики Windows.", NextCheckAt: timePointer(nextCheck), RetryInSeconds: 6, RequiresFreshData: true, LatencyMillis: 15},
 	}
+	workerSuccess := now.Add(-22 * time.Second)
+	workerNext := now.Add(8 * time.Second)
+	workers := []gateway.MaintenanceWorkerState{
+		{Key: "generation_jobs", Name: "Задания генераций", Status: "running", StatusLabel: "Выполняется", Interval: 30 * time.Second, Timeout: 20 * time.Second, Running: true, LastStartedAt: timePointer(now.Add(-2 * time.Second)), LastSuccessAt: timePointer(workerSuccess), LastDurationMillis: 842, LastItems: 3},
+		{Key: "mining_leases", Name: "Аренды майнинга", Status: "healthy", StatusLabel: "Работает", Interval: 30 * time.Second, Timeout: 15 * time.Second, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 74, LastItems: 1},
+		{Key: "host_metrics", Name: "Метрики Windows", Status: "retrying", StatusLabel: "Повтор после ошибки", Interval: 30 * time.Second, Timeout: 8 * time.Second, LastFinishedAt: timePointer(lastError), NextRunAt: timePointer(workerNext), LastDurationMillis: 3012, ConsecutiveFailures: 2, LastError: "Windows-agent временно недоступен"},
+		{Key: "comfy_memory", Name: "Освобождение памяти ComfyUI", Status: "healthy", StatusLabel: "Работает", Interval: 10 * time.Second, Timeout: 8 * time.Second, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 118, LastItems: 0},
+		{Key: "dependency_health", Name: "Состояние зависимостей", Status: "healthy", StatusLabel: "Работает", Interval: 10 * time.Second, Timeout: 4 * time.Second, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 346, LastItems: 6},
+		{Key: "websocket_authorization", Name: "Авторизация WebSocket", Status: "healthy", StatusLabel: "Работает", Interval: time.Minute, Timeout: 8 * time.Second, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 12, LastItems: 0},
+		{Key: "suggestion_scans", Name: "Проверка предложений", Status: "waiting", StatusLabel: "Ожидает запуска", Interval: 15 * time.Minute, Timeout: 2 * time.Minute, NextRunAt: timePointer(workerNext)},
+		{Key: "media_archive", Name: "Архивация результатов", Status: "healthy", StatusLabel: "Работает", Interval: 15 * time.Minute, Timeout: 2 * time.Minute, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 1640, LastItems: 4},
+		{Key: "media_hashes", Name: "Хэши архивных медиа", Status: "healthy", StatusLabel: "Работает", Interval: 15 * time.Minute, Timeout: 2 * time.Minute, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 920, LastItems: 4},
+		{Key: "comfy_input_cleanup", Name: "Очистка входных файлов", Status: "healthy", StatusLabel: "Работает", Interval: 15 * time.Minute, Timeout: 3 * time.Minute, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 223, LastItems: 2},
+		{Key: "comfy_media_cleanup", Name: "Очистка результатов ComfyUI", Status: "healthy", StatusLabel: "Работает", Interval: 15 * time.Minute, Timeout: 3 * time.Minute, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 510, LastItems: 8},
+		{Key: "other_media_cleanup", Name: "Очистка остальных медиа", Status: "healthy", StatusLabel: "Работает", Interval: 15 * time.Minute, Timeout: 15 * time.Second, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 63, LastItems: 0},
+		{Key: "database_retention", Name: "Сроки хранения БД", Status: "healthy", StatusLabel: "Работает", Interval: 15 * time.Minute, Timeout: 2 * time.Minute, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 1840, LastItems: 1243},
+		{Key: "session_cleanup", Name: "Очистка сессий", Status: "healthy", StatusLabel: "Работает", Interval: 15 * time.Minute, Timeout: 15 * time.Second, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 84, LastItems: 2},
+		{Key: "temporary_users", Name: "Удаление временных аккаунтов", Status: "healthy", StatusLabel: "Работает", Interval: 15 * time.Minute, Timeout: 15 * time.Second, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 48, LastItems: 1},
+		{Key: "content_cleanup", Name: "Очистка AI-контента", Status: "healthy", StatusLabel: "Работает", Interval: 15 * time.Minute, Timeout: 15 * time.Second, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 177, LastItems: 5},
+	}
 	mux.HandleFunc("/preview/admin", render("admin_dashboard", "Обзор системы", map[string]any{
 		"System": gateway.SystemOverview{
 			DatabaseBytes: 184 << 20,
@@ -304,7 +324,7 @@ func main() {
 				{Username: "admin", Role: "admin", LastSeenAt: now.Add(-2 * time.Minute)},
 			},
 			Host: &lastHost, History: hostHistory, AgentAvailable: false,
-			AgentMessage: dependencies[len(dependencies)-1].Detail, Agent: dependencies[len(dependencies)-1], Dependencies: dependencies,
+			AgentMessage: dependencies[len(dependencies)-1].Detail, Agent: dependencies[len(dependencies)-1], Dependencies: dependencies, Workers: workers,
 		},
 		"Stats": domain.AdminStats{
 			ActiveUsers: 3, RequestsToday: 147, Requests7Days: 824, ActiveWebSockets: 2, AverageDuration: 1160, ErrorRate: "0,8%",

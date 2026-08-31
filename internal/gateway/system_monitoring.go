@@ -10,10 +10,10 @@ import (
 	"ai-access-gateway/internal/mining"
 )
 
-func (a *App) captureHostMetric(ctx context.Context) {
+func (a *App) captureHostMetric(ctx context.Context) (int64, error) {
 	if a.systemMonitor == nil {
 		a.dependencyMonitor().failure(dependencySystemMonitor, "Windows-агент мониторинга не настроен.", true, 0)
-		return
+		return 0, errors.New("windows-агент мониторинга не настроен")
 	}
 	started := time.Now()
 	metrics, err := a.systemMonitor.System(ctx)
@@ -24,16 +24,18 @@ func (a *App) captureHostMetric(ctx context.Context) {
 			errors.Is(err, mining.ErrUnavailable) && (a.systemMonitor == nil || !a.systemMonitor.Configured()),
 			time.Since(started),
 		)
-		return
+		return 0, err
 	}
 	metric := hostMetricFromSystem(metrics)
 	a.dependencyMonitor().success(dependencySystemMonitor, "Показатели Windows получены.", &metric.RecordedAt, time.Since(started))
 	if metric.MemoryTotalBytes <= 0 {
-		return
+		return 0, nil
 	}
 	if err := a.store.RecordHostMetric(ctx, metric); err != nil {
 		log.Printf("record host metric: %v", err)
+		return 0, err
 	}
+	return 1, nil
 }
 
 func (a *App) systemOverview(ctx context.Context) (SystemOverview, error) {
@@ -74,6 +76,7 @@ func (a *App) systemOverview(ctx context.Context) (SystemOverview, error) {
 	overview.AgentAvailable = overview.Agent.State == DependencyOnline
 	overview.AgentMessage = overview.Agent.Detail
 	overview.Dependencies = a.dependencyStatuses()
+	overview.Workers = a.maintenanceWorkerStates()
 	return overview, nil
 }
 

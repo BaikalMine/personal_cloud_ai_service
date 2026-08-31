@@ -4,27 +4,32 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"log"
+	"errors"
+	"fmt"
 )
 
-func (a *App) backfillContentMediaHashes(ctx context.Context) {
+func (a *App) backfillContentMediaHashes(ctx context.Context) (int64, error) {
 	if a.store == nil || a.contentCipher == nil {
-		return
+		return 0, nil
 	}
 	items, err := a.store.UnhashedComfyMedia(ctx, 100)
 	if err != nil {
-		log.Printf("find unhashed ComfyUI media: %v", err)
-		return
+		return 0, err
 	}
+	var updated int64
+	var updateErrors []error
 	for _, item := range items {
 		payload, err := a.contentCipher.DecryptBytes(item.PayloadCipher)
 		if err != nil {
-			log.Printf("decrypt ComfyUI media %d for hash backfill: %v", item.ID, err)
+			updateErrors = append(updateErrors, fmt.Errorf("decrypt media %d: %w", item.ID, err))
 			continue
 		}
 		digest := sha256.Sum256(payload)
 		if err := a.store.SetContentMediaHash(ctx, item.ID, hex.EncodeToString(digest[:])); err != nil {
-			log.Printf("store ComfyUI media %d hash: %v", item.ID, err)
+			updateErrors = append(updateErrors, fmt.Errorf("store media %d hash: %w", item.ID, err))
+			continue
 		}
+		updated++
 	}
+	return updated, errors.Join(updateErrors...)
 }

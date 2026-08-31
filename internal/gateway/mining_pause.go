@@ -192,13 +192,19 @@ func (a *App) restoreMiningPauseLease(ctx context.Context, lease domain.QuickGen
 
 // refreshQuickGenerationMiningLeases also covers a Gateway restart: leases
 // are in PostgreSQL, so completed ComfyUI tasks still release the miner.
-func (a *App) refreshQuickGenerationMiningLeases(ctx context.Context) {
+func (a *App) refreshQuickGenerationMiningLeases(ctx context.Context) (int64, error) {
 	leases, err := a.store.ListQuickGenerationMiningLeases(ctx)
 	if err != nil {
 		log.Printf("list mining-pause leases: %v", err)
-		return
+		return 0, err
 	}
+	var processed int64
+	var refreshErrors []error
 	for _, lease := range leases {
+		if ctx.Err() != nil {
+			return processed, errors.Join(append(refreshErrors, ctx.Err())...)
+		}
+		processed++
 		if lease.GenerationJobID > 0 {
 			// Durable jobs own their quota and mining release as one transaction-like
 			// lifecycle. The job reconciler is the only component allowed to finish it.
@@ -212,6 +218,7 @@ func (a *App) refreshQuickGenerationMiningLeases(ctx context.Context) {
 		}
 		status, statusErr := a.fetchGenerationStatus(ctx, lease.PromptID, lease.UserID)
 		if statusErr != nil {
+			refreshErrors = append(refreshErrors, fmt.Errorf("lease %s status: %w", lease.ID, statusErr))
 			continue
 		}
 		if status.State == "completed" || status.State == "error" {
@@ -221,4 +228,5 @@ func (a *App) refreshQuickGenerationMiningLeases(ctx context.Context) {
 			a.syncGenerationAuditState(ctx, lease.UserID, lease.PromptID, status.State)
 		}
 	}
+	return processed, errors.Join(refreshErrors...)
 }

@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"log"
 	"time"
 )
 
@@ -11,118 +10,87 @@ const generationRefreshInterval = 30 * time.Second
 const comfyMemoryMonitorInterval = 10 * time.Second
 
 func (a *App) runMaintenance(ctx context.Context) {
-	backfillCtx, backfillCancel := context.WithTimeout(ctx, 2*time.Minute)
-	a.backfillComfyContentMedia(backfillCtx)
-	a.backfillContentMediaHashes(backfillCtx)
-	backfillCancel()
-	miningPauseCtx, miningPauseCancel := context.WithTimeout(ctx, 15*time.Second)
-	a.refreshQuickGenerationMiningLeases(miningPauseCtx)
-	miningPauseCancel()
-	metricCtx, metricCancel := context.WithTimeout(ctx, 8*time.Second)
-	a.captureHostMetric(metricCtx)
-	metricCancel()
-	dependencyCtx, dependencyCancel := context.WithTimeout(ctx, 4*time.Second)
-	a.refreshDependencyStatuses(dependencyCtx)
-	dependencyCancel()
-	virusTotalCtx, virusTotalCancel := context.WithTimeout(ctx, 2*time.Minute)
-	a.refreshFeatureSuggestionScans(virusTotalCtx)
-	virusTotalCancel()
-	retentionCtx, retentionCancel := context.WithTimeout(ctx, databaseRetentionTimeout)
-	a.runDatabaseRetentionCleanup(retentionCtx)
-	retentionCancel()
-	ticker := time.NewTicker(maintenanceInterval)
-	defer ticker.Stop()
-	generationTicker := time.NewTicker(generationRefreshInterval)
-	defer generationTicker.Stop()
-	comfyMemoryTicker := time.NewTicker(comfyMemoryMonitorInterval)
-	defer comfyMemoryTicker.Stop()
+	runMaintenanceWorkers(ctx, a.maintenanceWorkerRegistry(), a.maintenanceWorkerSpecs())
+}
+
+func (a *App) maintenanceWorkerSpecs() []maintenanceWorkerSpec {
 	dependencyInterval := a.cfg.DependencyCheckInterval
 	if dependencyInterval <= 0 {
 		dependencyInterval = defaultDependencyCheckInterval
 	}
-	dependencyTicker := time.NewTicker(dependencyInterval)
-	defer dependencyTicker.Stop()
-	websocketTicker := time.NewTicker(websocketAuthorizationRefreshInterval)
-	defer websocketTicker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-generationTicker.C:
-			refreshCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			a.refreshTrackedGenerationStatuses(refreshCtx)
-			a.refreshQuickGenerationMiningLeases(refreshCtx)
-			cancel()
-			metricCtx, metricCancel := context.WithTimeout(ctx, 8*time.Second)
-			a.captureHostMetric(metricCtx)
-			metricCancel()
-		case <-comfyMemoryTicker.C:
-			memoryCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
-			a.observeComfyQueueForMemoryRelease(memoryCtx)
-			cancel()
-		case <-dependencyTicker.C:
-			dependencyCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
-			a.refreshDependencyStatuses(dependencyCtx)
-			cancel()
-		case <-websocketTicker.C:
-			websocketCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
-			a.pruneUnauthorizedWebSockets(websocketCtx)
-			cancel()
-		case <-ticker.C:
-			virusTotalCtx, virusTotalCancel := context.WithTimeout(ctx, 2*time.Minute)
-			a.refreshFeatureSuggestionScans(virusTotalCtx)
-			virusTotalCancel()
-			backfillCtx, backfillCancel := context.WithTimeout(ctx, 2*time.Minute)
-			a.backfillComfyContentMedia(backfillCtx)
-			a.backfillContentMediaHashes(backfillCtx)
-			backfillCancel()
-			inputCleanupCtx, inputCleanupCancel := context.WithTimeout(ctx, 3*time.Minute)
-			deletedInputs, inputErr := a.deleteExpiredComfyInputs(inputCleanupCtx)
-			inputCleanupCancel()
-			if inputErr != nil {
-				log.Printf("delete expired ComfyUI inputs: %v", inputErr)
-			} else if deletedInputs > 0 {
-				log.Printf("deleted %d expired ComfyUI input records", deletedInputs)
-			}
-			mediaCleanupCtx, mediaCleanupCancel := context.WithTimeout(ctx, 3*time.Minute)
-			deletedMedia, mediaErr := a.deleteExpiredComfyMedia(mediaCleanupCtx)
-			mediaCleanupCancel()
-			if mediaErr != nil {
-				log.Printf("delete expired ComfyUI media: %v", mediaErr)
-			} else if deletedMedia > 0 {
-				log.Printf("deleted %d expired ComfyUI media items", deletedMedia)
-			}
-			otherMediaCleanupCtx, otherMediaCleanupCancel := context.WithTimeout(ctx, 15*time.Second)
-			deletedOtherMedia, otherMediaErr := a.store.DeleteExpiredNonComfyMedia(otherMediaCleanupCtx)
-			otherMediaCleanupCancel()
-			if otherMediaErr != nil {
-				log.Printf("delete expired non-ComfyUI media: %v", otherMediaErr)
-			} else if deletedOtherMedia > 0 {
-				log.Printf("deleted %d expired non-ComfyUI media items", deletedOtherMedia)
-			}
-			retentionCtx, retentionCancel := context.WithTimeout(ctx, databaseRetentionTimeout)
-			a.runDatabaseRetentionCleanup(retentionCtx)
-			retentionCancel()
-			cleanupCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			deleted, err := a.store.DeleteExpiredSessions(cleanupCtx, a.cfg.SessionIdleTimeout)
-			if err != nil {
-				log.Printf("delete expired sessions: %v", err)
-			} else if deleted > 0 {
-				log.Printf("deleted %d expired sessions", deleted)
-			}
-			deletedTemporaryUsers, err := a.store.DeleteExpiredTemporaryUsers(cleanupCtx)
-			if err != nil {
-				log.Printf("delete expired temporary users: %v", err)
-			} else if deletedTemporaryUsers > 0 {
-				log.Printf("deleted %d expired temporary users", deletedTemporaryUsers)
-			}
-			deletedContent, err := a.store.DeleteExpiredContent(cleanupCtx)
-			if err != nil {
-				log.Printf("delete expired content: %v", err)
-			} else if deletedContent > 0 {
-				log.Printf("deleted %d expired content events", deletedContent)
-			}
-			cancel()
-		}
+	shortRetry := 15 * time.Second
+	return []maintenanceWorkerSpec{
+		{
+			Key: "generation_jobs", Name: "Задания генераций", Interval: generationRefreshInterval, Timeout: 20 * time.Second,
+			RetryDelay: shortRetry, MaxBackoff: 2 * time.Minute, Run: a.refreshTrackedGenerationStatuses,
+		},
+		{
+			Key: "mining_leases", Name: "Аренды майнинга", Interval: generationRefreshInterval, Timeout: 15 * time.Second, InitialDelay: time.Second,
+			RetryDelay: shortRetry, MaxBackoff: 2 * time.Minute, Run: a.refreshQuickGenerationMiningLeases,
+		},
+		{
+			Key: "host_metrics", Name: "Метрики Windows", Interval: generationRefreshInterval, Timeout: 8 * time.Second, InitialDelay: 2 * time.Second,
+			RetryDelay: shortRetry, MaxBackoff: 2 * time.Minute, Run: a.captureHostMetric,
+		},
+		{
+			Key: "comfy_memory", Name: "Освобождение памяти ComfyUI", Interval: comfyMemoryMonitorInterval, Timeout: 8 * time.Second, InitialDelay: 3 * time.Second,
+			RetryDelay: shortRetry, MaxBackoff: time.Minute, Run: a.observeComfyQueueForMemoryRelease,
+		},
+		{
+			Key: "dependency_health", Name: "Состояние зависимостей", Interval: dependencyInterval, Timeout: 4 * time.Second,
+			RetryDelay: shortRetry, MaxBackoff: time.Minute, Run: func(ctx context.Context) (int64, error) {
+				a.refreshDependencyStatuses(ctx)
+				return int64(len(a.dependencySpecs())), nil
+			},
+		},
+		{
+			Key: "websocket_authorization", Name: "Авторизация WebSocket", Interval: websocketAuthorizationRefreshInterval, Timeout: 8 * time.Second, InitialDelay: 4 * time.Second,
+			RetryDelay: shortRetry, MaxBackoff: 2 * time.Minute, Run: a.pruneUnauthorizedWebSockets,
+		},
+		{
+			Key: "suggestion_scans", Name: "Проверка предложений", Interval: maintenanceInterval, Timeout: 2 * time.Minute, InitialDelay: 5 * time.Second,
+			RetryDelay: time.Minute, MaxBackoff: maintenanceInterval, Run: a.refreshFeatureSuggestionScans,
+		},
+		{
+			Key: "media_archive", Name: "Архивация результатов", Interval: maintenanceInterval, Timeout: 2 * time.Minute, InitialDelay: 6 * time.Second,
+			RetryDelay: 30 * time.Second, MaxBackoff: 5 * time.Minute, Run: a.backfillComfyContentMedia,
+		},
+		{
+			Key: "media_hashes", Name: "Хэши архивных медиа", Interval: maintenanceInterval, Timeout: 2 * time.Minute, InitialDelay: 7 * time.Second,
+			RetryDelay: 30 * time.Second, MaxBackoff: 5 * time.Minute, Run: a.backfillContentMediaHashes,
+		},
+		{
+			Key: "comfy_input_cleanup", Name: "Очистка входных файлов", Interval: maintenanceInterval, Timeout: 3 * time.Minute, InitialDelay: 8 * time.Second,
+			RetryDelay: 30 * time.Second, MaxBackoff: 5 * time.Minute, Run: a.deleteExpiredComfyInputs,
+		},
+		{
+			Key: "comfy_media_cleanup", Name: "Очистка результатов ComfyUI", Interval: maintenanceInterval, Timeout: 3 * time.Minute, InitialDelay: 9 * time.Second,
+			RetryDelay: 30 * time.Second, MaxBackoff: 5 * time.Minute, Run: a.deleteExpiredComfyMedia,
+		},
+		{
+			Key: "other_media_cleanup", Name: "Очистка остальных медиа", Interval: maintenanceInterval, Timeout: 15 * time.Second, InitialDelay: 10 * time.Second,
+			RetryDelay: 30 * time.Second, MaxBackoff: 5 * time.Minute, Run: a.store.DeleteExpiredNonComfyMedia,
+		},
+		{
+			Key: "database_retention", Name: "Сроки хранения БД", Interval: maintenanceInterval, Timeout: databaseRetentionTimeout, InitialDelay: 11 * time.Second,
+			RetryDelay: 30 * time.Second, MaxBackoff: 5 * time.Minute, Run: func(ctx context.Context) (int64, error) {
+				report, err := a.runDatabaseRetentionCleanup(ctx)
+				return report.TotalDeleted(), err
+			},
+		},
+		{
+			Key: "session_cleanup", Name: "Очистка сессий", Interval: maintenanceInterval, Timeout: 15 * time.Second, InitialDelay: 12 * time.Second,
+			RetryDelay: 30 * time.Second, MaxBackoff: 5 * time.Minute, Run: func(ctx context.Context) (int64, error) {
+				return a.store.DeleteExpiredSessions(ctx, a.cfg.SessionIdleTimeout)
+			},
+		},
+		{
+			Key: "temporary_users", Name: "Удаление временных аккаунтов", Interval: maintenanceInterval, Timeout: 15 * time.Second, InitialDelay: 13 * time.Second,
+			RetryDelay: 30 * time.Second, MaxBackoff: 5 * time.Minute, Run: a.store.DeleteExpiredTemporaryUsers,
+		},
+		{
+			Key: "content_cleanup", Name: "Очистка AI-контента", Interval: maintenanceInterval, Timeout: 15 * time.Second, InitialDelay: 14 * time.Second,
+			RetryDelay: 30 * time.Second, MaxBackoff: 5 * time.Minute, Run: a.store.DeleteExpiredContent,
+		},
 	}
 }

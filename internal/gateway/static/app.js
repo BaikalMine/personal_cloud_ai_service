@@ -501,6 +501,71 @@
       dependencyStateClasses.forEach((name) => node.classList.toggle(name, name === state));
     };
     const dependencyTime = (value) => value ? new Date(value).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-";
+    const workerStateClasses = ["waiting", "running", "healthy", "retrying", "stopped"];
+    const setWorkerState = (node, state) => {
+      if (!node) return;
+      workerStateClasses.forEach((name) => node.classList.toggle(`is-${name}`, name === state));
+    };
+    const workerDuration = (milliseconds) => {
+      const value = Number(milliseconds) || 0;
+      if (value <= 0) return "-";
+      if (value < 1000) return `${Math.round(value)} мс`;
+      if (value < 60000) return `${(value / 1000).toFixed(value < 10000 ? 1 : 0)} сек.`;
+      return `${Math.floor(value / 60000)} мин. ${Math.round(value % 60000 / 1000)} сек.`;
+    };
+    const refreshWorkerCountdowns = () => {
+      systemMonitoring.querySelectorAll("[data-worker-next]").forEach((node) => {
+        const deadline = Date.parse(node.dataset.nextRun || "");
+        if (!Number.isFinite(deadline)) return;
+        const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+        if (seconds <= 0) node.textContent = "сейчас";
+        else if (seconds < 60) node.textContent = `через ${seconds} сек.`;
+        else node.textContent = `через ${Math.ceil(seconds / 60)} мин.`;
+      });
+    };
+    const renderWorkers = (workers) => {
+      let running = 0;
+      let retrying = 0;
+      workers.forEach((worker) => {
+        const row = systemMonitoring.querySelector(`[data-worker-key="${CSS.escape(worker.key)}"]`);
+        if (!row) return;
+        setWorkerState(row, worker.status);
+        const status = row.querySelector("[data-worker-status]");
+        if (status) {
+          status.textContent = worker.status_label;
+          setWorkerState(status, worker.status);
+        }
+        const success = row.querySelector("[data-worker-success]");
+        if (success) success.textContent = dependencyTime(worker.last_success_at);
+        const duration = row.querySelector("[data-worker-duration]");
+        if (duration) duration.textContent = workerDuration(worker.last_duration_ms);
+        const items = row.querySelector("[data-worker-items]");
+        if (items) items.textContent = Number(worker.last_items || 0).toLocaleString("ru-RU");
+        const next = row.querySelector("[data-worker-next]");
+        if (next) {
+          if (worker.next_run_at) next.dataset.nextRun = worker.next_run_at;
+          else {
+            delete next.dataset.nextRun;
+            next.textContent = worker.running ? "после завершения" : "-";
+          }
+        }
+        const error = row.querySelector("[data-worker-error]");
+        if (error) {
+          error.textContent = worker.last_error || "";
+          error.hidden = !worker.last_error;
+        }
+        if (worker.status === "running") running += 1;
+        if (worker.status === "retrying") retrying += 1;
+      });
+      const summary = systemMonitoring.querySelector("[data-worker-summary]");
+      if (summary) {
+        const details = [];
+        if (running) details.push(`выполняется: ${running}`);
+        if (retrying) details.push(`с ошибкой: ${retrying}`);
+        summary.textContent = details.length ? `${workers.length} · ${details.join(" · ")}` : `${workers.length} процессов · без ошибок`;
+      }
+      refreshWorkerCountdowns();
+    };
     const refreshDependencyCountdowns = () => {
       document.querySelectorAll("[data-dependency-next]").forEach((node) => {
         const deadline = Date.parse(node.dataset.nextCheck || "");
@@ -573,6 +638,7 @@
       }
       renderOnlineUsers(overview.online_users || []);
       renderDependencies(overview.dependencies || []);
+      renderWorkers(overview.workers || []);
       systemMonitoring._history = overview.history || [];
       renderHistory(systemMonitoring._history);
     };
@@ -589,6 +655,8 @@
     window.setInterval(refreshSystem, 10000);
     refreshDependencyCountdowns();
     window.setInterval(refreshDependencyCountdowns, 1000);
+    refreshWorkerCountdowns();
+    window.setInterval(refreshWorkerCountdowns, 1000);
   }
 
   const inviteComposer = document.querySelector("[data-invite-composer]");

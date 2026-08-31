@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -478,17 +479,23 @@ func contentAssistantFromMetadata(metadata string) *ContentAssistantView {
 	}
 }
 
-func (a *App) backfillComfyContentMedia(ctx context.Context) {
+func (a *App) backfillComfyContentMedia(ctx context.Context) (int64, error) {
 	items, err := a.store.UnarchivedComfyOutputs(ctx, 12)
 	if err != nil {
-		log.Printf("find unarchived ComfyUI outputs: %v", err)
-		return
+		return 0, err
 	}
+	var archived int64
+	var archiveErrors []error
 	for _, item := range items {
-		a.archiveGenerationOutputs(ctx, item.UserID, []generationOutput{{
+		if err := a.archiveGenerationOutputs(ctx, item.UserID, []generationOutput{{
 			Filename: item.Filename, Subfolder: item.Subfolder, Type: item.StorageType, MediaType: item.MediaType,
-		}})
+		}}); err != nil {
+			archiveErrors = append(archiveErrors, fmt.Errorf("archive %s: %w", item.Filename, err))
+			continue
+		}
+		archived++
 	}
+	return archived, errors.Join(archiveErrors...)
 }
 
 func (a *App) handleAdminContentMedia(w http.ResponseWriter, r *http.Request, rawID string) {

@@ -1274,10 +1274,10 @@ func (a *App) trimComfyWorkingSetIfIdle(ctx context.Context) {
 	}
 }
 
-func (a *App) observeComfyQueueForMemoryRelease(ctx context.Context) {
+func (a *App) observeComfyQueueForMemoryRelease(ctx context.Context) (int64, error) {
 	overview, err := a.generationQueueOverview(ctx)
 	if err != nil {
-		return
+		return 0, err
 	}
 	busy := overview.Running != 0 || overview.Pending != 0
 	a.comfyQueueMu.Lock()
@@ -1286,7 +1286,9 @@ func (a *App) observeComfyQueueForMemoryRelease(ctx context.Context) {
 	a.comfyQueueMu.Unlock()
 	if wasBusy && !busy {
 		a.scheduleComfyMemoryRelease()
+		return 1, nil
 	}
+	return 0, nil
 }
 
 func (a *App) scheduleComfyMemoryRelease() {
@@ -1865,20 +1867,23 @@ func (a *App) forgetGenerationOutputs(promptID string, outputs []generationOutpu
 
 // refreshTrackedGenerationStatuses reconciles every durable job independently
 // of the browser and survives a Gateway restart while ComfyUI keeps working.
-func (a *App) refreshTrackedGenerationStatuses(ctx context.Context) {
+func (a *App) refreshTrackedGenerationStatuses(ctx context.Context) (int64, error) {
 	if a.store == nil {
-		return
+		return 0, nil
 	}
 	jobs, err := a.store.ListActiveGenerationJobs(ctx, 500)
 	if err != nil {
 		log.Printf("load active generation jobs: %v", err)
-		return
+		return 0, err
 	}
 	now := time.Now()
+	var processed int64
+	var reconciliationErrors []error
 	for _, job := range jobs {
 		if ctx.Err() != nil {
-			return
+			return processed, errors.Join(append(reconciliationErrors, ctx.Err())...)
 		}
+		processed++
 		if job.UserID == nil {
 			a.failGenerationJob(ctx, job, "generation_owner_deleted", "Владелец задания удалён", errors.New("generation owner was deleted"))
 			continue
@@ -1887,18 +1892,21 @@ func (a *App) refreshTrackedGenerationStatuses(ctx context.Context) {
 			if job.CancellationRequestedAt != nil {
 				if _, _, cancelErr := a.continueGenerationJobCancellation(ctx, job); cancelErr != nil {
 					log.Printf("cancel promptless generation job %s: %v", job.PublicID, cancelErr)
+					reconciliationErrors = append(reconciliationErrors, fmt.Errorf("cancel %s: %w", job.PublicID, cancelErr))
 				}
 				continue
 			}
 			recovered, found, recoverErr := a.recoverGenerationJobPrompt(ctx, job)
 			if recoverErr != nil {
 				log.Printf("recover generation job %s prompt: %v", job.PublicID, recoverErr)
+				reconciliationErrors = append(reconciliationErrors, fmt.Errorf("recover %s: %w", job.PublicID, recoverErr))
 				continue
 			}
 			if !found {
 				if now.Sub(job.StateChangedAt) > 2*time.Minute {
 					if _, expireErr := a.expireGenerationJob(ctx, job, "ComfyUI не подтвердил запуск"); expireErr != nil {
 						log.Printf("expire unconfirmed generation job %s: %v", job.PublicID, expireErr)
+						reconciliationErrors = append(reconciliationErrors, fmt.Errorf("expire unconfirmed %s: %w", job.PublicID, expireErr))
 					}
 				}
 				continue
@@ -1907,27 +1915,32 @@ func (a *App) refreshTrackedGenerationStatuses(ctx context.Context) {
 		}
 		if projectionErr := a.ensureGenerationJobProjections(ctx, job); projectionErr != nil {
 			log.Printf("ensure generation job %s projections: %v", job.PublicID, projectionErr)
+			reconciliationErrors = append(reconciliationErrors, fmt.Errorf("project %s: %w", job.PublicID, projectionErr))
 		}
 		if job.CancellationRequestedAt != nil {
 			if _, _, cancelErr := a.continueGenerationJobCancellation(ctx, job); cancelErr != nil {
 				log.Printf("continue generation job %s cancellation: %v", job.PublicID, cancelErr)
+				reconciliationErrors = append(reconciliationErrors, fmt.Errorf("continue cancellation %s: %w", job.PublicID, cancelErr))
 			}
 			continue
 		}
 		status, err := a.fetchGenerationStatus(ctx, job.PromptID, *job.UserID)
 		if err != nil {
 			log.Printf("refresh ComfyUI generation job %s: %v", job.PublicID, err)
+			reconciliationErrors = append(reconciliationErrors, fmt.Errorf("refresh %s: %w", job.PublicID, err))
 			continue
 		}
 		if !status.Known && now.Sub(job.StateChangedAt) > 5*time.Minute {
 			if _, expireErr := a.expireGenerationJob(ctx, job, "Задание исчезло из очереди ComfyUI"); expireErr != nil {
 				log.Printf("expire lost generation job %s: %v", job.PublicID, expireErr)
+				reconciliationErrors = append(reconciliationErrors, fmt.Errorf("expire lost %s: %w", job.PublicID, expireErr))
 			}
 			continue
 		}
 		updated, reconcileErr := a.reconcileGenerationJobStatus(ctx, job, status)
 		if reconcileErr != nil {
 			log.Printf("reconcile generation job %s: %v", job.PublicID, reconcileErr)
+			reconciliationErrors = append(reconciliationErrors, fmt.Errorf("reconcile %s: %w", job.PublicID, reconcileErr))
 			continue
 		}
 		if updated.State.Terminal() {
@@ -1936,6 +1949,7 @@ func (a *App) refreshTrackedGenerationStatuses(ctx context.Context) {
 			a.generationMu.Unlock()
 		}
 	}
+	return processed, errors.Join(reconciliationErrors...)
 }
 
 func (a *App) syncGenerationAuditState(ctx context.Context, userID int64, promptID, state string) {

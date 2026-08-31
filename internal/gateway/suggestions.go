@@ -232,27 +232,39 @@ func virusTotalStatus(value string) string {
 	}
 }
 
-func (a *App) refreshFeatureSuggestionScans(ctx context.Context) {
+func (a *App) refreshFeatureSuggestionScans(ctx context.Context) (int64, error) {
 	if a.virusTotal == nil || !a.virusTotal.Configured() {
-		return
+		return 0, nil
 	}
 	scans, err := a.store.PendingFeatureSuggestionScans(ctx, 24)
 	if err != nil {
-		return
+		return 0, err
 	}
+	var processed int64
+	var scanErrors []error
 	for _, scan := range scans {
 		checkCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		analysis, checkErr := a.virusTotal.Analysis(checkCtx, scan.AnalysisID)
 		cancel()
 		suggestionID, idErr := a.store.FeatureSuggestionIDForScan(ctx, scan.ID)
 		if idErr != nil {
+			scanErrors = append(scanErrors, fmt.Errorf("scan %d suggestion: %w", scan.ID, idErr))
 			continue
 		}
 		if checkErr != nil {
-			_ = a.store.SetFeatureSuggestionScanError(ctx, scan.ID, truncate(checkErr.Error(), 300))
+			if saveErr := a.store.SetFeatureSuggestionScanError(ctx, scan.ID, truncate(checkErr.Error(), 300)); saveErr != nil {
+				scanErrors = append(scanErrors, fmt.Errorf("scan %d error state: %w", scan.ID, saveErr))
+			}
+			scanErrors = append(scanErrors, fmt.Errorf("scan %d VirusTotal: %w", scan.ID, checkErr))
 		} else {
-			_ = a.store.SetFeatureSuggestionScanResult(ctx, scan.ID, virusTotalStatus(analysis.Status), analysis.Malicious, analysis.Suspicious, analysis.Harmless, analysis.Undetected, analysis.Timeout)
+			if saveErr := a.store.SetFeatureSuggestionScanResult(ctx, scan.ID, virusTotalStatus(analysis.Status), analysis.Malicious, analysis.Suspicious, analysis.Harmless, analysis.Undetected, analysis.Timeout); saveErr != nil {
+				scanErrors = append(scanErrors, fmt.Errorf("scan %d result: %w", scan.ID, saveErr))
+			}
 		}
-		_ = a.store.RefreshFeatureSuggestionStatus(ctx, suggestionID)
+		if refreshErr := a.store.RefreshFeatureSuggestionStatus(ctx, suggestionID); refreshErr != nil {
+			scanErrors = append(scanErrors, fmt.Errorf("suggestion %d status: %w", suggestionID, refreshErr))
+		}
+		processed++
 	}
+	return processed, errors.Join(scanErrors...)
 }
