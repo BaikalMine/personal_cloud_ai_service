@@ -256,17 +256,26 @@ func (s *Store) InsertComfyOutputOwnerships(ctx context.Context, userID int64, o
 }
 
 func (s *Store) ListUserGenerationMedia(ctx context.Context, userID int64, limit int) ([]domain.UserGenerationMedia, error) {
+	return s.listUserGenerationMedia(ctx, userID, "", limit)
+}
+
+func (s *Store) ListUserGenerationImages(ctx context.Context, userID int64, limit int) ([]domain.UserGenerationMedia, error) {
+	return s.listUserGenerationMedia(ctx, userID, "image", limit)
+}
+
+func (s *Store) listUserGenerationMedia(ctx context.Context, userID int64, mediaType string, limit int) ([]domain.UserGenerationMedia, error) {
 	limit = boundedLimit(limit, 1, 100)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id,m.media_type,m.mime_type,m.original_name,m.created_at,m.expires_at,e.is_sensitive,
+		SELECT m.id,m.media_type,m.mime_type,m.original_name,e.model,m.created_at,m.expires_at,e.is_sensitive,
 		       (m.media_type='image' AND m.visual_sensitivity_classified_at IS NULL)
 		FROM content_media m
 		JOIN content_events e ON e.id=m.event_id
 		WHERE e.user_id=$1 AND e.service='comfyui' AND e.kind='comfyui_prompt'
 		  AND e.expires_at > now() AND m.expires_at > now() AND m.profile_hidden_at IS NULL
+		  AND ($3='' OR m.media_type=$3)
 		ORDER BY m.created_at DESC, m.id DESC
 		LIMIT $2
-	`, userID, limit)
+	`, userID, limit, mediaType)
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +283,7 @@ func (s *Store) ListUserGenerationMedia(ctx context.Context, userID int64, limit
 	var media []domain.UserGenerationMedia
 	for rows.Next() {
 		var item domain.UserGenerationMedia
-		if err := rows.Scan(&item.ID, &item.MediaType, &item.MIMEType, &item.OriginalName, &item.CreatedAt, &item.ExpiresAt, &item.Sensitive, &item.VisualPending); err != nil {
+		if err := rows.Scan(&item.ID, &item.MediaType, &item.MIMEType, &item.OriginalName, &item.ModelName, &item.CreatedAt, &item.ExpiresAt, &item.Sensitive, &item.VisualPending); err != nil {
 			return nil, err
 		}
 		media = append(media, item)

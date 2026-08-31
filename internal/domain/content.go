@@ -69,6 +69,7 @@ type UserGenerationMedia struct {
 	MediaType     string
 	MIMEType      string
 	OriginalName  string
+	ModelName     string
 	CreatedAt     time.Time
 	ExpiresAt     time.Time
 	Sensitive     bool

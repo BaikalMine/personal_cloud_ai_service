@@ -39,6 +39,7 @@ func TestGenerateTemplateRenders(t *testing.T) {
 		!strings.Contains(output.String(), "generation-editor-profile") || !strings.Contains(output.String(), "prompt-assistant-template") ||
 		!strings.Contains(output.String(), "Перенос внешности и редактирование") || !strings.Contains(output.String(), "prompt-assistant-think") ||
 		!strings.Contains(output.String(), "Максимум деталей · 4,7 Мп") || !strings.Contains(output.String(), "data-gallery-image-picker-open") ||
+		!strings.Contains(output.String(), "Из моих генераций") || !strings.Contains(output.String(), "generation-image-picker-refresh") ||
 		!strings.Contains(output.String(), "generation-image-picker-grid") {
 		t.Fatal("generation template did not render the wizard")
 	}

@@ -187,6 +187,17 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	if used, err := repository.ContentMediaBytesForUser(ctx, registeredUserID); err != nil || used != 3 {
 		t.Fatalf("media usage: bytes=%d err=%v", used, err)
 	}
+	generatedImages, err := repository.ListUserGenerationImages(ctx, registeredUserID, 10)
+	if err != nil || len(generatedImages) != 1 || generatedImages[0].OriginalName != "result.png" || generatedImages[0].ModelName != "model" {
+		t.Fatalf("generated image picker media: media=%+v err=%v", generatedImages, err)
+	}
+	foreignImages, err := repository.ListUserGenerationImages(ctx, adminID, 10)
+	if err != nil || len(foreignImages) != 0 {
+		t.Fatalf("foreign generated image picker media: media=%+v err=%v", foreignImages, err)
+	}
+	if _, err := repository.ContentMediaByIDForUser(ctx, generatedImages[0].ID, adminID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("foreign generated image lookup error = %v, want sql.ErrNoRows", err)
+	}
 	retentionStats, err := repository.ContentRetentionStats(ctx)
 	if err != nil || retentionStats.EventCount != 1 || retentionStats.MediaCount != 1 || retentionStats.MediaBytes != 3 || retentionStats.NextEventExpiry == nil || retentionStats.NextMediaExpiry == nil {
 		t.Fatalf("content retention stats: stats=%+v err=%v", retentionStats, err)

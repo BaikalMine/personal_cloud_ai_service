@@ -22,6 +22,16 @@ type generationGalleryItemView struct {
 	Media     generationMediaView
 }
 
+type generationPickerImageView struct {
+	ID          int64  `json:"id"`
+	URL         string `json:"url"`
+	Filename    string `json:"filename"`
+	ModelName   string `json:"model_name"`
+	CreatedUnix int64  `json:"created_unix"`
+	ExpiresUnix int64  `json:"expires_unix"`
+	Sensitive   bool   `json:"sensitive"`
+}
+
 func (a *App) handleGenerationGalleryPage(w http.ResponseWriter, r *http.Request) {
 	if (r.URL.Path != "/gallery" && r.URL.Path != "/gallery/") || r.Method != http.MethodGet {
 		if r.Method != http.MethodGet && (r.URL.Path == "/gallery" || r.URL.Path == "/gallery/") {
@@ -90,6 +100,32 @@ func (a *App) handleReuseGenerationLibraryImage(w http.ResponseWriter, r *http.R
 	uploadRequest.Host = r.Host
 	uploadRequest.Header.Set("User-Agent", r.UserAgent())
 	a.quickGenerationUploadHandler().ServeHTTP(w, uploadRequest)
+}
+
+func (a *App) handleGenerationLibraryImages(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
+	if a.store == nil {
+		writeGenerationError(w, http.StatusServiceUnavailable, "галерея временно недоступна")
+		return
+	}
+	user := a.currentUser(r)
+	media, err := a.store.ListUserGenerationImages(r.Context(), user.ID, 100)
+	if err != nil {
+		writeGenerationError(w, http.StatusInternalServerError, "не удалось загрузить изображения")
+		return
+	}
+	items := make([]generationPickerImageView, 0, len(media))
+	for _, item := range media {
+		items = append(items, generationPickerImageView{
+			ID: item.ID, URL: "/generate/library/" + strconv.FormatInt(item.ID, 10), Filename: item.OriginalName,
+			ModelName: generationModelLabel(item.ModelName), CreatedUnix: item.CreatedAt.UnixMilli(),
+			ExpiresUnix: item.ExpiresAt.UnixMilli(), Sensitive: item.Sensitive || item.VisualPending,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"images": items})
 }
 
 func newGenerationLibraryImageUploadRequest(ctx context.Context, filename string, payload []byte) (*http.Request, error) {

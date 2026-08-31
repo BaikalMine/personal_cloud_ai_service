@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"log"
 	"net/http"
 	"time"
@@ -72,6 +73,14 @@ func main() {
 	mux.HandleFunc("/generate/library/reuse-image", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = w.Write([]byte(`{"name":"gallery-preview.png","subfolder":"preview","type":"input"}`))
+	})
+	mux.HandleFunc("/generate/library/images", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(map[string]any{"images": []map[string]any{
+			{"id": 1, "url": "/preview/result.svg", "filename": "AI-Gateway-Krea2-portrait.png", "model_name": "Krea2 Raw INT8 Mixed", "created_unix": now.Add(-8 * time.Minute).UnixMilli(), "expires_unix": now.Add(23*time.Hour + 52*time.Minute).UnixMilli(), "sensitive": false},
+			{"id": 2, "url": "/preview/result.svg", "filename": "AI-Gateway-Flux2-editorial.png", "model_name": "Flux 2 Klein 9B", "created_unix": now.Add(-34 * time.Minute).UnixMilli(), "expires_unix": now.Add(23*time.Hour + 26*time.Minute).UnixMilli(), "sensitive": true},
+			{"id": 3, "url": "/preview/result.svg", "filename": "AI-Gateway-Krea2-product.png", "model_name": "Krea2 Gonzalomo v40", "created_unix": now.Add(-72 * time.Minute).UnixMilli(), "expires_unix": now.Add(22*time.Hour + 48*time.Minute).UnixMilli(), "sensitive": false},
+		}})
 	})
 	mux.HandleFunc("/generate/variants", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")

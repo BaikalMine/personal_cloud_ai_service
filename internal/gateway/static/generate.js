@@ -179,6 +179,7 @@
   const imagePickerGrid = document.getElementById("generation-image-picker-grid");
   const imagePickerState = document.getElementById("generation-image-picker-state");
   const imagePickerSlot = document.getElementById("generation-image-picker-slot");
+  const imagePickerRefresh = document.getElementById("generation-image-picker-refresh");
   const fieldHelps = [...root.querySelectorAll(".field-help[data-tooltip]")];
   const panels = [...root.querySelectorAll("[data-step]")];
   const progress = [...root.querySelectorAll("[data-progress]")];
@@ -207,8 +208,10 @@
   let activeGenerationRequestID = "";
   let savedRecipes = [];
   let savedVariants = [];
-  let variantsLoaded = false;
   let galleryPickerSlot = null;
+  let galleryPickerImages = [];
+  let galleryPickerImagesLoaded = false;
+  let galleryPickerImagesLoading = false;
   const requestedVariantID = new URLSearchParams(window.location.search).get("variant") || "";
   let requestedVariantHandled = false;
   const activeGenerationStorageKey = "ai-gateway.active-generation";
@@ -1638,39 +1641,17 @@
   }));
   miniMaxVideoSharpenMethod?.addEventListener("change", syncMiniMaxSharpenFields);
 
-  const generationGalleryImages = () => {
-    const seen = new Set();
-    const images = [];
-    savedVariants.forEach((variant) => {
-      (variant.media || []).forEach((media) => {
-        const id = Number(media.id || 0);
-        if (media.media_type !== "image" || id <= 0 || !media.url || seen.has(id)) return;
-        seen.add(id);
-        images.push({
-          id,
-          url: media.url,
-          name: media.filename || `Изображение ${id}`,
-          sensitive: Boolean(media.sensitive),
-          modelName: String(variant.model_name || "Сгенерированное изображение").replaceAll("\\", "/").split("/").pop().replace(/\.(safetensors|ckpt|gguf)$/i, ""),
-        });
-      });
-    });
-    return images;
-  };
-
   const renderGalleryImagePicker = () => {
     if (!imagePickerGrid || !imagePickerState) return;
-    const images = generationGalleryImages();
     imagePickerGrid.replaceChildren();
-    if (!images.length) {
+    if (!galleryPickerImages.length) {
       imagePickerState.hidden = false;
-      imagePickerState.textContent = variantsLoaded
-        ? "В галерее пока нет доступных изображений. Можно загрузить фото с устройства."
-        : "Загружаем ваши изображения...";
+      if (galleryPickerImagesLoading) imagePickerState.textContent = "Загружаем ваши изображения...";
+      else if (galleryPickerImagesLoaded) imagePickerState.textContent = `За последние ${mediaRetentionLabel} доступных изображений нет. Можно загрузить фото с устройства.`;
       return;
     }
     imagePickerState.hidden = true;
-    imagePickerGrid.replaceChildren(...images.map((entry) => {
+    imagePickerGrid.replaceChildren(...galleryPickerImages.map((entry) => {
       const card = document.createElement("button");
       card.type = "button";
       card.className = "generation-image-picker-card";
@@ -1686,9 +1667,13 @@
       const details = document.createElement("span");
       const title = document.createElement("strong");
       title.textContent = entry.modelName;
-      const filename = document.createElement("small");
-      filename.textContent = entry.name;
-      details.append(title, filename);
+      const meta = document.createElement("small");
+      const created = new Date(entry.createdUnix);
+      const dateLabel = Number.isFinite(created.getTime())
+        ? new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(created)
+        : "";
+      meta.textContent = [dateLabel, entry.name].filter(Boolean).join(" · ");
+      details.append(title, meta);
       card.append(image, details);
       if (entry.sensitive) {
         const cover = document.createElement("span");
@@ -1709,6 +1694,44 @@
     }));
   };
 
+  const refreshGalleryPickerImages = async () => {
+    if (galleryPickerImagesLoading) return;
+    galleryPickerImagesLoading = true;
+    if (imagePickerRefresh) {
+      imagePickerRefresh.disabled = true;
+      imagePickerRefresh.classList.add("is-loading");
+    }
+    renderGalleryImagePicker();
+    try {
+      const response = await fetch("/generate/library/images", { credentials: "same-origin" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Не удалось загрузить изображения");
+      galleryPickerImages = (Array.isArray(payload.images) ? payload.images : []).map((entry) => ({
+        id: Number(entry.id || 0),
+        url: String(entry.url || ""),
+        name: String(entry.filename || `Изображение ${entry.id || ""}`),
+        modelName: String(entry.model_name || "Сгенерированное изображение"),
+        createdUnix: Number(entry.created_unix || 0),
+        expiresUnix: Number(entry.expires_unix || 0),
+        sensitive: Boolean(entry.sensitive),
+      })).filter((entry) => entry.id > 0 && entry.url);
+      galleryPickerImagesLoaded = true;
+    } catch (error) {
+      if (!galleryPickerImages.length && imagePickerState) {
+        imagePickerState.hidden = false;
+        imagePickerState.textContent = error.message || "Не удалось загрузить изображения. Попробуйте ещё раз.";
+      }
+      throw error;
+    } finally {
+      galleryPickerImagesLoading = false;
+      if (imagePickerRefresh) {
+        imagePickerRefresh.disabled = false;
+        imagePickerRefresh.classList.remove("is-loading");
+      }
+      renderGalleryImagePicker();
+    }
+  };
+
   const closeGalleryImagePicker = () => {
     if (!imagePicker || imagePicker.hidden) return;
     const selectedSlot = galleryPickerSlot;
@@ -1727,13 +1750,8 @@
     renderGalleryImagePicker();
     imagePicker.querySelector(".generation-image-picker-close")?.focus({ preventScroll: true });
     try {
-      await refreshVariants();
-    } catch (error) {
-      if (!generationGalleryImages().length && imagePickerState) {
-        imagePickerState.hidden = false;
-        imagePickerState.textContent = error.message || "Не удалось загрузить галерею. Попробуйте ещё раз.";
-      }
-    }
+      await refreshGalleryPickerImages();
+    } catch (_) {}
   };
 
   const applyImageSelectionPreview = (item, source, url, stateMessage) => {
@@ -1772,7 +1790,7 @@
     uploadedImages.delete(item.index);
     if (item.input) item.input.value = "";
     if (inputImages[item.index - 1]) inputImages[item.index - 1].value = "";
-    applyImageSelectionPreview(item, entry, entry.url, "Выбрано из галереи. Подготовим фото для ComfyUI при продолжении.");
+    applyImageSelectionPreview(item, entry, entry.url, "Выбрано из моих генераций. Передадим фото в ComfyUI при продолжении.");
     closeGalleryImagePicker();
   };
 
@@ -1818,6 +1836,7 @@
   });
 
   imagePicker?.querySelectorAll("[data-gallery-image-picker-close]").forEach((button) => button.addEventListener("click", closeGalleryImagePicker));
+  imagePickerRefresh?.addEventListener("click", () => { refreshGalleryPickerImages().catch(() => {}); });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeGalleryImagePicker(); });
 
   workflowNext?.addEventListener("click", async () => {
@@ -1846,7 +1865,7 @@
         const file = selectedImageFile(item);
         const galleryImage = gallerySelections.get(item.index);
         if (!file && !galleryImage) throw new Error("Не удалось прочитать выбранное фото");
-        if (item.state) item.state.textContent = galleryImage ? "Подготавливаем фото из галереи..." : "Загружаем в вашу сессию...";
+        if (item.state) item.state.textContent = galleryImage ? "Передаём ранее созданное фото в ComfyUI..." : "Загружаем фото с устройства...";
         let response;
         if (galleryImage) {
           const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", media_id: String(galleryImage.id) });
@@ -2310,7 +2329,6 @@
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || "Не удалось загрузить историю вариантов");
     savedVariants = Array.isArray(payload.variants) ? payload.variants : [];
-    variantsLoaded = true;
     renderVariants();
     if (imagePicker && !imagePicker.hidden) renderGalleryImagePicker();
     restoreRequestedVariant();
