@@ -24,6 +24,7 @@ const (
 var (
 	windowsScriptPattern = regexp.MustCompile(`(?i)^[a-z]:\\.+\.(bat|cmd|ps1|exe)$`)
 	minerProcessPattern  = regexp.MustCompile(`(?i)^[a-z0-9][a-z0-9_.-]{0,126}\.exe$`)
+	archiveSHA256Pattern = regexp.MustCompile(`[0-9a-f]{64}`)
 	allowedIconMIMEs     = map[string]bool{"image/png": true, "image/jpeg": true, "image/webp": true, "image/x-icon": true, "image/vnd.microsoft.icon": true}
 )
 
@@ -182,13 +183,13 @@ func (a *App) handleAdminMining(w http.ResponseWriter, r *http.Request) {
 	switch action {
 	case "update":
 		archiveURL := strings.TrimSpace(r.FormValue("archive_url"))
-		archiveSHA256 := strings.ToLower(strings.TrimSpace(r.FormValue("archive_sha256")))
+		archiveSHA256, sha256OK := normalizeArchiveSHA256(r.FormValue("archive_sha256"))
 		if len(archiveURL) == 0 || len(archiveURL) > 2048 {
 			err = errors.New("укажите HTTPS-ссылку на ZIP-архив обновления")
 			break
 		}
-		if !validArchiveSHA256(archiveSHA256) {
-			err = errors.New("укажите SHA-256 ZIP-архива: 64 шестнадцатеричных символа")
+		if !sha256OK {
+			err = errors.New("укажите полный SHA-256 ZIP-архива или вставьте строку с контрольной суммой")
 			break
 		}
 		if a.mining == nil || !a.mining.Configured() {
@@ -266,6 +267,54 @@ func validArchiveSHA256(value string) bool {
 	}
 	_, err := hex.DecodeString(value)
 	return err == nil
+}
+
+func normalizeArchiveSHA256(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 512 {
+		return "", false
+	}
+
+	lower := strings.ToLower(value)
+	if validArchiveSHA256(lower) {
+		return lower, true
+	}
+
+	// CertUtil may group a checksum with spaces. Only compact an input that
+	// consists entirely of hexadecimal characters and whitespace.
+	compact := strings.Map(func(r rune) rune {
+		switch r {
+		case ' ', '\t', '\r', '\n':
+			return -1
+		default:
+			return r
+		}
+	}, lower)
+	if validArchiveSHA256(compact) {
+		return compact, true
+	}
+
+	candidates := make(map[string]struct{})
+	for _, match := range archiveSHA256Pattern.FindAllStringIndex(lower, -1) {
+		if match[0] > 0 && isHexByte(lower[match[0]-1]) {
+			continue
+		}
+		if match[1] < len(lower) && isHexByte(lower[match[1]]) {
+			continue
+		}
+		candidates[lower[match[0]:match[1]]] = struct{}{}
+	}
+	if len(candidates) != 1 {
+		return "", false
+	}
+	for candidate := range candidates {
+		return candidate, true
+	}
+	return "", false
+}
+
+func isHexByte(value byte) bool {
+	return value >= '0' && value <= '9' || value >= 'a' && value <= 'f'
 }
 
 func (a *App) handleCreateMiner(w http.ResponseWriter, r *http.Request) {
