@@ -13,7 +13,10 @@ import (
 	"time"
 )
 
-const maxResponseBytes = 1 << 20
+const (
+	maxResponseBytes = 1 << 20
+	updateTimeout    = 35 * time.Minute
+)
 
 var ErrUnavailable = errors.New("mining agent is unavailable")
 
@@ -95,6 +98,11 @@ func NewClient(baseURL *url.URL, token string) *Client {
 		TLSHandshakeTimeout:   3 * time.Second,
 		ResponseHeaderTimeout: 4 * time.Second,
 	}
+	updateTransport := transport.Clone()
+	// The update endpoint responds only after downloading, verifying, replacing,
+	// and optionally restarting the miner. The client timeout still bounds the
+	// request, while the ordinary four-second header timeout must not apply.
+	updateTransport.ResponseHeaderTimeout = 0
 	return &Client{
 		baseURL: baseURL,
 		token:   strings.TrimSpace(token),
@@ -102,7 +110,7 @@ func NewClient(baseURL *url.URL, token string) *Client {
 			Timeout:   5 * time.Second,
 			Transport: transport,
 		},
-		updateHTTP: &http.Client{Timeout: 35 * time.Minute, Transport: transport},
+		updateHTTP: &http.Client{Timeout: updateTimeout, Transport: updateTransport},
 	}
 }
 

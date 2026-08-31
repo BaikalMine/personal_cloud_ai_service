@@ -126,6 +126,30 @@ func TestClientUsesLongRunningMinerUpdateEndpoint(t *testing.T) {
 	}
 }
 
+func TestClientUsesDedicatedTransportForLongRunningUpdates(t *testing.T) {
+	client := NewClient(&url.URL{Scheme: "http", Host: "localhost"}, "test-token")
+	regularTransport, ok := client.http.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("regular transport type = %T", client.http.Transport)
+	}
+	updateTransport, ok := client.updateHTTP.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("update transport type = %T", client.updateHTTP.Transport)
+	}
+	if regularTransport == updateTransport {
+		t.Fatal("long-running updates must not share the short-lived request transport")
+	}
+	if regularTransport.ResponseHeaderTimeout != 4*time.Second {
+		t.Fatalf("regular response header timeout = %s", regularTransport.ResponseHeaderTimeout)
+	}
+	if updateTransport.ResponseHeaderTimeout != 0 {
+		t.Fatalf("update response header timeout = %s, want disabled", updateTransport.ResponseHeaderTimeout)
+	}
+	if client.updateHTTP.Timeout != updateTimeout {
+		t.Fatalf("update client timeout = %s, want %s", client.updateHTTP.Timeout, updateTimeout)
+	}
+}
+
 func TestClientTrimsOnlyConfiguredComfyMemory(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer test-token" || r.Method != http.MethodPost || r.URL.Path != "/v1/comfyui/trim" {
