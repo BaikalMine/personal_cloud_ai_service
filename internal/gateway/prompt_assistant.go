@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -71,6 +72,7 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 		writeGenerationError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	defer releasePromptAssistantImages(references)
 	thinkValue := r.Form.Get("assistant_think")
 	if thinkValue != "" && thinkValue != "true" && thinkValue != "false" {
 		writeGenerationError(w, http.StatusBadRequest, "некорректное значение режима рассуждений")
@@ -124,6 +126,18 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 		response["mining_paused"] = true
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func releasePromptAssistantImages(references []promptassistant.ImageReference) {
+	totalBytes := 0
+	for index := range references {
+		totalBytes += len(references[index].Image)
+		clear(references[index].Image)
+		references[index].Image = nil
+	}
+	if totalBytes >= 8<<20 {
+		debug.FreeOSMemory()
+	}
 }
 
 func promptAssistantTemplateID(mode promptassistant.Mode) string {

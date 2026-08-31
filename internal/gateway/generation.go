@@ -1058,6 +1058,8 @@ func (a *App) trimComfyWorkingSetIfIdle(ctx context.Context) {
 	}
 	if result.Trimmed > 0 {
 		log.Printf("trimmed idle ComfyUI working set for %d process(es)", result.Trimmed)
+	} else if result.Message != "" {
+		log.Printf("ComfyUI working set was not trimmed: %s", result.Message)
 	}
 }
 

@@ -38,11 +38,10 @@ func trimComfyWorkingSet(ctx context.Context, signature string) (mining.ComfyMem
 	if err != nil {
 		return mining.ComfyMemoryTrim{}, err
 	}
-	signature = strings.ToLower(strings.TrimSpace(signature))
 	result := mining.ComfyMemoryTrim{}
 	for _, process := range processes {
 		isPython := strings.EqualFold(process.Name, "python.exe") || strings.EqualFold(process.Name, "pythonw.exe")
-		if process.PID <= 0 || !isPython || !strings.Contains(strings.ToLower(process.CommandLine), signature) {
+		if process.PID <= 0 || !isPython || !matchesComfyCommand(process.CommandLine, signature) {
 			continue
 		}
 		if err := emptyProcessWorkingSet(uint32(process.PID)); err != nil {

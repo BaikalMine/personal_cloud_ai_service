@@ -36,6 +36,19 @@ func TestPromptAssistantImageReferencesRejectsUnknownRole(t *testing.T) {
 	}
 }
 
+func TestReleasePromptAssistantImagesClearsBuffers(t *testing.T) {
+	references := []promptassistant.ImageReference{
+		{Number: 1, Image: []byte("first image")},
+		{Number: 2, Image: []byte("second image")},
+	}
+	releasePromptAssistantImages(references)
+	for index, reference := range references {
+		if reference.Image != nil {
+			t.Fatalf("reference %d image buffer was not released", index+1)
+		}
+	}
+}
+
 func TestPromptAssistantVideoContextAcceptsReferenceAudioOnlyInReferenceMode(t *testing.T) {
 	referenceRequest := httptest.NewRequest("POST", "/generate/prompt-assistant", nil)
 	referenceRequest.Form = map[string][]string{

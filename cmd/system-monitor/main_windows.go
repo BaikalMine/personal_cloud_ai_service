@@ -136,7 +136,7 @@ func loadConfig(path string) (config, error) {
 		settings.LogFile = filepath.Join(filepath.Dir(path), "system-monitor.log")
 	}
 	if strings.TrimSpace(settings.ComfyCommandSignature) == "" {
-		settings.ComfyCommandSignature = "main.py --enable-manager"
+		settings.ComfyCommandSignature = "main.py"
 	}
 	return settings, nil
 }

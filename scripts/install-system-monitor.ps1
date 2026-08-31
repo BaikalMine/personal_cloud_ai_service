@@ -8,7 +8,7 @@ param(
     [string]$GatewayEnvPath,
     [string]$InstallDirectory = (Join-Path $env:ProgramData 'AI-System-Monitor'),
     [string]$ListenAddress = ':8094',
-    [string]$ComfyCommandSignature = 'main.py --enable-manager',
+    [string]$ComfyCommandSignature = 'main.py',
     [string[]]$DockerRemoteAddresses = @(
         '192.168.65.0/24',
         '172.16.0.0/12',
@@ -76,7 +76,10 @@ if ([string]::IsNullOrWhiteSpace($Token) -and (Test-Path -LiteralPath $existingC
     if ($ListenAddress -eq ':8094' -and -not [string]::IsNullOrWhiteSpace($existingConfig.listen_address)) {
         $ListenAddress = $existingConfig.listen_address
     }
-    if ($ComfyCommandSignature -eq 'main.py --enable-manager' -and -not [string]::IsNullOrWhiteSpace($existingConfig.comfy_command_signature)) {
+    $legacyComfySignature = 'main.py --enable-manager'
+    if ($ComfyCommandSignature -eq 'main.py' -and
+        -not [string]::IsNullOrWhiteSpace($existingConfig.comfy_command_signature) -and
+        $existingConfig.comfy_command_signature -ne $legacyComfySignature) {
         $ComfyCommandSignature = $existingConfig.comfy_command_signature
     }
 }

@@ -32,8 +32,8 @@ services:
     env_file:
       - .env
     environment:
-      GOMEMLIMIT: 768MiB
-      GOGC: "75"
+      GOMEMLIMIT: 512MiB
+      GOGC: "50"
     ports:
       - "8090:8090"
       - "192.168.1.86:8091:8091"
@@ -61,7 +61,7 @@ services:
       retries: 5
       start_period: 10s
     logging: *default-logging
-    mem_limit: 1g
+    mem_limit: 768m
     pids_limit: 128
     stop_grace_period: 15s
     restart: unless-stopped
