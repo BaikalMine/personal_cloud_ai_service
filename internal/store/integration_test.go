@@ -49,6 +49,7 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	}
 	assertMiningProfiles(t, ctx, repository, adminID)
 	assertDatabaseRetentionLifecycle(t, ctx, db, repository, adminID)
+	assertGenerationJobLifecycle(t, ctx, db, repository, adminID)
 
 	inviteHash := security.HashToken("single-use-integration-invite")
 	inviteID, err := repository.CreateInvite(ctx, store.CreateInviteParams{
@@ -361,6 +362,217 @@ func assertComfyOutputCleanupLifecycle(t *testing.T, ctx context.Context, db *sq
 	}
 }
 
+func assertGenerationJobLifecycle(t *testing.T, ctx context.Context, db *sql.DB, repository *store.Store, userID int64) {
+	t.Helper()
+	const (
+		requestID = "integration-job-primary-request"
+		publicID  = "job_integration_primary_0001"
+		promptID  = "integration-job-prompt-0001"
+	)
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := db.ExecContext(cleanupCtx, `DELETE FROM content_events WHERE external_id=$1`, promptID); err != nil {
+			t.Errorf("clean generation job content event: %v", err)
+		}
+		if _, err := db.ExecContext(cleanupCtx, `DELETE FROM generation_jobs WHERE public_id LIKE 'job_integration_%'`); err != nil {
+			t.Errorf("clean generation jobs: %v", err)
+		}
+		if _, err := db.ExecContext(cleanupCtx, `DELETE FROM generation_requests WHERE request_id LIKE 'integration-job-%'`); err != nil {
+			t.Errorf("clean generation job requests: %v", err)
+		}
+	}()
+
+	existing, recoveredPromptID, err := repository.ClaimGenerationRequest(ctx, userID, requestID)
+	if err != nil || existing || recoveredPromptID != "" {
+		t.Fatalf("claim generation request: existing=%v prompt=%q err=%v", existing, recoveredPromptID, err)
+	}
+	revisionBefore, err := repository.GenerationJobRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, created, err := repository.CreateGenerationJob(ctx, domain.CreateGenerationJobParams{
+		PublicID: publicID, UserID: userID, UsernameSnapshot: "admin", RequestID: requestID,
+	})
+	if err != nil || !created || job.State != domain.GenerationJobDraft {
+		t.Fatalf("create generation job: job=%+v created=%v err=%v", job, created, err)
+	}
+	revisionAfterCreate, err := repository.GenerationJobRevision(ctx)
+	if err != nil || revisionAfterCreate <= revisionBefore {
+		t.Fatalf("generation job revision after create=%d before=%d err=%v", revisionAfterCreate, revisionBefore, err)
+	}
+	recovered, created, err := repository.CreateGenerationJob(ctx, domain.CreateGenerationJobParams{
+		PublicID: "job_integration_duplicate_0001", UserID: userID, UsernameSnapshot: "admin", RequestID: requestID,
+	})
+	if err != nil || created || recovered.ID != job.ID || recovered.PublicID != publicID {
+		t.Fatalf("recover generation job: job=%+v created=%v err=%v", recovered, created, err)
+	}
+	foreignUserID := userID + 1000000
+	if _, _, err := repository.CreateGenerationJob(ctx, domain.CreateGenerationJobParams{
+		PublicID: "job_integration_foreign_0001", UserID: foreignUserID, UsernameSnapshot: "other",
+		RequestID: "integration-job-foreign-request", ParentJobID: &job.ID,
+	}); !errors.Is(err, store.ErrGenerationJobParentConflict) {
+		t.Fatalf("foreign generation job parent error=%v, want ErrGenerationJobParentConflict", err)
+	}
+
+	job, changed, err := repository.TransitionGenerationJob(ctx, job.ID, domain.GenerationJobTransitionParams{
+		State: domain.GenerationJobPreparing, Message: "Проверяем параметры",
+	})
+	if err != nil || !changed || job.State != domain.GenerationJobPreparing {
+		t.Fatalf("prepare transition: job=%+v changed=%v err=%v", job, changed, err)
+	}
+	job, err = repository.PrepareGenerationJob(ctx, job.ID, domain.PreparedGenerationJob{
+		TemplateID: "video", WorkflowID: "minimax-h3-v4", ModelName: "MiniMax H3", Seed: 42,
+		PayloadCipher: []byte{1, 2, 3}, Dependencies: []string{" comfyui ", "rife", "comfyui"}, InputCount: 2,
+	})
+	if err != nil || job.WorkflowID != "minimax-h3-v4" || job.Seed != 42 || len(job.Dependencies) != 2 || job.InputCount != 2 {
+		t.Fatalf("prepare generation job payload: job=%+v err=%v", job, err)
+	}
+	job, changed, err = repository.TransitionGenerationJob(ctx, job.ID, domain.GenerationJobTransitionParams{
+		State: domain.GenerationJobWaitingForResources, Message: "Ожидаем ресурсы",
+	})
+	if err != nil || !changed || job.State != domain.GenerationJobWaitingForResources {
+		t.Fatalf("resource transition: job=%+v changed=%v err=%v", job, changed, err)
+	}
+	job, err = repository.BindGenerationJobPrompt(ctx, job.ID, promptID)
+	if err != nil || job.PromptID != promptID {
+		t.Fatalf("bind generation job prompt: job=%+v err=%v", job, err)
+	}
+	revisionAfterBind, err := repository.GenerationJobRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.BindGenerationJobPrompt(ctx, job.ID, promptID); err != nil {
+		t.Fatalf("idempotent generation job prompt bind: %v", err)
+	}
+	revisionAfterRepeatedBind, err := repository.GenerationJobRevision(ctx)
+	if err != nil || revisionAfterRepeatedBind != revisionAfterBind {
+		t.Fatalf("idempotent prompt bind revision=%d want=%d err=%v", revisionAfterRepeatedBind, revisionAfterBind, err)
+	}
+	var linkedJobID int64
+	if err := db.QueryRowContext(ctx, `SELECT job_id FROM generation_requests WHERE user_id=$1 AND request_id=$2`, userID, requestID).Scan(&linkedJobID); err != nil || linkedJobID != job.ID {
+		t.Fatalf("generation request job link=%d want=%d err=%v", linkedJobID, job.ID, err)
+	}
+	if err := repository.InsertGenerationVariant(ctx, userID, promptID, "video", "minimax-h3-v4", "MiniMax H3", 42, []byte{4}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.LinkGenerationJobVariant(ctx, job.ID, promptID); err != nil {
+		t.Fatal(err)
+	}
+	eventID, err := repository.InsertContentEvent(ctx, domain.ContentEventRecord{
+		UserID: userID, Service: "comfyui", Kind: "comfyui_prompt", ExternalID: promptID,
+		Model: "MiniMax H3", GenerationState: "queued", PromptCipher: []byte{5}, ResponseCipher: []byte{6},
+		MetadataCipher: []byte{7}, ExpiresAt: time.Now().Add(24 * time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.LinkGenerationJobContentEvent(ctx, job.ID, userID, promptID); err != nil {
+		t.Fatal(err)
+	}
+	var variantJobID, contentJobID int64
+	if err := db.QueryRowContext(ctx, `SELECT job_id FROM quick_generation_variants WHERE prompt_id=$1`, promptID).Scan(&variantJobID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT generation_job_id FROM content_events WHERE id=$1`, eventID).Scan(&contentJobID); err != nil {
+		t.Fatal(err)
+	}
+	if variantJobID != job.ID || contentJobID != job.ID {
+		t.Fatalf("generation job projections: variant=%d content=%d want=%d", variantJobID, contentJobID, job.ID)
+	}
+
+	for _, transition := range []domain.GenerationJobTransitionParams{
+		{State: domain.GenerationJobQueued, Message: "В очереди ComfyUI"},
+		{State: domain.GenerationJobRunning, Message: "Выполняем workflow"},
+		{State: domain.GenerationJobPostprocessing, Message: "Обрабатываем результат"},
+		{State: domain.GenerationJobArchiving, Message: "Сохраняем результат"},
+	} {
+		job, changed, err = repository.TransitionGenerationJob(ctx, job.ID, transition)
+		if err != nil || !changed || job.State != transition.State {
+			t.Fatalf("generation job transition to %s: job=%+v changed=%v err=%v", transition.State, job, changed, err)
+		}
+	}
+	if _, _, err := repository.TransitionGenerationJob(ctx, job.ID, domain.GenerationJobTransitionParams{
+		State: domain.GenerationJobCompleted, Message: "Готово",
+	}); !errors.Is(err, store.ErrGenerationJobStateConflict) {
+		t.Fatalf("completion before resource release error=%v", err)
+	}
+	revisionBeforeRelease, err := repository.GenerationJobRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	released, err := repository.MarkGenerationJobResourcesReleased(ctx, job.ID)
+	if err != nil || released.ResourcesReleasedAt == nil {
+		t.Fatalf("release generation job resources: job=%+v err=%v", released, err)
+	}
+	revisionAfterRelease, err := repository.GenerationJobRevision(ctx)
+	if err != nil || revisionAfterRelease <= revisionBeforeRelease {
+		t.Fatalf("resource release revision=%d before=%d err=%v", revisionAfterRelease, revisionBeforeRelease, err)
+	}
+	releasedAgain, err := repository.MarkGenerationJobResourcesReleased(ctx, job.ID)
+	if err != nil || releasedAgain.ResourcesReleasedAt == nil {
+		t.Fatalf("repeat generation job resource release: job=%+v err=%v", releasedAgain, err)
+	}
+	revisionAfterRepeatedRelease, err := repository.GenerationJobRevision(ctx)
+	if err != nil || revisionAfterRepeatedRelease != revisionAfterRelease {
+		t.Fatalf("idempotent resource release revision=%d want=%d err=%v", revisionAfterRepeatedRelease, revisionAfterRelease, err)
+	}
+	job, changed, err = repository.TransitionGenerationJob(ctx, job.ID, domain.GenerationJobTransitionParams{
+		State: domain.GenerationJobCompleted, Message: "Готово",
+	})
+	if err != nil || !changed || job.State != domain.GenerationJobCompleted || job.FinishedAt == nil {
+		t.Fatalf("complete generation job: job=%+v changed=%v err=%v", job, changed, err)
+	}
+	if _, changed, err := repository.TransitionGenerationJob(ctx, job.ID, domain.GenerationJobTransitionParams{
+		State: domain.GenerationJobCompleted, Message: "Готово",
+	}); err != nil || changed {
+		t.Fatalf("idempotent terminal observation changed=%v err=%v", changed, err)
+	}
+	if _, _, err := repository.TransitionGenerationJob(ctx, job.ID, domain.GenerationJobTransitionParams{
+		State: domain.GenerationJobCompleted, Message: "Перезаписанное состояние",
+	}); !errors.Is(err, store.ErrGenerationJobStateConflict) {
+		t.Fatalf("terminal generation job mutation error=%v", err)
+	}
+
+	transitions, err := repository.GenerationJobTransitions(ctx, job.ID, userID)
+	if err != nil || len(transitions) != 8 || transitions[0].ToState != domain.GenerationJobDraft || transitions[len(transitions)-1].ToState != domain.GenerationJobCompleted {
+		t.Fatalf("generation job transitions=%+v err=%v", transitions, err)
+	}
+	if _, err := repository.GenerationJobByPublicID(ctx, userID+1, publicID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("foreign generation job lookup error=%v, want sql.ErrNoRows", err)
+	}
+	listed, err := repository.ListGenerationJobs(ctx, userID, 20, time.Now().Add(-time.Hour))
+	if err != nil || len(listed) == 0 || listed[0].ID != job.ID {
+		t.Fatalf("list generation jobs=%+v err=%v", listed, err)
+	}
+	active, err := repository.ListActiveGenerationJobs(ctx, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, activeJob := range active {
+		if activeJob.ID == job.ID {
+			t.Fatalf("completed job remained active: %+v", activeJob)
+		}
+	}
+
+	retry, created, err := repository.CreateGenerationJob(ctx, domain.CreateGenerationJobParams{
+		PublicID: "job_integration_retry_0001", UserID: userID, UsernameSnapshot: "admin",
+		RequestID: "integration-job-retry-request", ParentJobID: &job.ID,
+	})
+	if err != nil || !created || retry.ParentJobID == nil || *retry.ParentJobID != job.ID {
+		t.Fatalf("create retry generation job: job=%+v created=%v err=%v", retry, created, err)
+	}
+	if _, err := repository.MarkGenerationJobResourcesReleased(ctx, retry.ID); err != nil {
+		t.Fatal(err)
+	}
+	retry, changed, err = repository.TransitionGenerationJob(ctx, retry.ID, domain.GenerationJobTransitionParams{
+		State: domain.GenerationJobFailed, Message: "Повтор не запущен", ErrorCode: "integration_retry_failed", ErrorMessage: "test failure",
+	})
+	if err != nil || !changed || retry.State != domain.GenerationJobFailed || retry.ErrorCode != "integration_retry_failed" {
+		t.Fatalf("fail retry generation job: job=%+v changed=%v err=%v", retry, changed, err)
+	}
+}
+
 func resetIntegrationDatabase(t *testing.T, db *sql.DB) {
 	t.Helper()
 	if _, err := db.Exec(`
@@ -408,6 +620,10 @@ func assertDatabaseRetentionLifecycle(t *testing.T, ctx context.Context, db *sql
 		 VALUES ($1,'retention-old-variant',1,decode('00','hex'),'completed',now() - interval '72 hours',now() - interval '71 hours',now() - interval '71 hours'),
 		        ($1,'retention-current-variant',2,decode('00','hex'),'completed',now(),now(),now()),
 		        ($1,'retention-active-variant',3,decode('00','hex'),'running',now() - interval '72 hours',NULL,now())`,
+		`INSERT INTO generation_jobs(public_id,user_id,username_snapshot,request_id,state,status_message,state_changed_at,finished_at,resources_released_at,created_at,updated_at)
+		 VALUES ('job_retention_old_0001',$1,'admin','retention-job-old','completed','Готово',now() - interval '71 hours',now() - interval '71 hours',now() - interval '71 hours',now() - interval '72 hours',now() - interval '71 hours'),
+		        ('job_retention_current_0001',$1,'admin','retention-job-current','completed','Готово',now(),now(),now(),now(),now()),
+		        ('job_retention_active_0001',$1,'admin','retention-job-active','running','Выполняем workflow',now(),NULL,NULL,now() - interval '72 hours',now())`,
 		`WITH event AS (
 			INSERT INTO content_events(user_id,service,kind,external_id,prompt_cipher,response_cipher,metadata_cipher,expires_at)
 			VALUES ($1,'comfyui','comfyui_prompt','retention-ownership-event',decode('00','hex'),decode('00','hex'),decode('00','hex'),now() + interval '7 days')
@@ -436,7 +652,8 @@ func assertDatabaseRetentionLifecycle(t *testing.T, ctx context.Context, db *sql
 	cutoff := now.Add(-24 * time.Hour)
 	cutoffs := domain.DatabaseRetentionCutoffs{
 		ProxyRequests: cutoff, WebSocketSessions: cutoff, GenerationRequests: cutoff,
-		DailyUsage: cutoff, InviteHistory: cutoff, AuditLog: cutoff, HostMetrics: cutoff,
+		GenerationJobs: cutoff,
+		DailyUsage:     cutoff, InviteHistory: cutoff, AuditLog: cutoff, HostMetrics: cutoff,
 		GenerationVariants: cutoff, OutputOwnerships: now,
 	}
 	first, err := repository.CleanupDatabaseRetention(ctx, cutoffs, 100, 1)
@@ -447,6 +664,7 @@ func assertDatabaseRetentionLifecycle(t *testing.T, ctx context.Context, db *sql
 		"proxy_requests": 100, "websocket_sessions": 1, "generation_requests": 1,
 		"quick_generation_daily_usage": 1, "invites": 1, "audit_log": 1,
 		"host_metrics": 1, "quick_generation_variants": 1, "comfy_output_ownership": 1,
+		"generation_jobs": 1,
 	} {
 		if first.DeletedRows[table] != expected {
 			t.Fatalf("first cleanup deleted %s=%d, want %d", table, first.DeletedRows[table], expected)
@@ -482,6 +700,7 @@ func assertDatabaseRetentionLifecycle(t *testing.T, ctx context.Context, db *sql
 		`SELECT count(*) FROM audit_log WHERE action='retention_current'`:                                                                   1,
 		`SELECT count(*) FROM host_metrics WHERE recorded_at >= now() - interval '1 hour'`:                                                  1,
 		`SELECT count(*) FROM quick_generation_variants WHERE prompt_id IN ('retention-current-variant','retention-active-variant')`:        2,
+		`SELECT count(*) FROM generation_jobs WHERE request_id IN ('retention-job-current','retention-job-active')`:                         2,
 		`SELECT count(*) FROM comfy_output_ownership WHERE filename='current.png'`:                                                          1,
 	} {
 		var count int
@@ -528,6 +747,7 @@ func cleanupDatabaseRetentionFixtures(t *testing.T, db *sql.DB, userID int64) {
 		{`DELETE FROM audit_log WHERE action IN ('retention_old','retention_current')`, nil},
 		{`DELETE FROM host_metrics WHERE cpu_percent IN (91,92) AND memory_total_bytes=2`, nil},
 		{`DELETE FROM quick_generation_variants WHERE prompt_id IN ('retention-old-variant','retention-current-variant','retention-active-variant')`, nil},
+		{`DELETE FROM generation_jobs WHERE request_id IN ('retention-job-old','retention-job-current','retention-job-active')`, nil},
 		{`DELETE FROM comfy_output_ownership WHERE prompt_id='retention-ownership-event'`, nil},
 		{`DELETE FROM content_events WHERE external_id='retention-ownership-event'`, nil},
 	}

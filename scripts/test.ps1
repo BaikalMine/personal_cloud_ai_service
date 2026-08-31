@@ -57,6 +57,14 @@ try {
     docker run --rm --network ai-gateway-e2e_default `
         -e "TEST_DATABASE_URL=$testDatabaseURL" `
         -v "${projectRoot}:/src" -w /src $goImage `
+        sh -c '/usr/local/go/bin/go test -count=1 -v ./internal/database -run TestDurableGenerationJobsMigrationBackfill'
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Migration backfill checks failed.'
+    }
+
+    docker run --rm --network ai-gateway-e2e_default `
+        -e "TEST_DATABASE_URL=$testDatabaseURL" `
+        -v "${projectRoot}:/src" -w /src $goImage `
         sh -c '/usr/local/go/bin/go test -count=1 -v ./internal/store -run TestStoreIntegrationLifecycle'
     if ($LASTEXITCODE -ne 0) {
         throw 'Integration checks failed.'

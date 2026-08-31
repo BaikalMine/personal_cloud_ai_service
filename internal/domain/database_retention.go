@@ -9,6 +9,7 @@ type DatabaseRetentionCutoffs struct {
 	ProxyRequests      time.Time
 	WebSocketSessions  time.Time
 	GenerationRequests time.Time
+	GenerationJobs     time.Time
 	DailyUsage         time.Time
 	InviteHistory      time.Time
 	AuditLog           time.Time

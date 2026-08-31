@@ -731,6 +731,119 @@ var migrationCatalog = []migration{
 			`CREATE INDEX IF NOT EXISTS comfy_output_ownership_retention_idx ON comfy_output_ownership(expires_at,id)`,
 		},
 	},
+	{
+		version: 40,
+		name:    "durable_generation_jobs",
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS generation_jobs (
+				id BIGSERIAL PRIMARY KEY,
+				public_id TEXT NOT NULL UNIQUE CHECK (char_length(public_id) BETWEEN 16 AND 96 AND public_id ~ '^[A-Za-z0-9_-]+$'),
+				user_id BIGINT NULL REFERENCES users(id) ON DELETE SET NULL,
+				username_snapshot TEXT NOT NULL DEFAULT '' CHECK (char_length(username_snapshot) <= 128),
+				request_id TEXT NOT NULL CHECK (char_length(request_id) BETWEEN 1 AND 128),
+				parent_job_id BIGINT NULL REFERENCES generation_jobs(id) ON DELETE SET NULL,
+				prompt_id TEXT NULL UNIQUE CHECK (prompt_id IS NULL OR char_length(prompt_id) BETWEEN 1 AND 128),
+				template_id TEXT NOT NULL DEFAULT '' CHECK (char_length(template_id) <= 256),
+				workflow_id TEXT NOT NULL DEFAULT '' CHECK (char_length(workflow_id) <= 256),
+				model_name TEXT NOT NULL DEFAULT '' CHECK (char_length(model_name) <= 512),
+				seed BIGINT NOT NULL DEFAULT -1,
+				payload_cipher BYTEA NULL,
+				state TEXT NOT NULL DEFAULT 'draft' CHECK (state IN ('draft','preparing','uploading','waiting_for_resources','queued','running','postprocessing','archiving','completed','failed','cancelled','expired')),
+				status_message TEXT NOT NULL DEFAULT '' CHECK (char_length(status_message) <= 500),
+				error_code TEXT NOT NULL DEFAULT '' CHECK (char_length(error_code) <= 80),
+				error_message TEXT NOT NULL DEFAULT '' CHECK (char_length(error_message) <= 4000),
+				attempt INTEGER NOT NULL DEFAULT 1 CHECK (attempt BETWEEN 1 AND 100),
+				dependencies JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(dependencies) = 'array'),
+				input_count INTEGER NOT NULL DEFAULT 0 CHECK (input_count BETWEEN 0 AND 16),
+				state_changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				started_at TIMESTAMPTZ NULL,
+				finished_at TIMESTAMPTZ NULL,
+				resources_released_at TIMESTAMPTZ NULL,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS generation_jobs_user_request_idx ON generation_jobs(user_id,request_id) WHERE user_id IS NOT NULL`,
+			`CREATE INDEX IF NOT EXISTS generation_jobs_user_created_idx ON generation_jobs(user_id,created_at DESC,id DESC)`,
+			`CREATE INDEX IF NOT EXISTS generation_jobs_active_idx ON generation_jobs(state_changed_at,id) WHERE state NOT IN ('completed','failed','cancelled','expired')`,
+			`CREATE INDEX IF NOT EXISTS generation_jobs_retention_idx ON generation_jobs(finished_at,id) WHERE state IN ('completed','failed','cancelled','expired')`,
+			`INSERT INTO generation_jobs
+				(public_id,user_id,username_snapshot,request_id,prompt_id,template_id,workflow_id,model_name,seed,payload_cipher,state,status_message,error_code,error_message,attempt,dependencies,input_count,state_changed_at,started_at,finished_at,resources_released_at,created_at,updated_at)
+			 SELECT 'legacy-' || lpad(v.id::text,20,'0'),v.user_id,COALESCE(u.username,''),
+				COALESCE(gr.request_id,'legacy-' || lpad(v.id::text,20,'0')),v.prompt_id,
+				left(v.template_id,256),left(v.workflow_id,256),left(v.model_name,512),v.seed,v.payload_cipher,
+				CASE v.state WHEN 'error' THEN 'failed' ELSE v.state END,
+				CASE v.state WHEN 'queued' THEN 'Генерация ожидает запуска' WHEN 'running' THEN 'ComfyUI выполняет workflow' WHEN 'completed' THEN 'Готово' WHEN 'cancelled' THEN 'Генерация отменена' ELSE 'Генерация завершилась с ошибкой' END,
+				CASE WHEN v.state='error' THEN 'legacy_generation_error' ELSE '' END,left(v.error_message,4000),1,'["comfyui"]'::jsonb,0,
+				v.state_changed_at,CASE WHEN v.state IN ('running','completed','error','cancelled') THEN v.created_at ELSE NULL END,
+				v.finished_at,CASE WHEN v.state IN ('completed','error','cancelled') THEN COALESCE(v.finished_at,v.state_changed_at,v.created_at) ELSE NULL END,
+				v.created_at,COALESCE(v.finished_at,v.state_changed_at,v.created_at)
+			 FROM quick_generation_variants v
+			 LEFT JOIN users u ON u.id=v.user_id
+			 LEFT JOIN LATERAL (
+				SELECT r.request_id FROM generation_requests r
+				WHERE r.user_id=v.user_id AND r.prompt_id=v.prompt_id
+				ORDER BY r.created_at LIMIT 1
+			 ) gr ON true
+			 ON CONFLICT (prompt_id) DO NOTHING`,
+			`INSERT INTO generation_jobs
+				(public_id,user_id,username_snapshot,request_id,prompt_id,state,status_message,error_code,error_message,attempt,dependencies,state_changed_at,started_at,finished_at,resources_released_at,created_at,updated_at)
+			 SELECT 'request-' || substr(md5(r.user_id::text || ':' || r.request_id),1,32),r.user_id,COALESCE(u.username,''),r.request_id,r.prompt_id,
+				CASE WHEN r.prompt_id IS NOT NULL THEN 'queued' WHEN r.updated_at < now()-interval '5 minutes' THEN 'expired' ELSE 'preparing' END,
+				CASE WHEN r.prompt_id IS NOT NULL THEN 'Генерация ожидает запуска' WHEN r.updated_at < now()-interval '5 minutes' THEN 'Подтверждение запуска истекло' ELSE 'Подтверждаем запуск' END,
+				CASE WHEN r.prompt_id IS NULL AND r.updated_at < now()-interval '5 minutes' THEN 'legacy_submission_unconfirmed' ELSE '' END,
+				CASE WHEN r.prompt_id IS NULL AND r.updated_at < now()-interval '5 minutes' THEN 'Gateway не получил prompt_id до перезапуска' ELSE '' END,
+				1,'["comfyui"]'::jsonb,r.updated_at,NULL,
+				CASE WHEN r.prompt_id IS NULL AND r.updated_at < now()-interval '5 minutes' THEN r.updated_at ELSE NULL END,
+				CASE WHEN r.prompt_id IS NULL AND r.updated_at < now()-interval '5 minutes' THEN r.updated_at ELSE NULL END,
+				r.created_at,r.updated_at
+			 FROM generation_requests r
+			 LEFT JOIN users u ON u.id=r.user_id
+			 WHERE NOT EXISTS (
+				SELECT 1 FROM generation_jobs j
+				WHERE j.user_id=r.user_id AND j.request_id=r.request_id
+			 )
+			 ON CONFLICT DO NOTHING`,
+			`CREATE TABLE IF NOT EXISTS generation_job_transitions (
+				id BIGSERIAL PRIMARY KEY,
+				job_id BIGINT NOT NULL REFERENCES generation_jobs(id) ON DELETE CASCADE,
+				from_state TEXT NOT NULL DEFAULT '' CHECK (from_state IN ('','draft','preparing','uploading','waiting_for_resources','queued','running','postprocessing','archiving','completed','failed','cancelled','expired')),
+				to_state TEXT NOT NULL CHECK (to_state IN ('draft','preparing','uploading','waiting_for_resources','queued','running','postprocessing','archiving','completed','failed','cancelled','expired')),
+				message TEXT NOT NULL DEFAULT '' CHECK (char_length(message) <= 500),
+				error_code TEXT NOT NULL DEFAULT '' CHECK (char_length(error_code) <= 80),
+				error_message TEXT NOT NULL DEFAULT '' CHECK (char_length(error_message) <= 4000),
+				attempt INTEGER NOT NULL DEFAULT 1 CHECK (attempt BETWEEN 1 AND 100),
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`CREATE INDEX IF NOT EXISTS generation_job_transitions_job_created_idx ON generation_job_transitions(job_id,created_at,id)`,
+			`INSERT INTO generation_job_transitions(job_id,from_state,to_state,message,error_code,error_message,attempt,created_at)
+			 SELECT id,'',state,status_message,error_code,error_message,attempt,state_changed_at
+			 FROM generation_jobs j
+			 WHERE NOT EXISTS (SELECT 1 FROM generation_job_transitions t WHERE t.job_id=j.id)`,
+			`ALTER TABLE generation_requests ADD COLUMN IF NOT EXISTS job_id BIGINT NULL REFERENCES generation_jobs(id) ON DELETE CASCADE`,
+			`UPDATE generation_requests r SET job_id=j.id FROM generation_jobs j
+			 WHERE r.job_id IS NULL AND j.user_id=r.user_id AND j.request_id=r.request_id`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS generation_requests_job_idx ON generation_requests(job_id) WHERE job_id IS NOT NULL`,
+			`ALTER TABLE quick_generation_variants ADD COLUMN IF NOT EXISTS job_id BIGINT NULL REFERENCES generation_jobs(id) ON DELETE CASCADE`,
+			`UPDATE quick_generation_variants v SET job_id=j.id FROM generation_jobs j
+			 WHERE v.job_id IS NULL AND j.prompt_id=v.prompt_id`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS quick_generation_variants_job_idx ON quick_generation_variants(job_id) WHERE job_id IS NOT NULL`,
+			`ALTER TABLE content_events ADD COLUMN IF NOT EXISTS generation_job_id BIGINT NULL REFERENCES generation_jobs(id) ON DELETE SET NULL`,
+			`UPDATE content_events e SET generation_job_id=j.id FROM generation_jobs j
+			 WHERE e.generation_job_id IS NULL AND e.service='comfyui' AND e.kind='comfyui_prompt' AND e.external_id=j.prompt_id
+			   AND (j.user_id IS NULL OR e.user_id=j.user_id)`,
+			`CREATE INDEX IF NOT EXISTS content_events_generation_job_idx ON content_events(generation_job_id) WHERE generation_job_id IS NOT NULL`,
+			`ALTER TABLE quick_generation_mining_leases ADD COLUMN IF NOT EXISTS generation_job_id BIGINT NULL REFERENCES generation_jobs(id) ON DELETE SET NULL`,
+			`UPDATE quick_generation_mining_leases l SET generation_job_id=j.id FROM generation_jobs j
+			 WHERE l.generation_job_id IS NULL AND l.prompt_id=j.prompt_id`,
+			`CREATE INDEX IF NOT EXISTS quick_generation_mining_leases_job_idx ON quick_generation_mining_leases(generation_job_id) WHERE generation_job_id IS NOT NULL`,
+			`CREATE TABLE IF NOT EXISTS generation_job_revision (
+				id SMALLINT PRIMARY KEY CHECK (id=1),
+				revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+				changed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`INSERT INTO generation_job_revision(id,revision) VALUES (1,1) ON CONFLICT (id) DO NOTHING`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

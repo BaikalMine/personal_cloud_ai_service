@@ -17,6 +17,7 @@ func (a *App) runDatabaseRetentionCleanup(ctx context.Context) domain.DatabaseCl
 		ProxyRequests:      now.Add(-policy.ProxyRequests),
 		WebSocketSessions:  now.Add(-policy.WebSocketSessions),
 		GenerationRequests: now.Add(-policy.GenerationRequests),
+		GenerationJobs:     now.Add(-policy.GenerationRequests),
 		DailyUsage:         now.Add(-policy.DailyUsage),
 		InviteHistory:      now.Add(-policy.InviteHistory),
 		AuditLog:           now.Add(-policy.AuditLog),

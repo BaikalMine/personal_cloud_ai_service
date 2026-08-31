@@ -95,6 +95,15 @@ func (s *Store) CleanupDatabaseRetention(ctx context.Context, cutoffs domain.Dat
 				ORDER BY COALESCE(finished_at,created_at),id LIMIT $2::integer FOR UPDATE SKIP LOCKED
 			)
 			DELETE FROM quick_generation_variants item USING doomed WHERE item.id=doomed.id`},
+		{name: "generation_jobs", before: cutoffs.GenerationJobs, query: `
+			WITH doomed AS (
+				SELECT id FROM generation_jobs
+				WHERE state IN ('completed','failed','cancelled','expired')
+				  AND resources_released_at IS NOT NULL
+				  AND COALESCE(finished_at,updated_at) < $1
+				ORDER BY COALESCE(finished_at,updated_at),id LIMIT $2::integer FOR UPDATE SKIP LOCKED
+			)
+			DELETE FROM generation_jobs item USING doomed WHERE item.id=doomed.id`},
 		{name: "comfy_output_ownership", before: cutoffs.OutputOwnerships, query: `
 			WITH doomed AS (
 				SELECT item.id FROM comfy_output_ownership item
@@ -276,6 +285,9 @@ func databaseOldestQueries() map[string]string {
 		"quick_generation_mining_leases":   `SELECT MIN(created_at) FROM quick_generation_mining_leases`,
 		"host_metrics":                     `SELECT MIN(recorded_at) FROM host_metrics`,
 		"generation_requests":              `SELECT MIN(created_at) FROM generation_requests`,
+		"generation_jobs":                  `SELECT MIN(created_at) FROM generation_jobs`,
+		"generation_job_transitions":       `SELECT MIN(created_at) FROM generation_job_transitions`,
+		"generation_job_revision":          `SELECT MIN(changed_at) FROM generation_job_revision`,
 		"quick_generation_recipes":         `SELECT MIN(created_at) FROM quick_generation_recipes`,
 		"quick_generation_variants":        `SELECT MIN(created_at) FROM quick_generation_variants`,
 		"quick_generation_access_policies": `SELECT MIN(updated_at) FROM quick_generation_access_policies`,

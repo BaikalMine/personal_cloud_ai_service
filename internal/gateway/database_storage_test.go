@@ -61,6 +61,19 @@ func TestDatabaseCleanupViewSortsErrorsFirst(t *testing.T) {
 	}
 }
 
+func TestGenerationJobTablesHaveLifecyclePolicies(t *testing.T) {
+	policies := databaseTablePolicies()
+	for _, table := range []string{"generation_jobs", "generation_job_transitions", "generation_job_revision"} {
+		policy, ok := policies[table]
+		if !ok || policy.Owner == "" || policy.Retention == nil {
+			t.Fatalf("generation job table %q has no lifecycle policy: %+v", table, policy)
+		}
+	}
+	if policy := policies["generation_jobs"]; !policy.Managed || policy.Configuration != "GENERATION_REQUEST_RETENTION" {
+		t.Fatalf("generation_jobs retention policy = %+v", policy)
+	}
+}
+
 func TestAdminAuditExportHeadAndInvalidBoundary(t *testing.T) {
 	app := &App{}
 	head := httptest.NewRecorder()

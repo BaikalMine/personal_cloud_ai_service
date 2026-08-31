@@ -210,3 +210,28 @@ func TestBoundedDatabaseRetentionMigration(t *testing.T) {
 		}
 	}
 }
+
+func TestDurableGenerationJobsMigration(t *testing.T) {
+	var jobsMigration *migration
+	for index := range migrationCatalog {
+		if migrationCatalog[index].version == 40 {
+			jobsMigration = &migrationCatalog[index]
+			break
+		}
+	}
+	if jobsMigration == nil || jobsMigration.name != "durable_generation_jobs" {
+		t.Fatal("durable generation jobs migration is missing")
+	}
+	sql := strings.Join(jobsMigration.statements, "\n")
+	for _, expected := range []string{
+		"generation_jobs", "generation_job_transitions", "generation_job_revision",
+		"waiting_for_resources", "postprocessing", "archiving", "parent_job_id",
+		"generation_requests_job_idx", "quick_generation_variants_job_idx",
+		"content_events_generation_job_idx", "quick_generation_mining_leases_job_idx",
+		"ON DELETE SET NULL", "legacy_generation_error",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("durable generation jobs migration does not contain %q: %s", expected, sql)
+		}
+	}
+}
