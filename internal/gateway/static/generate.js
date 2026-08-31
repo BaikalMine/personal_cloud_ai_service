@@ -2,6 +2,9 @@
   const root = document.querySelector("[data-comfy-generation]");
   if (!root) return;
 
+  const generationRetentionLabel = root.dataset.generationRetention || "24 часа";
+  const mediaRetentionLabel = root.dataset.mediaRetention || generationRetentionLabel;
+
   const workflowGuides = root.querySelector(".workflow-guides");
 
   const form = document.getElementById("generation-form");
@@ -1057,7 +1060,7 @@
     requestedVariantHandled = true;
     const variant = savedVariants.find((item) => String(item.id) === requestedVariantID);
     if (!variant) {
-      showRepeatNotice("Вариант больше недоступен", "История хранится 24 часа. Выберите другой результат в галерее.", true);
+      showRepeatNotice("Вариант больше недоступен", `История хранится ${generationRetentionLabel}. Выберите другой результат в галерее.`, true);
       clearRequestedVariantQuery();
       return;
     }
@@ -2065,7 +2068,7 @@
       library.className = "generation-library panel";
       const heading = document.createElement("div");
       heading.className = "panel-heading";
-      heading.innerHTML = "<div><p class=\"section-kicker\">Моя галерея</p><h2>Последние результаты</h2><p class=\"panel-intro\">Результаты доступны в вашем профиле 24 часа, затем удаляются без возможности восстановления.</p></div>";
+      heading.innerHTML = `<div><p class="section-kicker">Моя галерея</p><h2>Последние результаты</h2><p class="panel-intro">Результаты доступны в вашем профиле ${mediaRetentionLabel}, затем удаляются без возможности восстановления.</p></div>`;
       const grid = document.createElement("div");
       grid.className = "generation-output-grid generation-library-grid";
       library.append(heading, grid);
@@ -2328,7 +2331,7 @@
     variantsSection.hidden = savedVariants.length === 0;
     if (variantCount) {
       const count = filteredVariants.length === savedVariants.length ? `${savedVariants.length} вариантов` : `Показано ${filteredVariants.length} из ${savedVariants.length}`;
-      variantCount.textContent = `${count} · хранится 24 часа`;
+      variantCount.textContent = `${count} · хранится ${generationRetentionLabel}`;
     }
     if (filteredVariants.length === 0) {
       const empty = document.createElement("p");

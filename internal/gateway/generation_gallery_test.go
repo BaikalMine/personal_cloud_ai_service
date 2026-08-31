@@ -63,6 +63,7 @@ func TestGenerationGalleryTemplateRendersMediaAndRepeatAction(t *testing.T) {
 	var output bytes.Buffer
 	if err := templates.ExecuteTemplate(&output, "gallery", map[string]any{
 		"Title": "Моя галерея", "CSRF": "csrf", "AssetVersion": "asset", "Items": items, "ImageCount": 1, "VideoCount": 1,
+		"Retention": newRetentionPolicyView(Config{}.Retention),
 	}); err != nil {
 		t.Fatal(err)
 	}

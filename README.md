@@ -278,9 +278,9 @@ The test script runs formatting verification, `go vet`, unit tests, and the
 PostgreSQL lifecycle suite. The integration suite verifies concurrent
 single-use invites, service grants, session revocation, encrypted-content
 storage accounting, per-user ComfyUI settings/workflow isolation and quotas,
-and the configured seven-day/text and three-day/media retention windows. Its
-temporary database and network are removed in a `finally` block even when a
-check fails.
+and the configured seven-day AI-content and 24-hour generation/media retention
+windows. Its temporary database and network are removed in a `finally` block
+even when a check fails.
 
 Use `.\scripts\test.ps1 -Deep` before production releases to additionally run
 the pinned Staticcheck `v0.7.0` analyzer and Go race detector. Their compiler

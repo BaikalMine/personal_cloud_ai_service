@@ -289,7 +289,7 @@ func (a *App) refreshComfyOutputOwnerships(ctx context.Context, userID int64) er
 	if err != nil {
 		return err
 	}
-	return a.store.InsertComfyOutputOwnerships(ctx, userID, outputs)
+	return a.insertComfyOutputOwnerships(ctx, userID, outputs)
 }
 
 func (a *App) filterComfyResponse(resp *http.Response) error {
@@ -324,7 +324,7 @@ func (a *App) filterComfyResponse(resp *http.Response) error {
 			if extractErr != nil {
 				return extractErr
 			}
-			if err = a.store.InsertComfyOutputOwnerships(resp.Request.Context(), user.ID, outputs); err != nil {
+			if err = a.insertComfyOutputOwnerships(resp.Request.Context(), user.ID, outputs); err != nil {
 				return err
 			}
 		}

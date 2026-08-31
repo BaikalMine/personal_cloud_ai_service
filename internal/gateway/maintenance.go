@@ -110,13 +110,14 @@ func (a *App) runMaintenance(ctx context.Context) {
 			if deletedContent > 0 {
 				log.Printf("deleted %d expired content events", deletedContent)
 			}
-			deletedVariants, variantErr := a.store.DeleteExpiredGenerationVariants(cleanupCtx, time.Now().Add(-24*time.Hour))
+			retention := a.retentionPolicy()
+			deletedVariants, variantErr := a.store.DeleteExpiredGenerationVariants(cleanupCtx, time.Now().Add(-retention.GenerationHistory))
 			if variantErr != nil {
 				log.Printf("delete expired generation variants: %v", variantErr)
 			} else if deletedVariants > 0 {
 				log.Printf("deleted %d expired generation history items", deletedVariants)
 			}
-			if _, err := a.store.DeleteHostMetricsBefore(cleanupCtx, time.Now().Add(-hostMetricRetention)); err != nil {
+			if _, err := a.store.DeleteHostMetricsBefore(cleanupCtx, time.Now().Add(-retention.HostMetrics)); err != nil {
 				log.Printf("delete expired host metrics: %v", err)
 			}
 			cancel()

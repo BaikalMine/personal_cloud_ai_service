@@ -147,3 +147,22 @@ func TestContentLiveRevisionMigration(t *testing.T) {
 		}
 	}
 }
+
+func TestUnifiedContentRetentionDefaultsMigration(t *testing.T) {
+	var retentionMigration *migration
+	for index := range migrationCatalog {
+		if migrationCatalog[index].version == 37 {
+			retentionMigration = &migrationCatalog[index]
+			break
+		}
+	}
+	if retentionMigration == nil || retentionMigration.name != "unified_content_retention_defaults" {
+		t.Fatal("unified content retention migration is missing")
+	}
+	sql := strings.Join(retentionMigration.statements, "\n")
+	for _, expected := range []string{"content_events", "interval '7 days'", "content_media", "comfy_output_ownership", "interval '24 hours'", "LEAST", "media_expires_at"} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("retention migration does not contain %q: %s", expected, sql)
+		}
+	}
+}

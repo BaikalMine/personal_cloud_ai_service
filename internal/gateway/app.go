@@ -179,6 +179,7 @@ func ParseTemplates() (*Templates, error) {
 		"formatNumber":         formatNumber,
 		"formatDuration":       formatDuration,
 		"accountLifetimeLabel": accountLifetimeLabel,
+		"fileLabel":            russianFileLabel,
 		"pct":                  pct,
 		"divFloat":             divFloat,
 		"roleLabel":            roleLabel,
@@ -411,6 +412,7 @@ func (a *App) renderStatus(w http.ResponseWriter, r *http.Request, status int, n
 	data["RequestID"] = requestID(r)
 	data["AssetVersion"] = a.tpl.AssetVersion
 	data["FeatureSuggestionsEnabled"] = a.cfg.FeatureSuggestionsEnabled
+	data["Retention"] = newRetentionPolicyView(a.retentionPolicy())
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' blob: data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'")

@@ -297,6 +297,11 @@ func (a *App) handleAdminContent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ошибка загрузки медиа", http.StatusInternalServerError)
 		return
 	}
+	retentionStats, err := a.store.ContentRetentionStats(r.Context())
+	if err != nil {
+		http.Error(w, "ошибка отчёта хранения", http.StatusInternalServerError)
+		return
+	}
 	events := make([]ContentEventView, 0, min(len(rows), 200))
 	overview := ContentOverview{}
 	queryLower := strings.ToLower(query)
@@ -347,7 +352,7 @@ func (a *App) handleAdminContent(w http.ResponseWriter, r *http.Request) {
 	a.render(w, r, "admin_content", map[string]any{
 		"Title": "AI-контент пользователей", "Events": events,
 		"Username": username, "Service": service, "Query": query, "Overview": overview,
-		"ContentRevision": contentRevision,
+		"ContentRevision": contentRevision, "RetentionStats": retentionStats,
 	})
 }
 

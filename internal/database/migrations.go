@@ -665,6 +665,24 @@ var migrationCatalog = []migration{
 				FOR EACH STATEMENT EXECUTE FUNCTION bump_content_change_revision()`,
 		},
 	},
+	{
+		version: 37,
+		name:    "unified_content_retention_defaults",
+		statements: []string{
+			`ALTER TABLE content_events ALTER COLUMN expires_at SET DEFAULT (now() + interval '7 days')`,
+			`ALTER TABLE content_media ALTER COLUMN expires_at SET DEFAULT (now() + interval '24 hours')`,
+			`ALTER TABLE comfy_output_ownership ALTER COLUMN expires_at SET DEFAULT (now() + interval '24 hours')`,
+			`UPDATE content_media SET expires_at=LEAST(expires_at,created_at + interval '24 hours') WHERE expires_at > now()`,
+			`UPDATE comfy_output_ownership SET expires_at=LEAST(expires_at,created_at + interval '24 hours') WHERE expires_at > now()`,
+			`UPDATE content_events e
+			 SET media_expires_at=summary.last_media_expiry
+			 FROM (
+			   SELECT event_id,MAX(expires_at) AS last_media_expiry
+			   FROM content_media GROUP BY event_id
+			 ) summary
+			 WHERE e.id=summary.event_id`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

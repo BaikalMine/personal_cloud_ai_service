@@ -26,6 +26,7 @@ func TestGenerateTemplateRenders(t *testing.T) {
 	var output bytes.Buffer
 	err = templates.ExecuteTemplate(&output, "generate", map[string]any{
 		"Title": "Быстрая генерация", "CSRF": "csrf", "AssetVersion": "asset",
+		"Retention":         newRetentionPolicyView(Config{}.Retention),
 		"Workflows":         []workflowView{{ID: "text-to-image", Name: "Текст в изображение", Description: "Описание"}},
 		"GenerationPresets": []generationPreset{{ID: "photoflow-krea2-edit", TemplateID: "image-to-image", Name: "Krea 2: фото и промт", Family: modelFamilyKrea2, Available: true, ModelID: "krea2:test", ModelCount: 2, RequiresImage: true, MaxInputImages: 2}},
 		"QuickModels":       []generationModel{{ID: "krea2:test", Name: "krea.safetensors", DisplayName: "Krea2 / krea", Family: modelFamilyKrea2, Available: true, DefaultSteps: 8, DefaultCFG: 1}},

@@ -34,7 +34,6 @@ const (
 	maxComfyObjectInfo             = 32 << 20
 	maxGenerationHistory           = 32 << 20
 	maxGenerationOutputFingerprint = int64(2 << 30)
-	generationMediaRetention       = 24 * time.Hour
 )
 
 type generationOutput struct {
@@ -948,7 +947,7 @@ func (a *App) fetchGenerationStatus(ctx context.Context, promptID string, userID
 			break
 		}
 		// Ownership is recorded only after ComfyUI confirms the output exists.
-		_ = a.store.InsertComfyOutputOwnerships(ctx, userID, []domain.ComfyOutputOwnership{{
+		_ = a.insertComfyOutputOwnerships(ctx, userID, []domain.ComfyOutputOwnership{{
 			PromptID: promptID, Filename: output.Filename, Subfolder: output.Subfolder,
 			StorageType: output.Type, MediaType: output.MediaType,
 		}})
@@ -1584,7 +1583,7 @@ func (a *App) archiveGenerationOutputs(ctx context.Context, userID int64, output
 			err = a.store.ScheduleComfyOutputCleanup(ctx, domain.ComfyOutputCleanupTombstone{
 				Filename: output.Filename, Subfolder: output.Subfolder, StorageType: output.Type,
 				SizeBytes: archive.SizeBytes, ContentHash: archive.ContentHash,
-			}, time.Now().Add(generationMediaRetention))
+			}, time.Now().Add(a.retentionPolicy().GenerationMedia))
 			if err != nil {
 				log.Printf("schedule generation output cleanup %s: %v", output.Filename, err)
 			}
@@ -1777,7 +1776,7 @@ func (a *App) recordGenerationEvent(ctx context.Context, userID int64, promptID 
 		log.Printf("generation metadata encryption: %v", err)
 		return
 	}
-	if _, err := a.store.InsertContentEvent(ctx, domain.ContentEventRecord{UserID: userID, Service: "comfyui", Kind: "comfyui_prompt", ExternalID: promptID, Model: input.ModelName, GenerationState: "queued", PromptCipher: promptCipher, ResponseCipher: negativeCipher, MetadataCipher: metadataCipher, Sensitive: isSensitiveGeneration(input)}); err != nil {
+	if _, err := a.store.InsertContentEvent(ctx, domain.ContentEventRecord{UserID: userID, Service: "comfyui", Kind: "comfyui_prompt", ExternalID: promptID, Model: input.ModelName, GenerationState: "queued", PromptCipher: promptCipher, ResponseCipher: negativeCipher, MetadataCipher: metadataCipher, Sensitive: isSensitiveGeneration(input), ExpiresAt: time.Now().Add(a.retentionPolicy().AIContent)}); err != nil {
 		log.Printf("store generation event: %v", err)
 	}
 }

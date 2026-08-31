@@ -89,15 +89,18 @@ func (s *Store) SetGenerationVariantError(ctx context.Context, userID int64, pro
 	return err
 }
 
-func (s *Store) ListGenerationVariants(ctx context.Context, userID int64, limit int) ([]domain.GenerationVariantRow, error) {
+func (s *Store) ListGenerationVariants(ctx context.Context, userID int64, limit int, finishedAfter time.Time) ([]domain.GenerationVariantRow, error) {
+	if finishedAfter.IsZero() {
+		return nil, errors.New("generation history boundary is required")
+	}
 	limit = boundedLimit(limit, 1, 60)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id,user_id,prompt_id,template_id,workflow_id,model_name,seed,payload_cipher,state,created_at,finished_at,state_changed_at,error_message
 		FROM quick_generation_variants
 		WHERE user_id=$1
-		  AND (state IN ('queued','running') OR COALESCE(finished_at,created_at) > now()-interval '24 hours')
+		  AND (state IN ('queued','running') OR COALESCE(finished_at,created_at) > $3)
 		ORDER BY created_at DESC,id DESC LIMIT $2
-	`, userID, limit)
+	`, userID, limit, finishedAfter)
 	if err != nil {
 		return nil, err
 	}

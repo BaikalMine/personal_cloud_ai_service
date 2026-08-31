@@ -17,6 +17,11 @@ func TestLoadValidConfiguration(t *testing.T) {
 	t.Setenv("SESSION_IDLE_TIMEOUT", "12h")
 	t.Setenv("ACCOUNT_LOCK_THRESHOLD", "7")
 	t.Setenv("ACCOUNT_LOCK_DURATION", "20m")
+	t.Setenv("GENERATION_RETENTION", "30h")
+	t.Setenv("AI_CONTENT_RETENTION", "240h")
+	t.Setenv("COMFY_INPUT_RETENTION", "96h")
+	t.Setenv("HOST_METRIC_RETENTION", "240h")
+	t.Setenv("AUDIT_LOG_RETENTION", "2400h")
 	t.Setenv("TRUSTED_PROXIES", "198.51.100.10,127.0.0.1")
 	t.Setenv("ADMIN_ALLOWED_CIDRS", "10.0.0.0/24,127.0.0.1")
 	t.Setenv("COMFYUI_UPSTREAM", "http://host.docker.internal:8088")
@@ -40,11 +45,36 @@ func TestLoadValidConfiguration(t *testing.T) {
 	if cfg.SessionIdleTimeout != 12*time.Hour || cfg.AccountLockThreshold != 7 || cfg.AccountLockDuration != 20*time.Minute {
 		t.Fatalf("unexpected auth policy: %+v", cfg)
 	}
+	if cfg.Retention.GenerationHistory != 30*time.Hour || cfg.Retention.GenerationMedia != 30*time.Hour || cfg.Retention.AIContent != 240*time.Hour || cfg.Retention.ComfyInputs != 96*time.Hour || cfg.Retention.HostMetrics != 240*time.Hour || cfg.Retention.AuditLog != 2400*time.Hour {
+		t.Fatalf("unexpected retention policy: %+v", cfg.Retention)
+	}
 	if len(cfg.TrustedProxies) != 2 || len(cfg.AdminAllowedNetworks) != 2 {
 		t.Fatal("network allow-lists were not parsed")
 	}
 	if cfg.OllamaUpstream == nil || cfg.OllamaUpstream.Host != "host.docker.internal:11434" || cfg.PromptAssistantModel != "huihui_ai/gemma-4-abliterated:e4b" {
 		t.Fatalf("prompt assistant config was not parsed: %+v", cfg)
+	}
+}
+
+func TestDefaultRetentionPolicyKeepsGenerationHistoryAndMediaTogether(t *testing.T) {
+	policy := (RetentionPolicy{GenerationHistory: 12 * time.Hour, AIContent: time.Hour}).WithDefaults()
+	if policy.GenerationHistory != 12*time.Hour || policy.GenerationMedia != 12*time.Hour {
+		t.Fatalf("generation retention was not unified: %+v", policy)
+	}
+	if policy.AIContent != 12*time.Hour {
+		t.Fatalf("AI content must not expire before generation media: %+v", policy)
+	}
+	defaults := (RetentionPolicy{}).WithDefaults()
+	if defaults != DefaultRetentionPolicy() {
+		t.Fatalf("zero policy defaults = %+v, want %+v", defaults, DefaultRetentionPolicy())
+	}
+}
+
+func TestRejectsAIContentRetentionShorterThanGeneration(t *testing.T) {
+	t.Setenv("GENERATION_RETENTION", "48h")
+	t.Setenv("AI_CONTENT_RETENTION", "24h")
+	if _, err := loadRetentionPolicy(); err == nil {
+		t.Fatal("expected retention ordering validation error")
 	}
 }
 

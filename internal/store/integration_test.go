@@ -148,6 +148,7 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	eventID, err := repository.InsertContentEvent(ctx, domain.ContentEventRecord{
 		UserID: registeredUserID, Service: "comfyui", Kind: "comfyui_prompt",
 		ExternalID: "prompt-1", Model: "model", PromptCipher: []byte{1}, ResponseCipher: []byte{2}, MetadataCipher: []byte{3},
+		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -158,6 +159,7 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	}
 	ownership := domain.ComfyOutputOwnership{
 		PromptID: "prompt-1", Filename: "result.png", Subfolder: "alice", StorageType: "output", MediaType: "image",
+		ExpiresAt: time.Now().Add(24 * time.Hour),
 	}
 	if err := repository.InsertComfyOutputOwnerships(ctx, registeredUserID, []domain.ComfyOutputOwnership{ownership}); err != nil {
 		t.Fatal(err)
@@ -184,6 +186,10 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	assertRetentionWindow(t, db, "content_media", 24*time.Hour)
 	if used, err := repository.ContentMediaBytesForUser(ctx, registeredUserID); err != nil || used != 3 {
 		t.Fatalf("media usage: bytes=%d err=%v", used, err)
+	}
+	retentionStats, err := repository.ContentRetentionStats(ctx)
+	if err != nil || retentionStats.EventCount != 1 || retentionStats.MediaCount != 1 || retentionStats.MediaBytes != 3 || retentionStats.NextEventExpiry == nil || retentionStats.NextMediaExpiry == nil {
+		t.Fatalf("content retention stats: stats=%+v err=%v", retentionStats, err)
 	}
 	media, err := repository.ListContentMediaSummaries(ctx, []int64{eventID})
 	if err != nil || len(media[eventID]) != 1 || media[eventID][0].MediaType != "image" {
@@ -280,11 +286,12 @@ func assertComfyOutputCleanupLifecycle(t *testing.T, ctx context.Context, db *sq
 	eventID, err := repository.InsertContentEvent(ctx, domain.ContentEventRecord{
 		UserID: userID, Service: "comfyui", Kind: "comfyui_prompt", ExternalID: "cleanup-prompt",
 		Model: "model", PromptCipher: []byte{1}, ResponseCipher: []byte{2}, MetadataCipher: []byte{3},
+		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ownership := domain.ComfyOutputOwnership{PromptID: "cleanup-prompt", Filename: "cleanup.png", Subfolder: "tests", StorageType: "output", MediaType: "image"}
+	ownership := domain.ComfyOutputOwnership{PromptID: "cleanup-prompt", Filename: "cleanup.png", Subfolder: "tests", StorageType: "output", MediaType: "image", ExpiresAt: time.Now().Add(24 * time.Hour)}
 	if err := repository.InsertComfyOutputOwnerships(ctx, userID, []domain.ComfyOutputOwnership{ownership}); err != nil {
 		t.Fatal(err)
 	}
@@ -301,6 +308,23 @@ func assertComfyOutputCleanupLifecycle(t *testing.T, ctx context.Context, db *sq
 	}
 	if deleted, err := repository.QueueExpiredComfyOutputCleanup(ctx, expired); err != nil || deleted != 1 {
 		t.Fatalf("queue expired ComfyUI media = %d, err=%v", deleted, err)
+	}
+	if deleted, err := repository.QueueExpiredComfyOutputCleanup(ctx, expired); err != nil || deleted != 0 {
+		t.Fatalf("repeat expired ComfyUI media cleanup = %d, err=%v", deleted, err)
+	}
+	events, err := repository.ListContentEvents(ctx, 20, "", "comfyui")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var archived *domain.ContentEventRow
+	for index := range events {
+		if events[index].ID == eventID {
+			archived = &events[index]
+			break
+		}
+	}
+	if archived == nil || archived.GeneratedMediaCount != 1 || archived.MediaCount != 0 || archived.MediaExpiresAt.After(time.Now()) || archived.ExpiresAt.Before(time.Now()) {
+		t.Fatalf("archived content event after media expiry = %+v", archived)
 	}
 	var mediaRows int
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM content_media WHERE event_id=$1`, eventID).Scan(&mediaRows); err != nil || mediaRows != 0 {

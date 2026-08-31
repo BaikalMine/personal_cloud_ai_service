@@ -47,6 +47,7 @@ func TestGatewayIntegrationComfyOwnership(t *testing.T) {
 	if _, err := repository.InsertContentEvent(ctx, domain.ContentEventRecord{
 		UserID: userID, Service: "comfyui", Kind: "comfyui_prompt", ExternalID: "owned-prompt",
 		PromptCipher: []byte{1}, ResponseCipher: []byte{2}, MetadataCipher: []byte{3},
+		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
 	}); err != nil {
 		t.Fatal(err)
 	}

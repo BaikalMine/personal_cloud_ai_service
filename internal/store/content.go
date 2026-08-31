@@ -12,14 +12,17 @@ import (
 )
 
 func (s *Store) InsertContentEvent(ctx context.Context, event domain.ContentEventRecord) (int64, error) {
+	if event.ExpiresAt.IsZero() {
+		return 0, errors.New("content event expiration is required")
+	}
 	var id int64
 	err := s.db.QueryRowContext(ctx, `
 		INSERT INTO content_events
-			(user_id, service, kind, external_id, model, generation_state, prompt_cipher, response_cipher, metadata_cipher, is_sensitive, sensitivity_classified_at)
-		VALUES ($1,$2,$3,NULLIF($4,''),$5,$6,$7,$8,$9,$10,now())
+			(user_id, service, kind, external_id, model, generation_state, prompt_cipher, response_cipher, metadata_cipher, is_sensitive, sensitivity_classified_at, expires_at)
+		VALUES ($1,$2,$3,NULLIF($4,''),$5,$6,$7,$8,$9,$10,now(),$11)
 		RETURNING id
 	`, event.UserID, event.Service, event.Kind, event.ExternalID, event.Model, event.GenerationState,
-		event.PromptCipher, event.ResponseCipher, event.MetadataCipher, event.Sensitive).Scan(&id)
+		event.PromptCipher, event.ResponseCipher, event.MetadataCipher, event.Sensitive, event.ExpiresAt).Scan(&id)
 	return id, err
 }
 
@@ -134,18 +137,17 @@ func (s *Store) LatestComfyContentEventID(ctx context.Context, userID int64) (in
 }
 
 func (s *Store) InsertContentMedia(ctx context.Context, media domain.ContentMediaRecord) error {
-	var expiresAt any
-	if !media.ExpiresAt.IsZero() {
-		expiresAt = media.ExpiresAt
+	if media.ExpiresAt.IsZero() {
+		return errors.New("content media expiration is required")
 	}
 	var expiresAtStored time.Time
 	err := s.db.QueryRowContext(ctx, `
 		INSERT INTO content_media(event_id,media_type,mime_type,original_name,subfolder,storage_type,payload_cipher,size_bytes,content_hash,expires_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,COALESCE($10,now() + interval '3 days'))
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 		ON CONFLICT (event_id,original_name,subfolder,storage_type) DO NOTHING
 		RETURNING expires_at
 	`, media.EventID, media.MediaType, media.MIMEType, media.OriginalName, media.Subfolder,
-		media.StorageType, media.PayloadCipher, media.SizeBytes, media.ContentHash, expiresAt).Scan(&expiresAtStored)
+		media.StorageType, media.PayloadCipher, media.SizeBytes, media.ContentHash, media.ExpiresAt).Scan(&expiresAtStored)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -221,6 +223,11 @@ func (s *Store) InsertComfyOutputOwnerships(ctx context.Context, userID int64, o
 	if len(outputs) == 0 {
 		return nil
 	}
+	for _, output := range outputs {
+		if output.ExpiresAt.IsZero() {
+			return errors.New("ComfyUI output ownership expiration is required")
+		}
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -229,7 +236,7 @@ func (s *Store) InsertComfyOutputOwnerships(ctx context.Context, userID int64, o
 	statement, err := tx.PrepareContext(ctx, `
 		INSERT INTO comfy_output_ownership
 			(event_id,user_id,prompt_id,filename,subfolder,storage_type,media_type,expires_at)
-		SELECT e.id,e.user_id,$2,$3,$4,$5,$6,now() + interval '24 hours'
+		SELECT e.id,e.user_id,$2,$3,$4,$5,$6,$7
 		FROM content_events e
 		WHERE e.user_id=$1 AND e.service='comfyui' AND e.external_id=$2 AND e.expires_at > now()
 		ORDER BY e.created_at DESC LIMIT 1
@@ -241,7 +248,7 @@ func (s *Store) InsertComfyOutputOwnerships(ctx context.Context, userID int64, o
 	defer statement.Close()
 	for _, output := range outputs {
 		if _, err := statement.ExecContext(ctx, userID, output.PromptID, output.Filename,
-			output.Subfolder, output.StorageType, output.MediaType); err != nil {
+			output.Subfolder, output.StorageType, output.MediaType, output.ExpiresAt); err != nil {
 			return err
 		}
 	}
@@ -361,6 +368,34 @@ func (s *Store) ContentMediaBytesForUser(ctx context.Context, userID int64) (int
 		WHERE e.user_id=$1 AND m.expires_at > now() AND e.expires_at > now()
 	`, userID).Scan(&bytes)
 	return bytes, err
+}
+
+func (s *Store) ContentRetentionStats(ctx context.Context) (domain.ContentRetentionStats, error) {
+	var stats domain.ContentRetentionStats
+	var nextEventExpiry, nextMediaExpiry sql.NullTime
+	err := s.db.QueryRowContext(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM content_events WHERE expires_at > now()),
+			(SELECT COUNT(*) FROM content_media m JOIN content_events e ON e.id=m.event_id
+			 WHERE m.expires_at > now() AND e.expires_at > now()),
+			(SELECT COALESCE(SUM(m.size_bytes),0) FROM content_media m JOIN content_events e ON e.id=m.event_id
+			 WHERE m.expires_at > now() AND e.expires_at > now()),
+			(SELECT MIN(expires_at) FROM content_events WHERE expires_at > now()),
+			(SELECT MIN(m.expires_at) FROM content_media m JOIN content_events e ON e.id=m.event_id
+			 WHERE m.expires_at > now() AND e.expires_at > now())
+	`).Scan(&stats.EventCount, &stats.MediaCount, &stats.MediaBytes, &nextEventExpiry, &nextMediaExpiry)
+	if err != nil {
+		return domain.ContentRetentionStats{}, err
+	}
+	if nextEventExpiry.Valid {
+		value := nextEventExpiry.Time
+		stats.NextEventExpiry = &value
+	}
+	if nextMediaExpiry.Valid {
+		value := nextMediaExpiry.Time
+		stats.NextMediaExpiry = &value
+	}
+	return stats, nil
 }
 
 func (s *Store) ContentMediaByID(ctx context.Context, id int64) (domain.ContentMediaRow, error) {

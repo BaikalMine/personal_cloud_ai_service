@@ -232,6 +232,10 @@ func formatTime(v any) string {
 	switch t := v.(type) {
 	case time.Time:
 		return t.Local().Format("02.01.2006 15:04")
+	case *time.Time:
+		if t != nil {
+			return t.Local().Format("02.01.2006 15:04")
+		}
 	case sql.NullTime:
 		if t.Valid {
 			return t.Time.Local().Format("02.01.2006 15:04")
@@ -343,6 +347,21 @@ func russianHourLabel(value int64) string {
 		return "часа"
 	default:
 		return "часов"
+	}
+}
+
+func russianFileLabel(value int64) string {
+	lastTwo := value % 100
+	if lastTwo >= 11 && lastTwo <= 14 {
+		return "файлов"
+	}
+	switch value % 10 {
+	case 1:
+		return "файл"
+	case 2, 3, 4:
+		return "файла"
+	default:
+		return "файлов"
 	}
 }
 

@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-const hostMetricRetention = 7 * 24 * time.Hour
-
 func (a *App) captureHostMetric(ctx context.Context) {
 	metrics, err := a.systemMonitor.System(ctx)
 	if err != nil {

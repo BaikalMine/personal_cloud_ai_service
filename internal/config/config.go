@@ -13,6 +13,69 @@ import (
 	"ai-access-gateway/internal/security"
 )
 
+const (
+	defaultGenerationRetention = 24 * time.Hour
+	defaultAIContentRetention  = 7 * 24 * time.Hour
+	defaultComfyInputRetention = 72 * time.Hour
+	defaultHostMetricRetention = 7 * 24 * time.Hour
+	defaultAuditLogRetention   = 90 * 24 * time.Hour
+)
+
+// RetentionPolicy is the single source of truth for data lifetime. Generation
+// history and its media intentionally share one configured duration so the
+// gallery cannot retain an unusable history entry after its file is gone.
+type RetentionPolicy struct {
+	GenerationHistory time.Duration
+	GenerationMedia   time.Duration
+	AIContent         time.Duration
+	ComfyInputs       time.Duration
+	HostMetrics       time.Duration
+	AuditLog          time.Duration
+}
+
+func DefaultRetentionPolicy() RetentionPolicy {
+	return RetentionPolicy{
+		GenerationHistory: defaultGenerationRetention,
+		GenerationMedia:   defaultGenerationRetention,
+		AIContent:         defaultAIContentRetention,
+		ComfyInputs:       defaultComfyInputRetention,
+		HostMetrics:       defaultHostMetricRetention,
+		AuditLog:          defaultAuditLogRetention,
+	}
+}
+
+// WithDefaults keeps hand-built Config values used by tests and helper
+// commands safe. Generation media is authoritative when both generation
+// values are present because the history must follow the file lifetime.
+func (p RetentionPolicy) WithDefaults() RetentionPolicy {
+	defaults := DefaultRetentionPolicy()
+	generation := p.GenerationMedia
+	if generation <= 0 {
+		generation = p.GenerationHistory
+	}
+	if generation <= 0 {
+		generation = defaults.GenerationMedia
+	}
+	p.GenerationHistory = generation
+	p.GenerationMedia = generation
+	if p.AIContent <= 0 {
+		p.AIContent = defaults.AIContent
+	}
+	if p.AIContent < generation {
+		p.AIContent = generation
+	}
+	if p.ComfyInputs <= 0 {
+		p.ComfyInputs = defaults.ComfyInputs
+	}
+	if p.HostMetrics <= 0 {
+		p.HostMetrics = defaults.HostMetrics
+	}
+	if p.AuditLog <= 0 {
+		p.AuditLog = defaults.AuditLog
+	}
+	return p
+}
+
 type Config struct {
 	DatabaseURL               string
 	AdminUsername             string
@@ -46,6 +109,7 @@ type Config struct {
 	SessionIdleTimeout        time.Duration
 	AccountLockThreshold      int
 	AccountLockDuration       time.Duration
+	Retention                 RetentionPolicy
 }
 
 func Load() (Config, error) {
@@ -129,6 +193,10 @@ func Load() (Config, error) {
 	if accountLockDuration < time.Minute || accountLockDuration > 24*time.Hour {
 		return Config{}, fmt.Errorf("ACCOUNT_LOCK_DURATION must be between 1m and 24h")
 	}
+	retention, err := loadRetentionPolicy()
+	if err != nil {
+		return Config{}, err
+	}
 
 	databaseURL := requiredEnv("DATABASE_URL")
 	adminUsername := strings.TrimSpace(env("ADMIN_USERNAME", "admin"))
@@ -207,6 +275,41 @@ func Load() (Config, error) {
 		SessionIdleTimeout:        sessionIdleTimeout,
 		AccountLockThreshold:      accountLockThreshold,
 		AccountLockDuration:       accountLockDuration,
+		Retention:                 retention,
+	}, nil
+}
+
+func loadRetentionPolicy() (RetentionPolicy, error) {
+	generation, err := durationEnvBetween("GENERATION_RETENTION", defaultGenerationRetention, time.Hour, 30*24*time.Hour)
+	if err != nil {
+		return RetentionPolicy{}, err
+	}
+	aiContent, err := durationEnvBetween("AI_CONTENT_RETENTION", defaultAIContentRetention, time.Hour, 365*24*time.Hour)
+	if err != nil {
+		return RetentionPolicy{}, err
+	}
+	if aiContent < generation {
+		return RetentionPolicy{}, fmt.Errorf("AI_CONTENT_RETENTION must be greater than or equal to GENERATION_RETENTION")
+	}
+	comfyInputs, err := durationEnvBetween("COMFY_INPUT_RETENTION", defaultComfyInputRetention, time.Hour, 30*24*time.Hour)
+	if err != nil {
+		return RetentionPolicy{}, err
+	}
+	hostMetrics, err := durationEnvBetween("HOST_METRIC_RETENTION", defaultHostMetricRetention, time.Hour, 90*24*time.Hour)
+	if err != nil {
+		return RetentionPolicy{}, err
+	}
+	auditLog, err := durationEnvBetween("AUDIT_LOG_RETENTION", defaultAuditLogRetention, 24*time.Hour, 365*24*time.Hour)
+	if err != nil {
+		return RetentionPolicy{}, err
+	}
+	return RetentionPolicy{
+		GenerationHistory: generation,
+		GenerationMedia:   generation,
+		AIContent:         aiContent,
+		ComfyInputs:       comfyInputs,
+		HostMetrics:       hostMetrics,
+		AuditLog:          auditLog,
 	}, nil
 }
 
@@ -296,6 +399,17 @@ func durationEnv(key string, fallback time.Duration) (time.Duration, error) {
 		return 0, fmt.Errorf("%s: invalid duration %q", key, raw)
 	}
 	return duration, nil
+}
+
+func durationEnvBetween(key string, fallback, minimum, maximum time.Duration) (time.Duration, error) {
+	value, err := durationEnv(key, fallback)
+	if err != nil {
+		return 0, err
+	}
+	if value < minimum || value > maximum {
+		return 0, fmt.Errorf("%s must be between %s and %s", key, minimum, maximum)
+	}
+	return value, nil
 }
 
 func integerEnv(key string, fallback int) (int, error) {

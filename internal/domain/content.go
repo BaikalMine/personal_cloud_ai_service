@@ -13,6 +13,7 @@ type ContentEventRecord struct {
 	ResponseCipher  []byte
 	MetadataCipher  []byte
 	Sensitive       bool
+	ExpiresAt       time.Time
 }
 
 type ContentEventRow struct {
@@ -87,6 +88,15 @@ type ComfyOutputOwnership struct {
 	Subfolder   string
 	StorageType string
 	MediaType   string
+	ExpiresAt   time.Time
+}
+
+type ContentRetentionStats struct {
+	EventCount      int64
+	MediaCount      int64
+	MediaBytes      int64
+	NextEventExpiry *time.Time
+	NextMediaExpiry *time.Time
 }
 
 type ComfyOutputArchiveCandidate struct {

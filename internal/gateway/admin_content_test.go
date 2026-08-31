@@ -48,7 +48,8 @@ func TestAdminContentRendersEveryMediaItem(t *testing.T) {
 		t.Fatal(err)
 	}
 	data := map[string]any{
-		"Title": "AI content",
+		"Title": "AI content", "Retention": newRetentionPolicyView(Config{}.Retention),
+		"RetentionStats": domain.ContentRetentionStats{},
 		"Events": []ContentEventView{{
 			ID: 1, Username: "alice", Prompt: "prompt", MediaCount: 2,
 			Media: []domain.ContentMediaSummary{
@@ -82,7 +83,8 @@ func TestAdminContentRendersArchivedAndFailedGenerationStates(t *testing.T) {
 	}
 	now := time.Now()
 	data := map[string]any{
-		"Title": "AI content",
+		"Title": "AI content", "Retention": newRetentionPolicyView(Config{}.Retention),
+		"RetentionStats": domain.ContentRetentionStats{},
 		"Events": []ContentEventView{
 			{ID: 1, Username: "alice", Service: "comfyui", Prompt: "archived prompt", GenerationState: "completed", GeneratedMediaCount: 1, MediaExpired: true, MediaExpiresAt: now.Add(-time.Hour), ExpiresAt: now.Add(6 * 24 * time.Hour)},
 			{ID: 2, Username: "bob", Service: "comfyui", Prompt: "failed prompt", GenerationState: "error", ExpiresAt: now.Add(6 * 24 * time.Hour)},
@@ -94,13 +96,39 @@ func TestAdminContentRendersArchivedAndFailedGenerationStates(t *testing.T) {
 	}
 	html := rendered.String()
 	for _, expected := range []string{
-		"Результат очищен после трёх дней",
+		"Медиа удалено по сроку хранения",
+		"Результат хранился 24 часа",
 		"Генерация с ошибкой",
 		"Файл результата очищен по сроку хранения",
 		"ComfyUI завершил эту генерацию с ошибкой",
 	} {
 		if !strings.Contains(html, expected) {
 			t.Fatalf("rendered content state does not contain %q", expected)
+		}
+	}
+	if strings.Contains(html, `/admin/content/media/`) {
+		t.Fatal("archived generation rendered a broken media URL")
+	}
+}
+
+func TestAdminContentRendersRetentionReport(t *testing.T) {
+	templates, err := ParseTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextMedia := time.Date(2026, 8, 31, 18, 0, 0, 0, time.Local)
+	nextEvent := nextMedia.Add(6 * 24 * time.Hour)
+	data := map[string]any{
+		"Title": "AI content", "Retention": newRetentionPolicyView(Config{}.Retention),
+		"RetentionStats": domain.ContentRetentionStats{EventCount: 9, MediaCount: 3, MediaBytes: 2 << 20, NextMediaExpiry: &nextMedia, NextEventExpiry: &nextEvent},
+	}
+	var rendered bytes.Buffer
+	if err := templates.ExecuteTemplate(&rendered, "admin_content", data); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"Хранение AI-контента", "2.0 MB", "3 файла", "31.08.2026 18:00", "результаты хранятся 24 часа", "хранятся 7 дней"} {
+		if !strings.Contains(rendered.String(), expected) {
+			t.Fatalf("retention report does not contain %q", expected)
 		}
 	}
 }

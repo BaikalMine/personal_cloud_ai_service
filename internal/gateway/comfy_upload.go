@@ -35,7 +35,6 @@ const (
 	maxComfyInputGlobalFiles  = 5000
 	maxComfyUploadResponse    = 64 << 10
 	maxComfyStoredInputBytes  = int64(320 << 20)
-	comfyInputRetention       = 72 * time.Hour
 )
 
 var errForeignComfyAsset = errors.New("ComfyUI asset belongs to another Gateway user")
@@ -272,7 +271,7 @@ func (a *App) finalizeComfyInputUpload(resp *http.Response) error {
 	}
 	persistCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	finalized, err := a.store.FinalizeComfyInputAsset(persistCtx, reservation.ID, result.Name, normalizedSubfolder, storedAsset.SizeBytes, storedAsset.ContentHash, comfyInputRetention)
+	finalized, err := a.store.FinalizeComfyInputAsset(persistCtx, reservation.ID, result.Name, normalizedSubfolder, storedAsset.SizeBytes, storedAsset.ContentHash, a.retentionPolicy().ComfyInputs)
 	if err != nil {
 		return err
 	}

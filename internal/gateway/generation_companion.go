@@ -283,7 +283,7 @@ func (a *App) generationRecipeView(row domain.GenerationRecipeRow) (generationRe
 }
 
 func (a *App) generationVariantViews(ctx context.Context, userID int64) ([]generationVariantView, error) {
-	rows, err := a.store.ListGenerationVariants(ctx, userID, 60)
+	rows, err := a.store.ListGenerationVariants(ctx, userID, 60, time.Now().Add(-a.retentionPolicy().GenerationHistory))
 	if err != nil {
 		return nil, err
 	}

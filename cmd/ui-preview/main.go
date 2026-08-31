@@ -25,6 +25,14 @@ func main() {
 		"CurrentUser":   admin,
 		"PublicBaseURL": "http://127.0.0.1:8090",
 		"AdminBaseURL":  "http://127.0.0.1:8091",
+		"Retention": map[string]any{
+			"GenerationHistoryLabel": "24 часа",
+			"GenerationMediaLabel":   "24 часа",
+			"AIContentLabel":         "7 дней",
+			"ComfyInputsLabel":       "3 дня",
+			"HostMetricsLabel":       "7 дней",
+			"AuditLogLabel":          "90 дней",
+		},
 	}
 	activities := []domain.Activity{
 		{Service: "openwebui", ServiceLabel: "OpenWebUI", Summary: "Сообщение нейросети", Count: 1, Method: "POST", Path: "/ollama/api/chat", Status: 200, Duration: 1840, Bytes: 4820, CreatedAt: now.Add(-2 * time.Minute)},
@@ -236,11 +244,13 @@ func main() {
 	}))
 	mux.HandleFunc("/preview/content", render("admin_content", "AI-контент", map[string]any{
 		"Username": "", "Service": "", "Query": "",
-		"Overview": gateway.ContentOverview{Total: 28, ComfyUI: 11, OpenWebUI: 17, WithMedia: 6},
+		"Overview":       gateway.ContentOverview{Total: 28, ComfyUI: 11, OpenWebUI: 17, WithMedia: 6},
+		"RetentionStats": domain.ContentRetentionStats{EventCount: 28, MediaCount: 6, MediaBytes: 2480000 * 6, NextMediaExpiry: timePointer(now.Add(18 * time.Hour)), NextEventExpiry: timePointer(now.Add(6 * 24 * time.Hour))},
 		"Events": []gateway.ContentEventView{
 			{ID: 3, UserID: 2, Username: "rayka", Service: "comfyui", Kind: "generation", Model: "Krea2 / Raw INT8 Mixed", Prompt: "Editorial portrait of a woman holding a perfume bottle in a bright studio.", Metadata: `{"seed":284797972294826,"megapixels":1.9}`, Assistant: &gateway.ContentAssistantView{Applied: true, Template: "photographic", OriginalPrompt: "Девушка показывает флакон духов", Suggestion: "Create an editorial portrait of a woman naturally presenting a premium perfume bottle."}, GenerationState: "completed", MediaCount: 1, Media: []domain.ContentMediaSummary{{ID: 42, EventID: 3, MediaType: "image"}}, CreatedAt: now.Add(-5 * time.Minute), ExpiresAt: now.Add(7 * 24 * time.Hour)},
 			{ID: 2, UserID: 2, Username: "rayka", Service: "comfyui", Kind: "generation", Model: "Flux 2 / Klein 9B", Prompt: "Adult editorial portrait used to verify sensitive-content masking.", Metadata: `{"seed":1019794942414480}`, GenerationState: "completed", Sensitive: true, MediaCount: 1, Media: []domain.ContentMediaSummary{{ID: 43, EventID: 2, MediaType: "image"}}, CreatedAt: now.Add(-7 * time.Minute), ExpiresAt: now.Add(7 * 24 * time.Hour)},
 			{ID: 1, UserID: 2, Username: "rayka", Service: "comfyui", Kind: "generation", Model: "Krea2 / Raw INT8 Mixed", Prompt: "A detailed fashion portrait with dramatic lighting.", Metadata: `{"seed":45876641139403}`, GenerationState: "error", CreatedAt: now.Add(-9 * time.Minute), ExpiresAt: now.Add(7 * 24 * time.Hour)},
+			{ID: 4, UserID: 2, Username: "rayka", Service: "comfyui", Kind: "generation", Model: "Krea2 / Raw INT8 Mixed", Prompt: "Archived generation with parameters retained for review.", Metadata: `{"seed":8675309}`, GenerationState: "completed", GeneratedMediaCount: 1, MediaExpired: true, MediaExpiresAt: now.Add(-2 * time.Hour), CreatedAt: now.Add(-26 * time.Hour), ExpiresAt: now.Add(6 * 24 * time.Hour)},
 		},
 	}))
 	mux.HandleFunc("/preview/media", render("admin_media_viewer", "Просмотр результата", map[string]any{"Filename": "AI-Gateway-preview-result.png", "MediaID": int64(42), "MediaType": "image"}))
@@ -257,4 +267,8 @@ func main() {
 
 	log.Println("UI preview listening on http://0.0.0.0:18080")
 	log.Fatal(http.ListenAndServe(":18080", mux))
+}
+
+func timePointer(value time.Time) *time.Time {
+	return &value
 }

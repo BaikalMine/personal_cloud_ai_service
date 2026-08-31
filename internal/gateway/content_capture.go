@@ -199,6 +199,7 @@ func (a *App) persistContentCapture(ctx context.Context, capture *proxyContentCa
 	_, err = a.store.InsertContentEvent(ctx, domain.ContentEventRecord{
 		UserID: capture.userID, Service: capture.service, Kind: kind, ExternalID: externalID,
 		Model: model, PromptCipher: promptCipher, ResponseCipher: responseCipher, MetadataCipher: metadataCipher,
+		ExpiresAt: time.Now().Add(a.retentionPolicy().AIContent),
 	})
 	return err
 }
@@ -232,7 +233,7 @@ func (a *App) persistComfyMedia(ctx context.Context, capture *proxyContentCaptur
 		EventID: eventID, MediaType: capture.mediaType, MIMEType: mimeType,
 		OriginalName: capture.mediaName, Subfolder: capture.mediaSubfolder, StorageType: capture.mediaStorageType,
 		PayloadCipher: payload, SizeBytes: int64(len(capture.response.data)), ContentHash: hex.EncodeToString(digest[:]),
-		ExpiresAt: time.Now().Add(generationMediaRetention),
+		ExpiresAt: time.Now().Add(a.retentionPolicy().GenerationMedia),
 	})
 	if err == nil && capture.mediaType == "image" {
 		a.queueSensitiveMediaClassification()
