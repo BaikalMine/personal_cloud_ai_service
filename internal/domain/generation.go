@@ -44,9 +44,10 @@ type GenerationAccessPolicy struct {
 }
 
 type GenerationVariantMedia struct {
-	ID        int64
-	MediaType string
-	Filename  string
-	ExpiresAt time.Time
-	Sensitive bool
+	ID            int64
+	MediaType     string
+	Filename      string
+	ExpiresAt     time.Time
+	Sensitive     bool
+	VisualPending bool
 }

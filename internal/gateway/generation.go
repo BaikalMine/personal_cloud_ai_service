@@ -92,6 +92,7 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 		return a.requireAuth(a.requireServiceAccess("quick_generation", next))
 	}
 	page := quick(http.HandlerFunc(a.handleGeneratePage))
+	gallery := quick(http.HandlerFunc(a.handleGenerationGalleryPage))
 	run := quick(http.HandlerFunc(a.handleGenerateRun))
 	recover := quick(http.HandlerFunc(a.handleRecoverGeneration))
 	promptAssistant := quick(http.HandlerFunc(a.handlePromptAssistant))
@@ -107,6 +108,8 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 	uploadVideo := quick(a.requireQuickGenerationTypes([]string{"minimax-h3-video"}, a.quickGenerationVideoUploadHandler()))
 	mux.Handle("/generate", page)
 	mux.Handle("/generate/", page)
+	mux.Handle("/gallery", gallery)
+	mux.Handle("/gallery/", gallery)
 	mux.Handle("/generate/upload/image", upload)
 	mux.Handle("/generate/upload/audio", uploadAudio)
 	mux.Handle("/generate/upload/video", uploadVideo)
@@ -1329,7 +1332,7 @@ func (a *App) handleHideGenerationLibraryMedia(w http.ResponseWriter, r *http.Re
 		writeJSON(w, http.StatusOK, map[string]any{"removed": true, "media_id": id})
 		return
 	}
-	http.Redirect(w, r, "/generate#my-results", http.StatusSeeOther)
+	http.Redirect(w, r, "/gallery", http.StatusSeeOther)
 }
 
 func (a *App) fetchGenerationOutput(ctx context.Context, output generationOutput) ([]byte, string, int, error) {

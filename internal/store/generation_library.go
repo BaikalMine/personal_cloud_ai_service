@@ -214,7 +214,8 @@ func uniqueStrings(items []string) []string {
 
 func (s *Store) ListGenerationVariantMedia(ctx context.Context, userID int64, promptID string) ([]domain.GenerationVariantMedia, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id,m.media_type,m.original_name,m.expires_at,e.is_sensitive
+		SELECT m.id,m.media_type,m.original_name,m.expires_at,e.is_sensitive,
+		       (m.media_type='image' AND m.visual_sensitivity_classified_at IS NULL)
 		FROM content_media m JOIN content_events e ON e.id=m.event_id
 		WHERE e.user_id=$1 AND e.service='comfyui' AND e.kind='comfyui_prompt' AND e.external_id=$2
 		  AND e.expires_at > now() AND m.expires_at > now()
@@ -227,7 +228,7 @@ func (s *Store) ListGenerationVariantMedia(ctx context.Context, userID int64, pr
 	items := make([]domain.GenerationVariantMedia, 0)
 	for rows.Next() {
 		var item domain.GenerationVariantMedia
-		if err := rows.Scan(&item.ID, &item.MediaType, &item.Filename, &item.ExpiresAt, &item.Sensitive); err != nil {
+		if err := rows.Scan(&item.ID, &item.MediaType, &item.Filename, &item.ExpiresAt, &item.Sensitive, &item.VisualPending); err != nil {
 			return nil, err
 		}
 		items = append(items, item)

@@ -32,6 +32,7 @@
     <nav class="primary-nav" aria-label="Основная навигация">
       <a href="/app">Обзор</a>
       {{if .CurrentUser}}{{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseQuickGeneration}}<a href="/generate">Быстрая генерация</a>{{end}}{{end}}
+      {{if .CurrentUser}}{{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseQuickGeneration}}<a href="/gallery">Галерея</a>{{end}}{{end}}
       {{if .CurrentUser}}{{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseComfyUI}}<a href="/comfyui/" target="_blank" rel="noopener">ComfyUI</a>{{end}}{{end}}
       {{if .CurrentUser}}{{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseOpenWebUI}}<a href="/openwebui/" target="_blank" rel="noopener">OpenWebUI</a>{{end}}{{end}}
       <a href="/account/profile">Профиль</a>

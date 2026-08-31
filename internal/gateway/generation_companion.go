@@ -304,7 +304,7 @@ func (a *App) generationVariantViews(ctx context.Context, userID int64) ([]gener
 			view.DurationSeconds = int64(time.Since(row.CreatedAt).Seconds())
 		}
 		for _, item := range media {
-			view.Media = append(view.Media, generationMediaView{ID: item.ID, URL: "/generate/library/" + strconv.FormatInt(item.ID, 10), Filename: item.Filename, MediaType: item.MediaType, ExpiresUnix: item.ExpiresAt.UnixMilli(), Sensitive: item.Sensitive})
+			view.Media = append(view.Media, generationMediaView{ID: item.ID, URL: "/generate/library/" + strconv.FormatInt(item.ID, 10), Filename: item.Filename, MediaType: item.MediaType, ExpiresUnix: item.ExpiresAt.UnixMilli(), Sensitive: item.Sensitive || item.VisualPending})
 		}
 		views = append(views, view)
 	}

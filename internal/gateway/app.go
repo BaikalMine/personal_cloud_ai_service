@@ -192,7 +192,7 @@ func ParseTemplates() (*Templates, error) {
 		return nil, err
 	}
 	hash := sha256.New()
-	for _, path := range []string{"static/style.css", "static/app.js", "static/generate.js"} {
+	for _, path := range []string{"static/style.css", "static/app.js", "static/generate.js", "static/gallery.js"} {
 		body, err := embeddedFS.ReadFile(path)
 		if err != nil {
 			return nil, err
@@ -217,6 +217,7 @@ func (a *App) publicMux() http.Handler {
 	mux.HandleFunc("/static/style.css", a.handleStaticCSS)
 	mux.HandleFunc("/static/app.js", a.handleStaticJS)
 	mux.HandleFunc("/static/generate.js", a.handleStaticJS)
+	mux.HandleFunc("/static/gallery.js", a.handleStaticJS)
 	mux.HandleFunc("/static/fonts/", a.handleStaticFont)
 	mux.HandleFunc("/healthz", a.handleHealthz)
 	mux.HandleFunc("/login", a.handleLogin)
@@ -256,6 +257,7 @@ func (a *App) adminMux() http.Handler {
 	mux.HandleFunc("/static/style.css", a.handleStaticCSS)
 	mux.HandleFunc("/static/app.js", a.handleStaticJS)
 	mux.HandleFunc("/static/generate.js", a.handleStaticJS)
+	mux.HandleFunc("/static/gallery.js", a.handleStaticJS)
 	mux.HandleFunc("/static/fonts/", a.handleStaticFont)
 	mux.HandleFunc("/healthz", a.handleHealthz)
 	mux.HandleFunc("/login", a.handleLogin)
@@ -332,6 +334,8 @@ func (a *App) handleStaticJS(w http.ResponseWriter, r *http.Request) {
 	asset := "static/app.js"
 	if r.URL.Path == "/static/generate.js" {
 		asset = "static/generate.js"
+	} else if r.URL.Path == "/static/gallery.js" {
+		asset = "static/gallery.js"
 	}
 	body, err := embeddedFS.ReadFile(asset)
 	if err != nil {

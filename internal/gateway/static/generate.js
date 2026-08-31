@@ -136,6 +136,10 @@
   const variantTemplateFilter = document.getElementById("generation-variant-template");
   const generationQuota = document.getElementById("generation-quota");
   const variantCount = document.getElementById("generation-variant-count");
+  const repeatNotice = document.getElementById("generation-repeat-notice");
+  const repeatNoticeTitle = document.getElementById("generation-repeat-title");
+  const repeatNoticeMessage = document.getElementById("generation-repeat-message");
+  const repeatNoticeDismiss = document.getElementById("generation-repeat-dismiss");
   const outputGrid = document.getElementById("generation-output-grid");
   const resultActions = document.getElementById("generation-result-actions");
   const retryGeneration = document.getElementById("generation-retry");
@@ -193,6 +197,8 @@
   let activeGenerationRequestID = "";
   let savedRecipes = [];
   let savedVariants = [];
+  const requestedVariantID = new URLSearchParams(window.location.search).get("variant") || "";
+  let requestedVariantHandled = false;
   const activeGenerationStorageKey = "ai-gateway.active-generation";
   const generationHistoryCollapsedStorageKey = "ai-gateway.generation-history-collapsed";
   let generationHistoryCollapsed = false;
@@ -1018,6 +1024,45 @@
     }
     return Boolean(selectedChoice() && selectedGenerationWorkflow());
   };
+
+  const showRepeatNotice = (title, message, error = false) => {
+    if (!repeatNotice || !repeatNoticeTitle || !repeatNoticeMessage) return;
+    repeatNoticeTitle.textContent = title;
+    repeatNoticeMessage.textContent = message;
+    repeatNotice.classList.toggle("has-error", error);
+    repeatNotice.hidden = false;
+  };
+
+  const clearRequestedVariantQuery = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("variant");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  };
+
+  const restoreRequestedVariant = () => {
+    if (!requestedVariantID || requestedVariantHandled) return;
+    requestedVariantHandled = true;
+    const variant = savedVariants.find((item) => String(item.id) === requestedVariantID);
+    if (!variant) {
+      showRepeatNotice("Вариант больше недоступен", "История хранится 24 часа. Выберите другой результат в галерее.", true);
+      clearRequestedVariantQuery();
+      return;
+    }
+    if (!applySavedValues(variant.values)) {
+      showRepeatNotice("Не удалось перенести параметры", "Модель или workflow этого результата сейчас недоступны.", true);
+      clearRequestedVariantQuery();
+      return;
+    }
+    const needsFiles = variant.template_id === "image-to-image" || variant.template_id === "minimax-h3-video";
+    showRepeatNotice(
+      "Параметры перенесены",
+      needsFiles ? "Сценарий и настройки восстановлены. Исходные файлы и референсы при необходимости добавьте заново." : "Сценарий, промт и настройки восстановлены. Проверьте их перед запуском."
+    );
+    clearRequestedVariantQuery();
+    window.requestAnimationFrame(() => repeatNotice?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  };
+
+  repeatNoticeDismiss?.addEventListener("click", () => { repeatNotice.hidden = true; });
 
   const profileValues = (profile) => {
     const family = selectedGenerationWorkflow()?.dataset.family || "checkpoint";
@@ -1889,6 +1934,7 @@
   };
 
   const refreshLibrary = async () => {
+    if (!document.getElementById("my-results")) return;
     const response = await fetch("/generate/library/recent", { credentials: "same-origin" });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || "Не удалось обновить галерею");
@@ -2119,6 +2165,7 @@
     if (!response.ok) throw new Error(payload.error || "Не удалось загрузить историю вариантов");
     savedVariants = Array.isArray(payload.variants) ? payload.variants : [];
     renderVariants();
+    restoreRequestedVariant();
   };
 
   const syncGenerationHistoryVisibility = ({ persist = false } = {}) => {
@@ -2520,7 +2567,9 @@
   syncPromptAssistant();
   refreshQueueOverview();
   refreshRecipes().catch((error) => setRecipeState(error.message || "Не удалось загрузить наборы", "error"));
-  refreshVariants().catch(() => {});
+  refreshVariants().catch(() => {
+    if (requestedVariantID && !requestedVariantHandled) showRepeatNotice("Не удалось загрузить вариант", "Проверьте соединение и обновите страницу.", true);
+  });
   const savedGeneration = storedActiveGeneration();
   if (savedGeneration?.requestID) {
     activeGenerationRequestID = savedGeneration.requestID;

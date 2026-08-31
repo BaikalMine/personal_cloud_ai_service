@@ -1,0 +1,69 @@
+{{define "gallery"}}
+{{template "head" .}}
+<script src="/static/gallery.js?v={{.AssetVersion}}" defer></script>
+{{template "nav" .}}
+<main class="page user-gallery-page" id="main-content" data-user-gallery>
+  <section class="hero user-gallery-hero">
+    <div>
+      <p class="eyebrow">Ваши результаты</p>
+      <h1>Моя галерея</h1>
+      <p class="hero-copy">Изображения и видео хранятся 24 часа. Откройте результат или верните его параметры в быструю генерацию.</p>
+    </div>
+    <a class="button" href="/generate">Новая генерация</a>
+  </section>
+
+  {{if .Items}}
+  <section class="user-gallery-toolbar" aria-label="Фильтры галереи">
+    <div class="user-gallery-count"><strong data-gallery-visible-count>{{len .Items}}</strong><span>результатов</span></div>
+    <div class="user-gallery-filters" role="group" aria-label="Тип результата">
+      <button type="button" class="is-active" data-gallery-filter="all" aria-pressed="true">Все <span>{{len .Items}}</span></button>
+      <button type="button" data-gallery-filter="image" aria-pressed="false">Изображения <span>{{.ImageCount}}</span></button>
+      <button type="button" data-gallery-filter="video" aria-pressed="false">Видео <span>{{.VideoCount}}</span></button>
+    </div>
+  </section>
+
+  <section class="user-gallery-grid" aria-live="polite">
+    {{range .Items}}
+    <article class="user-gallery-card{{if .Media.Sensitive}} sensitive-media{{end}}" data-gallery-item data-media-type="{{.Media.MediaType}}">
+      <button class="user-gallery-preview" type="button" data-gallery-open data-url="{{.Media.URL}}" data-filename="{{.Media.Filename}}" data-media-type="{{.Media.MediaType}}" {{if .Media.Sensitive}}data-sensitive-media{{end}} aria-label="Открыть {{if eq .Media.MediaType "video"}}видео{{else}}изображение{{end}}">
+        {{if eq .Media.MediaType "video"}}
+        <video muted playsinline preload="metadata" src="{{.Media.URL}}"></video><span class="user-gallery-play" aria-hidden="true">&#9654;</span>
+        {{else}}
+        <img loading="lazy" src="{{.Media.URL}}" alt="{{.Prompt}}">
+        {{end}}
+        {{if .Media.Sensitive}}<span class="sensitive-media-cover"><b>Контент 18+</b><small>Нажмите, чтобы показать</small></span>{{end}}
+      </button>
+      <div class="user-gallery-card-body">
+        <div class="user-gallery-card-heading"><span>{{.Scenario}}</span><time datetime="{{.CreatedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{formatTime .CreatedAt}}</time></div>
+        <strong>{{.ModelName}}</strong>
+        <p>{{.Prompt}}</p>
+        <div class="user-gallery-meta"><span>Seed {{.Seed}}</span><span data-generation-expiry="{{.Media.ExpiresUnix}}">Вычисляем срок хранения</span></div>
+        <div class="user-gallery-actions">
+          <a class="button" href="/generate?variant={{.VariantID}}">Повторить</a>
+          <a class="button ghost" href="{{.Media.URL}}?download=1" download="{{.Media.Filename}}">Скачать</a>
+          <form method="post" action="/generate/library/hide" data-gallery-hide-form><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="media_id" value="{{.Media.ID}}"><button class="user-gallery-hide" type="submit">Убрать</button></form>
+        </div>
+      </div>
+    </article>
+    {{end}}
+  </section>
+  <div class="user-gallery-filter-empty" data-gallery-filter-empty hidden>По выбранному типу результатов пока нет.</div>
+  {{else}}
+  <section class="user-gallery-empty">
+    <strong>Здесь пока нет результатов</strong>
+    <p>После первой успешной генерации изображение или видео появится здесь автоматически.</p>
+    <a class="button" href="/generate">Создать первый результат</a>
+  </section>
+  {{end}}
+
+  <div class="generation-lightbox" id="gallery-lightbox" hidden role="dialog" aria-modal="true" aria-label="Просмотр результата">
+    <button class="generation-lightbox-backdrop" type="button" data-gallery-close aria-label="Закрыть просмотр"></button>
+    <div class="generation-lightbox-window">
+      <div class="generation-lightbox-toolbar"><span data-gallery-lightbox-name></span><a class="button generation-lightbox-download" data-gallery-lightbox-download download>Скачать оригинал</a><button class="generation-lightbox-close" type="button" data-gallery-close aria-label="Закрыть">&#10005;</button></div>
+      <img data-gallery-lightbox-image alt="Результат генерации в полном размере">
+      <video data-gallery-lightbox-video controls playsinline hidden></video>
+    </div>
+  </div>
+</main>
+</body></html>
+{{end}}
