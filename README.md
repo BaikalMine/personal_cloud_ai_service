@@ -5,6 +5,9 @@ Dockerized Go + PostgreSQL gateway for controlled access to ComfyUI and OpenWebU
 The Gateway user interface and administration area are localized in Russian;
 the proxied ComfyUI and OpenWebUI interfaces remain unchanged.
 
+The current-state audit and phased product/engineering roadmap are maintained
+in [`docs/PROJECT_IMPROVEMENT_PLAN.md`](docs/PROJECT_IMPROVEMENT_PLAN.md).
+
 ## Layout
 
 - `cmd/gateway`: process entrypoint only.
