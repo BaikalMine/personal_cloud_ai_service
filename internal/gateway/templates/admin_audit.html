@@ -2,9 +2,9 @@
 {{template "head" .}}
 {{template "admin_nav" .}}
 <main class="page" id="main-content">
-  <section class="hero"><div><p class="eyebrow">Безопасность</p><h1>Журнал аудита</h1></div><span class="live-badge"><i></i>События системы</span></section>
+  <section class="hero"><div><p class="eyebrow">Безопасность</p><h1>Журнал аудита</h1></div><a class="button ghost" href="/admin/audit/export" download>Скачать CSV</a></section>
   <section class="panel">
-    <div class="panel-heading"><div><p class="section-kicker">Для администратора</p><h2>Последние события системы</h2><p class="panel-intro">Здесь остаются технические и безопасностные события. Понятные действия пользователей смотрите в их профиле.</p></div></div>
+    <div class="panel-heading"><div><p class="section-kicker">Для администратора</p><h2>Последние события системы</h2><p class="panel-intro">События хранятся {{.Retention.AuditLogLabel}}. CSV-выгрузка содержит весь доступный журнал до текущего момента.</p></div></div>
     <table><thead><tr><th>Время</th><th>Инициатор</th><th>Действие</th><th>Объект</th><th>IP</th><th>Детали</th></tr></thead><tbody>
     {{range .Audits}}
       <tr><td data-label="Время">{{formatTime .CreatedAt}}</td><td data-label="Инициатор">{{if .Actor}}{{.Actor}}{{else}}система{{end}}</td><td data-label="Действие">{{auditActionLabel .Action}}</td><td data-label="Объект">{{auditTargetLabel .TargetType}} {{if .TargetID.Valid}}#{{.TargetID.Int64}}{{end}}</td><td data-label="IP">{{.IP}}</td><td data-label="Детали" class="path">{{auditMetadataLabel .Metadata}}</td></tr>

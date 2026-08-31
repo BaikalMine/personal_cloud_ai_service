@@ -185,3 +185,28 @@ func TestQuickGenerationRequestTelemetryMigration(t *testing.T) {
 		}
 	}
 }
+
+func TestBoundedDatabaseRetentionMigration(t *testing.T) {
+	var retentionMigration *migration
+	for index := range migrationCatalog {
+		if migrationCatalog[index].version == 39 {
+			retentionMigration = &migrationCatalog[index]
+			break
+		}
+	}
+	if retentionMigration == nil || retentionMigration.name != "bounded_database_retention" {
+		t.Fatal("bounded database retention migration is missing")
+	}
+	sql := strings.Join(retentionMigration.statements, "\n")
+	for _, expected := range []string{
+		"database_cleanup_state", "deleted_rows", "errors JSONB", "proxy_requests_retention_idx",
+		"websocket_sessions_retention_idx", "generation_requests_retention_idx",
+		"quick_generation_daily_usage_retention_idx", "invites_retention_idx",
+		"audit_log_retention_idx", "host_metrics_retention_idx",
+		"quick_generation_variants_retention_idx", "comfy_output_ownership_retention_idx",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("bounded database retention migration does not contain %q: %s", expected, sql)
+		}
+	}
+}

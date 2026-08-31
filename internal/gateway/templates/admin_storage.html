@@ -1,0 +1,67 @@
+{{define "admin_storage"}}
+{{template "head" .}}
+{{template "admin_nav" .}}
+<main class="page storage-page" id="main-content">
+  <section class="hero admin-hero storage-hero">
+    <div><p class="eyebrow">Эксплуатация</p><h1>Хранилище</h1><p class="hero-copy">Размеры таблиц, сроки хранения и последний проход очистки.</p></div>
+    <a class="button ghost" href="/admin/audit/export" download>Выгрузить аудит CSV</a>
+  </section>
+
+  <section class="metric-grid metrics-four storage-summary" aria-label="Сводка хранилища">
+    <article class="metric-card tone-blue"><span>База данных</span><strong>{{formatBytes .Storage.DatabaseBytes}}</strong><small>весь PostgreSQL</small></article>
+    <article class="metric-card tone-cyan"><span>Пользовательские таблицы</span><strong>{{formatBytes .Storage.VisibleTableBytes}}</strong><small>данные и индексы</small></article>
+    <article class="metric-card tone-green"><span>Оценка строк</span><strong>{{formatNumber .Storage.EstimatedRows}}</strong><small>по статистике PostgreSQL</small></article>
+    <article class="metric-card {{if eq .Storage.Cleanup.Status "ok"}}tone-green{{else if eq .Storage.Cleanup.Status "never"}}tone-amber{{else}}tone-red{{end}}"><span>Последняя очистка</span><strong>{{formatNumber .Storage.Cleanup.TotalDeleted}}</strong><small>удалено строк</small></article>
+  </section>
+
+  <section class="panel storage-cleanup is-{{.Storage.Cleanup.Status}}" aria-labelledby="storage-cleanup-title">
+    <div class="panel-heading storage-cleanup-heading">
+      <div><p class="section-kicker">Автоматическая очистка</p><h2 id="storage-cleanup-title">{{.Storage.Cleanup.StatusLabel}}</h2><p class="panel-intro">Удаление выполняется небольшими пачками и не затрагивает активные записи.</p></div>
+      <span class="storage-cleanup-status is-{{.Storage.Cleanup.Status}}"><i></i>{{.Storage.Cleanup.StatusLabel}}</span>
+    </div>
+    <dl class="storage-cleanup-facts">
+      <div><dt>Последний запуск</dt><dd>{{with .Storage.Cleanup.LastStartedAt}}{{formatTime .}}{{else}}-{{end}}</dd></div>
+      <div><dt>Последнее успешное завершение</dt><dd>{{with .Storage.Cleanup.LastSuccessAt}}{{formatTime .}}{{else}}-{{end}}</dd></div>
+      <div><dt>Длительность</dt><dd>{{formatDuration .Storage.Cleanup.DurationMS}}</dd></div>
+      <div><dt>Следующий проход</dt><dd>не позднее чем через 15 минут</dd></div>
+    </dl>
+    <div class="storage-cleanup-results">
+      {{range .Storage.Cleanup.Items}}
+      <div class="storage-cleanup-result {{if .Error}}has-error{{end}}"><span><strong>{{.Label}}</strong><small>{{.Table}}</small></span>{{if .Error}}<b>Ошибка</b><p>{{.Error}}</p>{{else}}<b>−{{formatNumber .Deleted}}</b>{{end}}</div>
+      {{else}}
+      <p class="storage-cleanup-empty">На последнем проходе удалять было нечего.</p>
+      {{end}}
+    </div>
+  </section>
+
+  <section class="panel storage-table-panel">
+    <div class="panel-heading"><div><p class="section-kicker">Под контролем retention</p><h2>Растущие таблицы</h2><p class="panel-intro">Сначала самые тяжёлые. Размер включает данные и индексы; число строк является оценкой PostgreSQL.</p></div>{{if gt .Storage.UnmappedCount 0}}<span class="storage-policy-warning">Без политики: {{.Storage.UnmappedCount}}</span>{{end}}</div>
+    <div class="table-scroll"><table class="storage-table">
+      <thead><tr><th>Данные</th><th>Строки</th><th>Размер</th><th>Самая старая запись</th><th>Срок</th><th>Владелец</th></tr></thead>
+      <tbody>
+      {{range .Storage.ManagedTables}}
+        <tr class="{{if .Unmapped}}is-unmapped{{end}}">
+          <td data-label="Данные"><strong>{{.Label}}</strong><small class="storage-table-name">{{.Name}}</small></td>
+          <td data-label="Строки" class="numeric">≈ {{formatNumber .EstimatedRows}}</td>
+          <td data-label="Размер"><strong>{{formatBytes .TotalBytes}}</strong></td>
+          <td data-label="Самая старая запись">{{with .OldestAt}}{{formatTime .}}{{else}}-{{end}}</td>
+          <td data-label="Срок"><span class="storage-retention {{if .Unmapped}}is-warning{{end}}">{{.Retention}}</span>{{if .Configuration}}<small class="storage-policy-key">{{.Configuration}}</small>{{end}}</td>
+          <td data-label="Владелец">{{.Owner}}</td>
+        </tr>
+      {{else}}<tr><td colspan="6" class="muted">Таблицы не найдены.</td></tr>{{end}}
+      </tbody>
+    </table></div>
+  </section>
+
+  <details class="panel storage-lifecycle">
+    <summary><span><strong>Постоянные и служебные данные</strong><small>Удаляются вместе с объектом, вручную или остаются как служебное состояние.</small></span><b>{{formatNumber (len .Storage.LifecycleTables)}}</b></summary>
+    <div class="table-scroll"><table class="storage-table">
+      <thead><tr><th>Данные</th><th>Строки</th><th>Размер</th><th>Самая старая запись</th><th>Жизненный цикл</th><th>Владелец</th></tr></thead>
+      <tbody>{{range .Storage.LifecycleTables}}
+        <tr><td data-label="Данные"><strong>{{.Label}}</strong><small class="storage-table-name">{{.Name}}</small></td><td data-label="Строки" class="numeric">≈ {{formatNumber .EstimatedRows}}</td><td data-label="Размер"><strong>{{formatBytes .TotalBytes}}</strong></td><td data-label="Самая старая запись">{{with .OldestAt}}{{formatTime .}}{{else}}-{{end}}</td><td data-label="Жизненный цикл">{{.Retention}}</td><td data-label="Владелец">{{.Owner}}</td></tr>
+      {{else}}<tr><td colspan="6" class="muted">Служебных таблиц нет.</td></tr>{{end}}</tbody>
+    </table></div>
+  </details>
+</main>
+</body></html>
+{{end}}

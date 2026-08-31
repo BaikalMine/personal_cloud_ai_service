@@ -234,6 +234,29 @@ func main() {
 		"Stats":        domain.AdminStats{RequestsToday: 147, Requests7Days: 824, ActiveWebSockets: 2, ErrorRate: "0,8%", Trend: chart},
 		"ServiceStats": serviceStats,
 	}))
+	storageManaged := []map[string]any{
+		{"Name": "content_media", "Label": "Медиа генераций", "Owner": "Контроль контента", "Retention": "24 часа", "Configuration": "GENERATION_RETENTION", "Managed": true, "EstimatedRows": int64(9), "TotalBytes": int64(225116160), "OldestAt": timePointer(now.Add(-22 * time.Hour))},
+		{"Name": "proxy_requests", "Label": "Запросы к сервисам", "Owner": "Телеметрия Gateway", "Retention": "90 дней", "Configuration": "PROXY_REQUEST_RETENTION", "Managed": true, "EstimatedRows": int64(19931), "TotalBytes": int64(8781824), "OldestAt": timePointer(now.Add(-38 * 24 * time.Hour))},
+		{"Name": "host_metrics", "Label": "Метрики компьютера", "Owner": "Мониторинг", "Retention": "7 дней", "Configuration": "HOST_METRIC_RETENTION", "Managed": true, "EstimatedRows": int64(9588), "TotalBytes": int64(2072576), "OldestAt": timePointer(now.Add(-7 * 24 * time.Hour))},
+		{"Name": "audit_log", "Label": "Журнал аудита", "Owner": "Безопасность", "Retention": "90 дней", "Configuration": "AUDIT_LOG_RETENTION", "Managed": true, "EstimatedRows": int64(710), "TotalBytes": int64(393216), "OldestAt": timePointer(now.Add(-64 * 24 * time.Hour))},
+		{"Name": "quick_generation_variants", "Label": "История генераций", "Owner": "Быстрая генерация", "Retention": "24 часа", "Configuration": "GENERATION_RETENTION", "Managed": true, "EstimatedRows": int64(12), "TotalBytes": int64(311296), "OldestAt": timePointer(now.Add(-20 * time.Hour))},
+		{"Name": "future_table", "Label": "future_table", "Owner": "Не назначен", "Retention": "Политика не задана", "Unmapped": true, "EstimatedRows": int64(4), "TotalBytes": int64(65536), "OldestAt": timePointer(now.Add(-3 * time.Hour))},
+	}
+	storageLifecycle := []map[string]any{
+		{"Name": "users", "Label": "Учётные записи", "Owner": "Управление доступом", "Retention": "До удаления; временные — до срока", "EstimatedRows": int64(9), "TotalBytes": int64(122880), "OldestAt": timePointer(now.Add(-180 * 24 * time.Hour))},
+		{"Name": "quick_generation_recipes", "Label": "Сохранённые рецепты", "Owner": "Пользователь", "Retention": "До ручного удаления", "EstimatedRows": int64(1), "TotalBytes": int64(49152), "OldestAt": timePointer(now.Add(-10 * 24 * time.Hour))},
+		{"Name": "database_cleanup_state", "Label": "Состояние очистки БД", "Owner": "Система", "Retention": "Одна служебная запись", "EstimatedRows": int64(1), "TotalBytes": int64(32768), "OldestAt": timePointer(now.Add(-12 * time.Minute))},
+	}
+	mux.HandleFunc("/preview/storage", render("admin_storage", "Хранилище базы данных", map[string]any{
+		"Storage": map[string]any{
+			"DatabaseBytes": int64(238 << 20), "VisibleTableBytes": int64(237 << 20), "EstimatedRows": int64(30692), "UnmappedCount": 1,
+			"ManagedTables": storageManaged, "LifecycleTables": storageLifecycle,
+			"Cleanup": map[string]any{
+				"Status": "partial", "StatusLabel": "Очистка завершена частично", "LastStartedAt": timePointer(now.Add(-12 * time.Minute)), "LastFinishedAt": timePointer(now.Add(-11*time.Minute - 58*time.Second)), "LastSuccessAt": timePointer(now.Add(-27 * time.Minute)), "DurationMS": int64(1840), "TotalDeleted": int64(1243),
+				"Items": []map[string]any{{"Table": "proxy_requests", "Label": "Запросы к сервисам", "Deleted": int64(1000)}, {"Table": "host_metrics", "Label": "Метрики компьютера", "Deleted": int64(243)}, {"Table": "audit_log", "Label": "Журнал аудита", "Error": "контекст очистки завершился до обработки таблицы"}},
+			},
+		},
+	}))
 	serviceAnalytics := domain.ServiceAnalytics{
 		Service: "comfyui", DisplayName: "ComfyUI", Requests: 516, Users: 3, Bytes: 6400000000, Errors: 2, AverageDuration: 1160, ActiveWebSockets: 2,
 		Trend: []domain.ServiceTrendPoint{{Label: "Сегодня", Requests: 84, Users: 3, Errors: 1, Bytes: 1600000000, RequestPercent: 100}, {Label: "Вчера", Requests: 61, Users: 3, Bytes: 1200000000, RequestPercent: 73}, {Label: "10 июл", Requests: 46, Users: 2, Errors: 1, Bytes: 920000000, RequestPercent: 55}},

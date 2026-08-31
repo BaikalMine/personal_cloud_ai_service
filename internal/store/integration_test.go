@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -47,6 +48,7 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertMiningProfiles(t, ctx, repository, adminID)
+	assertDatabaseRetentionLifecycle(t, ctx, db, repository, adminID)
 
 	inviteHash := security.HashToken("single-use-integration-invite")
 	inviteID, err := repository.CreateInvite(ctx, store.CreateInviteParams{
@@ -369,6 +371,171 @@ func resetIntegrationDatabase(t *testing.T, db *sql.DB) {
 		VALUES ('Example miner', 'mining-root/example/start-mining.bat', 'miner.exe', true, true)
 	`); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func assertDatabaseRetentionLifecycle(t *testing.T, ctx context.Context, db *sql.DB, repository *store.Store, userID int64) {
+	t.Helper()
+	now := time.Now().UTC()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	statements := []string{
+		`INSERT INTO proxy_requests(user_id,service,method,path,status_code,duration_ms,created_at)
+		 SELECT $1,'comfyui','GET','/retention/old/' || value,200,1,now() - interval '72 hours'
+		 FROM generate_series(1,101) value`,
+		`INSERT INTO proxy_requests(user_id,service,method,path,status_code,duration_ms,created_at)
+		 VALUES ($1,'comfyui','GET','/retention/current',200,1,now())`,
+		`INSERT INTO websocket_sessions(user_id,service,opened_at,closed_at,duration_ms,client_ip)
+		 VALUES ($1,'comfyui',now() - interval '72 hours',now() - interval '71 hours',3600000,'retention-test'),
+		        ($1,'comfyui',now(),NULL,NULL,'retention-test')`,
+		`INSERT INTO generation_requests(user_id,request_id,prompt_id,created_at,updated_at)
+		 VALUES ($1,'retention-old-request','retention-old-prompt',now() - interval '72 hours',now() - interval '72 hours'),
+		        ($1,'retention-current-request','retention-current-prompt',now(),now())`,
+		`INSERT INTO quick_generation_daily_usage(user_id,usage_date,used_count)
+		 VALUES ($1,current_date - 3,2),($1,current_date,1)`,
+		`INSERT INTO invites(token_hash,created_by_user_id,max_uses,expires_at,created_at)
+		 VALUES ('retention-old-invite',$1,1,now() - interval '72 hours',now() - interval '96 hours'),
+		        ('retention-current-invite',$1,1,now() + interval '24 hours',now())`,
+		`INSERT INTO audit_log(actor_user_id,action,target_type,created_at)
+		 VALUES ($1,'retention_old','system',now() - interval '72 hours'),
+		        ($1,'retention_current','system',now())`,
+		`INSERT INTO host_metrics(recorded_at,cpu_percent,memory_used_bytes,memory_total_bytes)
+		 VALUES (now() - interval '72 hours',91,1,2),(now(),92,1,2)`,
+		`INSERT INTO quick_generation_variants(user_id,prompt_id,seed,payload_cipher,state,created_at,finished_at,state_changed_at)
+		 VALUES ($1,'retention-old-variant',1,decode('00','hex'),'completed',now() - interval '72 hours',now() - interval '71 hours',now() - interval '71 hours'),
+		        ($1,'retention-current-variant',2,decode('00','hex'),'completed',now(),now(),now()),
+		        ($1,'retention-active-variant',3,decode('00','hex'),'running',now() - interval '72 hours',NULL,now())`,
+		`WITH event AS (
+			INSERT INTO content_events(user_id,service,kind,external_id,prompt_cipher,response_cipher,metadata_cipher,expires_at)
+			VALUES ($1,'comfyui','comfyui_prompt','retention-ownership-event',decode('00','hex'),decode('00','hex'),decode('00','hex'),now() + interval '7 days')
+			RETURNING id
+		 )
+		 INSERT INTO comfy_output_ownership(event_id,user_id,prompt_id,filename,subfolder,storage_type,media_type,created_at,expires_at)
+		 SELECT id,$1,'retention-ownership-event','old.png','retention','output','image',now() - interval '72 hours',now() - interval '48 hours' FROM event`,
+		`INSERT INTO comfy_output_ownership(event_id,user_id,prompt_id,filename,subfolder,storage_type,media_type,created_at,expires_at)
+		 SELECT id,$1,'retention-ownership-event','current.png','retention','output','image',now(),now() + interval '24 hours'
+		 FROM content_events WHERE external_id='retention-ownership-event'`,
+	}
+	for _, statement := range statements {
+		args := []any(nil)
+		if strings.Contains(statement, "$1") {
+			args = append(args, userID)
+		}
+		if _, err := tx.ExecContext(ctx, statement, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	defer cleanupDatabaseRetentionFixtures(t, db, userID)
+
+	cutoff := now.Add(-24 * time.Hour)
+	cutoffs := domain.DatabaseRetentionCutoffs{
+		ProxyRequests: cutoff, WebSocketSessions: cutoff, GenerationRequests: cutoff,
+		DailyUsage: cutoff, InviteHistory: cutoff, AuditLog: cutoff, HostMetrics: cutoff,
+		GenerationVariants: cutoff, OutputOwnerships: now,
+	}
+	first, err := repository.CleanupDatabaseRetention(ctx, cutoffs, 100, 1)
+	if err != nil || first.Status != "ok" {
+		t.Fatalf("first database retention cleanup: report=%+v err=%v", first, err)
+	}
+	for table, expected := range map[string]int64{
+		"proxy_requests": 100, "websocket_sessions": 1, "generation_requests": 1,
+		"quick_generation_daily_usage": 1, "invites": 1, "audit_log": 1,
+		"host_metrics": 1, "quick_generation_variants": 1, "comfy_output_ownership": 1,
+	} {
+		if first.DeletedRows[table] != expected {
+			t.Fatalf("first cleanup deleted %s=%d, want %d", table, first.DeletedRows[table], expected)
+		}
+	}
+	var remainingOldProxy int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM proxy_requests WHERE path LIKE '/retention/old/%'`).Scan(&remainingOldProxy); err != nil || remainingOldProxy != 1 {
+		t.Fatalf("bounded proxy cleanup left %d old rows, err=%v", remainingOldProxy, err)
+	}
+
+	second, err := repository.CleanupDatabaseRetention(ctx, cutoffs, 100, 2)
+	if err != nil || second.DeletedRows["proxy_requests"] != 1 {
+		t.Fatalf("second database retention cleanup: report=%+v err=%v", second, err)
+	}
+	if err := repository.SaveDatabaseCleanupState(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	state, err := repository.DatabaseCleanupState(ctx)
+	if err != nil || state.Status != "ok" || state.DeletedRows["proxy_requests"] != 1 || state.LastSuccessAt == nil {
+		t.Fatalf("database cleanup state=%+v err=%v", state, err)
+	}
+
+	third, err := repository.CleanupDatabaseRetention(ctx, cutoffs, 100, 2)
+	if err != nil || third.TotalDeleted() != 0 {
+		t.Fatalf("idempotent database retention cleanup: report=%+v err=%v", third, err)
+	}
+	for query, expected := range map[string]int{
+		`SELECT count(*) FROM proxy_requests WHERE path='/retention/current'`:                                                               1,
+		`SELECT count(*) FROM websocket_sessions WHERE closed_at IS NULL`:                                                                   1,
+		`SELECT count(*) FROM generation_requests WHERE request_id='retention-current-request'`:                                             1,
+		`SELECT count(*) FROM quick_generation_daily_usage WHERE user_id=` + strconv.FormatInt(userID, 10) + ` AND usage_date=current_date`: 1,
+		`SELECT count(*) FROM invites WHERE token_hash='retention-current-invite'`:                                                          1,
+		`SELECT count(*) FROM audit_log WHERE action='retention_current'`:                                                                   1,
+		`SELECT count(*) FROM host_metrics WHERE recorded_at >= now() - interval '1 hour'`:                                                  1,
+		`SELECT count(*) FROM quick_generation_variants WHERE prompt_id IN ('retention-current-variant','retention-active-variant')`:        2,
+		`SELECT count(*) FROM comfy_output_ownership WHERE filename='current.png'`:                                                          1,
+	} {
+		var count int
+		if err := db.QueryRowContext(ctx, query).Scan(&count); err != nil || count != expected {
+			t.Fatalf("live retention query %q count=%d want=%d err=%v", query, count, expected, err)
+		}
+	}
+	stats, err := repository.DatabaseTableStats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundProxy, foundState := false, false
+	for _, item := range stats {
+		foundProxy = foundProxy || item.Name == "proxy_requests" && item.TotalBytes > 0 && item.OldestAt != nil
+		foundState = foundState || item.Name == "database_cleanup_state" && item.TotalBytes > 0
+	}
+	if !foundProxy || !foundState {
+		t.Fatalf("database table stats missing expected rows: proxy=%v state=%v", foundProxy, foundState)
+	}
+	visited := 0
+	if err := repository.VisitAuditBefore(ctx, now.Add(time.Hour), func(row domain.AuditRow) error {
+		if row.Action == "retention_current" {
+			visited++
+		}
+		return nil
+	}); err != nil || visited != 1 {
+		t.Fatalf("visit retained audit rows: visited=%d err=%v", visited, err)
+	}
+}
+
+func cleanupDatabaseRetentionFixtures(t *testing.T, db *sql.DB, userID int64) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	statements := []struct {
+		query string
+		args  []any
+	}{
+		{`DELETE FROM proxy_requests WHERE path LIKE '/retention/%'`, nil},
+		{`DELETE FROM websocket_sessions WHERE client_ip='retention-test'`, nil},
+		{`DELETE FROM generation_requests WHERE request_id IN ('retention-old-request','retention-current-request')`, nil},
+		{`DELETE FROM quick_generation_daily_usage WHERE user_id=$1 AND usage_date IN (current_date - 3,current_date)`, []any{userID}},
+		{`DELETE FROM invites WHERE token_hash IN ('retention-old-invite','retention-current-invite')`, nil},
+		{`DELETE FROM audit_log WHERE action IN ('retention_old','retention_current')`, nil},
+		{`DELETE FROM host_metrics WHERE cpu_percent IN (91,92) AND memory_total_bytes=2`, nil},
+		{`DELETE FROM quick_generation_variants WHERE prompt_id IN ('retention-old-variant','retention-current-variant','retention-active-variant')`, nil},
+		{`DELETE FROM comfy_output_ownership WHERE prompt_id='retention-ownership-event'`, nil},
+		{`DELETE FROM content_events WHERE external_id='retention-ownership-event'`, nil},
+	}
+	for _, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement.query, statement.args...); err != nil {
+			t.Errorf("clean retention fixture: %v", err)
+			return
+		}
 	}
 }
 

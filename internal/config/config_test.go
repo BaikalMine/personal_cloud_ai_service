@@ -27,6 +27,13 @@ func TestLoadValidConfiguration(t *testing.T) {
 	t.Setenv("COMFY_INPUT_RETENTION", "96h")
 	t.Setenv("HOST_METRIC_RETENTION", "240h")
 	t.Setenv("AUDIT_LOG_RETENTION", "2400h")
+	t.Setenv("PROXY_REQUEST_RETENTION", "2880h")
+	t.Setenv("WEBSOCKET_SESSION_RETENTION", "1440h")
+	t.Setenv("GENERATION_REQUEST_RETENTION", "240h")
+	t.Setenv("DAILY_USAGE_RETENTION", "3360h")
+	t.Setenv("INVITE_HISTORY_RETENTION", "4320h")
+	t.Setenv("DATABASE_CLEANUP_BATCH_SIZE", "777")
+	t.Setenv("DATABASE_CLEANUP_MAX_BATCHES", "9")
 	t.Setenv("TRUSTED_PROXIES", "198.51.100.10,127.0.0.1")
 	t.Setenv("ADMIN_ALLOWED_CIDRS", "10.0.0.0/24,127.0.0.1")
 	t.Setenv("COMFYUI_UPSTREAM", "http://host.docker.internal:8088")
@@ -56,8 +63,11 @@ func TestLoadValidConfiguration(t *testing.T) {
 	if cfg.ComfyObjectInfoCacheTTL != 45*time.Second || cfg.ComfyObjectInfoMaxStale != 12*time.Hour {
 		t.Fatalf("unexpected ComfyUI schema cache policy: %+v", cfg)
 	}
-	if cfg.Retention.GenerationHistory != 30*time.Hour || cfg.Retention.GenerationMedia != 30*time.Hour || cfg.Retention.AIContent != 240*time.Hour || cfg.Retention.ComfyInputs != 96*time.Hour || cfg.Retention.HostMetrics != 240*time.Hour || cfg.Retention.AuditLog != 2400*time.Hour {
+	if cfg.Retention.GenerationHistory != 30*time.Hour || cfg.Retention.GenerationMedia != 30*time.Hour || cfg.Retention.AIContent != 240*time.Hour || cfg.Retention.ComfyInputs != 96*time.Hour || cfg.Retention.HostMetrics != 240*time.Hour || cfg.Retention.AuditLog != 2400*time.Hour || cfg.Retention.ProxyRequests != 2880*time.Hour || cfg.Retention.WebSocketSessions != 1440*time.Hour || cfg.Retention.GenerationRequests != 240*time.Hour || cfg.Retention.DailyUsage != 3360*time.Hour || cfg.Retention.InviteHistory != 4320*time.Hour {
 		t.Fatalf("unexpected retention policy: %+v", cfg.Retention)
+	}
+	if cfg.DatabaseCleanupBatchSize != 777 || cfg.DatabaseCleanupMaxBatches != 9 {
+		t.Fatalf("unexpected cleanup limits: batch=%d max_batches=%d", cfg.DatabaseCleanupBatchSize, cfg.DatabaseCleanupMaxBatches)
 	}
 	if len(cfg.TrustedProxies) != 2 || len(cfg.AdminAllowedNetworks) != 2 {
 		t.Fatal("network allow-lists were not parsed")
@@ -86,6 +96,15 @@ func TestRejectsAIContentRetentionShorterThanGeneration(t *testing.T) {
 	t.Setenv("AI_CONTENT_RETENTION", "24h")
 	if _, err := loadRetentionPolicy(); err == nil {
 		t.Fatal("expected retention ordering validation error")
+	}
+}
+
+func TestRejectsGenerationRequestRetentionShorterThanGeneration(t *testing.T) {
+	t.Setenv("GENERATION_RETENTION", "48h")
+	t.Setenv("AI_CONTENT_RETENTION", "72h")
+	t.Setenv("GENERATION_REQUEST_RETENTION", "24h")
+	if _, err := loadRetentionPolicy(); err == nil {
+		t.Fatal("expected generation request retention ordering validation error")
 	}
 }
 

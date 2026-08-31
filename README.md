@@ -42,6 +42,9 @@ Important environment settings:
 - `SESSION_TTL` controls the absolute lifetime of a browser session.
 - `SESSION_IDLE_TIMEOUT` expires sessions that have not been used recently.
 - `ACCOUNT_LOCK_THRESHOLD` and `ACCOUNT_LOCK_DURATION` control persistent login lockout.
+- Retention windows and bounded cleanup limits are documented in
+  [`docs/RETENTION_POLICY.md`](docs/RETENTION_POLICY.md); `/admin/storage`
+  shows their current database effect.
 
 Passwords use a versioned `bcrypt-sha256` format. Pre-hashing removes bcrypt's
 72-byte input limitation while bcrypt still provides the adaptive work factor.
@@ -167,7 +170,8 @@ count. Older manual dumps without a manifest are never removed.
 - `/comfyui/` and `/openwebui/`: authenticated HTTP/WebSocket proxies.
 - `/admin/users`, `/admin/invites`, `/admin/sessions`: identity and access administration.
 - `/admin/services/comfyui` and `/admin/services/openwebui`: 30-day service analytics.
-- `/admin/metrics` and `/admin/audit`: operational metrics and security audit history.
+- `/admin/metrics`, `/admin/audit`, and `/admin/storage`: operational metrics,
+  exportable audit history, table growth, and retention cleanup state.
 - `/admin/mining`: miner profiles, icons, scripts, status, start/stop controls, and ZIP updates.
 - `/metrics`: Prometheus text format on the LAN-only admin listener.
 

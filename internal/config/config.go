@@ -19,6 +19,13 @@ const (
 	defaultComfyInputRetention = 72 * time.Hour
 	defaultHostMetricRetention = 7 * 24 * time.Hour
 	defaultAuditLogRetention   = 90 * 24 * time.Hour
+	defaultProxyRetention      = 90 * 24 * time.Hour
+	defaultWebSocketRetention  = 30 * 24 * time.Hour
+	defaultRequestRetention    = 7 * 24 * time.Hour
+	defaultDailyUsageRetention = 90 * 24 * time.Hour
+	defaultInviteRetention     = 90 * 24 * time.Hour
+	defaultCleanupBatchSize    = 1000
+	defaultCleanupMaxBatches   = 20
 	defaultDependencyCheck     = 10 * time.Second
 	defaultDependencyStale     = 45 * time.Second
 	defaultDependencyOffline   = 3 * time.Minute
@@ -30,22 +37,32 @@ const (
 // history and its media intentionally share one configured duration so the
 // gallery cannot retain an unusable history entry after its file is gone.
 type RetentionPolicy struct {
-	GenerationHistory time.Duration
-	GenerationMedia   time.Duration
-	AIContent         time.Duration
-	ComfyInputs       time.Duration
-	HostMetrics       time.Duration
-	AuditLog          time.Duration
+	GenerationHistory  time.Duration
+	GenerationMedia    time.Duration
+	AIContent          time.Duration
+	ComfyInputs        time.Duration
+	HostMetrics        time.Duration
+	AuditLog           time.Duration
+	ProxyRequests      time.Duration
+	WebSocketSessions  time.Duration
+	GenerationRequests time.Duration
+	DailyUsage         time.Duration
+	InviteHistory      time.Duration
 }
 
 func DefaultRetentionPolicy() RetentionPolicy {
 	return RetentionPolicy{
-		GenerationHistory: defaultGenerationRetention,
-		GenerationMedia:   defaultGenerationRetention,
-		AIContent:         defaultAIContentRetention,
-		ComfyInputs:       defaultComfyInputRetention,
-		HostMetrics:       defaultHostMetricRetention,
-		AuditLog:          defaultAuditLogRetention,
+		GenerationHistory:  defaultGenerationRetention,
+		GenerationMedia:    defaultGenerationRetention,
+		AIContent:          defaultAIContentRetention,
+		ComfyInputs:        defaultComfyInputRetention,
+		HostMetrics:        defaultHostMetricRetention,
+		AuditLog:           defaultAuditLogRetention,
+		ProxyRequests:      defaultProxyRetention,
+		WebSocketSessions:  defaultWebSocketRetention,
+		GenerationRequests: defaultRequestRetention,
+		DailyUsage:         defaultDailyUsageRetention,
+		InviteHistory:      defaultInviteRetention,
 	}
 }
 
@@ -77,6 +94,24 @@ func (p RetentionPolicy) WithDefaults() RetentionPolicy {
 	}
 	if p.AuditLog <= 0 {
 		p.AuditLog = defaults.AuditLog
+	}
+	if p.ProxyRequests <= 0 {
+		p.ProxyRequests = defaults.ProxyRequests
+	}
+	if p.WebSocketSessions <= 0 {
+		p.WebSocketSessions = defaults.WebSocketSessions
+	}
+	if p.GenerationRequests <= 0 {
+		p.GenerationRequests = defaults.GenerationRequests
+	}
+	if p.GenerationRequests < generation {
+		p.GenerationRequests = generation
+	}
+	if p.DailyUsage <= 0 {
+		p.DailyUsage = defaults.DailyUsage
+	}
+	if p.InviteHistory <= 0 {
+		p.InviteHistory = defaults.InviteHistory
 	}
 	return p
 }
@@ -120,6 +155,8 @@ type Config struct {
 	ComfyObjectInfoCacheTTL   time.Duration
 	ComfyObjectInfoMaxStale   time.Duration
 	Retention                 RetentionPolicy
+	DatabaseCleanupBatchSize  int
+	DatabaseCleanupMaxBatches int
 }
 
 func Load() (Config, error) {
@@ -242,6 +279,20 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	databaseCleanupBatchSize, err := integerEnv("DATABASE_CLEANUP_BATCH_SIZE", defaultCleanupBatchSize)
+	if err != nil {
+		return Config{}, err
+	}
+	if databaseCleanupBatchSize < 100 || databaseCleanupBatchSize > 10000 {
+		return Config{}, fmt.Errorf("DATABASE_CLEANUP_BATCH_SIZE must be between 100 and 10000")
+	}
+	databaseCleanupMaxBatches, err := integerEnv("DATABASE_CLEANUP_MAX_BATCHES", defaultCleanupMaxBatches)
+	if err != nil {
+		return Config{}, err
+	}
+	if databaseCleanupMaxBatches < 1 || databaseCleanupMaxBatches > 100 {
+		return Config{}, fmt.Errorf("DATABASE_CLEANUP_MAX_BATCHES must be between 1 and 100")
+	}
 
 	databaseURL := requiredEnv("DATABASE_URL")
 	adminUsername := strings.TrimSpace(env("ADMIN_USERNAME", "admin"))
@@ -326,6 +377,8 @@ func Load() (Config, error) {
 		ComfyObjectInfoCacheTTL:   comfyObjectInfoCacheTTL,
 		ComfyObjectInfoMaxStale:   comfyObjectInfoMaxStale,
 		Retention:                 retention,
+		DatabaseCleanupBatchSize:  databaseCleanupBatchSize,
+		DatabaseCleanupMaxBatches: databaseCleanupMaxBatches,
 	}, nil
 }
 
@@ -353,13 +406,41 @@ func loadRetentionPolicy() (RetentionPolicy, error) {
 	if err != nil {
 		return RetentionPolicy{}, err
 	}
+	proxyRequests, err := durationEnvBetween("PROXY_REQUEST_RETENTION", defaultProxyRetention, 30*24*time.Hour, 365*24*time.Hour)
+	if err != nil {
+		return RetentionPolicy{}, err
+	}
+	websocketSessions, err := durationEnvBetween("WEBSOCKET_SESSION_RETENTION", defaultWebSocketRetention, 24*time.Hour, 365*24*time.Hour)
+	if err != nil {
+		return RetentionPolicy{}, err
+	}
+	generationRequests, err := durationEnvBetween("GENERATION_REQUEST_RETENTION", defaultRequestRetention, time.Hour, 30*24*time.Hour)
+	if err != nil {
+		return RetentionPolicy{}, err
+	}
+	if generationRequests < generation {
+		return RetentionPolicy{}, fmt.Errorf("GENERATION_REQUEST_RETENTION must be greater than or equal to GENERATION_RETENTION")
+	}
+	dailyUsage, err := durationEnvBetween("DAILY_USAGE_RETENTION", defaultDailyUsageRetention, 7*24*time.Hour, 365*24*time.Hour)
+	if err != nil {
+		return RetentionPolicy{}, err
+	}
+	inviteHistory, err := durationEnvBetween("INVITE_HISTORY_RETENTION", defaultInviteRetention, 7*24*time.Hour, 2*365*24*time.Hour)
+	if err != nil {
+		return RetentionPolicy{}, err
+	}
 	return RetentionPolicy{
-		GenerationHistory: generation,
-		GenerationMedia:   generation,
-		AIContent:         aiContent,
-		ComfyInputs:       comfyInputs,
-		HostMetrics:       hostMetrics,
-		AuditLog:          auditLog,
+		GenerationHistory:  generation,
+		GenerationMedia:    generation,
+		AIContent:          aiContent,
+		ComfyInputs:        comfyInputs,
+		HostMetrics:        hostMetrics,
+		AuditLog:           auditLog,
+		ProxyRequests:      proxyRequests,
+		WebSocketSessions:  websocketSessions,
+		GenerationRequests: generationRequests,
+		DailyUsage:         dailyUsage,
+		InviteHistory:      inviteHistory,
 	}, nil
 }
 

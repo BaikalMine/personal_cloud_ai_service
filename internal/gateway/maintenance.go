@@ -27,6 +27,9 @@ func (a *App) runMaintenance(ctx context.Context) {
 	virusTotalCtx, virusTotalCancel := context.WithTimeout(ctx, 2*time.Minute)
 	a.refreshFeatureSuggestionScans(virusTotalCtx)
 	virusTotalCancel()
+	retentionCtx, retentionCancel := context.WithTimeout(ctx, databaseRetentionTimeout)
+	a.runDatabaseRetentionCleanup(retentionCtx)
+	retentionCancel()
 	ticker := time.NewTicker(maintenanceInterval)
 	defer ticker.Stop()
 	generationTicker := time.NewTicker(generationRefreshInterval)
@@ -89,49 +92,35 @@ func (a *App) runMaintenance(ctx context.Context) {
 			} else if deletedMedia > 0 {
 				log.Printf("deleted %d expired ComfyUI media items", deletedMedia)
 			}
-			cleanupCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			deletedOtherMedia, otherMediaErr := a.store.DeleteExpiredNonComfyMedia(cleanupCtx)
+			otherMediaCleanupCtx, otherMediaCleanupCancel := context.WithTimeout(ctx, 15*time.Second)
+			deletedOtherMedia, otherMediaErr := a.store.DeleteExpiredNonComfyMedia(otherMediaCleanupCtx)
+			otherMediaCleanupCancel()
 			if otherMediaErr != nil {
 				log.Printf("delete expired non-ComfyUI media: %v", otherMediaErr)
 			} else if deletedOtherMedia > 0 {
 				log.Printf("deleted %d expired non-ComfyUI media items", deletedOtherMedia)
 			}
+			retentionCtx, retentionCancel := context.WithTimeout(ctx, databaseRetentionTimeout)
+			a.runDatabaseRetentionCleanup(retentionCtx)
+			retentionCancel()
+			cleanupCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			deleted, err := a.store.DeleteExpiredSessions(cleanupCtx, a.cfg.SessionIdleTimeout)
 			if err != nil {
-				cancel()
 				log.Printf("delete expired sessions: %v", err)
-				continue
-			}
-			if deleted > 0 {
+			} else if deleted > 0 {
 				log.Printf("deleted %d expired sessions", deleted)
 			}
 			deletedTemporaryUsers, err := a.store.DeleteExpiredTemporaryUsers(cleanupCtx)
 			if err != nil {
-				cancel()
 				log.Printf("delete expired temporary users: %v", err)
-				continue
-			}
-			if deletedTemporaryUsers > 0 {
+			} else if deletedTemporaryUsers > 0 {
 				log.Printf("deleted %d expired temporary users", deletedTemporaryUsers)
 			}
 			deletedContent, err := a.store.DeleteExpiredContent(cleanupCtx)
 			if err != nil {
-				cancel()
 				log.Printf("delete expired content: %v", err)
-				continue
-			}
-			if deletedContent > 0 {
+			} else if deletedContent > 0 {
 				log.Printf("deleted %d expired content events", deletedContent)
-			}
-			retention := a.retentionPolicy()
-			deletedVariants, variantErr := a.store.DeleteExpiredGenerationVariants(cleanupCtx, time.Now().Add(-retention.GenerationHistory))
-			if variantErr != nil {
-				log.Printf("delete expired generation variants: %v", variantErr)
-			} else if deletedVariants > 0 {
-				log.Printf("deleted %d expired generation history items", deletedVariants)
-			}
-			if _, err := a.store.DeleteHostMetricsBefore(cleanupCtx, time.Now().Add(-retention.HostMetrics)); err != nil {
-				log.Printf("delete expired host metrics: %v", err)
 			}
 			cancel()
 		}

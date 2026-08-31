@@ -68,6 +68,8 @@ func (a *App) handleAdminRoutes(w http.ResponseWriter, r *http.Request) {
 		a.handleAdminSessionAction(w, r, strings.TrimPrefix(path, "sessions/"))
 	case path == "metrics":
 		a.handleAdminMetricsPage(w, r)
+	case path == "storage":
+		a.handleAdminStorage(w, r)
 	case path == "system/overview":
 		a.handleAdminSystemOverview(w, r)
 	case path == "mining":
@@ -84,6 +86,8 @@ func (a *App) handleAdminRoutes(w http.ResponseWriter, r *http.Request) {
 		a.handleAdminContent(w, r)
 	case strings.HasPrefix(path, "services/"):
 		a.handleAdminService(w, r, strings.TrimPrefix(path, "services/"))
+	case path == "audit/export":
+		a.handleAdminAuditExport(w, r)
 	case path == "audit":
 		a.handleAdminAudit(w, r)
 	case strings.HasPrefix(path, "suggestions/"):

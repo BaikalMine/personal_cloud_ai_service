@@ -702,6 +702,35 @@ var migrationCatalog = []migration{
 			   )`,
 		},
 	},
+	{
+		version: 39,
+		name:    "bounded_database_retention",
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS database_cleanup_state (
+				id SMALLINT PRIMARY KEY CHECK (id = 1),
+				last_started_at TIMESTAMPTZ NULL,
+				last_finished_at TIMESTAMPTZ NULL,
+				last_success_at TIMESTAMPTZ NULL,
+				status TEXT NOT NULL DEFAULT 'never' CHECK (status IN ('never','ok','partial','error')),
+				deleted_rows JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(deleted_rows) = 'object'),
+				errors JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(errors) = 'object'),
+				duration_ms BIGINT NOT NULL DEFAULT 0 CHECK (duration_ms >= 0),
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`INSERT INTO database_cleanup_state(id) VALUES (1) ON CONFLICT (id) DO NOTHING`,
+			`CREATE INDEX IF NOT EXISTS proxy_requests_retention_idx ON proxy_requests(created_at,id)`,
+			`CREATE INDEX IF NOT EXISTS websocket_sessions_retention_idx ON websocket_sessions(closed_at,id) WHERE closed_at IS NOT NULL`,
+			`CREATE INDEX IF NOT EXISTS generation_requests_retention_idx ON generation_requests(updated_at,user_id,request_id)`,
+			`CREATE INDEX IF NOT EXISTS quick_generation_daily_usage_retention_idx ON quick_generation_daily_usage(usage_date,user_id)`,
+			`CREATE INDEX IF NOT EXISTS invites_retention_idx ON invites(expires_at,id)`,
+			`CREATE INDEX IF NOT EXISTS audit_log_retention_idx ON audit_log(created_at,id)`,
+			`CREATE INDEX IF NOT EXISTS host_metrics_retention_idx ON host_metrics(recorded_at,id)`,
+			`CREATE INDEX IF NOT EXISTS quick_generation_variants_retention_idx
+			 ON quick_generation_variants((COALESCE(finished_at,created_at)),id)
+			 WHERE state NOT IN ('queued','running')`,
+			`CREATE INDEX IF NOT EXISTS comfy_output_ownership_retention_idx ON comfy_output_ownership(expires_at,id)`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
