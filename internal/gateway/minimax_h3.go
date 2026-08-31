@@ -10,17 +10,16 @@ import (
 )
 
 const (
-	miniMaxH3FrameMode                 = "frames"
-	miniMaxH3ReferenceMode             = "references"
-	miniMaxH3VideoFPS                  = 24
-	miniMaxH3MinimumSeconds            = 5
-	miniMaxH3DefaultQuality            = 720
-	miniMaxH3MaxDimension              = 4096
-	miniMaxH3MaxBasePixels             = 4_700_000
-	miniMaxH3MaxProcessedFramePixels   = 9_000_000
-	miniMaxH3MaxPostProcessPixelFrames = 3_200_000_000
-	miniMaxH3MaxRIFEBatchSize          = 4
-	miniMaxH3TurboLoraName             = miniMaxH3LoraDirectory + "minimax_h3_turbo_v4_step600_ema.safetensors"
+	miniMaxH3FrameMode               = "frames"
+	miniMaxH3ReferenceMode           = "references"
+	miniMaxH3VideoFPS                = 24
+	miniMaxH3MinimumSeconds          = 5
+	miniMaxH3DefaultQuality          = 720
+	miniMaxH3MaxDimension            = 4096
+	miniMaxH3MaxBasePixels           = 4_700_000
+	miniMaxH3MaxProcessedFramePixels = 9_000_000
+	miniMaxH3MaxRIFEBatchSize        = 4
+	miniMaxH3TurboLoraName           = miniMaxH3LoraDirectory + "minimax_h3_turbo_v4_step600_ema.safetensors"
 )
 
 // normalizeMiniMaxH3 keeps the public controls intentionally small while
@@ -403,14 +402,6 @@ func validateMiniMaxH3ResourceBudget(input generationForm) error {
 	processedPixels := basePixels * scale * scale
 	if processedWidth > miniMaxH3MaxDimension || processedHeight > miniMaxH3MaxDimension || processedPixels > miniMaxH3MaxProcessedFramePixels {
 		return errors.New("RTX Super Resolution создаст слишком большой кадр: уменьшите качество видео или масштаб RTX")
-	}
-	frameMultiplier := 1
-	if input.VideoRIFEEnabled {
-		frameMultiplier = input.VideoRIFEMultiplier
-	}
-	pixelFrames := processedPixels * float64(miniMaxH3FrameCount(input.VideoDurationSeconds)) * float64(frameMultiplier)
-	if pixelFrames > miniMaxH3MaxPostProcessPixelFrames {
-		return errors.New("сочетание качества, длительности, RTX и RIFE слишком тяжёлое: уменьшите один из этих параметров")
 	}
 	return nil
 }

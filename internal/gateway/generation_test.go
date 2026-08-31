@@ -1761,6 +1761,18 @@ func TestMiniMaxH3ResourceBudgetAllowsPracticalPostProcessing(t *testing.T) {
 	}
 }
 
+func TestMiniMaxH3ResourceBudgetAllows2KWithRTXAndRIFE(t *testing.T) {
+	input := generationForm{
+		Width: 1080, Height: 1440, InputImage: "gateway/first.png",
+		VideoMode: miniMaxH3FrameMode, VideoQuality: 1440, VideoDurationSeconds: 15, VideoSteps: 25,
+		VideoRTXEnabled: true, VideoRTXScale: 2, VideoRTXQuality: "ULTRA",
+		VideoRIFEEnabled: true, VideoRIFEMultiplier: 4, VideoRIFEBatchSize: 1, VideoRIFECheckpoint: "rife49.pth", VideoRIFEDtype: "float32",
+	}
+	if err := normalizeMiniMaxH3(&input); err != nil {
+		t.Fatalf("2K video with RTX and RIFE was rejected: %v", err)
+	}
+}
+
 func TestGenerationAuditMetadataCapturesMiniMaxSettingsAndLoras(t *testing.T) {
 	input := generationForm{
 		ModelName: "MiniMax/model.safetensors", ModelFamily: modelFamilyMiniMaxH3,
