@@ -115,21 +115,25 @@
         <div class="source-image-grid">
           <section class="source-image-card is-primary" data-image-slot="1">
             <label class="upload-zone" for="source-image"><span class="upload-slot-label" data-image-slot-label>Фото 1 · обязательно</span><span class="upload-icon">+</span><strong>Выбрать основное фото</strong><small>PNG, JPG или WEBP</small><input id="source-image" data-image-file type="file" accept="image/png,image/jpeg,image/webp"></label>
+            <div class="source-gallery-choice" data-gallery-image-picker-choice hidden><span>или</span><button class="button ghost source-gallery-button" type="button" data-gallery-image-picker-open>Выбрать из моей галереи</button></div>
             <div class="upload-preview" data-image-preview hidden><img data-image-preview-image alt="Предпросмотр основного фото"><span><strong data-image-name></strong><small data-image-state>Готово к загрузке</small></span><button class="upload-remove" type="button" data-remove-image aria-label="Удалить основное фото">×</button></div>
             <label class="image-reference-role">Роль в промте<select data-image-role><option value="base_scene">Основной кадр и композиция</option><option value="identity">Внешность и лицо</option><option value="wardrobe_object">Одежда, предмет или материал</option><option value="pose_composition">Поза и ракурс</option><option value="style">Стиль, свет и цвет</option><option value="background">Фон и окружение</option><option value="details">Текст и мелкие детали</option></select></label>
           </section>
           <section class="source-image-card" data-image-slot="2">
             <label class="upload-zone" for="source-image-2"><span class="upload-slot-label" data-image-slot-label>Фото 2 · референс</span><span class="upload-icon">+</span><strong>Добавить референс</strong><small>Необязательно · PNG, JPG или WEBP</small><input id="source-image-2" data-image-file type="file" accept="image/png,image/jpeg,image/webp"></label>
+            <div class="source-gallery-choice" data-gallery-image-picker-choice hidden><span>или</span><button class="button ghost source-gallery-button" type="button" data-gallery-image-picker-open>Выбрать из моей галереи</button></div>
             <div class="upload-preview" data-image-preview hidden><img data-image-preview-image alt="Предпросмотр второго фото"><span><strong data-image-name></strong><small data-image-state>Готово к загрузке</small></span><button class="upload-remove" type="button" data-remove-image aria-label="Удалить второе фото">×</button></div>
             <label class="image-reference-role">Роль в промте<select data-image-role><option value="base_scene">Основной кадр и композиция</option><option value="identity" selected>Внешность и лицо</option><option value="wardrobe_object">Одежда, предмет или материал</option><option value="pose_composition">Поза и ракурс</option><option value="style">Стиль, свет и цвет</option><option value="background">Фон и окружение</option><option value="details">Текст и мелкие детали</option></select></label>
           </section>
           <section class="source-image-card" data-image-slot="3">
             <label class="upload-zone" for="source-image-3"><span class="upload-slot-label" data-image-slot-label>Фото 3 · референс</span><span class="upload-icon">+</span><strong>Добавить референс</strong><small>Необязательно · PNG, JPG или WEBP</small><input id="source-image-3" data-image-file type="file" accept="image/png,image/jpeg,image/webp"></label>
+            <div class="source-gallery-choice" data-gallery-image-picker-choice hidden><span>или</span><button class="button ghost source-gallery-button" type="button" data-gallery-image-picker-open>Выбрать из моей галереи</button></div>
             <div class="upload-preview" data-image-preview hidden><img data-image-preview-image alt="Предпросмотр третьего фото"><span><strong data-image-name></strong><small data-image-state>Готово к загрузке</small></span><button class="upload-remove" type="button" data-remove-image aria-label="Удалить третье фото">×</button></div>
             <label class="image-reference-role">Роль в промте<select data-image-role><option value="base_scene">Основной кадр и композиция</option><option value="identity">Внешность и лицо</option><option value="wardrobe_object">Одежда, предмет или материал</option><option value="pose_composition">Поза и ракурс</option><option value="style" selected>Стиль, свет и цвет</option><option value="background">Фон и окружение</option><option value="details">Текст и мелкие детали</option></select></label>
           </section>
           <section class="source-image-card" data-image-slot="4">
             <label class="upload-zone" for="source-image-4"><span class="upload-slot-label" data-image-slot-label>Фото 4 · референс</span><span class="upload-icon">+</span><strong>Добавить референс</strong><small>Необязательно · PNG, JPG или WEBP</small><input id="source-image-4" data-image-file type="file" accept="image/png,image/jpeg,image/webp"></label>
+            <div class="source-gallery-choice" data-gallery-image-picker-choice hidden><span>или</span><button class="button ghost source-gallery-button" type="button" data-gallery-image-picker-open>Выбрать из моей галереи</button></div>
             <div class="upload-preview" data-image-preview hidden><img data-image-preview-image alt="Предпросмотр четвёртого фото"><span><strong data-image-name></strong><small data-image-state>Готово к загрузке</small></span><button class="upload-remove" type="button" data-remove-image aria-label="Удалить четвёртое фото">×</button></div>
             <label class="image-reference-role">Роль в промте<select data-image-role><option value="base_scene">Основной кадр и композиция</option><option value="identity">Внешность и лицо</option><option value="wardrobe_object">Одежда, предмет или материал</option><option value="pose_composition">Поза и ракурс</option><option value="style">Стиль, свет и цвет</option><option value="background">Фон и окружение</option><option value="details" selected>Текст и мелкие детали</option></select></label>
           </section>
@@ -581,6 +585,20 @@
     </div>
     <div class="generation-history-content" id="generation-history-content"><div class="generation-variant-list" id="generation-variant-list"></div></div>
   </section>
+  <div class="generation-image-picker" id="generation-image-picker" hidden role="dialog" aria-modal="true" aria-labelledby="generation-image-picker-title">
+    <button class="generation-image-picker-backdrop" type="button" data-gallery-image-picker-close aria-label="Закрыть выбор изображения"></button>
+    <section class="generation-image-picker-window">
+      <header class="generation-image-picker-header">
+        <div><span>Референс для видео</span><h2 id="generation-image-picker-title">Выберите фото из галереи</h2><p>Выбранное изображение появится в <strong id="generation-image-picker-slot">карточке референса</strong>.</p></div>
+        <button class="generation-image-picker-close" type="button" data-gallery-image-picker-close aria-label="Закрыть">&#10005;</button>
+      </header>
+      <div class="generation-image-picker-body">
+        <p class="generation-image-picker-state" id="generation-image-picker-state">Загружаем ваши изображения...</p>
+        <div class="generation-image-picker-grid" id="generation-image-picker-grid" aria-live="polite"></div>
+      </div>
+    </section>
+  </div>
+
   <div class="generation-lightbox" id="generation-lightbox" hidden role="dialog" aria-modal="true" aria-label="Просмотр результата">
     <button class="generation-lightbox-backdrop" type="button" data-lightbox-close aria-label="Закрыть просмотр"></button>
     <div class="generation-lightbox-window">

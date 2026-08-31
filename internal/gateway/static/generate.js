@@ -26,6 +26,8 @@
     remove: slot.querySelector("[data-remove-image]"),
     label: slot.querySelector("[data-image-slot-label]"),
     role: slot.querySelector("[data-image-role]"),
+    galleryChoice: slot.querySelector("[data-gallery-image-picker-choice]"),
+    galleryButton: slot.querySelector("[data-gallery-image-picker-open]"),
   }));
   const workflowNext = document.getElementById("workflow-next");
   const imageSourceFields = document.getElementById("image-source-fields");
@@ -170,6 +172,10 @@
   const lightboxVideo = document.getElementById("generation-lightbox-video");
   const lightboxName = document.getElementById("generation-lightbox-name");
   const lightboxDownload = document.getElementById("generation-lightbox-download");
+  const imagePicker = document.getElementById("generation-image-picker");
+  const imagePickerGrid = document.getElementById("generation-image-picker-grid");
+  const imagePickerState = document.getElementById("generation-image-picker-state");
+  const imagePickerSlot = document.getElementById("generation-image-picker-slot");
   const fieldHelps = [...root.querySelectorAll(".field-help[data-tooltip]")];
   const panels = [...root.querySelectorAll("[data-step]")];
   const progress = [...root.querySelectorAll("[data-progress]")];
@@ -179,6 +185,7 @@
   let uploadInFlight = false;
   const previewURLs = new Map();
   const selectedImages = new Map();
+  const gallerySelections = new Map();
   const uploadedImages = new Map();
   let uploadedAudio = "";
   let uploadedVideo = "";
@@ -197,6 +204,8 @@
   let activeGenerationRequestID = "";
   let savedRecipes = [];
   let savedVariants = [];
+  let variantsLoaded = false;
+  let galleryPickerSlot = null;
   const requestedVariantID = new URLSearchParams(window.location.search).get("variant") || "";
   let requestedVariantHandled = false;
   const activeGenerationStorageKey = "ai-gateway.active-generation";
@@ -205,6 +214,8 @@
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const selectedImageFile = (item) => selectedImages.get(item?.index) || item?.input?.files?.[0] || null;
+  const selectedImageSource = (item) => selectedImageFile(item) || gallerySelections.get(item?.index) || null;
+  const hasSelectedImage = (item) => Boolean(selectedImageSource(item));
   const referenceRoleLabels = {
     base_scene: "Основной кадр и композиция",
     identity: "Внешность и лицо",
@@ -488,13 +499,13 @@
 
   const syncSelectedImageSummary = () => {
     const primary = imageSlots[0];
-    const file = selectedImageFile(primary);
+    const source = selectedImageSource(primary);
     const previewURL = previewURLs.get(1);
-    const visible = Boolean((requiresImage || allowsImages) && file && previewURL);
+    const visible = Boolean((requiresImage || allowsImages) && source && previewURL);
     if (selectedImageSummary) selectedImageSummary.hidden = !visible;
     if (!visible) return;
     if (selectedImagePreview) selectedImagePreview.src = previewURL;
-    if (selectedImageName) selectedImageName.textContent = file.name;
+    if (selectedImageName) selectedImageName.textContent = source.name;
     if (selectedImageDetails) {
       selectedImageDetails.textContent = primaryImageSize
         ? `${primaryImageSize.width} × ${primaryImageSize.height} · ${(primaryImageSize.width * primaryImageSize.height / (1024 * 1024)).toFixed(2).replace(".", ",")} Мп`
@@ -831,7 +842,7 @@
   const promptAssistantReferences = () => {
     if (templateID.value !== "image-to-image" && !(isMiniMaxSelected() && miniMaxMode() === "references")) return [];
     return imageSlots
-      .filter((item) => item.index <= activeMaxInputImages() && selectedImageFile(item))
+      .filter((item) => item.index <= activeMaxInputImages() && hasSelectedImage(item))
       .map((item) => ({ number: item.index, role: item.role?.value || "base_scene" }));
   };
 
@@ -867,9 +878,10 @@
     if (!item) return;
 	item.slot.classList.remove("has-image");
     const oldURL = previewURLs.get(item.index);
-    if (oldURL) URL.revokeObjectURL(oldURL);
+    if (oldURL?.startsWith("blob:")) URL.revokeObjectURL(oldURL);
     previewURLs.delete(item.index);
 	selectedImages.delete(item.index);
+    gallerySelections.delete(item.index);
     if (item.input) item.input.value = "";
     if (item.index === 1) {
       primaryImageSize = null;
@@ -896,6 +908,7 @@
       const visible = item.index <= maximum;
       item.slot.hidden = !visible;
       if (!visible) clearImageSlot(item);
+      if (item.galleryChoice) item.galleryChoice.hidden = !isMiniMax;
       if (!item.label) return;
       if (isMiniMax && referenceMode) item.label.textContent = `Референс ${item.index} · необязательно`;
       else if (isMiniMax) item.label.textContent = item.index === 1 ? "Первый кадр · необязательно" : "Последний кадр · необязательно";
@@ -911,8 +924,8 @@
     const note = document.getElementById("image-source-note");
     if (isMiniMax && note) {
       note.textContent = referenceMode
-        ? "Файлы необязательны. Можно добавить до четырёх фото, видео и/или аудио; для каждого фото укажите его роль."
-        : "Фото необязательны: без них работает текст в видео. Фото 1 задаёт первый кадр, Фото 2 — последний.";
+        ? "Файлы необязательны. Добавьте до четырёх фото с устройства или из своей галереи, а также видео и/или аудио; для каждого фото укажите его роль."
+        : "Фото необязательны: без них работает текст в видео. Первый и последний кадры можно загрузить с устройства или выбрать из своей галереи.";
       syncReferenceMap();
       syncMiniMaxAudioReference();
       return;
@@ -944,11 +957,11 @@
     const selected = selectedGenerationWorkflow();
     const hasWorkflow = Boolean(selected && selected.dataset.available === "true");
     const primary = imageSlots[0];
-    const hasImage = Boolean(selectedImageFile(primary) || uploadedImages.get(1));
+    const hasImage = Boolean(hasSelectedImage(primary) || uploadedImages.get(1));
     const needsImage = requiresImage;
     const hasPendingUploads = imageSlots.some((item) => (
       item.index <= activeMaxInputImages()
-      && Boolean(selectedImageFile(item))
+      && hasSelectedImage(item)
       && !uploadedImages.get(item.index)
     )) || hasPendingMiniMaxAudio() || hasPendingMiniMaxVideo();
     workflowNext.disabled = !hasWorkflow || (needsImage && !hasImage);
@@ -1479,7 +1492,8 @@
         body.set("video_has_video", miniMaxReferencesAreAvailable() && uploadedVideo ? "true" : "false");
       }
       inputImages.forEach((input, index) => {
-        if (input?.value) body.set(index === 0 ? "input_image" : `input_image_${index + 1}`, input.value);
+        const value = uploadedImages.get(index + 1) || input?.value || "";
+        if (value) body.set(index === 0 ? "input_image" : `input_image_${index + 1}`, value);
       });
       promptAssistantReferences().forEach((reference) => {
         body.set(`image_role_${reference.number}`, reference.role);
@@ -1621,55 +1635,168 @@
   }));
   miniMaxVideoSharpenMethod?.addEventListener("change", syncMiniMaxSharpenFields);
 
+  const generationGalleryImages = () => {
+    const seen = new Set();
+    const images = [];
+    savedVariants.forEach((variant) => {
+      (variant.media || []).forEach((media) => {
+        const id = Number(media.id || 0);
+        if (media.media_type !== "image" || id <= 0 || !media.url || seen.has(id)) return;
+        seen.add(id);
+        images.push({
+          id,
+          url: media.url,
+          name: media.filename || `Изображение ${id}`,
+          sensitive: Boolean(media.sensitive),
+          modelName: String(variant.model_name || "Сгенерированное изображение").replaceAll("\\", "/").split("/").pop().replace(/\.(safetensors|ckpt|gguf)$/i, ""),
+        });
+      });
+    });
+    return images;
+  };
+
+  const renderGalleryImagePicker = () => {
+    if (!imagePickerGrid || !imagePickerState) return;
+    const images = generationGalleryImages();
+    imagePickerGrid.replaceChildren();
+    if (!images.length) {
+      imagePickerState.hidden = false;
+      imagePickerState.textContent = variantsLoaded
+        ? "В галерее пока нет доступных изображений. Можно загрузить фото с устройства."
+        : "Загружаем ваши изображения...";
+      return;
+    }
+    imagePickerState.hidden = true;
+    imagePickerGrid.replaceChildren(...images.map((entry) => {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "generation-image-picker-card";
+      card.setAttribute("aria-label", `Выбрать ${entry.name}`);
+      if (entry.sensitive) {
+        card.classList.add("sensitive-media");
+        card.dataset.sensitiveMedia = "";
+      }
+      const image = document.createElement("img");
+      image.loading = "lazy";
+      image.src = entry.url;
+      image.alt = entry.name;
+      const details = document.createElement("span");
+      const title = document.createElement("strong");
+      title.textContent = entry.modelName;
+      const filename = document.createElement("small");
+      filename.textContent = entry.name;
+      details.append(title, filename);
+      card.append(image, details);
+      if (entry.sensitive) {
+        const cover = document.createElement("span");
+        cover.className = "sensitive-media-cover";
+        const coverTitle = document.createElement("b");
+        coverTitle.textContent = "Контент 18+";
+        const hint = document.createElement("small");
+        hint.textContent = "Нажмите, чтобы показать";
+        cover.append(coverTitle, hint);
+        card.append(cover);
+      }
+      card.addEventListener("click", () => {
+        if (window.aiGatewaySensitiveContent?.reveal(card)) return;
+        if (!galleryPickerSlot) return;
+        selectGalleryImage(galleryPickerSlot, entry);
+      });
+      return card;
+    }));
+  };
+
+  const closeGalleryImagePicker = () => {
+    if (!imagePicker || imagePicker.hidden) return;
+    const selectedSlot = galleryPickerSlot;
+    imagePicker.hidden = true;
+    galleryPickerSlot = null;
+    document.body.classList.remove("generation-image-picker-open");
+    selectedSlot?.galleryButton?.focus({ preventScroll: true });
+  };
+
+  const openGalleryImagePicker = async (item) => {
+    if (!imagePicker || !item || !isMiniMaxSelected()) return;
+    galleryPickerSlot = item;
+    if (imagePickerSlot) imagePickerSlot.textContent = miniMaxMode() === "references" ? `референсе ${item.index}` : item.index === 1 ? "первом кадре" : "последнем кадре";
+    imagePicker.hidden = false;
+    document.body.classList.add("generation-image-picker-open");
+    renderGalleryImagePicker();
+    imagePicker.querySelector(".generation-image-picker-close")?.focus({ preventScroll: true });
+    try {
+      await refreshVariants();
+    } catch (error) {
+      if (!generationGalleryImages().length && imagePickerState) {
+        imagePickerState.hidden = false;
+        imagePickerState.textContent = error.message || "Не удалось загрузить галерею. Попробуйте ещё раз.";
+      }
+    }
+  };
+
+  const applyImageSelectionPreview = (item, source, url, stateMessage) => {
+    item.slot.classList.add("has-image");
+    if (item.index === 1) primaryImageSize = null;
+    if (url) previewURLs.set(item.index, url);
+    if (item.previewImage) {
+      item.previewImage.onload = () => {
+        if (item.index !== 1) return;
+        primaryImageSize = { width: item.previewImage.naturalWidth, height: item.previewImage.naturalHeight };
+        applyOriginalResolution();
+        updateOriginalResolution();
+        syncSelectedImageSummary();
+        syncMiniMaxVideoProfile();
+      };
+      item.previewImage.onerror = () => {
+        if (item.state) item.state.textContent = "Не удалось показать предпросмотр, но фото можно использовать";
+      };
+      if (url) item.previewImage.src = url;
+      else item.previewImage.removeAttribute("src");
+    }
+    if (item.name) item.name.textContent = source.name;
+    if (item.state) item.state.textContent = stateMessage;
+    if (item.preview) item.preview.hidden = false;
+    syncSelectedImageSummary();
+    syncReferenceMap();
+    updateWorkflowNext();
+  };
+
+  const selectGalleryImage = (item, entry) => {
+    const previousURL = previewURLs.get(item.index);
+    if (previousURL?.startsWith("blob:")) URL.revokeObjectURL(previousURL);
+    previewURLs.delete(item.index);
+    selectedImages.delete(item.index);
+    gallerySelections.set(item.index, entry);
+    uploadedImages.delete(item.index);
+    if (item.input) item.input.value = "";
+    if (inputImages[item.index - 1]) inputImages[item.index - 1].value = "";
+    applyImageSelectionPreview(item, entry, entry.url, "Выбрано из галереи. Подготовим фото для ComfyUI при продолжении.");
+    closeGalleryImagePicker();
+  };
+
   const handleImageSelection = (item) => {
-      const file = item.input?.files?.[0] || null;
-      const previousURL = previewURLs.get(item.index);
-      if (previousURL) URL.revokeObjectURL(previousURL);
-      previewURLs.delete(item.index);
-      uploadedImages.delete(item.index);
-      if (inputImages[item.index - 1]) inputImages[item.index - 1].value = "";
-      if (!file) {
-		selectedImages.delete(item.index);
-		item.slot.classList.remove("has-image");
-        if (item.preview) item.preview.hidden = true;
-        syncReferenceMap();
-        updateWorkflowNext();
-        return;
-      }
-      selectedImages.set(item.index, file);
-      item.slot.classList.add("has-image");
+    const file = item.input?.files?.[0] || null;
+    const previousURL = previewURLs.get(item.index);
+    if (previousURL?.startsWith("blob:")) URL.revokeObjectURL(previousURL);
+    previewURLs.delete(item.index);
+    gallerySelections.delete(item.index);
+    uploadedImages.delete(item.index);
+    if (inputImages[item.index - 1]) inputImages[item.index - 1].value = "";
+    if (!file) {
+      clearImageSlot(item);
       updateWorkflowNext();
-      let url = "";
-      try {
-        url = URL.createObjectURL(file);
-        previewURLs.set(item.index, url);
-      } catch (_) {
-        if (item.state) item.state.textContent = "Фото выбрано. Предпросмотр недоступен, но файл можно загрузить.";
-      }
-      if (item.previewImage) {
-        item.previewImage.onload = () => {
-          if (item.index !== 1) return;
-          primaryImageSize = { width: item.previewImage.naturalWidth, height: item.previewImage.naturalHeight };
-          applyOriginalResolution();
-          updateOriginalResolution();
-          syncSelectedImageSummary();
-          syncMiniMaxVideoProfile();
-        };
-        if (url) item.previewImage.src = url;
-        item.previewImage.onerror = () => {
-          if (item.state) item.state.textContent = "Не удалось показать предпросмотр, но файл будет загружен";
-        };
-      }
-      if (item.name) item.name.textContent = file.name;
-      if (item.state) {
-        item.state.textContent = isMiniMaxSelected()
-          ? "Фото выбрано. Нажмите «Загрузить в ComfyUI и продолжить»."
-          : "Готово к загрузке";
-      }
-      if (item.preview) item.preview.hidden = false;
-      syncSelectedImageSummary();
-      syncReferenceMap();
-      updateWorkflowNext();
+      return;
+    }
+    selectedImages.set(item.index, file);
+    let url = "";
+    try {
+      url = URL.createObjectURL(file);
+    } catch (_) {}
+    applyImageSelectionPreview(
+      item,
+      file,
+      url,
+      isMiniMaxSelected() ? "Фото выбрано. Нажмите «Загрузить в ComfyUI и продолжить»." : "Готово к загрузке",
+    );
   };
 
   imageSlots.forEach((item) => {
@@ -1679,6 +1806,7 @@
       clearImageSlot(item);
       updateWorkflowNext();
     });
+    item.galleryButton?.addEventListener("click", () => openGalleryImagePicker(item));
     item.role?.addEventListener("change", () => {
       if (item.index === 1) item.role.value = "base_scene";
       syncReferenceMap();
@@ -1686,10 +1814,13 @@
     });
   });
 
+  imagePicker?.querySelectorAll("[data-gallery-image-picker-close]").forEach((button) => button.addEventListener("click", closeGalleryImagePicker));
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeGalleryImagePicker(); });
+
   workflowNext?.addEventListener("click", async () => {
     if (!generationWorkflowID.value) return;
     const requiresPrimary = requiresImage;
-    const selectedSlots = imageSlots.filter((item) => item.index <= activeMaxInputImages() && selectedImageFile(item));
+    const selectedSlots = imageSlots.filter((item) => item.index <= activeMaxInputImages() && hasSelectedImage(item));
     if (!selectedSlots.length && !requiresPrimary && !hasPendingMiniMaxAudio() && !hasPendingMiniMaxVideo()) {
       showStep(3);
       positive?.focus({ preventScroll: true });
@@ -1710,13 +1841,25 @@
     try {
       for (const item of pendingSlots) {
         const file = selectedImageFile(item);
-		if (!file) throw new Error("Не удалось прочитать выбранное фото");
-        if (item.state) item.state.textContent = "Загружаем в вашу сессию...";
-        const body = new FormData();
-        body.append("image", file, file.name);
-        body.append("type", "input");
-        body.append("overwrite", "true");
-        const response = await fetch("/generate/upload/image", { method: "POST", body, credentials: "same-origin" });
+        const galleryImage = gallerySelections.get(item.index);
+        if (!file && !galleryImage) throw new Error("Не удалось прочитать выбранное фото");
+        if (item.state) item.state.textContent = galleryImage ? "Подготавливаем фото из галереи..." : "Загружаем в вашу сессию...";
+        let response;
+        if (galleryImage) {
+          const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", media_id: String(galleryImage.id) });
+          response = await fetch("/generate/library/reuse-image", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+            body,
+            credentials: "same-origin",
+          });
+        } else {
+          const body = new FormData();
+          body.append("image", file, file.name);
+          body.append("type", "input");
+          body.append("overwrite", "true");
+          response = await fetch("/generate/upload/image", { method: "POST", body, credentials: "same-origin" });
+        }
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload.name) throw new Error(payload.error || "ComfyUI не принял фото");
         const value = [payload.subfolder, payload.name].filter(Boolean).join("/");
@@ -2164,7 +2307,9 @@
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || "Не удалось загрузить историю вариантов");
     savedVariants = Array.isArray(payload.variants) ? payload.variants : [];
+    variantsLoaded = true;
     renderVariants();
+    if (imagePicker && !imagePicker.hidden) renderGalleryImagePicker();
     restoreRequestedVariant();
   };
 

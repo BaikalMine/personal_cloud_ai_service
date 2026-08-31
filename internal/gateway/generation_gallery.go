@@ -1,8 +1,13 @@
 package gateway
 
 import (
+	"bytes"
+	"context"
+	"fmt"
+	"mime/multipart"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -41,6 +46,82 @@ func (a *App) handleGenerationGalleryPage(w http.ResponseWriter, r *http.Request
 		"ImageCount": generationGalleryMediaCount(items, "image"),
 		"VideoCount": generationGalleryMediaCount(items, "video"),
 	})
+}
+
+func (a *App) handleReuseGenerationLibraryImage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
+	if !a.validCSRF(r) {
+		writeGenerationError(w, http.StatusForbidden, "проверка безопасности не пройдена")
+		return
+	}
+	mediaID, err := strconv.ParseInt(strings.TrimSpace(r.FormValue("media_id")), 10, 64)
+	if err != nil || mediaID <= 0 || a.store == nil || a.contentCipher == nil {
+		http.NotFound(w, r)
+		return
+	}
+	user := a.currentUser(r)
+	media, err := a.store.ContentMediaByIDForUser(r.Context(), mediaID, user.ID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if media.MediaType != "image" {
+		writeGenerationError(w, http.StatusBadRequest, "для видеореференса можно выбрать только изображение")
+		return
+	}
+	payload, err := a.contentCipher.DecryptBytes(media.PayloadCipher)
+	if err != nil {
+		writeGenerationError(w, http.StatusInternalServerError, "не удалось подготовить изображение из галереи")
+		return
+	}
+	if len(payload) == 0 || int64(len(payload)) > maxComfyUploadBody-(1<<20) {
+		writeGenerationError(w, http.StatusRequestEntityTooLarge, "изображение из галереи слишком большое")
+		return
+	}
+	uploadRequest, err := newGenerationLibraryImageUploadRequest(r.Context(), media.OriginalName, payload)
+	if err != nil {
+		writeGenerationError(w, http.StatusInternalServerError, "не удалось подготовить изображение из галереи")
+		return
+	}
+	uploadRequest.RemoteAddr = r.RemoteAddr
+	uploadRequest.Host = r.Host
+	uploadRequest.Header.Set("User-Agent", r.UserAgent())
+	a.quickGenerationUploadHandler().ServeHTTP(w, uploadRequest)
+}
+
+func newGenerationLibraryImageUploadRequest(ctx context.Context, filename string, payload []byte) (*http.Request, error) {
+	filename = filepath.Base(strings.ReplaceAll(strings.TrimSpace(filename), "\\", "/"))
+	if filename == "" || filename == "." {
+		filename = "gallery-image.png"
+	}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("image", filename)
+	if err != nil {
+		return nil, fmt.Errorf("create image part: %w", err)
+	}
+	if _, err := part.Write(payload); err != nil {
+		return nil, fmt.Errorf("write image part: %w", err)
+	}
+	if err := writer.WriteField("type", "input"); err != nil {
+		return nil, fmt.Errorf("write upload type: %w", err)
+	}
+	if err := writer.WriteField("overwrite", "true"); err != nil {
+		return nil, fmt.Errorf("write overwrite flag: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("finish image upload: %w", err)
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "/generate/upload/image", bytes.NewReader(body.Bytes()))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request.ContentLength = int64(body.Len())
+	return request, nil
 }
 
 func generationGalleryItems(variants []generationVariantView) []generationGalleryItemView {

@@ -61,12 +61,16 @@ func main() {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = w.Write([]byte(`{"name":"preview-input.png","subfolder":"preview"}`))
 	})
+	mux.HandleFunc("/generate/library/reuse-image", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = w.Write([]byte(`{"name":"gallery-preview.png","subfolder":"preview","type":"input"}`))
+	})
 	mux.HandleFunc("/generate/variants", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = w.Write([]byte(`{"variants":[
-			{"id":"preview-1","template_id":"text-to-image","model_name":"Krea2 / Raw INT8 Mixed","seed":284797972294826,"state":"completed","duration_seconds":15,"values":{"template_id":"text-to-image","generation_workflow":"photoflow-krea2","model":"krea2:test","positive_prompt":"A cinematic portrait of a woman in a quiet neon-lit street, realistic skin, dramatic atmosphere."},"media":[{"media_type":"image","url":"/preview/result.svg","sensitive":false}]},
-			{"id":"preview-2","template_id":"text-to-image","model_name":"Krea2 / Raw INT8 Mixed","seed":1033409957175067,"state":"completed","duration_seconds":16,"values":{"template_id":"text-to-image","generation_workflow":"photoflow-krea2","model":"krea2:test","positive_prompt":"A calm seaside embankment at sunset with editorial fashion photography and soft detailed light."},"media":[{"media_type":"image","url":"/preview/result.svg","sensitive":false}]},
-			{"id":"preview-3","template_id":"image-to-image","model_name":"Flux 2 / Klein 9B","seed":1019794942414480,"state":"completed","duration_seconds":15,"values":{"template_id":"image-to-image","generation_workflow":"photoflow-flux2-edit","model":"flux2:test","positive_prompt":"Keep the subject identity and composition, replace the background with a warm studio environment."},"media":[{"media_type":"image","url":"/preview/result.svg","sensitive":true}]},
+			{"id":"preview-1","template_id":"text-to-image","model_name":"Krea2 / Raw INT8 Mixed","seed":284797972294826,"state":"completed","duration_seconds":15,"values":{"template_id":"text-to-image","generation_workflow":"photoflow-krea2","model":"krea2:test","positive_prompt":"A cinematic portrait of a woman in a quiet neon-lit street, realistic skin, dramatic atmosphere."},"media":[{"id":1,"filename":"AI-Gateway-Krea2-portrait.png","media_type":"image","url":"/preview/result.svg","sensitive":false}]},
+			{"id":"preview-2","template_id":"text-to-image","model_name":"Krea2 / Raw INT8 Mixed","seed":1033409957175067,"state":"completed","duration_seconds":16,"values":{"template_id":"text-to-image","generation_workflow":"photoflow-krea2","model":"krea2:test","positive_prompt":"A calm seaside embankment at sunset with editorial fashion photography and soft detailed light."},"media":[{"id":2,"filename":"AI-Gateway-Krea2-seaside.png","media_type":"image","url":"/preview/result.svg","sensitive":false}]},
+			{"id":"preview-3","template_id":"image-to-image","model_name":"Flux 2 / Klein 9B","seed":1019794942414480,"state":"completed","duration_seconds":15,"values":{"template_id":"image-to-image","generation_workflow":"photoflow-flux2-edit","model":"flux2:test","positive_prompt":"Keep the subject identity and composition, replace the background with a warm studio environment."},"media":[{"id":3,"filename":"AI-Gateway-Flux2-editorial.png","media_type":"image","url":"/preview/result.svg","sensitive":true}]},
 			{"id":"preview-4","template_id":"text-to-image","model_name":"Krea2 / Raw INT8 Mixed","seed":45876641139403,"state":"error","duration_seconds":0,"error_message":"Недостаточно памяти для выбранного разрешения.","values":{"positive_prompt":"A detailed fashion portrait with dramatic lighting."},"media":[]}
 		]}`))
 	})

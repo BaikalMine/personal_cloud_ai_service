@@ -2,10 +2,38 @@ package gateway
 
 import (
 	"bytes"
+	"context"
+	"io"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestGenerationLibraryImageUploadRequest(t *testing.T) {
+	payload := []byte("stored-image")
+	request, err := newGenerationLibraryImageUploadRequest(context.Background(), `..\portrait.png`, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := request.ParseMultipartForm(1 << 20); err != nil {
+		t.Fatal(err)
+	}
+	file, header, err := request.FormFile("image")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	actual, err := io.ReadAll(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if header.Filename != "portrait.png" || !bytes.Equal(actual, payload) {
+		t.Fatalf("image part = (%q, %q)", header.Filename, actual)
+	}
+	if request.FormValue("type") != "input" || request.FormValue("overwrite") != "true" {
+		t.Fatal("ComfyUI upload fields are missing")
+	}
+}
 
 func TestGenerationGalleryTemplateRendersMediaAndRepeatAction(t *testing.T) {
 	templates, err := ParseTemplates()

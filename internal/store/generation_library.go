@@ -218,7 +218,7 @@ func (s *Store) ListGenerationVariantMedia(ctx context.Context, userID int64, pr
 		       (m.media_type='image' AND m.visual_sensitivity_classified_at IS NULL)
 		FROM content_media m JOIN content_events e ON e.id=m.event_id
 		WHERE e.user_id=$1 AND e.service='comfyui' AND e.kind='comfyui_prompt' AND e.external_id=$2
-		  AND e.expires_at > now() AND m.expires_at > now()
+		  AND e.expires_at > now() AND m.expires_at > now() AND m.profile_hidden_at IS NULL
 		ORDER BY m.created_at DESC,m.id DESC
 	`, userID, strings.TrimSpace(promptID))
 	if err != nil {
