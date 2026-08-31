@@ -94,7 +94,7 @@ func safetyTermUsesPrefix(term string) bool {
 		"porn", "sexual", "erotic", "fetish", "masturb", "orgasm",
 		"несовершеннолет", "малолет", "ребен", "подрост", "школьниц", "школьник", "девочк", "мальчик",
 		"обнажен", "сексуал", "эрот", "откровенн", "генитал", "эякуля", "проникнов":
-			return true
+		return true
 	default:
 		return false
 	}

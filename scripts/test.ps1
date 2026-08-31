@@ -1,13 +1,20 @@
 param(
+    [switch] $Quick,
     [switch] $Deep
 )
 
 $ErrorActionPreference = 'Stop'
 
+if ($Quick -and $Deep) {
+    throw 'Quick and Deep modes cannot be used together.'
+}
+
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $composeFile = Join-Path $projectRoot 'docker-compose.e2e.yml'
 $testDatabaseURL = 'postgres://gateway_e2e:gateway-e2e-password@postgres:5432/gateway_e2e?sslmode=disable'
 $goImage = 'golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2'
+$nodeImage = 'node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43'
+$integrationStarted = $false
 
 Push-Location $projectRoot
 try {
@@ -15,6 +22,16 @@ try {
         sh /src/scripts/test-unit.sh
     if ($LASTEXITCODE -ne 0) {
         throw 'Unit checks failed.'
+    }
+
+    docker run --rm -v "${projectRoot}:/src:ro" -w /src $nodeImage `
+        sh -c 'for file in internal/gateway/static/*.js; do node --check "$file"; done'
+    if ($LASTEXITCODE -ne 0) {
+        throw 'JavaScript syntax checks failed.'
+    }
+
+    if ($Quick) {
+        return
     }
 
     if ($Deep) {
@@ -31,6 +48,7 @@ try {
         }
     }
 
+    $integrationStarted = $true
     docker compose -f $composeFile up -d --wait postgres
     if ($LASTEXITCODE -ne 0) {
         throw 'The integration database did not start.'
@@ -52,6 +70,8 @@ try {
         throw 'Gateway integration checks failed.'
     }
 } finally {
-    docker compose -f $composeFile down --volumes
+    if ($integrationStarted) {
+        docker compose -f $composeFile down --volumes
+    }
     Pop-Location
 }

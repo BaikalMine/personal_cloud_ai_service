@@ -260,6 +260,16 @@ permissions atomically with the invite use counter.
 publishes the test Gateway only on `18090/18091`. It never uses the production
 database or its volume.
 
+Run the quick formatting, `go vet`, uncached unit-test, and JavaScript syntax
+gate while developing:
+
+```powershell
+.\scripts\test.ps1 -Quick
+```
+
+Run the complete gate, including the isolated PostgreSQL integration tests,
+before committing:
+
 ```powershell
 .\scripts\test.ps1
 ```
