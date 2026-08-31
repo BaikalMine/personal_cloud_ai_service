@@ -288,14 +288,7 @@ func (c *windowsController) allowedScript(rawPath string) (string, error) {
 func commandForScript(path, outputLog string) (*exec.Cmd, string, error) {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".bat", ".cmd", ".ps1", ".exe":
-		invocation := fmt.Sprintf(`& '%s'`, powerShellQuote(path))
-		innerScript := fmt.Sprintf(
-			`$Host.UI.RawUI.WindowTitle = '%s'; $ErrorActionPreference = 'Continue'; try { $banner = [Environment]::NewLine + "=== Запуск майнера $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ==="; $banner | Tee-Object -FilePath '%s' -Append; %s 2>&1 | Tee-Object -FilePath '%s' -Append } finally { }`,
-			powerShellQuote("Майнинг - "+filepath.Base(path)),
-			powerShellQuote(outputLog),
-			invocation,
-			powerShellQuote(outputLog),
-		)
+		innerScript := buildMinerLauncherScript(path, outputLog)
 		innerEncoded := encodePowerShell(innerScript)
 		return exec.Command(
 			"powershell.exe", "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", innerEncoded,
@@ -303,10 +296,6 @@ func commandForScript(path, outputLog string) (*exec.Cmd, string, error) {
 	default:
 		return nil, "", errors.New("неподдерживаемый тип скрипта")
 	}
-}
-
-func powerShellQuote(value string) string {
-	return strings.ReplaceAll(value, `'`, `''`)
 }
 
 func encodePowerShell(script string) string {
