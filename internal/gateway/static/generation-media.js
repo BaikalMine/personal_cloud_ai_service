@@ -7,6 +7,11 @@
 })(typeof window !== "undefined" ? window : null, function generationMediaFactory() {
   const SOURCE_DEVICE = "device";
   const SOURCE_GALLERY = "gallery";
+  const SOURCE_RESTORED = "restored";
+  const referenceRoles = new Set([
+    "first_frame", "last_frame", "base_scene", "identity", "wardrobe_object",
+    "pose_composition", "style", "background", "details",
+  ]);
 
   const deviceSource = (file) => file ? {
     kind: SOURCE_DEVICE,
@@ -32,6 +37,29 @@
   };
 
   const sourceFrom = (device, gallery) => deviceSource(device) || gallerySource(gallery);
+
+  const referenceRole = ({ templateID = "", videoMode = "frames", slot = 1, role = "" } = {}) => {
+    const index = Math.max(1, Math.min(4, Number(slot) || 1));
+    if (templateID === "minimax-h3-video" && videoMode !== "references") {
+      return index === 1 ? "first_frame" : "last_frame";
+    }
+    if (templateID === "image-to-image" && index === 1) return "base_scene";
+    return referenceRoles.has(role) ? role : index === 1 ? "base_scene" : "details";
+  };
+
+  const referenceMetadata = ({ templateID = "", videoMode = "frames", slot = 1, source = null, role = "", uploaded = "" } = {}) => {
+    if (!source && !uploaded) return null;
+    const index = Math.max(1, Math.min(4, Number(slot) || 1));
+    const normalized = normalizeSource(source);
+    const sourceKind = normalized?.kind || (uploaded ? SOURCE_RESTORED : "unknown");
+    return {
+      number: index,
+      role: referenceRole({ templateID, videoMode, slot: index, role }),
+      source: sourceKind,
+      sourceID: normalized?.kind === SOURCE_GALLERY ? String(normalized.id || "") : "",
+      sourceName: String(normalized?.name || uploaded || "").trim(),
+    };
+  };
 
   const createState = (overrides = {}) => ({
     sources: {},
@@ -108,12 +136,15 @@
   return {
     SOURCE_DEVICE,
     SOURCE_GALLERY,
+    SOURCE_RESTORED,
     createState,
     reduce,
     deviceSource,
     gallerySource,
     normalizeSource,
     sourceFrom,
+    referenceRole,
+    referenceMetadata,
     uploadImageSource,
   };
 });

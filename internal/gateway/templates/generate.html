@@ -4,6 +4,7 @@
 <script src="/static/generation-wizard.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-media.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-video.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/generation-summary.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-assistant.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-job.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-recipes.js?v={{.AssetVersion}}" defer></script>
@@ -27,9 +28,9 @@
   </section>
 
   <section class="generation-progress" aria-label="Шаги генерации">
-    <span class="generation-step is-active" data-progress="1"><b>1</b><span>Сценарий</span></span>
-    <i></i><span class="generation-step" data-progress="2"><b>2</b><span>Схема генерации</span></span>
-    <i></i><span class="generation-step" data-progress="3"><b>3</b><span>Промт и параметры</span></span>
+    <span class="generation-step is-active" data-progress="1"><b>1</b><span>Задача</span></span>
+    <i></i><span class="generation-step" data-progress="2"><b>2</b><span>Workflow и модель</span></span>
+    <i></i><span class="generation-step" data-progress="3"><b>3</b><span>Промт и запуск</span></span>
   </section>
 
   <section class="generation-queue" id="generation-queue" hidden aria-live="polite"><span>Очередь сервера</span><strong id="generation-queue-title"></strong><small id="generation-queue-details"></small></section>
@@ -60,17 +61,23 @@
     </section>
 
     <section class="generation-panel" data-step="2">
-      <div class="panel-heading"><div><p class="section-kicker">Шаг 2 из 3</p><h2>Выберите схему генерации</h2><p class="panel-intro">Для быстрой генерации Gateway использует проверенный список моделей для каждой схемы.</p></div></div>
+      <div class="panel-heading"><div><p class="section-kicker">Шаг 2 из 3</p><h2>Выберите workflow и модель</h2><p class="panel-intro">Сначала выберите способ обработки, затем конкретную модель и необходимые материалы.</p></div></div>
       <div class="workflow-choices generation-workflow-choices">
         {{range .GenerationPresets}}
         <button class="workflow-choice generation-workflow-choice" type="button" data-preset-id="{{.ID}}" data-template-id="{{.TemplateID}}" data-family="{{.Family}}" data-default-model-id="{{.ModelID}}" data-available="{{if and .Available (not .Restricted)}}true{{else}}false{{end}}" data-default-steps="{{.DefaultSteps}}" data-default-cfg="{{.DefaultCFG}}" data-default-sampler="{{.DefaultSampler}}" data-default-scheduler="{{.DefaultScheduler}}" data-default-lora-strength="{{.LoraStrength}}" data-requires-image="{{.RequiresImage}}" data-allows-images="{{.AllowsImages}}" data-max-input-images="{{.MaxInputImages}}" {{if or (not .Available) .Restricted}}disabled{{end}}>
           <span class="workflow-choice-icon">WF</span>
-          <span><strong>{{.Name}}</strong><small>{{.Description}}</small><small class="workflow-bound-model">Доступных диффузионных моделей: {{.ModelCount}}{{if .MaxInputImages}} · фото: до {{.MaxInputImages}}{{end}}{{if .Reason}} · {{.Reason}}{{end}}{{if .Restriction}} · {{.Restriction}}{{end}}</small></span>
+          <span><strong>{{.Name}}</strong><small>{{.Description}}</small><small class="workflow-bound-model">Доступных моделей: {{.ModelCount}}{{if .MaxInputImages}} · фото: до {{.MaxInputImages}}{{end}}{{if .Reason}} · {{.Reason}}{{end}}{{if .Restriction}} · {{.Restriction}}{{end}}</small></span>
           <span class="workflow-choice-check" aria-hidden="true">&#10003;</span>
         </button>
         {{end}}
       </div>
       <p class="generation-model-note" id="generation-workflow-note" hidden>Для выбранного сценария пока нет готовой схемы генерации.</p>
+      <section class="generation-model-picker" id="generation-model-field" hidden>
+        <div><span>Модель</span><strong>Что будет создавать результат</strong><small>Показаны только модели, совместимые с выбранным workflow.</small></div>
+        <label>Выберите модель
+          <select name="model" id="generation-model" required><option value="">Выберите модель</option>{{range .QuickModels}}<option value="{{.ID}}" data-family="{{.Family}}" data-available="{{.Available}}" data-default-steps="{{.DefaultSteps}}" data-default-cfg="{{.DefaultCFG}}" data-default-sampler="{{.DefaultSampler}}" data-default-scheduler="{{.DefaultScheduler}}" data-default-lora-strength="{{.LoraStrength}}" data-video-integrated-turbo="{{.VideoIntegratedTurbo}}" data-video-reference-only="{{.VideoReferenceOnly}}" data-default-video-shift="{{.DefaultVideoShift}}" data-default-audio-shift="{{.DefaultAudioShift}}" {{if not .Available}}disabled{{end}}>{{.DisplayName}}{{if .Reason}} — {{.Reason}}{{end}}</option>{{end}}</select>
+        </label>
+      </section>
       <section class="minimax-video-mode" id="minimax-video-mode" hidden>
         <div class="minimax-mode-heading"><div><span>Способ создания</span><strong>Как использовать загруженные материалы?</strong></div><small id="minimax-video-mode-hint" aria-live="polite">Выбрано: ролик строится по промту; Фото 1 и Фото 2 при наличии фиксируют точные начало и финал.</small></div>
         <div class="minimax-mode-segments ui-segmented" role="radiogroup" aria-label="Способ создания видео MiniMax H3">
@@ -109,7 +116,7 @@
             <section class="minimax-media-card" id="minimax-video-reference">
               <label class="upload-zone" for="minimax-video-file"><span class="upload-slot-label">Видео · необязательно</span><span class="upload-icon upload-icon-video" aria-hidden="true">▶</span><strong>Добавить видеореференс</strong><small>MP4, WEBM, MOV или MKV · до 512 МБ</small><input id="minimax-video-file" type="file" accept="video/mp4,video/webm,video/quicktime,video/x-matroska"></label>
               <div class="upload-preview minimax-video-upload-preview" id="minimax-video-preview" hidden><video id="minimax-video-preview-media" muted playsinline preload="metadata"></video><span><strong id="minimax-video-name"></strong><small id="minimax-video-state">Готово к загрузке</small></span><button class="upload-remove" type="button" id="minimax-video-remove" aria-label="Удалить видеореференс">×</button></div>
-              <small class="field-hint">Передаёт движение, сцену или ритм как <code>&lt;Video 1&gt;</code>.</small>
+              <small class="field-hint">Передаёт движение, сцену или ритм как отдельный видеореференс.</small>
               <div class="minimax-video-reference-options">
                 <label>Начало фрагмента, сек<input name="video_reference_start" type="number" min="0" max="600" step="0.1" value="0"></label>
                 <label>Длина фрагмента, сек<input name="video_reference_duration" type="number" min="1" max="15" step="1" value="5"></label>
@@ -118,6 +125,11 @@
             </section>
           </div>
         </section>
+      </section>
+      <section class="generation-mode-guide" id="generation-mode-guide" hidden aria-live="polite">
+        <div class="generation-mode-guide-copy"><span id="generation-mode-guide-eyebrow">Текущий способ</span><strong id="generation-mode-guide-title"></strong><p id="generation-mode-guide-description"></p></div>
+        <dl class="generation-mode-guide-facts" id="generation-mode-guide-facts"></dl>
+        <p class="generation-mode-guide-advice" id="generation-mode-guide-advice"></p>
       </section>
       <div id="image-source-fields" hidden>
         <p class="image-source-note" id="image-source-note">Первое фото обязательно. Дополнительные файлы используются как референсы.</p>
@@ -167,7 +179,7 @@
           <summary><span>Мини-гайд: Krea2 «Фото и промт»</span><small>Как удержать исходник, использовать референсы и не переусердствовать с обработкой.</small></summary>
           <div class="workflow-mini-guide-grid">
             <section><strong>Главное фото</strong><p>Первое изображение задаёт лицо, позу, кадр и композицию. Опишите в промте именно изменение: например, замену одежды, фона или материала, а не пересказывайте всё фото.</p></section>
-            <section><strong>Второй референс</strong><p>Добавляйте второе фото, когда нужно перенести внешность, одежду, предмет, стиль или свет. Выберите его роль: так ассистент явно укажет, что брать из image 1 и image 2.</p></section>
+            <section><strong>Второй референс</strong><p>Добавляйте второе фото, когда нужно перенести внешность, одежду, предмет, стиль или свет. Выберите его роль: так ассистент поймёт, что брать из каждого фото.</p></section>
             <section><strong>Сохранение и апскейл</strong><p>«Сохранение исходника» удерживает сходство с первым фото. Оставьте 4 для обычного редактирования; повышайте аккуратно, если Krea2 слишком меняет лицо или композицию. Апскейл добавляет детали после основного прохода.</p></section>
             <section><strong>Кожа и цвет</strong><p>Начните с профиля Natural. Сильная очистка, сглаживание или цветокоррекция способны убрать фактуру и сделать фото искусственным, поэтому меняйте параметры небольшими шагами.</p></section>
           </div>
@@ -176,7 +188,7 @@
           <summary><span>Мини-гайд: Flux2 «Фото и промт»</span><small>Точная правка, роли референсов, LoRA и выбор финального апскейла.</small></summary>
           <div class="workflow-mini-guide-grid">
             <section><strong>Точное редактирование</strong><p>Первое фото остаётся базовой сценой. Сформулируйте только нужное изменение и явно попросите сохранить лицо, ракурс, позу, свет и композицию, если менять их не требуется.</p></section>
-            <section><strong>Несколько изображений</strong><p>Используйте дополнительные файлы как референсы для внешности, одежды, предметов, стиля или фона. Карта референсов показывает их номера, а ассистент связывает роль с image 1, image 2 и дальше.</p></section>
+            <section><strong>Несколько изображений</strong><p>Используйте дополнительные файлы как референсы для внешности, одежды, предметов, стиля или фона. Карта референсов показывает их порядок, а ассистент учитывает выбранную роль каждого фото.</p></section>
             <section><strong>Размер и семплирование</strong><p>Сохранение исходного размера подходит для ретуши. Изменение кадра используйте, когда нужна новая пропорция. Начните с текущих значений шагов, CFG и Guidance: их повышение не всегда делает результат лучше.</p></section>
             <section><strong>LoRA и финальный апскейл</strong><p>LoRA усиливает конкретный стиль или деталь, поэтому добавляйте её после удачной базовой правки. Ultimate SD Upscale и SeedVR2 требуют больше времени и VRAM; включайте их для финала, а не для каждой пробы.</p></section>
           </div>
@@ -184,14 +196,14 @@
         <details class="workflow-mini-guide" data-workflow-guide="video" hidden>
           <summary><span>MiniMax H3 v4: как собрать ролик</span><small>Режим, исходники, промт, память и финальная обработка без терминологии нод.</small></summary>
           <div class="workflow-mini-guide-grid">
-            <section><strong>Ключевые кадры: T2VA, I2VA, FL2VA</strong><p>Без фото модель строит ролик только по тексту. Фото 1 становится точным первым кадром. Фото 1 и Фото 2 задают точные начало и финал, поэтому промт должен описывать один достижимый переход между ними.</p></section>
-            <section><strong>Свободные референсы: REF2VA</strong><p>Этот режим тоже создаёт видео по промту и может работать без файлов. До четырёх фото передают внешность, одежду, предметы, стиль или сцену; видео — движение и работу камеры; аудио — голос, музыку или окружение. Они обозначаются как <code>&lt;Picture 1&gt;</code>, <code>&lt;Video 1&gt;</code> и <code>&lt;Audio 1&gt;</code>.</p></section>
+            <section><strong>Точные кадры</strong><p>Без фото модель строит ролик только по тексту. Фото 1 становится точным первым кадром. Фото 1 и Фото 2 задают точные начало и финал, поэтому промт должен описывать один достижимый переход между ними.</p></section>
+            <section><strong>Свободные референсы</strong><p>Этот режим тоже создаёт видео по промту и может работать без файлов. До четырёх фото передают внешность, одежду, предметы, стиль или сцену; видео — движение и работу камеры; аудио — голос, музыку или окружение.</p></section>
             <section><strong>Размер кадра</strong><p>При наличии Фото 1 его пропорции используются по умолчанию. Качество 480–1440 ограничивает длинную сторону, а обе стороны выравниваются до 32 px. Без фото выберите формат кадра вручную.</p></section>
-            <section><strong>Модели и Turbo</strong><p>FL2VA используется для текста и ключевых кадров, REF2VA — для мультимодальных референсов. Qwen MiniMax CLIP и обе VAE выбираются автоматически. Внешний Turbo опционален; Eros Max уже содержит Turbo и работает только через REF2VA.</p></section>
-            <section><strong>Промт-ассистент</strong><p>Ассистент получает тот же режим и тот же порядок фото, что MiniMax: точные первый и последний кадры либо свободные <code>&lt;Picture 1–4&gt;</code>. Он анализирует каждое фото и собирает один редактируемый Context-IR. Для <code>&lt;Video 1&gt;</code> и <code>&lt;Audio 1&gt;</code> явно напишите, что брать: движение, сцену, голос, музыку или окружение.</p></section>
+            <section><strong>Модели и Turbo</strong><p>Gateway сам подключает подходящую внутреннюю ветку для выбранного способа. Внешний Turbo опционален; модели со встроенным Turbo получают подходящее число шагов автоматически.</p></section>
+            <section><strong>Промт-ассистент</strong><p>Ассистент получает тот же режим и порядок файлов, что MiniMax: точные первый и последний кадры либо до четырёх свободных фото. Он анализирует каждый материал и собирает один редактируемый план. Для видео и аудио явно напишите, что брать: движение, сцену, голос, музыку или окружение.</p></section>
             <section><strong>Длительность и память</strong><p>5–15 секунд — основной проверенный диапазон; более длинные ролики экспериментальны и заметно тяжелее. Memory Optimization и поэтапная очистка VRAM оставлены включёнными. При артефактах сначала отключайте Sparse Attention.</p></section>
             <section><strong>RIFE, RTX и Sharpen</strong><p>RIFE добавляет промежуточные кадры, RTX увеличивает разрешение, Sharpen подчёркивает детали. Они выполняются именно в таком порядке. Все этапы опциональны: сначала получите удачный базовый ролик, затем включайте нужные улучшения.</p></section>
-            <section><strong>Звук и экспорт</strong><p>MiniMax генерирует финальную аудиодорожку вместе с видео. Аудиофайл или звук видеореференса задают ориентир только в REF2VA. Gateway сохраняет H.264 с yuv420p, чтобы ролик открывался в браузере и на Android.</p></section>
+            <section><strong>Звук и экспорт</strong><p>MiniMax генерирует финальную аудиодорожку вместе с видео. Аудиофайл или звук видеореференса используются как ориентир в режиме свободных референсов. Gateway сохраняет H.264 с yuv420p, чтобы ролик открывался в браузере и на Android.</p></section>
           </div>
         </details>
       </section>
@@ -233,24 +245,16 @@
       </section>
       <section class="generation-editor-profile" id="generation-editor-profile" hidden aria-live="polite"><span class="workflow-choice-icon">IMG</span><div><strong id="generation-editor-profile-title"></strong><small id="generation-editor-profile-description"></small></div></section>
       <section class="generation-selected-image" id="generation-selected-image" hidden aria-live="polite"><img id="generation-selected-image-preview" alt="Выбранное основное фото"><div><span>Основное фото</span><strong id="generation-selected-image-name"></strong><small id="generation-selected-image-details"></small></div></section>
-      <label>Диффузионная модель
-        <select name="model" id="generation-model" required><option value="">Выберите модель</option>{{range .QuickModels}}<option value="{{.ID}}" data-family="{{.Family}}" data-available="{{.Available}}" data-default-steps="{{.DefaultSteps}}" data-default-cfg="{{.DefaultCFG}}" data-default-sampler="{{.DefaultSampler}}" data-default-scheduler="{{.DefaultScheduler}}" data-default-lora-strength="{{.LoraStrength}}" data-video-integrated-turbo="{{.VideoIntegratedTurbo}}" data-video-reference-only="{{.VideoReferenceOnly}}" data-default-video-shift="{{.DefaultVideoShift}}" data-default-audio-shift="{{.DefaultAudioShift}}" {{if not .Available}}disabled{{end}}>{{.DisplayName}}{{if .Reason}} — {{.Reason}}{{end}}</option>{{end}}</select>
-        <small class="field-hint">Список ограничен моделями, проверенными для выбранной схемы.</small>
-      </label>
       <div class="generation-primary-fields" id="generation-quality-field">
         <label>Профиль качества Krea2<select id="generation-quality"><option value="fast">Быстрое · 1,0 Мп</option><option value="balanced" selected>Оптимальное · 1,9 Мп</option><option value="krea-2-5">Детальное · 2,5 Мп</option><option value="krea-3-2">Высокое · 3,2 Мп</option><option value="maximum">Максимальное · 4,0 Мп</option><option value="krea-4-7">Максимум деталей · 4,7 Мп</option></select></label>
       </div>
-      <section class="generation-summary" id="generation-summary" aria-live="polite">
-        <div class="generation-summary-copy"><span>Текущая конфигурация</span><strong id="generation-summary-value">Выберите workflow и модель.</strong></div>
-        <button type="button" class="button ghost" id="generation-open-exact">Точные настройки</button>
-      </section>
       <section class="workflow-settings-section minimax-video-settings minimax-v4-settings" hidden>
-        <div class="workflow-settings-heading"><div><strong>MiniMax H3 v4 · видео</strong><small>Качество ограничивает длинную сторону, как <code>max_resolution</code> в исходном workflow. Размер всегда кратен 32.</small></div><output class="resolution-preview" id="minimax-video-resolution-preview">432 × 720 · формат 9:16</output></div>
-        <p class="minimax-model-profile" id="minimax-video-model-profile">FL2VA создаёт видео из текста или ключевых кадров. REF2VA подключается режимом «Референсы».</p>
+        <div class="workflow-settings-heading"><div><strong>MiniMax H3 v4 · видео</strong><small>Качество задаёт максимальную длинную сторону кадра. Размер всегда кратен 32.</small></div><output class="resolution-preview" id="minimax-video-resolution-preview">432 × 720 · формат 9:16</output></div>
+        <p class="minimax-model-profile" id="minimax-video-model-profile">Gateway автоматически подключит подходящую ветку выбранной модели для текста, точных кадров или свободных референсов.</p>
         <div class="generation-fields minimax-primary-grid">
           <label><span class="field-label">Качество <span class="field-help" tabindex="0" data-tooltip="Это максимальная длинная сторона кадра. Маленький исходник не увеличивается на этом этапе; для финального увеличения включите RTX.">?</span></span><select name="video_quality" id="minimax-video-quality"><option value="480">480 · быстрый просмотр</option><option value="720" selected>720 · рекомендуем</option><option value="1080">1080 · Full HD</option><option value="1440">1440 · 2K</option></select><small class="field-hint">Максимум по длинной стороне</small></label>
           <label><span class="field-label">Длительность <span class="field-help" tabindex="0" data-tooltip="5–15 секунд — основной диапазон MiniMax H3. Значения до 60 секунд доступны для экспериментов и требуют заметно больше времени и памяти.">?</span></span><input name="video_duration_seconds" id="minimax-video-duration" type="number" min="5" max="60" step="1" value="5"><small class="field-hint">5–60 секунд</small></label>
-          <label><span class="field-label">Шаги <span class="field-help" tabindex="0" data-tooltip="FL2VA без Turbo использует 20–25 шагов, внешний Turbo — 4–8. Eros Max содержит Turbo внутри и работает на 6–8 шагах.">?</span></span><input name="video_steps" id="minimax-video-steps" type="number" min="20" max="25" value="25"></label>
+          <label><span class="field-label">Шаги <span class="field-help" tabindex="0" data-tooltip="Базовая модель без Turbo использует 20–25 шагов, внешний Turbo — 4–8. Eros Max содержит Turbo внутри и работает на 6–8 шагах.">?</span></span><input name="video_steps" id="minimax-video-steps" type="number" min="20" max="25" value="25"></label>
           <label><span class="field-label">Имя файла</span><input name="video_filename" type="text" maxlength="80" value="AI-Gateway-MiniMaxH3"><small class="field-hint">Без расширения</small></label>
           <label class="setting-toggle ui-choice" id="minimax-video-turbo-control"><input name="video_turbo" id="minimax-video-turbo" type="checkbox" value="true"><span><strong id="minimax-video-turbo-title">Turbo MiniMax H3</strong><small id="minimax-video-turbo-description">Опциональная официальная LoRA v4: 4–8 шагов для быстрых проб.</small></span></label>
           <label class="minimax-reference-field"><span class="field-label">Размер референсов <span class="field-help" tabindex="0" data-tooltip="По размеру кадра экономит память. Максимальная детализация лучше сохраняет черты, текст и аксессуары, но для 1440p/2160p может требовать существенно больше VRAM.">?</span></span><select name="video_reference_size" id="minimax-video-reference-size"><option value="match">По размеру кадра · рекомендуем</option><option value="max">Максимальная детализация</option></select></label>
@@ -262,7 +266,7 @@
         </div>
       </section>
       <section class="workflow-settings-section minimax-video-settings minimax-v4-settings" hidden>
-        <div class="workflow-settings-heading"><div><strong>MiniMax H3 v4 · LoRA</strong><small>Адаптеры из отдельной папки MiniMaxH3 подключаются после оптимизаций модели. Внешний Turbo применяется только к базовой FL2VA.</small></div></div>
+        <div class="workflow-settings-heading"><div><strong>MiniMax H3 v4 · LoRA</strong><small>Адаптеры из отдельной папки MiniMaxH3 подключаются после оптимизаций модели. Внешний Turbo применяется только к базовой модели.</small></div></div>
         <div class="lora-list">
           <div class="lora-row" data-lora-slots="minimax"><span class="lora-number">1</span><label>LoRA<select name="lora_1" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .MiniMaxLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label>Модель<input name="lora_model_strength_1" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label><label>CLIP<input name="lora_clip_strength_1" class="generation-lora-clip" type="number" min="-100" max="100" step="0.05" value="1"></label></div>
           <div class="lora-row" data-lora-slots="minimax" hidden><span class="lora-number">2</span><label>LoRA<select name="lora_2" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .MiniMaxLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label>Модель<input name="lora_model_strength_2" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label><label>CLIP<input name="lora_clip_strength_2" class="generation-lora-clip" type="number" min="-100" max="100" step="0.05" value="1"></label></div>
@@ -277,10 +281,10 @@
           <div class="workflow-settings-heading minimax-settings-heading"><div><span>ГЕНЕРАЦИЯ</span><strong>Семплирование MiniMax H3 v4</strong><small>Модель задаёт безопасные значения при выборе. Меняйте их только для осознанного сравнения результатов.</small></div></div>
           <div class="minimax-parameter-grid">
             <label class="minimax-field">Seed<input name="seed" type="number" min="-1" value="-1"><small>-1 выбирает новый seed.</small></label>
-            <label class="minimax-field">Сэмплер<select name="video_sampler" id="minimax-video-sampler"><option value="euler" selected>Euler · v4 рекомендует</option><option value="res_multistep">Res Multistep · совместимость v3</option></select><small>Turbo FL2VA использует свой sampler.</small></label>
+            <label class="minimax-field">Сэмплер<select name="video_sampler" id="minimax-video-sampler"><option value="euler" selected>Euler · v4 рекомендует</option><option value="res_multistep">Res Multistep · совместимость v3</option></select><small>Режим Turbo использует собственный сэмплер.</small></label>
             <label class="minimax-field">Планировщик<select name="video_scheduler" id="minimax-video-scheduler"><option value="simple" selected>Simple · рекомендуем</option><option value="sgm_uniform">SGM Uniform</option><option value="karras">Karras</option><option value="exponential">Exponential</option><option value="beta">Beta</option><option value="normal">Normal</option></select><small>Simple соответствует workflow v4.</small></label>
-            <label class="minimax-field">Video Sigma<input name="video_shift_video" id="minimax-video-shift-video" type="number" min="1" max="32" step="1" value="11"><small>11 для FL2VA, 12 для Eros Max.</small></label>
-            <label class="minimax-field">Audio Sigma<input name="video_shift_audio" id="minimax-video-shift-audio" type="number" min="1" max="32" step="1" value="3"><small>3 для FL2VA, 7 для Eros Max.</small></label>
+            <label class="minimax-field">Video Sigma<input name="video_shift_video" id="minimax-video-shift-video" type="number" min="1" max="32" step="1" value="11"><small>11 для базовой модели, 12 для Eros Max.</small></label>
+            <label class="minimax-field">Audio Sigma<input name="video_shift_audio" id="minimax-video-shift-audio" type="number" min="1" max="32" step="1" value="3"><small>3 для базовой модели, 7 для Eros Max.</small></label>
           </div>
           <div class="minimax-utility-grid">
             <label class="minimax-utility-toggle ui-choice"><input name="video_sage_attention" type="checkbox" value="true" checked><span><strong>SageAttention</strong><small>Экономит VRAM на слоях внимания H3.</small></span></label>
@@ -339,7 +343,7 @@
           <div class="workflow-settings-heading minimax-settings-heading"><div><span>УЛУЧШЕНИЯ</span><strong>Обработка готового ролика</strong><small>Подключайте этапы только для финального результата. Выключенные этапы не потребляют ресурсы.</small></div></div>
           <div class="video-enhancements">
             <section class="video-enhancement">
-              <label class="video-enhancement-toggle ui-choice"><input name="video_rife_enabled" type="checkbox" value="true"><span><strong>Плавность движения</strong><small>Добавляет промежуточные кадры и повышает FPS.</small></span><b>RIFE</b></label>
+              <label class="video-enhancement-toggle ui-choice"><input name="video_rife_enabled" type="checkbox" value="true"><span><strong>Плавность движения</strong><small>Добавляет промежуточные кадры и повышает FPS.</small><em class="workflow-load-note"><b>Время ++</b><b>VRAM +</b></em></span><b>RIFE</b></label>
               <div class="video-enhancement-settings video-enhancement-settings--rife">
                 <div class="video-enhancement-fields">
                   <label>Модель RIFE<select name="video_rife_checkpoint"><option value="rife49.pth" selected>rife49 · исходный workflow</option><option value="rife47.pth">rife47</option><option value="rife417.pth">rife417</option><option value="rife426.pth">rife426</option><option value="sudo_rife4_269.662_testV1_scale1.pth">sudo_rife4_269</option></select></label>
@@ -355,7 +359,7 @@
               </div>
             </section>
             <section class="video-enhancement">
-              <label class="video-enhancement-toggle ui-choice"><input name="video_rtx_enabled" type="checkbox" value="true"><span><strong>Финальный апскейл</strong><small>Увеличивает детализацию ролика средствами NVIDIA.</small></span><b>RTX</b></label>
+              <label class="video-enhancement-toggle ui-choice"><input name="video_rtx_enabled" type="checkbox" value="true"><span><strong>Финальный апскейл</strong><small>Увеличивает детализацию ролика средствами NVIDIA.</small><em class="workflow-load-note"><b>Время +++</b><b>VRAM +++</b></em></span><b>RTX</b></label>
               <div class="video-enhancement-settings video-enhancement-settings--compact">
                 <div class="video-enhancement-fields">
                   <label>Масштаб<input name="video_rtx_scale" type="number" min="1" max="4" step="0.1" value="2"></label>
@@ -364,7 +368,7 @@
               </div>
             </section>
             <section class="video-enhancement">
-              <label class="video-enhancement-toggle ui-choice"><input name="video_color_match" type="checkbox" value="true"><span><strong>Палитра референса</strong><small>Дополнительный этап Gateway перед RIFE; требует Фото 1.</small></span><b>COLOR</b></label>
+              <label class="video-enhancement-toggle ui-choice"><input name="video_color_match" type="checkbox" value="true"><span><strong>Палитра референса</strong><small>Дополнительный этап Gateway перед RIFE; требует Фото 1.</small><em class="workflow-load-note"><b>Время +</b><b>VRAM +</b></em></span><b>COLOR</b></label>
               <div class="video-enhancement-settings video-enhancement-settings--compact">
                 <div class="video-enhancement-fields">
                   <label>Метод<select name="video_color_method"><option value="adain" selected>AdaIN · рекомендуем</option><option value="mean_std">Mean / Std</option></select></label>
@@ -373,7 +377,7 @@
               </div>
             </section>
             <section class="video-enhancement">
-              <label class="video-enhancement-toggle ui-choice"><input name="video_sharpen_enabled" type="checkbox" value="true"><span><strong>Финальная резкость</strong><small>ImageSharpenKJ подчёркивает детали после RIFE и RTX.</small></span><b>SHARPEN</b></label>
+              <label class="video-enhancement-toggle ui-choice"><input name="video_sharpen_enabled" type="checkbox" value="true"><span><strong>Финальная резкость</strong><small>Подчёркивает детали после плавности движения и апскейла.</small><em class="workflow-load-note"><b>Время +</b><b>VRAM +</b></em></span><b>SHARPEN</b></label>
               <div class="video-enhancement-settings">
                 <div class="video-enhancement-fields video-sharpen-fields">
                   <label>Метод<select name="video_sharpen_method" id="minimax-video-sharpen-method"><option value="rcas" selected>RCAS · workflow v4</option><option value="adaptive_usm">Adaptive USM</option><option value="high_pass">High Pass</option><option value="deconvolution">Deconvolution</option></select></label>
@@ -437,7 +441,7 @@
           </div>
         </section>
         <section class="workflow-settings-section flux-edit-settings" data-workflow-panel="flux2">
-          <div class="workflow-settings-heading"><div><strong>Flux2 · финальный апскейл</strong><small>Выберите необязательные ветки из исходной схемы. При двух проходах сначала используется Ultimate SD Upscale, затем SeedVR2.</small></div></div>
+          <div class="workflow-settings-heading"><div><strong>Flux2 · финальный апскейл</strong><small>Выберите необязательные ветки из исходной схемы. При двух проходах сначала используется Ultimate SD Upscale, затем SeedVR2.</small><span class="workflow-load-note"><b>Время ++ / +++</b><b>VRAM ++ / +++</b></span></div></div>
           <div class="generation-fields">
             <label>Апскейл после Flux2<select name="flux_upscale_mode" id="generation-flux-upscale-mode"><option value="none" selected>Без апскейла</option><option value="ultimate">Ultimate SD Upscale · 1,5×</option><option value="seedvr2">SeedVR2 · 2×</option><option value="both">Оба по очереди · 1,5× и 2×</option></select><small class="field-hint">SeedVR2 использует 7B-модель и ограничивает длинную сторону 4098 px.</small></label>
           </div>
@@ -480,7 +484,7 @@
           </div>
         </section>
         <section class="workflow-settings-section krea-edit-settings" data-workflow-panel="krea2">
-          <div class="workflow-settings-heading"><div><strong>Krea2 · Ultimate Upscale</strong><small>Отдельный проход UltimateSDUpscale, который идёт после Identity Edit.</small></div></div>
+          <div class="workflow-settings-heading"><div><strong>Krea2 · Ultimate Upscale</strong><small>Отдельный проход после основного редактирования.</small><span class="workflow-load-note"><b>Время ++</b><b>VRAM ++</b></span></div></div>
           <div class="generation-fields">
             <label>Коэффициент<input name="upscale_factor" type="number" min="1" max="2" step="0.05" value="1.5"><small class="field-hint">При сохранении размера исходника автоматически используется 1×.</small></label>
             <label>Шаги<input name="upscale_steps" type="number" min="1" max="100" value="4"></label>
@@ -553,11 +557,11 @@
           </div>
         </section>
         <section class="workflow-settings-section krea-workflow-field">
-          <div class="workflow-settings-heading"><div><strong>Апскейл <span class="field-help" tabindex="0" data-tooltip="Увеличивает картинку до итогового разрешения и добавляет детали. Автоматическая сила перерисовки подбирает мягкое значение по размеру кадра.">?</span></strong><small>Второй проход после масштабирования изображения.</small></div><label class="setting-toggle krea-text-workflow-field ui-choice ui-choice--compact"><input name="upscale_auto_denoise" id="generation-auto-denoise" type="checkbox" value="true" checked><span>Автонастройка перерисовки</span></label></div>
+          <div class="workflow-settings-heading"><div><strong>Апскейл <span class="field-help" tabindex="0" data-tooltip="Увеличивает картинку до итогового разрешения и добавляет детали. Автоматическая сила перерисовки подбирает мягкое значение по размеру кадра.">?</span></strong><small>Второй проход после масштабирования изображения.</small><span class="workflow-load-note"><b>Время ++</b><b>VRAM ++</b></span></div><label class="setting-toggle krea-text-workflow-field ui-choice ui-choice--compact"><input name="upscale_auto_denoise" id="generation-auto-denoise" type="checkbox" value="true" checked><span>Автонастройка перерисовки</span></label></div>
           <div class="generation-fields"><label>Шаги<input name="upscale_steps" id="generation-upscale-steps" type="number" min="1" max="12" value="5"></label><label>Сэмплер<select name="upscale_sampler" id="generation-upscale-sampler"><option value="euler_ancestral" selected>Euler Ancestral</option><option value="euler">Euler</option><option value="dpmpp_2m">DPM++ 2M</option><option value="dpmpp_2m_sde">DPM++ 2M SDE</option></select></label><label>Denoise <span class="field-help" tabindex="0" data-tooltip="Насколько апскейл может изменить исходный результат. Низкое значение сохраняет композицию, высокое сильнее перерисовывает её.">?</span><input name="upscale_denoise" id="generation-upscale-denoise" type="number" min="0.01" max="0.5" step="0.01" value="0.18"></label></div>
         </section>
         <section class="workflow-settings-section krea-text-workflow-field">
-          <div class="workflow-settings-heading"><div><strong>Финальная детализация <span class="field-help" tabindex="0" data-tooltip="Короткий завершающий проход. Улучшает мелкие детали, но слишком сильный denoise способен изменить лицо и композицию.">?</span></strong><small>Короткий проход перед декодированием результата.</small></div></div>
+          <div class="workflow-settings-heading"><div><strong>Финальная детализация <span class="field-help" tabindex="0" data-tooltip="Короткий завершающий проход. Улучшает мелкие детали, но слишком сильный denoise способен изменить лицо и композицию.">?</span></strong><small>Короткий проход перед декодированием результата.</small><span class="workflow-load-note"><b>Время +</b><b>VRAM +</b></span></div></div>
           <div class="generation-fields"><label>Шаги<input name="detail_steps" id="generation-detail-steps" type="number" min="1" max="8" value="2"></label><label>CFG<input name="detail_cfg" id="generation-detail-cfg" type="number" min="0" max="30" step="0.1" value="1"></label><label>Сэмплер<select name="detail_sampler" id="generation-detail-sampler"><option value="euler" selected>Euler</option><option value="euler_ancestral">Euler Ancestral</option><option value="dpmpp_2m">DPM++ 2M</option><option value="dpmpp_2m_sde">DPM++ 2M SDE</option></select></label><label>Планировщик<select name="detail_scheduler" id="generation-detail-scheduler"><option value="simple" selected>Simple</option><option value="normal">Normal</option><option value="karras">Karras</option><option value="sgm_uniform">SGM Uniform</option></select></label><label>Denoise<input name="detail_denoise" id="generation-detail-denoise" type="number" min="0.01" max="0.2" step="0.005" value="0.03"></label></div>
         </section>
         <section class="workflow-settings-section krea-text-workflow-field">
@@ -566,7 +570,14 @@
         </section>
       </div></details>
       <section class="generation-preflight" id="generation-preflight" hidden aria-live="polite"><div class="generation-preflight-heading"><div><strong>Проверка перед запуском</strong><small id="generation-preflight-summary"></small></div><button type="button" class="button ghost" id="generation-preflight-repeat">Проверить ещё раз</button></div><div class="generation-preflight-checks" id="generation-preflight-checks"></div></section>
-      <div class="generation-actions"><button type="button" class="button ghost generation-back">Назад</button><button type="button" class="button ghost" id="generation-preflight-button">Проверить перед запуском</button><button type="submit" class="button" id="generation-submit">Запустить генерацию</button></div>
+      <div class="generation-run-dock" id="generation-run-dock">
+        <section class="generation-summary" id="generation-summary" aria-live="polite">
+          <div class="generation-summary-head"><div><span>Готово к запуску</span><strong id="generation-summary-title">Текущая конфигурация</strong></div><button type="button" class="button ghost" id="generation-open-exact">Точные настройки</button></div>
+          <dl class="generation-summary-facts" id="generation-summary-facts"><div><dt>Модель</dt><dd>Не выбрана</dd></div></dl>
+          <p class="generation-summary-impact" id="generation-summary-impact" data-load="normal">Дополнительная тяжёлая обработка не включена.</p>
+        </section>
+        <div class="generation-actions"><button type="button" class="button ghost generation-back">Назад</button><button type="button" class="button ghost" id="generation-preflight-button">Проверить</button><button type="submit" class="button" id="generation-submit">Запустить генерацию</button></div>
+      </div>
     </section>
   </form>
 

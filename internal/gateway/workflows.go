@@ -19,9 +19,18 @@ var workflowFS embed.FS
 
 const (
 	maxGenerationLoraSlots        = 10
+	maxGenerationReferenceSlots   = 4
 	krea2EditMaxBaseMegapixels    = 4.7
 	krea2EditMaxLongestSidePixels = 4096
 )
+
+type generationReferenceMetadata struct {
+	Number     int
+	Role       string
+	Source     string
+	SourceID   string
+	SourceName string
+}
 
 type workflowDefinition struct {
 	ID             string                    `json:"id"`
@@ -127,6 +136,7 @@ type generationForm struct {
 	LUTEnabled             bool
 	InputImage             string
 	ReferenceImages        [3]string
+	ReferenceMetadata      [maxGenerationReferenceSlots]generationReferenceMetadata
 	InputAudio             string
 	InputVideo             string
 	Positive               string
@@ -235,6 +245,84 @@ func (input generationForm) images() []string {
 		}
 	}
 	return images
+}
+
+func generationReferenceRole(templateID, videoMode string, number int, value string) string {
+	if templateID == "minimax-h3-video" && videoMode != miniMaxH3ReferenceMode {
+		if number == 1 {
+			return "first_frame"
+		}
+		return "last_frame"
+	}
+	if templateID == "image-to-image" && number == 1 {
+		return "base_scene"
+	}
+	switch strings.TrimSpace(value) {
+	case "first_frame", "last_frame", "base_scene", "identity", "wardrobe_object", "pose_composition", "style", "background", "details":
+		return strings.TrimSpace(value)
+	default:
+		if number == 1 {
+			return "base_scene"
+		}
+		return "details"
+	}
+}
+
+func generationReferenceSource(value string) string {
+	switch strings.TrimSpace(value) {
+	case "device", "gallery", "restored", "unknown":
+		return strings.TrimSpace(value)
+	default:
+		return "unknown"
+	}
+}
+
+func truncateGenerationReferenceValue(value string, maximum int) string {
+	value = strings.TrimSpace(value)
+	characters := []rune(value)
+	if len(characters) <= maximum {
+		return value
+	}
+	return string(characters[:maximum])
+}
+
+func generationReferenceMetadataFromForm(values map[string][]string, input generationForm) [maxGenerationReferenceSlots]generationReferenceMetadata {
+	var metadata [maxGenerationReferenceSlots]generationReferenceMetadata
+	for index := range metadata {
+		number := index + 1
+		suffix := strconv.Itoa(number)
+		metadata[index] = generationReferenceMetadata{
+			Number:     number,
+			Role:       generationReferenceRole(input.TemplateID, input.VideoMode, number, firstGenerationFormValue(values, "image_role_"+suffix)),
+			Source:     generationReferenceSource(firstGenerationFormValue(values, "image_source_"+suffix)),
+			SourceID:   truncateGenerationReferenceValue(firstGenerationFormValue(values, "image_source_id_"+suffix), 128),
+			SourceName: truncateGenerationReferenceValue(firstGenerationFormValue(values, "image_source_name_"+suffix), 255),
+		}
+	}
+	return metadata
+}
+
+func firstGenerationFormValue(values map[string][]string, name string) string {
+	if len(values[name]) == 0 {
+		return ""
+	}
+	return values[name][0]
+}
+
+func (input generationForm) references() []generationReferenceMetadata {
+	paths := [maxGenerationReferenceSlots]string{input.InputImage, input.ReferenceImages[0], input.ReferenceImages[1], input.ReferenceImages[2]}
+	references := make([]generationReferenceMetadata, 0, input.imageCount())
+	for index, path := range paths {
+		if strings.TrimSpace(path) == "" {
+			continue
+		}
+		reference := input.ReferenceMetadata[index]
+		reference.Number = index + 1
+		reference.Role = generationReferenceRole(input.TemplateID, input.VideoMode, reference.Number, reference.Role)
+		reference.Source = generationReferenceSource(reference.Source)
+		references = append(references, reference)
+	}
+	return references
 }
 
 func loadWorkflowDefinitions() ([]workflowDefinition, error) {
@@ -1469,6 +1557,7 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 			strings.TrimSpace(r.Form.Get("input_image_4")),
 		},
 	}
+	input.ReferenceMetadata = generationReferenceMetadataFromForm(r.Form, input)
 	if manifest, ok := workflowManifestForInput(input); ok {
 		if err := applyWorkflowManifestForm(manifest, r.Form, &input); err != nil {
 			return generationForm{}, err

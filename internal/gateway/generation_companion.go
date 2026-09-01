@@ -374,11 +374,31 @@ func generationRecipeValues(form url.Values, resolvedSeed int64) map[string]stri
 	return values
 }
 
+func generationReferenceField(name, prefix string) bool {
+	if !strings.HasPrefix(name, prefix) {
+		return false
+	}
+	position, err := strconv.Atoi(strings.TrimPrefix(name, prefix))
+	return err == nil && position >= 1 && position <= maxGenerationReferenceSlots
+}
+
+func allowedGenerationReferenceJobField(name string) bool {
+	for _, prefix := range []string{"image_role_", "image_source_", "image_source_id_", "image_source_name_"} {
+		if generationReferenceField(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func allowedGenerationRecipeField(name string) bool {
 	if strings.HasPrefix(name, "input_image") || strings.HasPrefix(name, "assistant_") || name == "csrf" || name == "client_request_id" || name == "recipe_name" {
 		return false
 	}
 	if strings.HasPrefix(name, "lora_") || strings.HasPrefix(name, "lora_model_strength_") || strings.HasPrefix(name, "lora_clip_strength_") {
+		return true
+	}
+	if generationReferenceField(name, "image_role_") {
 		return true
 	}
 	switch name {

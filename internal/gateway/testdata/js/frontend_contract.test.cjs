@@ -5,9 +5,11 @@ const path = require("node:path");
 
 const projectRoot = path.resolve(__dirname, "../../../..");
 const stylePath = path.join(projectRoot, "internal/gateway/static/style.css");
+const generatePath = path.join(projectRoot, "internal/gateway/static/generate.js");
 const templateRoot = path.join(projectRoot, "internal/gateway/templates");
 const previewPath = path.join(projectRoot, "cmd/ui-preview/main.go");
 const css = fs.readFileSync(stylePath, "utf8");
+const generateScript = fs.readFileSync(generatePath, "utf8");
 const templates = fs.readdirSync(templateRoot)
   .filter((name) => name.endsWith(".html"))
   .map((name) => fs.readFileSync(path.join(templateRoot, name), "utf8"))
@@ -106,4 +108,15 @@ test("ui preview renders the component contract", () => {
   const preview = fs.readFileSync(previewPath, "utf8");
   assert.match(preview, /\/preview\/components/);
   assert.match(templates, /define "ui_components"/);
+});
+
+test("ui preview exposes every supported reference slot", () => {
+  const preview = fs.readFileSync(previewPath, "utf8");
+  assert.match(preview, /"ID": "photoflow-krea2-edit"[^\n]+"MaxInputImages": 2/);
+  assert.match(preview, /"ID": "photoflow-flux2-edit"[^\n]+"AllowsImages": true, "MaxInputImages": 4/);
+  assert.match(preview, /"ID": "minimax-h3-video"[^\n]+"AllowsImages": true, "MaxInputImages": 4/);
+});
+
+test("a sole compatible workflow is selected automatically", () => {
+  assert.match(generateScript, /compatibleWorkflows\.length === 1\) chooseGenerationWorkflow\(compatibleWorkflows\[0\]\)/);
 });

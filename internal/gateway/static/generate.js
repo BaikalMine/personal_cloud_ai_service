@@ -63,12 +63,19 @@
     galleryButton: slot.querySelector("[data-gallery-image-picker-open]"),
   }));
   const workflowNext = document.getElementById("workflow-next");
+  const generationModelField = document.getElementById("generation-model-field");
   const imageSourceFields = document.getElementById("image-source-fields");
   const imageSourceGrid = root.querySelector(".source-image-grid");
   const miniMaxVideoMode = document.getElementById("minimax-video-mode");
   const miniMaxVideoModeInputs = [...root.querySelectorAll('input[name="video_mode"]')];
   const miniMaxVideoModeSelect = form.elements.video_mode;
   const miniMaxVideoModeHint = document.getElementById("minimax-video-mode-hint");
+  const generationModeGuide = document.getElementById("generation-mode-guide");
+  const generationModeGuideEyebrow = document.getElementById("generation-mode-guide-eyebrow");
+  const generationModeGuideTitle = document.getElementById("generation-mode-guide-title");
+  const generationModeGuideDescription = document.getElementById("generation-mode-guide-description");
+  const generationModeGuideFacts = document.getElementById("generation-mode-guide-facts");
+  const generationModeGuideAdvice = document.getElementById("generation-mode-guide-advice");
   const miniMaxReferenceMedia = document.getElementById("minimax-reference-media");
   const miniMaxAudioReference = document.getElementById("minimax-audio-reference");
   const miniMaxAudioFile = document.getElementById("minimax-audio-file");
@@ -160,7 +167,9 @@
   const recipeName = document.getElementById("generation-recipe-name");
   const recipeSave = document.getElementById("generation-recipe-save");
   const recipeState = document.getElementById("generation-recipe-state");
-  const generationSummaryValue = document.getElementById("generation-summary-value");
+  const generationSummaryTitle = document.getElementById("generation-summary-title");
+  const generationSummaryFacts = document.getElementById("generation-summary-facts");
+  const generationSummaryImpact = document.getElementById("generation-summary-impact");
   const generationOpenExact = document.getElementById("generation-open-exact");
   const generationAdvanced = root.querySelector(".generation-advanced");
   const variantsSection = document.getElementById("generation-variants");
@@ -248,6 +257,8 @@
   const hasSelectedImage = (item) => Boolean(selectedImageSource(item));
   const workflowManifestsByID = new Map();
   const referenceRoleLabels = {
+    first_frame: "Точный первый кадр",
+    last_frame: "Точный последний кадр",
     base_scene: "Основной кадр и композиция",
     identity: "Внешность и лицо",
     wardrobe_object: "Одежда, предмет или материал",
@@ -360,8 +371,8 @@
       ? "Дополнительная Turbo LoRA не применяется: модель уже содержит её слияние."
       : "Опциональная официальная LoRA v4: 4–8 шагов для быстрых проб.";
     if (miniMaxVideoModelProfile) miniMaxVideoModelProfile.textContent = integratedTurbo
-      ? "H3 Eros Max beta4 · только reference-путь · встроенный Turbo · Euler · 6–8 шагов · Sigma 12 / 7."
-      : "MiniMax H3 v4 · FL2VA для точных кадров, REF2VA для свободных референсов · Turbo опционален.";
+      ? "Eros Max работает только со свободными референсами и уже содержит Turbo. Gateway применит подходящие параметры автоматически."
+      : "MiniMax H3 v4 поддерживает текст, точные кадры и свободные референсы. Turbo остаётся опциональным.";
     if (miniMaxVideoSteps) {
       miniMaxVideoSteps.min = String(profileRule("video_steps")?.minimum ?? (integratedTurbo ? 6 : turbo ? 4 : 20));
       miniMaxVideoSteps.max = String(profileRule("video_steps")?.maximum ?? (integratedTurbo || turbo ? 8 : 25));
@@ -376,7 +387,7 @@
       miniMaxVideoSampler.disabled = samplerLocked;
     }
     if (miniMaxVideoModeHint && referenceOnly) {
-      miniMaxVideoModeHint.textContent = "Выбрано: Eros Max использует REF2VA. Ролик строится по промту; фото, видео и аудио необязательны.";
+      miniMaxVideoModeHint.textContent = "Выбрано: Eros Max работает со свободными референсами. Фото, видео и аудио необязательны.";
     }
     if (!miniMaxVideoResolutionPreview) return;
     const quality = Number(miniMaxVideoQuality?.value);
@@ -826,6 +837,8 @@
     help.setAttribute("aria-expanded", "false");
     const tooltip = help.dataset.tooltip?.trim();
     if (tooltip) help.setAttribute("aria-label", `Подсказка: ${tooltip}`);
+    help.addEventListener("mouseenter", () => positionFieldHelp(help));
+    help.addEventListener("focus", () => positionFieldHelp(help));
     help.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -914,11 +927,29 @@
     if (miniMaxVideoPreview) miniMaxVideoPreview.hidden = true;
   };
 
+  const selectedReferenceMetadata = () => imageSlots
+    .filter((item) => item.index <= activeMaxInputImages() && (hasSelectedImage(item) || uploadedImages.get(item.index)))
+    .map((item) => generationModules.media?.referenceMetadata?.({
+      templateID: templateID.value,
+      videoMode: miniMaxMode(),
+      slot: item.index,
+      source: mediaSlice.get().sources?.[String(item.index)] || selectedImageSource(item),
+      role: item.role?.value || "",
+      uploaded: uploadedImages.get(item.index) || inputImages[item.index - 1]?.value || "",
+    }) || ({
+      number: item.index,
+      role: templateID.value === "minimax-h3-video" && miniMaxMode() !== "references"
+        ? (item.index === 1 ? "first_frame" : "last_frame")
+        : item.index === 1 ? "base_scene" : (item.role?.value || "details"),
+      source: "unknown",
+      sourceID: "",
+      sourceName: selectedImageSource(item)?.name || uploadedImages.get(item.index) || "",
+    }))
+    .filter(Boolean);
+
   const promptAssistantReferences = () => {
     if (templateID.value !== "image-to-image" && !(isMiniMaxSelected() && miniMaxMode() === "references")) return [];
-    return imageSlots
-      .filter((item) => item.index <= activeMaxInputImages() && hasSelectedImage(item))
-      .map((item) => ({ number: item.index, role: item.role?.value || "base_scene" }));
+    return selectedReferenceMetadata();
   };
 
   const syncReferenceMap = () => {
@@ -927,8 +958,6 @@
     referenceMap.hidden = references.length === 0;
     referenceMapList.replaceChildren();
     references.forEach((reference) => {
-      const item = imageSlots.find((slot) => slot.index === reference.number);
-      if (item?.role && item.index === 1) item.role.value = "base_scene";
       const card = document.createElement("div");
       card.className = "generation-reference-map-item";
       const preview = previewURLs.get(reference.number);
@@ -991,7 +1020,7 @@
       const visible = item.index <= maximum;
       item.slot.hidden = !visible;
       if (!visible) clearImageSlot(item);
-      if (item.galleryChoice) item.galleryChoice.hidden = !isMiniMax;
+      if (item.galleryChoice) item.galleryChoice.hidden = !(wizard.requiresImage || wizard.allowsImages);
       if (!item.label) return;
       if (isMiniMax && referenceMode) item.label.textContent = `Референс ${item.index} · необязательно`;
       else if (isMiniMax) item.label.textContent = item.index === 1 ? "Первый кадр · необязательно" : "Последний кадр · необязательно";
@@ -1000,8 +1029,9 @@
       const roleControl = item.role?.closest(".image-reference-role");
       if (roleControl) roleControl.hidden = !(isImageEdit || (isMiniMax && referenceMode));
       if (item.role) {
-        if (item.index === 1) item.role.value = "base_scene";
-        item.role.disabled = !(isImageEdit || (isMiniMax && referenceMode)) || item.index === 1;
+        const locksBaseScene = isImageEdit && item.index === 1;
+        if (locksBaseScene) item.role.value = "base_scene";
+        item.role.disabled = !(isImageEdit || (isMiniMax && referenceMode)) || locksBaseScene;
       }
     });
     const note = document.getElementById("image-source-note");
@@ -1015,7 +1045,7 @@
     }
     if (note) note.textContent = maximum > 1
       ? isImageEdit
-        ? `Фото 1 задаёт базовую сцену. Для каждого референса выберите роль, чтобы ассистент точно связал image 1–4 в промте.`
+        ? "Фото 1 задаёт базовую сцену. Для каждого дополнительного фото выберите роль, чтобы ассистент использовал референсы без путаницы."
         : `Первое фото обязательно. Можно добавить ещё до ${maximum - 1} ${maximum === 2 ? "референса" : "референсов"}.`
       : "Загрузите исходное фото для редактирования.";
     syncReferenceMap();
@@ -1036,8 +1066,11 @@
       allowsImages,
     }, (state) => ({ ...state, step: 2, scenarioID: button.dataset.workflowId || "", workflowID: "", requiresImage, allowsImages, workflowAvailable: false }));
     generationWorkflowID.value = "";
+    if (model) model.value = "";
     root.querySelectorAll(".generation-workflow-choice").forEach((item) => item.classList.remove("is-selected"));
     updateWorkflowCompatibility();
+    const compatibleWorkflows = [...root.querySelectorAll(".generation-workflow-choice")].filter((item) => !item.hidden && !item.disabled);
+    if (compatibleWorkflows.length === 1) chooseGenerationWorkflow(compatibleWorkflows[0]);
     showStep(2);
   };
 
@@ -1045,6 +1078,8 @@
     if (!workflowNext) return;
     const selected = selectedGenerationWorkflow();
     const hasWorkflow = Boolean(selected && selected.dataset.available === "true");
+    const selectedModel = model?.selectedOptions?.[0];
+    const hasModel = Boolean(model?.value && selectedModel && !selectedModel.disabled);
     const primary = imageSlots[0];
     const hasImage = Boolean(hasSelectedImage(primary) || uploadedImages.get(1));
     const needsImage = wizardSlice.get().requiresImage;
@@ -1059,7 +1094,7 @@
       primarySelected: hasImage,
       pendingUploads: hasPendingUploads ? 1 : 0,
     }, (state) => ({ ...state, selectedCount: hasImage ? 1 : 0, primarySelected: hasImage, pendingUploads: hasPendingUploads ? 1 : 0 }));
-    const canContinue = generationModules.wizard?.canContinue?.({ ...wizard, workflowAvailable: hasWorkflow }) ?? (hasWorkflow && (!needsImage || hasImage));
+    const canContinue = generationModules.wizard?.canContinue?.({ ...wizard, workflowAvailable: hasWorkflow && hasModel }) ?? (hasWorkflow && hasModel && (!needsImage || hasImage));
     workflowNext.disabled = !canContinue;
     if (!needsImage && !hasPendingUploads) {
       workflowNext.textContent = "Продолжить";
@@ -1068,6 +1103,7 @@
     } else {
       workflowNext.textContent = "Продолжить к промту";
     }
+    syncGenerationSummary();
   };
 
   const updateWorkflowCompatibility = () => {
@@ -1078,6 +1114,7 @@
       if (matches) visible += 1;
     });
     if (miniMaxVideoMode) miniMaxVideoMode.hidden = templateID.value !== "minimax-h3-video";
+    if (generationModelField) generationModelField.hidden = !selectedGenerationWorkflow();
     const wizard = wizardSlice.get();
     if (imageSourceFields) imageSourceFields.hidden = !(wizard.requiresImage || wizard.allowsImages);
     if (workflowNote) workflowNote.hidden = visible > 0;
@@ -1096,6 +1133,7 @@
       workflowAvailable: button.dataset.available === "true",
     }));
     updateQuickModelOptions(button);
+    if (generationModelField) generationModelField.hidden = false;
     applyQuality();
     if (button.dataset.family === "minimax_h3") syncMiniMaxVideoProfile({ applyModelDefaults: true });
     syncImageSlots();
@@ -1225,29 +1263,130 @@
     return values;
   };
 
-  const syncGenerationSummary = () => {
-    if (!generationSummaryValue) return;
+  const renderDefinitionList = (target, facts = []) => {
+    if (!target) return;
+    target.replaceChildren(...facts.map((fact) => {
+      const item = document.createElement("div");
+      const term = document.createElement("dt");
+      const value = document.createElement("dd");
+      term.textContent = fact.label || "Параметр";
+      value.textContent = fact.value || "Не выбрано";
+      item.append(term, value);
+      return item;
+    }));
+  };
+
+  const currentGenerationContext = () => {
     const preset = selectedGenerationWorkflow();
     const selectedModel = model?.selectedOptions?.[0];
-    if (!preset || !selectedModel?.value) {
-      generationSummaryValue.textContent = "Выберите workflow и модель.";
+    const family = preset?.dataset.family || "";
+    const references = selectedReferenceMetadata();
+    const hasAudio = Boolean(miniMaxAudioIsAvailable() && (uploadedAudio || miniMaxAudioFile?.files?.[0]));
+    const hasVideo = Boolean(miniMaxReferencesAreAvailable() && (uploadedVideo || miniMaxVideoFile?.files?.[0]));
+    return { preset, selectedModel, family, references, hasAudio, hasVideo };
+  };
+
+  const syncGenerationModeGuide = () => {
+    if (!generationModeGuide) return;
+    const { preset, family, references, hasAudio, hasVideo } = currentGenerationContext();
+    if (!preset) {
+      generationModeGuide.hidden = true;
       return;
     }
-    const parts = [preset.querySelector("strong")?.textContent || "Workflow", selectedModel.textContent.trim()];
-    const family = preset.dataset.family || "";
-    if (family === "krea2") {
-      const mp = outputMegapixels?.value || quality?.selectedOptions?.[0]?.textContent || "";
-      if (mp) parts.push(`${mp} Мп`);
-    } else if (family === "minimax_h3") {
-      parts.push(`${miniMaxVideoQuality?.value || "720"}p`, `${form.elements.video_duration_seconds?.value || "5"} сек.`);
-      if (selectedModel.dataset.videoIntegratedTurbo === "true") parts.push("Turbo встроен");
-      else if (miniMaxVideoTurbo?.checked) parts.push("Turbo");
-    } else if (isFinite(Number(width?.value)) && isFinite(Number(height?.value))) {
-      parts.push(`${width.value} × ${height.value}`);
+    const guide = generationModules.summary?.guideFor?.({
+      family,
+      templateID: templateID.value,
+      videoMode: miniMaxMode(),
+      references,
+      hasAudio,
+      hasVideo,
+    });
+    if (!guide) {
+      generationModeGuide.hidden = true;
+      return;
     }
-    const loras = [...root.querySelectorAll(".lora-row:not([hidden]) .generation-lora-select")].filter((item) => !item.disabled && item.value).length;
-    if (loras) parts.push(`LoRA: ${loras}`);
-    generationSummaryValue.textContent = parts.filter(Boolean).join(" · ");
+    generationModeGuide.hidden = false;
+    if (generationModeGuideEyebrow) generationModeGuideEyebrow.textContent = guide.eyebrow || "Текущий способ";
+    if (generationModeGuideTitle) generationModeGuideTitle.textContent = guide.title || "Как будет создан результат";
+    if (generationModeGuideDescription) generationModeGuideDescription.textContent = guide.description || "";
+    renderDefinitionList(generationModeGuideFacts, guide.facts);
+    if (generationModeGuideAdvice) generationModeGuideAdvice.textContent = guide.advice || "";
+  };
+
+  const selectedHeavyOptions = (family) => {
+    const options = [];
+    if (family === "minimax_h3") {
+      if (form.elements.video_rife_enabled?.checked) options.push("плавность движения");
+      if (form.elements.video_rtx_enabled?.checked) options.push(`апскейл RTX ${form.elements.video_rtx_scale?.value || "2"}×`);
+      if (form.elements.video_color_match?.checked) options.push("перенос палитры");
+      if (form.elements.video_sharpen_enabled?.checked) options.push("финальная резкость");
+      return options;
+    }
+    if (family === "flux2" && fluxUpscaleMode?.value && fluxUpscaleMode.value !== "none") {
+      const labels = { ultimate: "Ultimate SD Upscale", seedvr2: "SeedVR2", both: "два этапа апскейла" };
+      options.push(labels[fluxUpscaleMode.value] || "финальный апскейл");
+    }
+    if (family === "krea2") {
+      const megapixels = Number(outputMegapixels?.value || 0);
+      if (templateID.value === "image-to-image") {
+        const factor = Number(form.elements.upscale_factor?.value || 1);
+        if (!preserveOriginalSize?.checked && factor > 1) options.push(`апскейл ${factor}×`);
+      } else {
+        if (Number(upscaleSteps?.value || 0) > 0) options.push("апскейл Krea2");
+        if (Number(detailSteps?.value || 0) > 0) options.push("финальная детализация");
+      }
+      if (megapixels >= 3) options.push(`${megapixels.toLocaleString("ru-RU")} Мп`);
+    }
+    if (!family && Number(steps?.value || 0) > 30) options.push("более 30 шагов");
+    return options;
+  };
+
+  const generationOutputLabel = (family) => {
+    if (family === "minimax_h3") return miniMaxVideoResolutionPreview?.textContent || `${miniMaxVideoQuality?.value || "720"}p`;
+    if (family === "krea2") return `${outputMegapixels?.value || "1.9"} Мп`;
+    if (family === "flux2" && templateID.value === "image-to-image") {
+      if (preserveOriginalSize?.checked) return "Размер исходного фото";
+      return `${width?.value || "1024"} × ${height?.value || "1024"}`;
+    }
+    return `${width?.value || "1024"} × ${height?.value || "1024"}`;
+  };
+
+  const syncGenerationSummary = () => {
+    syncGenerationModeGuide();
+    if (!generationSummaryFacts) return;
+    const { preset, selectedModel, family, references, hasAudio, hasVideo } = currentGenerationContext();
+    if (!preset || !selectedModel?.value) {
+      if (generationSummaryTitle) generationSummaryTitle.textContent = "Выберите workflow и модель";
+      renderDefinitionList(generationSummaryFacts, [{ label: "Следующий шаг", value: "Вернитесь к шагу 2 и завершите выбор" }]);
+      if (generationSummaryImpact) {
+        generationSummaryImpact.dataset.load = "normal";
+        generationSummaryImpact.textContent = "Сводка обновится автоматически после выбора параметров.";
+      }
+      return;
+    }
+    const loraCount = [...root.querySelectorAll(".lora-row:not([hidden]) .generation-lora-select")]
+      .filter((item) => !item.disabled && item.value).length;
+    const summary = generationModules.summary?.buildSummary?.({
+      family,
+      templateID: templateID.value,
+      workflowName: preset.querySelector("strong")?.textContent || "Текущая конфигурация",
+      modelName: selectedModel.textContent.trim(),
+      videoMode: miniMaxMode(),
+      references,
+      hasAudio,
+      hasVideo,
+      output: generationOutputLabel(family),
+      duration: family === "minimax_h3" ? `${form.elements.video_duration_seconds?.value || "5"} сек.` : "",
+      loraCount,
+      heavyOptions: selectedHeavyOptions(family),
+    });
+    if (!summary) return;
+    if (generationSummaryTitle) generationSummaryTitle.textContent = summary.title;
+    renderDefinitionList(generationSummaryFacts, summary.facts);
+    if (generationSummaryImpact) {
+      generationSummaryImpact.dataset.load = summary.load || "normal";
+      generationSummaryImpact.textContent = summary.impact || "";
+    }
   };
 
   const applyGenerationProfile = (profile) => {
@@ -1442,7 +1581,7 @@
     syncSelectedImageSummary();
     if (isFluxEdit) {
       if (editorProfileTitle) editorProfileTitle.textContent = "Flux2: фото и промт";
-      if (editorProfileDescription) editorProfileDescription.textContent = "До четырёх изображений: основной кадр и до трёх референсов. Flux2 работает с латентами исходных изображений.";
+      if (editorProfileDescription) editorProfileDescription.textContent = "До четырёх изображений: основной кадр и до трёх дополнительных референсов.";
       if (editSourceTitle) editSourceTitle.textContent = "Исходник и референсы Flux2";
       if (editSourceDescription) editSourceDescription.textContent = "Выберите детализацию входных фото. Размер результата меняется только при включённой настройке кадра.";
       if (mainPassTitle) mainPassTitle.textContent = "Параметры Flux2";
@@ -1510,6 +1649,7 @@
       syncMiniMaxVideoProfile({ applyModelDefaults: true });
       syncWorkflowFields();
     }
+    updateWorkflowNext();
   });
   quality?.addEventListener("change", applyQuality);
   [aspect, outputMegapixels, dimensionMultiple, maxSide].forEach((input) => input?.addEventListener("change", calculateResolution));
@@ -1680,7 +1820,7 @@
     videoSlice.dispatch({ type: "SET_MODE", mode: miniMaxMode() }, (state) => ({ ...state, mode: miniMaxMode() }));
     if (miniMaxVideoModeHint) miniMaxVideoModeHint.textContent = miniMaxMode() === "references"
       ? referenceOnly
-        ? "Выбрано: Eros Max использует REF2VA. Ролик строится по промту; фото, видео и аудио необязательны."
+        ? "Выбрано: Eros Max работает в режиме свободных референсов. Ролик строится по промту; фото, видео и аудио необязательны."
         : "Выбрано: ролик строится по промту; фото, видео и аудио при наличии используются как свободные референсы."
       : "Выбрано: ролик строится по промту; Фото 1 и Фото 2 при наличии фиксируют точные начало и финал.";
     syncImageSlots();
@@ -1861,9 +2001,13 @@
   };
 
   const openGalleryImagePicker = async (item) => {
-    if (!imagePicker || !item || !isMiniMaxSelected()) return;
+    if (!imagePicker || !item || !selectedGenerationWorkflow()) return;
     galleryPickerSlot = item;
-    if (imagePickerSlot) imagePickerSlot.textContent = miniMaxMode() === "references" ? `референсе ${item.index}` : item.index === 1 ? "первом кадре" : "последнем кадре";
+    if (imagePickerSlot) {
+      imagePickerSlot.textContent = isMiniMaxSelected()
+        ? miniMaxMode() === "references" ? `референсе ${item.index}` : item.index === 1 ? "первом кадре" : "последнем кадре"
+        : item.index === 1 ? "основном фото" : `референсе ${item.index}`;
+    }
     imagePicker.hidden = false;
     document.body.classList.add("generation-image-picker-open");
     renderGalleryImagePicker();
@@ -1960,8 +2104,9 @@
     });
     item.galleryButton?.addEventListener("click", () => openGalleryImagePicker(item));
     item.role?.addEventListener("change", () => {
-      if (item.index === 1) item.role.value = "base_scene";
+      if (templateID.value === "image-to-image" && item.index === 1) item.role.value = "base_scene";
       syncReferenceMap();
+      syncGenerationSummary();
       if (promptAssistantEnabled?.checked) resetPromptAssistantReview();
     });
   });
@@ -2331,6 +2476,18 @@
     body.set("assistant_suggestion", assistant.suggestion);
     if (assistant.correlationID) body.set("correlation_id", assistant.correlationID);
     ["input_image", "input_image_2", "input_image_3", "input_image_4"].forEach((name, index) => body.set(name, uploadedImages.get(index + 1) || ""));
+    for (let index = 1; index <= 4; index += 1) {
+      body.delete(`image_role_${index}`);
+      body.delete(`image_source_${index}`);
+      body.delete(`image_source_id_${index}`);
+      body.delete(`image_source_name_${index}`);
+    }
+    selectedReferenceMetadata().forEach((reference) => {
+      body.set(`image_role_${reference.number}`, reference.role || "details");
+      body.set(`image_source_${reference.number}`, reference.source || "unknown");
+      if (reference.sourceID) body.set(`image_source_id_${reference.number}`, reference.sourceID);
+      if (reference.sourceName) body.set(`image_source_name_${reference.number}`, reference.sourceName);
+    });
     body.set("input_audio", miniMaxAudioIsAvailable() ? uploadedAudio : "");
     body.set("input_video", miniMaxReferencesAreAvailable() ? uploadedVideo : "");
     body.set("video_reference_audio", miniMaxReferencesAreAvailable() && uploadedVideo && form.elements.video_reference_audio?.checked ? "true" : "false");

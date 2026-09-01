@@ -7,6 +7,7 @@ const vm = require("node:vm");
 const storeModule = require("../../static/generation-store.js");
 const wizard = require("../../static/generation-wizard.js");
 const media = require("../../static/generation-media.js");
+const summary = require("../../static/generation-summary.js");
 const video = require("../../static/generation-video.js");
 const assistant = require("../../static/generation-assistant.js");
 const job = require("../../static/generation-job.js");
@@ -93,6 +94,54 @@ test("media exposes one source interface for device and gallery", async () => {
   assert.equal(state.sources[1].kind, media.SOURCE_GALLERY);
   assert.equal(state.uploaded[1], "users/u1/ready.png");
   assert.equal(state.uploading, false);
+});
+
+test("media keeps the role and source of every reference", () => {
+  const file = { name: "device.png", size: 42, type: "image/png" };
+  const galleryEntry = { id: 17, filename: "gallery.png", url: "/media/17" };
+  assert.deepEqual(
+    media.referenceMetadata({ templateID: "image-to-image", slot: 1, source: media.deviceSource(file), role: "identity" }),
+    { number: 1, role: "base_scene", source: "device", sourceID: "", sourceName: "device.png" },
+  );
+  assert.deepEqual(
+    media.referenceMetadata({ templateID: "image-to-image", slot: 2, source: media.gallerySource(galleryEntry), role: "identity" }),
+    { number: 2, role: "identity", source: "gallery", sourceID: "17", sourceName: "gallery.png" },
+  );
+  assert.equal(media.referenceMetadata({ templateID: "minimax-h3-video", videoMode: "frames", slot: 1, uploaded: "restored/first.png" }).role, "first_frame");
+  assert.equal(media.referenceMetadata({ templateID: "minimax-h3-video", videoMode: "frames", slot: 2, uploaded: "restored/last.png" }).role, "last_frame");
+  assert.deepEqual(
+    media.referenceMetadata({ templateID: "minimax-h3-video", videoMode: "references", slot: 4, role: "style", uploaded: "restored/style.png" }),
+    { number: 4, role: "style", source: "restored", sourceID: "", sourceName: "restored/style.png" },
+  );
+});
+
+test("generation guides cover every quick-generation family and video mode", () => {
+  assert.equal(summary.guideFor({ family: "krea2", templateID: "text-to-image" }).eyebrow, "Текст в изображение");
+  assert.equal(summary.guideFor({ family: "krea2", templateID: "image-to-image" }).eyebrow, "Редактирование фото");
+  assert.equal(summary.guideFor({ family: "flux2", templateID: "image-to-image" }).eyebrow, "Точное редактирование");
+  assert.equal(summary.modeLabel({ family: "minimax_h3", templateID: "minimax-h3-video", references: [] }), "Текст в видео");
+  assert.equal(summary.modeLabel({ family: "minimax_h3", templateID: "minimax-h3-video", references: [{ number: 1 }] }), "Первый кадр");
+  assert.equal(summary.modeLabel({ family: "minimax_h3", templateID: "minimax-h3-video", references: [{ number: 1 }, { number: 2 }] }), "Первый и последний кадры");
+  assert.equal(summary.modeLabel({ family: "minimax_h3", templateID: "minimax-h3-video", videoMode: "references" }), "Свободные референсы");
+});
+
+test("launch summary reports shared settings and heavy work for all families", () => {
+  const imageSummary = summary.buildSummary({
+    family: "flux2", templateID: "image-to-image", workflowName: "Flux2 Редактирование", modelName: "Flux2 Dev",
+    output: "2048 × 2048", references: [{ number: 1, source: "gallery" }, { number: 2, source: "device" }],
+    loraCount: 2, heavyOptions: ["SeedVR2"],
+  });
+  assert.equal(imageSummary.facts.find((item) => item.label === "Режим").value, "Точное редактирование");
+  assert.equal(imageSummary.facts.find((item) => item.label === "Материалы").value, "2 фото (1 из галереи, 1 с устройства)");
+  assert.equal(imageSummary.load, "high");
+  assert.match(imageSummary.impact, /SeedVR2/);
+
+  const videoSummary = summary.buildSummary({
+    family: "minimax_h3", templateID: "minimax-h3-video", workflowName: "MiniMaxH3 Видео", modelName: "MiniMax H3 v4",
+    duration: "10 секунд", output: "480p", videoMode: "references", hasAudio: true,
+  });
+  assert.equal(videoSummary.facts.find((item) => item.label === "Режим").value, "Свободные референсы");
+  assert.equal(videoSummary.facts.find((item) => item.label === "Результат").value, "480p · 10 секунд");
 });
 
 test("video state derives modes, profiles, limits, and reference resolution", () => {
@@ -212,7 +261,7 @@ class FakeElement {
   getBoundingClientRect() { return { left: 0, width: 24 }; }
 }
 
-const moduleAPIs = { store: storeModule, wizard, media, video, assistant, job, recipes, history, lightbox };
+const moduleAPIs = { store: storeModule, wizard, media, summary, video, assistant, job, recipes, history, lightbox };
 
 const pageContextWithout = (omittedModule) => {
   const elements = new Map();

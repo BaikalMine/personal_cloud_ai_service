@@ -37,7 +37,8 @@ func TestGenerateTemplateRenders(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "data-comfy-generation") || !strings.Contains(output.String(), "/static/generate.js") ||
 		!strings.Contains(output.String(), "/static/generation-store.js") || !strings.Contains(output.String(), "/static/generation-media.js") ||
-		!strings.Contains(output.String(), "Krea 2: фото и промт") || !strings.Contains(output.String(), "Диффузионная модель") ||
+		!strings.Contains(output.String(), "/static/generation-summary.js") || !strings.Contains(output.String(), "Krea 2: фото и промт") ||
+		!strings.Contains(output.String(), "Выберите workflow и модель") || !strings.Contains(output.String(), "Что будет создавать результат") ||
 		!strings.Contains(output.String(), "generation-editor-profile") || !strings.Contains(output.String(), "prompt-assistant-template") ||
 		!strings.Contains(output.String(), "Перенос внешности и редактирование") || !strings.Contains(output.String(), "prompt-assistant-think") ||
 		!strings.Contains(output.String(), "Максимум деталей · 4,7 Мп") || !strings.Contains(output.String(), "data-gallery-image-picker-open") ||
@@ -332,6 +333,63 @@ func TestParseGenerationFormAcceptsCommasInPhotoAndPromptControls(t *testing.T) 
 	}
 	if input.CFG != 1.5 || input.Denoise != 0.75 || input.ReferenceBoost != 4.25 || input.UpscaleFactor != 1.5 || input.SkinCoolness != 0.22 || input.LoraModel[0] != 0.8 || input.FluxGuidance != 3.5 || input.FluxActiveScale != 0.8 || input.FluxTokenWhiten != 0.25 || input.FluxNormEqualize != 0.5 || input.ColorStrength != 0.6 {
 		t.Fatalf("comma controls were not preserved: %#v", input)
+	}
+}
+
+func TestParseGenerationFormKeepsReferenceRolesAndSources(t *testing.T) {
+	form := url.Values{
+		"template_id":         {"image-to-image"},
+		"generation_workflow": {"photoflow-flux2-edit"},
+		"model":               {"flux2:test"},
+		"positive_prompt":     {"replace the jacket"},
+		"input_image":         {"gateway/base.png"},
+		"input_image_2":       {"gateway/jacket.png"},
+		"image_role_1":        {"identity"},
+		"image_source_1":      {"gallery"},
+		"image_source_id_1":   {"17"},
+		"image_source_name_1": {"base.png"},
+		"image_role_2":        {"wardrobe_object"},
+		"image_source_2":      {"device"},
+		"image_source_name_2": {"jacket.png"},
+		"width":               {"1024"},
+		"height":              {"1024"},
+		"steps":               {"20"},
+		"cfg":                 {"1"},
+		"denoise":             {"0.75"},
+		"sampler":             {"euler"},
+		"scheduler":           {"simple"},
+		"seed":                {"42"},
+	}
+	request := httptest.NewRequest(http.MethodPost, "/generate/run", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	input, err := parseGenerationForm(request)
+	if err != nil {
+		t.Fatalf("parseGenerationForm() error = %v", err)
+	}
+	references := input.references()
+	if len(references) != 2 {
+		t.Fatalf("references = %#v", references)
+	}
+	if references[0].Number != 1 || references[0].Role != "base_scene" || references[0].Source != "gallery" || references[0].SourceID != "17" || references[0].SourceName != "base.png" {
+		t.Fatalf("primary reference = %#v", references[0])
+	}
+	if references[1].Number != 2 || references[1].Role != "wardrobe_object" || references[1].Source != "device" || references[1].SourceName != "jacket.png" {
+		t.Fatalf("secondary reference = %#v", references[1])
+	}
+
+	video := generationForm{
+		TemplateID:      "minimax-h3-video",
+		VideoMode:       miniMaxH3FrameMode,
+		InputImage:      "gateway/first.png",
+		ReferenceImages: [3]string{"gateway/last.png"},
+		ReferenceMetadata: [maxGenerationReferenceSlots]generationReferenceMetadata{
+			{Role: "style", Source: "gallery"},
+			{Role: "identity", Source: "device"},
+		},
+	}.references()
+	if video[0].Role != "first_frame" || video[1].Role != "last_frame" {
+		t.Fatalf("MiniMax frame roles = %#v", video)
 	}
 }
 
@@ -1105,10 +1163,10 @@ func TestGenerationModelCatalogEnablesInstalledEditWorkflows(t *testing.T) {
 	}
 	catalog := buildGenerationModelCatalog(info)
 	presets := buildGenerationPresets(catalog)
-	if preset, ok := findGenerationPreset(presets, "photoflow-krea2-edit", "image-to-image"); !ok || preset.ModelName != "Krea2/krea2TurboOfficialComfy_krea2TurboBf16" || preset.DefaultSteps != 8 || preset.DefaultCFG != 1 {
+	if preset, ok := findGenerationPreset(presets, "photoflow-krea2-edit", "image-to-image"); !ok || preset.ModelName != "Krea2/krea2TurboOfficialComfy_krea2TurboBf16" || preset.DefaultSteps != 8 || preset.DefaultCFG != 1 || preset.MaxInputImages != 2 {
 		t.Fatalf("unexpected Krea 2 edit preset: %#v", preset)
 	}
-	if preset, ok := findGenerationPreset(presets, "photoflow-flux2-edit", "image-to-image"); !ok || !preset.Available {
+	if preset, ok := findGenerationPreset(presets, "photoflow-flux2-edit", "image-to-image"); !ok || !preset.Available || !preset.AllowsImages || preset.MaxInputImages != 4 {
 		t.Fatalf("Flux 2 edit preset is unavailable: %#v", preset)
 	}
 }
@@ -1148,7 +1206,7 @@ func TestGenerationModelCatalogDiscoversMiniMaxH3V4AndErosMax(t *testing.T) {
 		t.Fatalf("unexpected H3 Eros Max model: %#v", eros)
 	}
 	preset, ok := findGenerationPreset(buildGenerationPresets(catalog), "minimax-h3-video", "minimax-h3-video")
-	if !ok || preset.ModelCount != 2 {
+	if !ok || preset.ModelCount != 2 || !preset.AllowsImages || preset.MaxInputImages != 4 {
 		t.Fatalf("MiniMax H3 preset = %#v", preset)
 	}
 }
@@ -1453,13 +1511,17 @@ func TestGenerationJobValuesPreserveMiniMaxH3V4Controls(t *testing.T) {
 		"video_sharpen_enabled":         {"true"},
 		"video_output_crf":              {"19"},
 		"input_image":                   {"gateway/image.png"},
+		"image_role_1":                  {"first_frame"},
+		"image_source_1":                {"gallery"},
+		"image_source_id_1":             {"17"},
+		"image_source_name_1":           {"saved.png"},
 		"input_audio":                   {"gateway/voice.mp3"},
 		"assistant_original_prompt":     {"original"},
 		"assistant_suggestion":          {"enhanced"},
 		"untrusted_unrelated_parameter": {"omit"},
 	}
 	values := generationJobValues(form, 42)
-	for _, name := range []string{"video_memory_optimize", "video_memory_chunk_rows", "video_sparse_attention", "video_sparse_early_schedule", "video_rife_enabled", "video_rife_checkpoint", "video_rtx_enabled", "video_rtx_scale", "video_color_match", "video_sharpen_enabled", "video_output_crf", "input_image", "input_audio", "assistant_original_prompt", "assistant_suggestion", "seed"} {
+	for _, name := range []string{"video_memory_optimize", "video_memory_chunk_rows", "video_sparse_attention", "video_sparse_early_schedule", "video_rife_enabled", "video_rife_checkpoint", "video_rtx_enabled", "video_rtx_scale", "video_color_match", "video_sharpen_enabled", "video_output_crf", "input_image", "image_role_1", "image_source_1", "image_source_id_1", "image_source_name_1", "input_audio", "assistant_original_prompt", "assistant_suggestion", "seed"} {
 		if values[name] == "" {
 			t.Fatalf("durable generation payload dropped %q: %#v", name, values)
 		}
@@ -1469,6 +1531,26 @@ func TestGenerationJobValuesPreserveMiniMaxH3V4Controls(t *testing.T) {
 	}
 	if _, exists := values["untrusted_unrelated_parameter"]; exists {
 		t.Fatal("durable generation payload retained unrelated input")
+	}
+}
+
+func TestGenerationRecipeKeepsReferenceRolesWithoutUserMediaSources(t *testing.T) {
+	values := generationRecipeValues(url.Values{
+		"template_id":         {"image-to-image"},
+		"image_role_1":        {"base_scene"},
+		"image_role_2":        {"wardrobe_object"},
+		"image_source_1":      {"gallery"},
+		"image_source_id_1":   {"17"},
+		"image_source_name_1": {"saved.png"},
+		"input_image":         {"gateway/saved.png"},
+	}, 42)
+	if values["image_role_1"] != "base_scene" || values["image_role_2"] != "wardrobe_object" {
+		t.Fatalf("recipe reference roles = %#v", values)
+	}
+	for _, name := range []string{"input_image", "image_source_1", "image_source_id_1", "image_source_name_1"} {
+		if _, exists := values[name]; exists {
+			t.Fatalf("recipe retained user-specific media field %q: %#v", name, values)
+		}
 	}
 }
 
@@ -1997,8 +2079,12 @@ func TestMiniMaxH3ResourceBudgetAllows2KWithRTXAndRIFE(t *testing.T) {
 
 func TestGenerationAuditMetadataCapturesMiniMaxSettingsAndLoras(t *testing.T) {
 	input := generationForm{
-		ModelName: "MiniMax/model.safetensors", ModelFamily: modelFamilyMiniMaxH3,
+		TemplateID: "minimax-h3-video", ModelName: "MiniMax/model.safetensors", ModelFamily: modelFamilyMiniMaxH3,
 		InputImage: "gateway/first.png", ReferenceImages: [3]string{"gateway/second.png"},
+		ReferenceMetadata: [maxGenerationReferenceSlots]generationReferenceMetadata{
+			{Role: "identity", Source: "gallery", SourceID: "17", SourceName: "first.png"},
+			{Role: "style", Source: "device", SourceName: "second.png"},
+		},
 		Width: 480, Height: 640, Steps: 20, CFG: 1, Denoise: 1, Sampler: "res_multistep", Scheduler: "simple", Seed: 42,
 		VideoMode: miniMaxH3ReferenceMode, VideoResolution: "reference-480p", VideoQuality: 480, VideoDurationSeconds: 5,
 		VideoReferenceSize: "match", VideoSteps: 20, VideoScheduler: "simple", VideoShiftVideo: 11, VideoShiftAudio: 3,
@@ -2026,5 +2112,9 @@ func TestGenerationAuditMetadataCapturesMiniMaxSettingsAndLoras(t *testing.T) {
 	loras, ok := metadata["loras"].([]map[string]any)
 	if !ok || len(loras) != 1 || loras[0]["name"] != "MiniMaxH3/motion.safetensors" || loras[0]["model_strength"] != 0.9 {
 		t.Fatalf("MiniMax audit LoRAs = %#v", metadata["loras"])
+	}
+	references, ok := metadata["references"].([]map[string]any)
+	if !ok || len(references) != 2 || references[0]["number"] != 1 || references[0]["role"] != "identity" || references[0]["source"] != "gallery" || references[0]["source_id"] != "17" || references[1]["role"] != "style" || references[1]["source"] != "device" {
+		t.Fatalf("MiniMax audit references = %#v", metadata["references"])
 	}
 }

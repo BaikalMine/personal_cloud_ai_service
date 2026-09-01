@@ -2264,6 +2264,24 @@ func generationAuditMetadata(definition workflowDefinition, input generationForm
 	if len(loras) > 0 {
 		metadata["loras"] = loras
 	}
+	references := make([]map[string]any, 0, input.imageCount())
+	for _, reference := range input.references() {
+		item := map[string]any{
+			"number": reference.Number,
+			"role":   reference.Role,
+			"source": reference.Source,
+		}
+		if reference.SourceID != "" {
+			item["source_id"] = reference.SourceID
+		}
+		if reference.SourceName != "" {
+			item["source_name"] = reference.SourceName
+		}
+		references = append(references, item)
+	}
+	if len(references) > 0 {
+		metadata["references"] = references
+	}
 	switch definition.ID {
 	case "text-to-image-krea2":
 		metadata["krea2_text"] = map[string]any{

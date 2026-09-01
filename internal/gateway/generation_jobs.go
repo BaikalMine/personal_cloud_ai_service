@@ -115,7 +115,7 @@ func generationJobValues(form url.Values, resolvedSeed int64) map[string]string 
 		if len(raw) == 0 || name == "csrf" || name == "client_request_id" || name == "recipe_name" {
 			continue
 		}
-		allowed := allowedGenerationRecipeField(name) || strings.HasPrefix(name, "input_image") || strings.HasPrefix(name, "assistant_") || name == "input_audio" || name == "input_video"
+		allowed := allowedGenerationRecipeField(name) || allowedGenerationReferenceJobField(name) || strings.HasPrefix(name, "input_image") || strings.HasPrefix(name, "assistant_") || name == "input_audio" || name == "input_video"
 		if !allowed {
 			continue
 		}
