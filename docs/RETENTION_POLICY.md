@@ -11,6 +11,7 @@ source of product behavior.
 | --- | --- | ---: | --- |
 | Quick-generation history (`quick_generation_variants`) | `GENERATION_RETENTION` | 24 hours | Quick generation. Only terminal attempts expire; queued and running attempts remain. |
 | Generated media (`content_media`, `comfy_output_ownership`) | `GENERATION_RETENTION` | 24 hours | Content and file isolation. Encrypted media and orphaned ComfyUI ownership rows expire together. |
+| Pinned generated media (`content_media`) | `PINNED_GENERATION_RETENTION` | 30 days | Personal media library. Pinning extends the media, its content event and source job lineage from the time of the action. Unpinning returns the result to the ordinary generation window. |
 | AI-content metadata (`content_events`) | `AI_CONTENT_RETENTION` | 7 days | Content review. The event remains after media expiry and renders an archived state instead of a broken preview. |
 | ComfyUI inputs (`comfy_input_assets`) | `COMFY_INPUT_RETENTION` | 72 hours | File isolation. User-owned references expire after their last permitted use. |
 | Host samples (`host_metrics`) | `HOST_METRIC_RETENTION` | 7 days | Monitoring. The dashboard can display a shorter chart window. |
@@ -32,7 +33,9 @@ parent object is removed.
 `AI_CONTENT_RETENTION` cannot be shorter than `GENERATION_RETENTION`.
 `GENERATION_REQUEST_RETENTION` also cannot be shorter than it. The generation
 setting deliberately controls both history and binary media so a gallery entry
-cannot outlive its usable result.
+cannot outlive its usable result. `PINNED_GENERATION_RETENTION` cannot be
+shorter than `GENERATION_RETENTION`; a live pin protects the related terminal
+variant and durable job from cleanup until the extended media deadline.
 
 ## Cleanup execution
 

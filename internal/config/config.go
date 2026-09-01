@@ -15,24 +15,25 @@ import (
 )
 
 const (
-	defaultGenerationRetention = 24 * time.Hour
-	defaultAIContentRetention  = 7 * 24 * time.Hour
-	defaultComfyInputRetention = 72 * time.Hour
-	defaultHostMetricRetention = 7 * 24 * time.Hour
-	defaultAuditLogRetention   = 90 * 24 * time.Hour
-	defaultProxyRetention      = 90 * 24 * time.Hour
-	defaultWebSocketRetention  = 30 * 24 * time.Hour
-	defaultRequestRetention    = 7 * 24 * time.Hour
-	defaultDailyUsageRetention = 90 * 24 * time.Hour
-	defaultInviteRetention     = 90 * 24 * time.Hour
-	defaultCleanupBatchSize    = 1000
-	defaultCleanupMaxBatches   = 20
-	defaultDependencyCheck     = 10 * time.Second
-	defaultDependencyStale     = 45 * time.Second
-	defaultDependencyOffline   = 3 * time.Minute
-	defaultComfyObjectInfoTTL  = 30 * time.Second
-	defaultComfyObjectInfoMax  = 24 * time.Hour
-	defaultMediaInflightMB     = 256
+	defaultGenerationRetention  = 24 * time.Hour
+	defaultPinnedMediaRetention = 30 * 24 * time.Hour
+	defaultAIContentRetention   = 7 * 24 * time.Hour
+	defaultComfyInputRetention  = 72 * time.Hour
+	defaultHostMetricRetention  = 7 * 24 * time.Hour
+	defaultAuditLogRetention    = 90 * 24 * time.Hour
+	defaultProxyRetention       = 90 * 24 * time.Hour
+	defaultWebSocketRetention   = 30 * 24 * time.Hour
+	defaultRequestRetention     = 7 * 24 * time.Hour
+	defaultDailyUsageRetention  = 90 * 24 * time.Hour
+	defaultInviteRetention      = 90 * 24 * time.Hour
+	defaultCleanupBatchSize     = 1000
+	defaultCleanupMaxBatches    = 20
+	defaultDependencyCheck      = 10 * time.Second
+	defaultDependencyStale      = 45 * time.Second
+	defaultDependencyOffline    = 3 * time.Minute
+	defaultComfyObjectInfoTTL   = 30 * time.Second
+	defaultComfyObjectInfoMax   = 24 * time.Hour
+	defaultMediaInflightMB      = 256
 )
 
 // RetentionPolicy is the single source of truth for data lifetime. Generation
@@ -41,6 +42,7 @@ const (
 type RetentionPolicy struct {
 	GenerationHistory  time.Duration
 	GenerationMedia    time.Duration
+	PinnedMedia        time.Duration
 	AIContent          time.Duration
 	ComfyInputs        time.Duration
 	HostMetrics        time.Duration
@@ -56,6 +58,7 @@ func DefaultRetentionPolicy() RetentionPolicy {
 	return RetentionPolicy{
 		GenerationHistory:  defaultGenerationRetention,
 		GenerationMedia:    defaultGenerationRetention,
+		PinnedMedia:        defaultPinnedMediaRetention,
 		AIContent:          defaultAIContentRetention,
 		ComfyInputs:        defaultComfyInputRetention,
 		HostMetrics:        defaultHostMetricRetention,
@@ -82,6 +85,12 @@ func (p RetentionPolicy) WithDefaults() RetentionPolicy {
 	}
 	p.GenerationHistory = generation
 	p.GenerationMedia = generation
+	if p.PinnedMedia <= 0 {
+		p.PinnedMedia = defaults.PinnedMedia
+	}
+	if p.PinnedMedia < generation {
+		p.PinnedMedia = generation
+	}
 	if p.AIContent <= 0 {
 		p.AIContent = defaults.AIContent
 	}
@@ -410,6 +419,13 @@ func loadRetentionPolicy() (RetentionPolicy, error) {
 	if err != nil {
 		return RetentionPolicy{}, err
 	}
+	pinnedMedia, err := durationEnvBetween("PINNED_GENERATION_RETENTION", defaultPinnedMediaRetention, time.Hour, 365*24*time.Hour)
+	if err != nil {
+		return RetentionPolicy{}, err
+	}
+	if pinnedMedia < generation {
+		return RetentionPolicy{}, fmt.Errorf("PINNED_GENERATION_RETENTION must be greater than or equal to GENERATION_RETENTION")
+	}
 	aiContent, err := durationEnvBetween("AI_CONTENT_RETENTION", defaultAIContentRetention, time.Hour, 365*24*time.Hour)
 	if err != nil {
 		return RetentionPolicy{}, err
@@ -455,6 +471,7 @@ func loadRetentionPolicy() (RetentionPolicy, error) {
 	return RetentionPolicy{
 		GenerationHistory:  generation,
 		GenerationMedia:    generation,
+		PinnedMedia:        pinnedMedia,
 		AIContent:          aiContent,
 		ComfyInputs:        comfyInputs,
 		HostMetrics:        hostMetrics,

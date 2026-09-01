@@ -80,10 +80,13 @@ type UserGenerationMedia struct {
 	MIMEType      string
 	OriginalName  string
 	ModelName     string
+	SizeBytes     int64
 	CreatedAt     time.Time
 	ExpiresAt     time.Time
 	Sensitive     bool
 	VisualPending bool
+	Pinned        bool
+	Favorite      bool
 }
 
 type ContentMediaSummary struct {

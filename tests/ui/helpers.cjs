@@ -1,5 +1,29 @@
 const { expect } = require("@playwright/test");
 
+const previewClock = Date.parse("2026-09-01T07:14:00.000Z");
+const clockInstalled = new WeakSet();
+
+const installPreviewClock = async (page) => {
+  if (!clockInstalled.has(page)) {
+    await page.addInitScript(({ now }) => {
+      const NativeDate = Date;
+      class PreviewDate extends NativeDate {
+        constructor(...args) {
+          super(...(args.length ? args : [now]));
+        }
+
+        static now() {
+          return now;
+        }
+      }
+      PreviewDate.parse = NativeDate.parse;
+      PreviewDate.UTC = NativeDate.UTC;
+      window.Date = PreviewDate;
+    }, { now: previewClock });
+    clockInstalled.add(page);
+  }
+};
+
 const settlePage = async (page) => {
   await page.waitForLoadState("domcontentloaded");
   await page.evaluate(async () => {
@@ -46,4 +70,4 @@ const expectFocusInside = async (page, selector) => {
   expect(inside).toBe(true);
 };
 
-module.exports = { settlePage, assertNoViewportOverflow, expectFocusInside };
+module.exports = { installPreviewClock, settlePage, assertNoViewportOverflow, expectFocusInside };

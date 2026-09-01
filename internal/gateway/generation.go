@@ -48,12 +48,22 @@ type generationOutput struct {
 }
 
 type generationMediaView struct {
-	ID          int64  `json:"id"`
-	URL         string `json:"url"`
-	Filename    string `json:"filename"`
-	MediaType   string `json:"media_type"`
-	ExpiresUnix int64  `json:"expires_unix"`
-	Sensitive   bool   `json:"sensitive"`
+	ID                    int64                                `json:"id"`
+	URL                   string                               `json:"url"`
+	Filename              string                               `json:"filename"`
+	MediaType             string                               `json:"media_type"`
+	MIMEType              string                               `json:"mime_type,omitempty"`
+	SizeBytes             int64                                `json:"size_bytes"`
+	CreatedUnix           int64                                `json:"created_unix"`
+	ExpiresUnix           int64                                `json:"expires_unix"`
+	Sensitive             bool                                 `json:"sensitive"`
+	Pinned                bool                                 `json:"pinned"`
+	Favorite              bool                                 `json:"favorite"`
+	Tags                  []string                             `json:"tags,omitempty"`
+	Collections           []domain.GenerationMediaCollection   `json:"collections,omitempty"`
+	GenerationJobID       *int64                               `json:"generation_job_id,omitempty"`
+	GenerationJobPublicID string                               `json:"generation_job_public_id,omitempty"`
+	ReferenceUses         []domain.GenerationMediaReferenceUse `json:"reference_uses,omitempty"`
 }
 
 type generationStatus struct {
@@ -112,6 +122,13 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 	recentLibrary := quick(http.HandlerFunc(a.handleRecentGenerationLibrary))
 	libraryImages := quick(a.requireQuickGenerationTypes(quickGenerationImageInputTemplateIDs(), http.HandlerFunc(a.handleGenerationLibraryImages)))
 	hideLibrary := quick(http.HandlerFunc(a.handleHideGenerationLibraryMedia))
+	pinLibrary := quick(http.HandlerFunc(a.handlePinGenerationLibraryMedia))
+	favoriteLibrary := quick(http.HandlerFunc(a.handleFavoriteGenerationLibraryMedia))
+	metadataLibrary := quick(http.HandlerFunc(a.handleGenerationLibraryMetadata))
+	collectionsLibrary := quick(http.HandlerFunc(a.handleGenerationLibraryCollections))
+	deleteCollection := quick(http.HandlerFunc(a.handleDeleteGenerationLibraryCollection))
+	bulkHideLibrary := quick(http.HandlerFunc(a.handleBulkHideGenerationLibraryMedia))
+	exportLibrary := quick(http.HandlerFunc(a.handleExportGenerationLibraryMedia))
 	reuseLibraryImage := quick(a.requireQuickGenerationTypes(quickGenerationImageInputTemplateIDs(), http.HandlerFunc(a.handleReuseGenerationLibraryImage)))
 	upload := quick(a.requireQuickGenerationTypes(quickGenerationImageInputTemplateIDs(), a.quickGenerationUploadHandler()))
 	uploadAudio := quick(a.requireQuickGenerationTypes([]string{"minimax-h3-video"}, a.quickGenerationAudioUploadHandler()))
@@ -137,6 +154,13 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 	mux.Handle("/generate/queue", queue)
 	mux.Handle("/generate/output", output)
 	mux.Handle("/generate/library/hide", hideLibrary)
+	mux.Handle("/generate/library/pin", pinLibrary)
+	mux.Handle("/generate/library/favorite", favoriteLibrary)
+	mux.Handle("/generate/library/metadata", metadataLibrary)
+	mux.Handle("/generate/library/collections", collectionsLibrary)
+	mux.Handle("/generate/library/collections/delete", deleteCollection)
+	mux.Handle("/generate/library/bulk-hide", bulkHideLibrary)
+	mux.Handle("/generate/library/export", exportLibrary)
 	mux.Handle("/generate/library/reuse-image", reuseLibraryImage)
 	mux.Handle("/generate/library/images", libraryImages)
 	mux.Handle("/generate/library/recent", recentLibrary)
@@ -273,7 +297,9 @@ func (a *App) recentGenerationMedia(ctx context.Context, userID int64) []generat
 	for _, item := range items {
 		views = append(views, generationMediaView{
 			ID: item.ID, URL: "/generate/library/" + strconv.FormatInt(item.ID, 10), Filename: item.OriginalName,
-			MediaType: item.MediaType, ExpiresUnix: item.ExpiresAt.UnixMilli(), Sensitive: item.Sensitive || item.VisualPending,
+			MediaType: item.MediaType, MIMEType: item.MIMEType, SizeBytes: item.SizeBytes, CreatedUnix: item.CreatedAt.UnixMilli(),
+			ExpiresUnix: item.ExpiresAt.UnixMilli(), Sensitive: item.Sensitive || item.VisualPending,
+			Pinned: item.Pinned, Favorite: item.Favorite,
 		})
 	}
 	return views

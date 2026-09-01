@@ -12,6 +12,7 @@ import (
 type retentionPolicyView struct {
 	GenerationHistoryLabel string
 	GenerationMediaLabel   string
+	PinnedMediaLabel       string
 	AIContentLabel         string
 	ComfyInputsLabel       string
 	HostMetricsLabel       string
@@ -27,6 +28,7 @@ func newRetentionPolicyView(policy config.RetentionPolicy) retentionPolicyView {
 	return retentionPolicyView{
 		GenerationHistoryLabel: retentionHourLabel(policy.GenerationHistory),
 		GenerationMediaLabel:   retentionHourLabel(policy.GenerationMedia),
+		PinnedMediaLabel:       retentionDurationLabel(policy.PinnedMedia),
 		AIContentLabel:         retentionDurationLabel(policy.AIContent),
 		ComfyInputsLabel:       retentionDurationLabel(policy.ComfyInputs),
 		HostMetricsLabel:       retentionDurationLabel(policy.HostMetrics),

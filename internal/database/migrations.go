@@ -968,6 +968,60 @@ var migrationCatalog = []migration{
 			)`,
 		},
 	},
+	{
+		version: 44,
+		name:    "generation_media_library",
+		statements: []string{
+			`ALTER TABLE content_media ADD COLUMN IF NOT EXISTS favorite_at TIMESTAMPTZ NULL`,
+			`ALTER TABLE content_media ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMPTZ NULL`,
+			`CREATE INDEX IF NOT EXISTS content_media_favorite_idx ON content_media(favorite_at DESC,id DESC) WHERE favorite_at IS NOT NULL AND profile_hidden_at IS NULL`,
+			`CREATE INDEX IF NOT EXISTS content_media_pinned_idx ON content_media(pinned_at DESC,id DESC) WHERE pinned_at IS NOT NULL AND profile_hidden_at IS NULL`,
+			`CREATE TABLE IF NOT EXISTS generation_media_collections (
+				id BIGSERIAL PRIMARY KEY,
+				user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				name TEXT NOT NULL CHECK (char_length(btrim(name)) BETWEEN 1 AND 80),
+				name_key TEXT NOT NULL CHECK (char_length(name_key) BETWEEN 1 AND 80),
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				UNIQUE(user_id,name_key)
+			)`,
+			`CREATE TABLE IF NOT EXISTS generation_media_collection_items (
+				collection_id BIGINT NOT NULL REFERENCES generation_media_collections(id) ON DELETE CASCADE,
+				media_id BIGINT NOT NULL REFERENCES content_media(id) ON DELETE CASCADE,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				PRIMARY KEY(collection_id,media_id)
+			)`,
+			`CREATE INDEX IF NOT EXISTS generation_media_collection_items_media_idx ON generation_media_collection_items(media_id,collection_id)`,
+			`CREATE TABLE IF NOT EXISTS generation_media_tags (
+				media_id BIGINT NOT NULL REFERENCES content_media(id) ON DELETE CASCADE,
+				user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				tag TEXT NOT NULL CHECK (char_length(btrim(tag)) BETWEEN 1 AND 32),
+				tag_key TEXT NOT NULL CHECK (char_length(tag_key) BETWEEN 1 AND 32),
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				PRIMARY KEY(media_id,tag_key)
+			)`,
+			`CREATE INDEX IF NOT EXISTS generation_media_tags_user_idx ON generation_media_tags(user_id,tag_key,media_id)`,
+			`CREATE TABLE IF NOT EXISTS generation_media_references (
+				id BIGSERIAL PRIMARY KEY,
+				source_media_id BIGINT NULL REFERENCES content_media(id) ON DELETE SET NULL,
+				source_media_name TEXT NOT NULL DEFAULT '' CHECK (char_length(source_media_name) <= 255),
+				target_job_id BIGINT NOT NULL REFERENCES generation_jobs(id) ON DELETE CASCADE,
+				reference_number SMALLINT NOT NULL CHECK (reference_number BETWEEN 1 AND 4),
+				reference_role TEXT NOT NULL DEFAULT 'details' CHECK (char_length(reference_role) BETWEEN 1 AND 40),
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				UNIQUE(target_job_id,reference_number)
+			)`,
+			`CREATE INDEX IF NOT EXISTS generation_media_references_source_idx ON generation_media_references(source_media_id,created_at DESC,id DESC) WHERE source_media_id IS NOT NULL`,
+			`DROP TRIGGER IF EXISTS generation_media_collections_change_revision ON generation_media_collections`,
+			`CREATE TRIGGER generation_media_collections_change_revision AFTER INSERT OR UPDATE OR DELETE ON generation_media_collections FOR EACH STATEMENT EXECUTE FUNCTION bump_content_change_revision()`,
+			`DROP TRIGGER IF EXISTS generation_media_collection_items_change_revision ON generation_media_collection_items`,
+			`CREATE TRIGGER generation_media_collection_items_change_revision AFTER INSERT OR UPDATE OR DELETE ON generation_media_collection_items FOR EACH STATEMENT EXECUTE FUNCTION bump_content_change_revision()`,
+			`DROP TRIGGER IF EXISTS generation_media_tags_change_revision ON generation_media_tags`,
+			`CREATE TRIGGER generation_media_tags_change_revision AFTER INSERT OR UPDATE OR DELETE ON generation_media_tags FOR EACH STATEMENT EXECUTE FUNCTION bump_content_change_revision()`,
+			`DROP TRIGGER IF EXISTS generation_media_references_change_revision ON generation_media_references`,
+			`CREATE TRIGGER generation_media_references_change_revision AFTER INSERT OR UPDATE OR DELETE ON generation_media_references FOR EACH STATEMENT EXECUTE FUNCTION bump_content_change_revision()`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

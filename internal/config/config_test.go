@@ -26,6 +26,7 @@ func TestLoadValidConfiguration(t *testing.T) {
 	t.Setenv("MEDIA_SPOOL_DIR", t.TempDir())
 	t.Setenv("PPROF_ENABLED", "true")
 	t.Setenv("GENERATION_RETENTION", "30h")
+	t.Setenv("PINNED_GENERATION_RETENTION", "720h")
 	t.Setenv("AI_CONTENT_RETENTION", "240h")
 	t.Setenv("COMFY_INPUT_RETENTION", "96h")
 	t.Setenv("HOST_METRIC_RETENTION", "240h")
@@ -69,7 +70,7 @@ func TestLoadValidConfiguration(t *testing.T) {
 	if cfg.MediaInFlightLimitBytes != 384<<20 || cfg.MediaSpoolDir == "" || !cfg.PprofEnabled {
 		t.Fatalf("unexpected media memory policy: bytes=%d spool=%q pprof=%t", cfg.MediaInFlightLimitBytes, cfg.MediaSpoolDir, cfg.PprofEnabled)
 	}
-	if cfg.Retention.GenerationHistory != 30*time.Hour || cfg.Retention.GenerationMedia != 30*time.Hour || cfg.Retention.AIContent != 240*time.Hour || cfg.Retention.ComfyInputs != 96*time.Hour || cfg.Retention.HostMetrics != 240*time.Hour || cfg.Retention.AuditLog != 2400*time.Hour || cfg.Retention.ProxyRequests != 2880*time.Hour || cfg.Retention.WebSocketSessions != 1440*time.Hour || cfg.Retention.GenerationRequests != 240*time.Hour || cfg.Retention.DailyUsage != 3360*time.Hour || cfg.Retention.InviteHistory != 4320*time.Hour {
+	if cfg.Retention.GenerationHistory != 30*time.Hour || cfg.Retention.GenerationMedia != 30*time.Hour || cfg.Retention.PinnedMedia != 720*time.Hour || cfg.Retention.AIContent != 240*time.Hour || cfg.Retention.ComfyInputs != 96*time.Hour || cfg.Retention.HostMetrics != 240*time.Hour || cfg.Retention.AuditLog != 2400*time.Hour || cfg.Retention.ProxyRequests != 2880*time.Hour || cfg.Retention.WebSocketSessions != 1440*time.Hour || cfg.Retention.GenerationRequests != 240*time.Hour || cfg.Retention.DailyUsage != 3360*time.Hour || cfg.Retention.InviteHistory != 4320*time.Hour {
 		t.Fatalf("unexpected retention policy: %+v", cfg.Retention)
 	}
 	if cfg.DatabaseCleanupBatchSize != 777 || cfg.DatabaseCleanupMaxBatches != 9 {
@@ -88,6 +89,9 @@ func TestDefaultRetentionPolicyKeepsGenerationHistoryAndMediaTogether(t *testing
 	if policy.GenerationHistory != 12*time.Hour || policy.GenerationMedia != 12*time.Hour {
 		t.Fatalf("generation retention was not unified: %+v", policy)
 	}
+	if policy.PinnedMedia != 30*24*time.Hour {
+		t.Fatalf("pinned media retention default was not applied: %+v", policy)
+	}
 	if policy.AIContent != 12*time.Hour {
 		t.Fatalf("AI content must not expire before generation media: %+v", policy)
 	}
@@ -102,6 +106,14 @@ func TestRejectsAIContentRetentionShorterThanGeneration(t *testing.T) {
 	t.Setenv("AI_CONTENT_RETENTION", "24h")
 	if _, err := loadRetentionPolicy(); err == nil {
 		t.Fatal("expected retention ordering validation error")
+	}
+}
+
+func TestRejectsPinnedMediaRetentionShorterThanGeneration(t *testing.T) {
+	t.Setenv("GENERATION_RETENTION", "48h")
+	t.Setenv("PINNED_GENERATION_RETENTION", "24h")
+	if _, err := loadRetentionPolicy(); err == nil {
+		t.Fatal("expected pinned media retention ordering validation error")
 	}
 }
 

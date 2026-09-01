@@ -278,14 +278,15 @@ func (s *Store) ListUserGenerationImages(ctx context.Context, userID int64, limi
 func (s *Store) listUserGenerationMedia(ctx context.Context, userID int64, mediaType string, limit int) ([]domain.UserGenerationMedia, error) {
 	limit = boundedLimit(limit, 1, 100)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id,m.media_type,m.mime_type,m.original_name,e.model,m.created_at,m.expires_at,e.is_sensitive,
-		       (m.media_type='image' AND m.visual_sensitivity_classified_at IS NULL)
+		SELECT m.id,m.media_type,m.mime_type,m.original_name,e.model,m.size_bytes,m.created_at,m.expires_at,e.is_sensitive,
+		       (m.media_type='image' AND m.visual_sensitivity_classified_at IS NULL),
+		       (m.pinned_at IS NOT NULL),(m.favorite_at IS NOT NULL)
 		FROM content_media m
 		JOIN content_events e ON e.id=m.event_id
 		WHERE e.user_id=$1 AND e.service='comfyui' AND e.kind='comfyui_prompt'
 		  AND e.expires_at > now() AND m.expires_at > now() AND m.profile_hidden_at IS NULL
 		  AND ($3='' OR m.media_type=$3)
-		ORDER BY m.created_at DESC, m.id DESC
+		ORDER BY (m.pinned_at IS NOT NULL) DESC,m.created_at DESC,m.id DESC
 		LIMIT $2
 	`, userID, limit, mediaType)
 	if err != nil {
@@ -295,7 +296,8 @@ func (s *Store) listUserGenerationMedia(ctx context.Context, userID int64, media
 	var media []domain.UserGenerationMedia
 	for rows.Next() {
 		var item domain.UserGenerationMedia
-		if err := rows.Scan(&item.ID, &item.MediaType, &item.MIMEType, &item.OriginalName, &item.ModelName, &item.CreatedAt, &item.ExpiresAt, &item.Sensitive, &item.VisualPending); err != nil {
+		if err := rows.Scan(&item.ID, &item.MediaType, &item.MIMEType, &item.OriginalName, &item.ModelName, &item.SizeBytes,
+			&item.CreatedAt, &item.ExpiresAt, &item.Sensitive, &item.VisualPending, &item.Pinned, &item.Favorite); err != nil {
 			return nil, err
 		}
 		media = append(media, item)

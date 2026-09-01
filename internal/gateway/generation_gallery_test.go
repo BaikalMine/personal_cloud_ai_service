@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"ai-access-gateway/internal/domain"
 )
 
 func TestGenerationLibraryImageUploadRequest(t *testing.T) {
@@ -47,6 +49,19 @@ func TestGenerationLibraryImageUploadRequest(t *testing.T) {
 	}
 }
 
+func TestGenerationLibraryArchiveNameIsFlatAndUnique(t *testing.T) {
+	used := make(map[string]int)
+	if got := generationLibraryArchiveName(`..\portrait.png`, 7, used); got != "portrait.png" {
+		t.Fatalf("sanitized archive name = %q", got)
+	}
+	if got := generationLibraryArchiveName("../portrait.png", 8, used); got != "portrait-2.png" {
+		t.Fatalf("duplicate archive name = %q", got)
+	}
+	if got := generationLibraryArchiveName("..", 9, used); got != "result-9" {
+		t.Fatalf("parent archive name = %q", got)
+	}
+}
+
 func TestGenerationGalleryTemplateRendersMediaAndRepeatAction(t *testing.T) {
 	templates, err := ParseTemplates()
 	if err != nil {
@@ -54,36 +69,68 @@ func TestGenerationGalleryTemplateRendersMediaAndRepeatAction(t *testing.T) {
 	}
 	items := []generationGalleryItemView{
 		{
-			VariantID: 42,
-			Scenario:  "Текст в изображение",
-			ModelName: "Krea2",
-			Prompt:    "Портрет в студии",
-			Seed:      123,
-			CreatedAt: time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC),
-			Media:     generationMediaView{ID: 7, URL: "/generate/library/7", Filename: "portrait.png", MediaType: "image", ExpiresUnix: 123456789, Sensitive: true},
+			VariantID: 42, TemplateID: "text-to-image", WorkflowID: "photoflow-krea2", WorkflowName: "Krea2 · текст в изображение",
+			Scenario: "Текст в изображение", ModelName: "Krea2", Prompt: "Портрет в студии", Seed: 123,
+			CreatedAt: time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC), HasMedia: true, CompareCount: 1,
+			Media: generationMediaView{ID: 7, URL: "/generate/library/7", Filename: "portrait.png", MediaType: "image", ExpiresUnix: 123456789, Sensitive: true},
 		},
 		{
-			VariantID: 43,
-			Scenario:  "Видео",
-			ModelName: "MiniMax H3",
-			Prompt:    "Медленное движение камеры",
-			Seed:      456,
-			CreatedAt: time.Date(2026, 8, 31, 12, 5, 0, 0, time.UTC),
-			Media:     generationMediaView{ID: 8, URL: "/generate/library/8", Filename: "clip.mp4", MediaType: "video", ExpiresUnix: 123456790},
+			VariantID: 43, TemplateID: "minimax-h3-video", WorkflowID: "minimax-h3-video", WorkflowName: "MiniMax H3 · видео",
+			Scenario: "Видео", ModelName: "MiniMax H3", Prompt: "Медленное движение камеры", Seed: 456,
+			CreatedAt: time.Date(2026, 8, 31, 12, 5, 0, 0, time.UTC), HasMedia: true, CompareCount: 1,
+			Media: generationMediaView{ID: 8, URL: "/generate/library/8", Filename: "clip.mp4", MediaType: "video", ExpiresUnix: 123456790},
 		},
 	}
 	var output bytes.Buffer
 	if err := templates.ExecuteTemplate(&output, "gallery", map[string]any{
 		"Title": "Моя галерея", "CSRF": "csrf", "AssetVersion": "asset", "Items": items, "ImageCount": 1, "VideoCount": 1,
+		"Collections": []domain.GenerationMediaCollection{}, "PinnedCount": 0, "FavoriteCount": 0, "ErrorCount": 0,
+		"CanUseImageToImage": true, "CanUseMiniMaxVideo": true, "CanReuseImages": true,
 		"Retention": newRetentionPolicyView(Config{}.Retention),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	body := output.String()
-	for _, wanted := range []string{"data-user-gallery", "/static/gallery.js", "/generate?variant=42", "/generate/library/7", "Контент 18+", "data-media-type=\"video\"", "gallery-lightbox"} {
+	for _, wanted := range []string{"data-user-gallery", "/static/gallery.js", "/generate?variant=43", "/generate/library/7", "Контент 18+", "data-media-type=\"video\"", "data-gallery-use-open", "photoflow-flux2-edit", "gallery-lightbox"} {
 		if !strings.Contains(body, wanted) {
 			t.Fatalf("gallery output does not contain %q", wanted)
 		}
+	}
+}
+
+func TestGenerationGalleryTemplateShowsOnlyAllowedReuseWorkflows(t *testing.T) {
+	templates, err := ParseTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := generationGalleryItemView{
+		VariantID: 42, TemplateID: "text-to-image", WorkflowID: "photoflow-krea2", WorkflowName: "Krea2 · текст в изображение",
+		Scenario: "Текст в изображение", ModelName: "Krea2", Prompt: "Портрет", CreatedAt: time.Now(), HasMedia: true,
+		Media: generationMediaView{ID: 7, URL: "/generate/library/7", Filename: "portrait.png", MediaType: "image", ExpiresUnix: time.Now().Add(time.Hour).UnixMilli()},
+	}
+	data := map[string]any{
+		"Title": "Моя галерея", "CSRF": "csrf", "AssetVersion": "asset", "Items": []generationGalleryItemView{item},
+		"Collections": []domain.GenerationMediaCollection{}, "CanUseImageToImage": false, "CanUseMiniMaxVideo": true, "CanReuseImages": true,
+		"Retention": newRetentionPolicyView(Config{}.Retention),
+	}
+	var output bytes.Buffer
+	if err := templates.ExecuteTemplate(&output, "gallery", data); err != nil {
+		t.Fatal(err)
+	}
+	body := output.String()
+	if !strings.Contains(body, "minimax-h3-video") || strings.Contains(body, "photoflow-krea2-edit") || strings.Contains(body, "photoflow-flux2-edit") {
+		t.Fatalf("reuse workflow permissions were not applied: %s", body)
+	}
+
+	data["CanUseMiniMaxVideo"] = false
+	data["CanReuseImages"] = false
+	output.Reset()
+	if err := templates.ExecuteTemplate(&output, "gallery", data); err != nil {
+		t.Fatal(err)
+	}
+	body = output.String()
+	if strings.Contains(body, "data-gallery-use-open") || strings.Contains(body, "id=\"gallery-use-dialog\"") {
+		t.Fatal("reuse controls rendered without an available image workflow")
 	}
 }
 

@@ -243,8 +243,15 @@
   let galleryPickerImages = [];
   let galleryPickerImagesLoaded = false;
   let galleryPickerImagesLoading = false;
-  const requestedVariantID = new URLSearchParams(window.location.search).get("variant") || "";
+  const requestedQuery = new URLSearchParams(window.location.search);
+  const requestedVariantID = requestedQuery.get("variant") || "";
+  const requestedLibraryMediaID = requestedQuery.get("media") || "";
+  const requestedLibraryTemplateID = requestedQuery.get("template") || "";
+  const requestedLibraryWorkflowID = requestedQuery.get("workflow") || "";
+  const requestedLibrarySlot = requestedQuery.get("slot") || "1";
+  const requestedLibraryRole = requestedQuery.get("role") || "base_scene";
   let requestedVariantHandled = false;
+  let requestedLibraryMediaHandled = false;
   const activeGenerationStorageKey = "ai-gateway.active-generation";
   const generationHistoryCollapsedStorageKey = "ai-gateway.generation-history-collapsed";
 
@@ -2072,6 +2079,68 @@
     closeGalleryImagePicker();
   };
 
+  const clearRequestedLibraryMediaQuery = () => {
+    const url = new URL(window.location.href);
+    ["media", "template", "workflow", "slot", "role"].forEach((name) => url.searchParams.delete(name));
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  };
+
+  const applyRequestedLibraryMedia = async () => {
+    if (!requestedLibraryMediaID || requestedLibraryMediaHandled) return;
+    requestedLibraryMediaHandled = true;
+    const workflowTemplates = {
+      "photoflow-krea2-edit": "image-to-image",
+      "photoflow-flux2-edit": "image-to-image",
+      "minimax-h3-video": "minimax-h3-video",
+    };
+    const template = requestedLibraryTemplateID || workflowTemplates[requestedLibraryWorkflowID] || "image-to-image";
+    const workflowID = requestedLibraryWorkflowID || (template === "minimax-h3-video" ? "minimax-h3-video" : "photoflow-krea2-edit");
+    const scenario = root.querySelector(`.scenario-choice[data-workflow-id="${CSS.escape(template)}"]`);
+    if (!scenario || scenario.disabled) {
+      showRepeatNotice("Сценарий недоступен", "У вашей учётной записи нет доступа к выбранному типу генерации.", true);
+      clearRequestedLibraryMediaQuery();
+      return;
+    }
+    if (!scenario.classList.contains("is-selected")) chooseScenario(scenario);
+    const workflow = root.querySelector(`.generation-workflow-choice[data-preset-id="${CSS.escape(workflowID)}"]`);
+    if (!workflow || workflow.disabled || workflow.hidden) {
+      showRepeatNotice("Workflow недоступен", "Выберите другой способ генерации или проверьте доступность workflow.", true);
+      clearRequestedLibraryMediaQuery();
+      return;
+    }
+    if (!workflow.classList.contains("is-selected")) chooseGenerationWorkflow(workflow);
+
+    if (template === "minimax-h3-video") {
+      const frameRole = requestedLibraryRole === "first_frame" || requestedLibraryRole === "last_frame";
+      setMiniMaxMode(frameRole ? "frames" : "references");
+      syncImageSlots();
+      syncMiniMaxAudioReference();
+    }
+    const requestedSlot = Math.max(1, Number.parseInt(requestedLibrarySlot, 10) || 1);
+    const slotNumber = Math.min(requestedSlot, activeMaxInputImages());
+    const item = imageSlots.find((candidate) => candidate.index === slotNumber);
+    if (!item || item.slot.hidden) {
+      showRepeatNotice("Слот недоступен", "Выбранный workflow поддерживает меньше изображений. Выберите доступный слот.", true);
+      clearRequestedLibraryMediaQuery();
+      return;
+    }
+    if (item.role && requestedLibraryRole) item.role.value = requestedLibraryRole;
+    try {
+      await refreshGalleryPickerImages();
+      const entry = galleryPickerImages.find((candidate) => String(candidate.id) === String(requestedLibraryMediaID));
+      if (!entry) throw new Error(`Изображение больше не доступно. Результаты хранятся ${mediaRetentionLabel}.`);
+      selectGalleryImage(item, entry);
+      showStep(2);
+      const workflowLabel = workflow.querySelector("strong")?.textContent?.trim() || workflowID;
+      showRepeatNotice("Изображение добавлено", `${entry.name} выбрано для «${workflowLabel}», слот ${slotNumber}.`);
+      window.requestAnimationFrame(() => item.slot.scrollIntoView({ behavior: "smooth", block: "center" }));
+    } catch (error) {
+      showRepeatNotice("Не удалось добавить изображение", error.message || "Обновите медиатеку и выберите другой результат.", true);
+    } finally {
+      clearRequestedLibraryMediaQuery();
+    }
+  };
+
   const handleImageSelection = (item) => {
     const file = item.input?.files?.[0] || null;
     const previousURL = previewURLs.get(item.index);
@@ -3372,9 +3441,10 @@
   });
 
   const initialID = root.dataset.selectedWorkflow || "";
-  loadWorkflowCapabilities();
+  const workflowCapabilitiesReady = loadWorkflowCapabilities();
   const initial = initialID ? root.querySelector(`[data-workflow-id="${CSS.escape(initialID)}"]`) : null;
   if (initial) chooseScenario(initial);
+  workflowCapabilitiesReady.finally(() => applyRequestedLibraryMedia().catch(() => {}));
   if (root.dataset.previewOutput) {
     result.hidden = false;
     resultTitle.textContent = "Готово";

@@ -203,6 +203,7 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	if _, err := repository.ContentMediaByIDForUser(ctx, generatedImages[0].ID, adminID); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("foreign generated image lookup error = %v, want sql.ErrNoRows", err)
 	}
+	assertGenerationMediaLibraryLifecycle(t, ctx, db, repository, registeredUserID, adminID, generatedImages[0].ID)
 	retentionStats, err := repository.ContentRetentionStats(ctx)
 	if err != nil || retentionStats.EventCount != 1 || retentionStats.MediaCount != 1 || retentionStats.MediaBytes != 3 || retentionStats.NextEventExpiry == nil || retentionStats.NextMediaExpiry == nil {
 		t.Fatalf("content retention stats: stats=%+v err=%v", retentionStats, err)
@@ -271,6 +272,81 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	}
 	if deleted, err := repository.DeleteUser(ctx, adminID, "admin"); err != nil || deleted {
 		t.Fatalf("admin deletion protection: deleted=%v err=%v", deleted, err)
+	}
+}
+
+func assertGenerationMediaLibraryLifecycle(t *testing.T, ctx context.Context, db *sql.DB, repository *store.Store, userID, foreignUserID, mediaID int64) {
+	t.Helper()
+	collection, err := repository.CreateGenerationMediaCollection(ctx, userID, "  Портреты для видео  ")
+	if err != nil || collection.ID <= 0 || collection.Name != "Портреты для видео" {
+		t.Fatalf("create generation media collection: collection=%+v err=%v", collection, err)
+	}
+	if err := repository.UpdateGenerationMediaMetadata(ctx, userID, mediaID,
+		[]string{" Портрет ", "#Для видео", "портрет"}, []int64{collection.ID}); err != nil {
+		t.Fatalf("update generation media metadata: %v", err)
+	}
+	if err := repository.UpdateGenerationMediaMetadata(ctx, foreignUserID, mediaID, []string{"чужой"}, nil); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("foreign generation media metadata error=%v, want sql.ErrNoRows", err)
+	}
+	if changed, err := repository.SetGenerationMediaFavorite(ctx, userID, mediaID, true); err != nil || !changed {
+		t.Fatalf("favorite generation media changed=%v err=%v", changed, err)
+	}
+	regularUntil := time.Now().Add(24 * time.Hour)
+	pinnedUntil := time.Now().Add(30 * 24 * time.Hour)
+	expiresAt, changed, err := repository.SetGenerationMediaPinned(ctx, userID, mediaID, true, regularUntil, pinnedUntil)
+	if err != nil || !changed || expiresAt.Before(pinnedUntil.Add(-time.Second)) {
+		t.Fatalf("pin generation media expires=%v changed=%v err=%v", expiresAt, changed, err)
+	}
+
+	job, created, err := repository.CreateGenerationJob(ctx, domain.CreateGenerationJobParams{
+		PublicID: "job_media_library_target_0001", UserID: userID, UsernameSnapshot: "alice", RequestID: "media-library-target-request",
+	})
+	if err != nil || !created {
+		t.Fatalf("create generation media target job: job=%+v created=%v err=%v", job, created, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE generation_jobs SET template_id='minimax-h3-video',workflow_id='minimax-h3-video' WHERE id=$1`, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.ReplaceGenerationMediaReferencesForJob(ctx, userID, job.ID, []domain.GenerationMediaReferenceRecord{{
+		SourceMediaID: mediaID, SourceMediaName: "result.png", Number: 2, Role: "style",
+	}}); err != nil {
+		t.Fatalf("replace generation media references: %v", err)
+	}
+
+	byPrompt, err := repository.ListGenerationMediaForPrompts(ctx, userID, []string{"prompt-1"})
+	if err != nil || len(byPrompt["prompt-1"]) != 1 {
+		t.Fatalf("list generation media library: media=%+v err=%v", byPrompt, err)
+	}
+	media := byPrompt["prompt-1"][0]
+	if !media.Pinned || !media.Favorite || len(media.Tags) != 2 || len(media.Collections) != 1 || media.Collections[0].ID != collection.ID {
+		t.Fatalf("generation media metadata projection: %+v", media)
+	}
+	if len(media.ReferenceUses) != 1 || media.ReferenceUses[0].JobPublicID != job.PublicID || media.ReferenceUses[0].Number != 2 || media.ReferenceUses[0].Role != "style" {
+		t.Fatalf("generation media reference projection: %+v", media.ReferenceUses)
+	}
+	collections, err := repository.ListGenerationMediaCollections(ctx, userID)
+	if err != nil || len(collections) != 1 || collections[0].ItemCount != 1 {
+		t.Fatalf("list generation media collections: collections=%+v err=%v", collections, err)
+	}
+	exportMedia, err := repository.GenerationMediaByIDsForUser(ctx, userID, []int64{mediaID})
+	if err != nil || len(exportMedia) != 1 || exportMedia[0].OriginalName != "result.png" {
+		t.Fatalf("generation media export lookup: media=%+v err=%v", exportMedia, err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO generation_media_collections(user_id,name,name_key)
+		SELECT $1,'test collection ' || value,'test-collection-' || value FROM generate_series(1,39) value
+	`, userID); err != nil {
+		t.Fatal(err)
+	}
+	existing, err := repository.CreateGenerationMediaCollection(ctx, userID, "Портреты для видео")
+	if err != nil || existing.ID != collection.ID {
+		t.Fatalf("update existing collection at limit: collection=%+v err=%v", existing, err)
+	}
+	if _, err := repository.CreateGenerationMediaCollection(ctx, userID, "Сверх лимита"); err == nil {
+		t.Fatal("new collection was created above the per-user limit")
+	}
+	if deleted, err := repository.DeleteGenerationMediaCollection(ctx, userID, collection.ID); err != nil || !deleted {
+		t.Fatalf("delete generation media collection: deleted=%v err=%v", deleted, err)
 	}
 }
 

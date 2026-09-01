@@ -186,6 +186,28 @@ func TestChunkedContentMediaMigration(t *testing.T) {
 	}
 }
 
+func TestGenerationMediaLibraryMigration(t *testing.T) {
+	var libraryMigration *migration
+	for index := range migrationCatalog {
+		if migrationCatalog[index].version == 44 {
+			libraryMigration = &migrationCatalog[index]
+			break
+		}
+	}
+	if libraryMigration == nil || libraryMigration.name != "generation_media_library" {
+		t.Fatal("generation media library migration is missing")
+	}
+	sql := strings.Join(libraryMigration.statements, "\n")
+	for _, expected := range []string{
+		"favorite_at", "pinned_at", "generation_media_collections", "generation_media_collection_items",
+		"generation_media_tags", "generation_media_references", "source_media_id", "target_job_id", "bump_content_change_revision",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("generation media library migration does not contain %q: %s", expected, sql)
+		}
+	}
+}
+
 func TestQuickGenerationRequestTelemetryMigration(t *testing.T) {
 	var telemetryMigration *migration
 	for index := range migrationCatalog {

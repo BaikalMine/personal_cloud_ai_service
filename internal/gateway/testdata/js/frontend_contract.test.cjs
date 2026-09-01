@@ -6,10 +6,12 @@ const path = require("node:path");
 const projectRoot = path.resolve(__dirname, "../../../..");
 const stylePath = path.join(projectRoot, "internal/gateway/static/style.css");
 const generatePath = path.join(projectRoot, "internal/gateway/static/generate.js");
+const galleryPath = path.join(projectRoot, "internal/gateway/templates/gallery.html");
 const templateRoot = path.join(projectRoot, "internal/gateway/templates");
 const previewPath = path.join(projectRoot, "cmd/ui-preview/main.go");
 const css = fs.readFileSync(stylePath, "utf8");
 const generateScript = fs.readFileSync(generatePath, "utf8");
+const galleryTemplate = fs.readFileSync(galleryPath, "utf8");
 const templates = fs.readdirSync(templateRoot)
   .filter((name) => name.endsWith(".html"))
   .map((name) => fs.readFileSync(path.join(templateRoot, name), "utf8"))
@@ -119,4 +121,15 @@ test("ui preview exposes every supported reference slot", () => {
 
 test("a sole compatible workflow is selected automatically", () => {
   assert.match(generateScript, /compatibleWorkflows\.length === 1\) chooseGenerationWorkflow\(compatibleWorkflows\[0\]\)/);
+});
+
+test("the media library reuses an image across every compatible workflow", () => {
+  for (const workflow of ["photoflow-krea2-edit", "photoflow-flux2-edit", "minimax-h3-video"]) {
+    assert.match(galleryTemplate, new RegExp(`name="workflow" value="${workflow}"`));
+    assert.ok(generateScript.includes(`"${workflow}"`));
+  }
+  for (const parameter of ["media", "template", "workflow", "slot", "role"]) {
+    assert.ok(generateScript.includes(`requestedQuery.get("${parameter}")`), `missing library query ${parameter}`);
+  }
+  assert.match(generateScript, /selectGalleryImage\(item, entry\)/);
 });

@@ -47,6 +47,15 @@ redefine the shared focus, disabled, loading or semantic state language.
   menu on every supported viewport.
 - Supported visual widths are 390, 768, 1280, 1440 and 1920 px.
 
+## Media Library Contract
+
+- The personal media library is a shared source for every image-capable workflow; do not create a model-specific gallery or picker.
+- Workflow capabilities control available slots and roles: Krea2 currently accepts two images, while Flux2 and MiniMax accept up to four.
+- A reuse action must show the destination workflow, slot and semantic role before navigation. The selected asset then renders inside that exact source card in the generation wizard.
+- Search, type and state filters remain above the results. Collections are a secondary navigation rail on desktop and a readable vertical list on narrow screens.
+- Pinning changes retention and must expose the new deadline. Favorite is organizational only and must not imply extended storage.
+- Source job and downstream reference lineage stay available from each result without competing with the primary reuse and download actions.
+
 ## Verification
 
 `/preview/components` in `cmd/ui-preview` renders the canonical states. The

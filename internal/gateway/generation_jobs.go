@@ -131,6 +131,32 @@ func generationJobValues(form url.Values, resolvedSeed int64) map[string]string 
 	return values
 }
 
+func generationMediaReferenceRecords(values map[string]string) []domain.GenerationMediaReferenceRecord {
+	references := make([]domain.GenerationMediaReferenceRecord, 0, maxGenerationReferenceSlots)
+	for number := 1; number <= maxGenerationReferenceSlots; number++ {
+		if strings.TrimSpace(values[fmt.Sprintf("image_source_%d", number)]) != "gallery" {
+			continue
+		}
+		mediaID, err := strconv.ParseInt(strings.TrimSpace(values[fmt.Sprintf("image_source_id_%d", number)]), 10, 64)
+		if err != nil || mediaID <= 0 {
+			continue
+		}
+		role := strings.TrimSpace(values[fmt.Sprintf("image_role_%d", number)])
+		if role == "" {
+			if number == 1 {
+				role = "base_scene"
+			} else {
+				role = "details"
+			}
+		}
+		references = append(references, domain.GenerationMediaReferenceRecord{
+			SourceMediaID: mediaID, SourceMediaName: values[fmt.Sprintf("image_source_name_%d", number)],
+			Number: number, Role: role,
+		})
+	}
+	return references
+}
+
 func (a *App) generationJobPayloadCipher(input generationForm, values url.Values) ([]byte, error) {
 	if a.contentCipher == nil {
 		return nil, errors.New("content cipher is not configured")
@@ -184,6 +210,9 @@ func (a *App) ensureGenerationJobProjections(ctx context.Context, job domain.Gen
 	payload, err := a.decodeGenerationSavedPayload(job.PayloadCipher)
 	if err != nil {
 		return err
+	}
+	if err := a.store.ReplaceGenerationMediaReferencesForJob(ctx, *job.UserID, job.ID, generationMediaReferenceRecords(payload.Values)); err != nil {
+		return fmt.Errorf("project generation media references: %w", err)
 	}
 	form := generationJobFormValues(payload.Values)
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "/generate/run", strings.NewReader(form.Encode()))

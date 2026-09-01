@@ -2,59 +2,207 @@
 {{template "head" .}}
 <script src="/static/gallery.js?v={{.AssetVersion}}" defer></script>
 {{template "nav" .}}
-<main class="page user-gallery-page" id="main-content" data-user-gallery>
+<main class="page user-gallery-page" id="main-content" data-user-gallery data-csrf="{{.CSRF}}" data-media-retention="{{.Retention.GenerationMediaLabel}}" data-pinned-retention="{{.Retention.PinnedMediaLabel}}">
   <section class="hero user-gallery-hero">
     <div>
-      <p class="eyebrow">Ваши результаты</p>
-      <h1>Моя галерея</h1>
-      <p class="hero-copy">Изображения и видео хранятся {{.Retention.GenerationMediaLabel}}. Откройте результат или верните его параметры в быструю генерацию.</p>
+      <p class="eyebrow">Медиатека</p>
+      <h1>Ваши результаты</h1>
+      <p class="hero-copy">Найдите изображение или видео, закрепите важное и используйте результат в следующей генерации без скачивания.</p>
     </div>
     <a class="button" href="/generate">Новая генерация</a>
   </section>
 
   {{if .Items}}
-  <section class="user-gallery-toolbar ui-toolbar ui-toolbar--plain" aria-label="Фильтры галереи">
-    <div class="user-gallery-count"><strong data-gallery-visible-count>{{len .Items}}</strong><span>результатов</span></div>
-    <div class="user-gallery-filters ui-segmented ui-segmented--compact" role="group" aria-label="Тип результата">
-      <button type="button" class="is-active ui-segment" data-gallery-filter="all" aria-pressed="true">Все <span>{{len .Items}}</span></button>
-      <button type="button" class="ui-segment" data-gallery-filter="image" aria-pressed="false">Изображения <span>{{.ImageCount}}</span></button>
-      <button type="button" class="ui-segment" data-gallery-filter="video" aria-pressed="false">Видео <span>{{.VideoCount}}</span></button>
+  <section class="media-library-controls" aria-label="Поиск и фильтры">
+    <label class="media-library-search ui-field"><span>Поиск</span><input type="search" data-gallery-search placeholder="Промт, модель, workflow или тег" autocomplete="off"></label>
+    <div class="media-library-date-range">
+      <label class="ui-field"><span>С даты</span><input type="date" data-gallery-date-from></label>
+      <label class="ui-field"><span>По дату</span><input type="date" data-gallery-date-to></label>
+    </div>
+    <div class="media-library-filter-row">
+      <div class="media-library-type-filter ui-segmented ui-segmented--compact" role="group" aria-label="Тип результата">
+        <button class="ui-segment is-active" type="button" data-gallery-filter="all" aria-pressed="true">Все <span>{{len .Items}}</span></button>
+        <button class="ui-segment" type="button" data-gallery-filter="image" aria-pressed="false">Изображения <span>{{.ImageCount}}</span></button>
+        <button class="ui-segment" type="button" data-gallery-filter="video" aria-pressed="false">Видео <span>{{.VideoCount}}</span></button>
+      </div>
+      <div class="media-library-flag-filter" role="group" aria-label="Дополнительные фильтры">
+        <button type="button" data-gallery-flag="pinned" aria-pressed="false">Закреплённые <span>{{.PinnedCount}}</span></button>
+        <button type="button" data-gallery-flag="favorite" aria-pressed="false">Избранное <span>{{.FavoriteCount}}</span></button>
+        <button type="button" data-gallery-flag="sensitive" aria-pressed="false">18+</button>
+        <button type="button" data-gallery-flag="error" aria-pressed="false">Ошибки <span>{{.ErrorCount}}</span></button>
+      </div>
     </div>
   </section>
+  <p class="media-library-status" data-gallery-status hidden aria-live="polite"></p>
 
-  <section class="user-gallery-grid" aria-live="polite">
-    {{range .Items}}
-    <article class="user-gallery-card ui-media-card{{if .Media.Sensitive}} sensitive-media{{end}}" data-gallery-item data-media-type="{{.Media.MediaType}}">
-      <button class="user-gallery-preview" type="button" data-gallery-open data-url="{{.Media.URL}}" data-filename="{{.Media.Filename}}" data-media-type="{{.Media.MediaType}}" {{if .Media.Sensitive}}data-sensitive-media{{end}} aria-label="Открыть {{if eq .Media.MediaType "video"}}видео{{else}}изображение{{end}}">
-        {{if eq .Media.MediaType "video"}}
-        <video muted playsinline preload="metadata" src="{{.Media.URL}}"></video><span class="user-gallery-play" aria-hidden="true">&#9654;</span>
-        {{else}}
-        <img loading="lazy" src="{{.Media.URL}}" alt="{{.Prompt}}">
-        {{end}}
-        {{if .Media.Sensitive}}<span class="sensitive-media-cover"><b>Контент 18+</b><small>Нажмите, чтобы показать</small></span>{{end}}
-      </button>
-      <div class="user-gallery-card-body">
-        <div class="user-gallery-card-heading"><span>{{.Scenario}}</span><time datetime="{{.CreatedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{formatTime .CreatedAt}}</time></div>
-        <strong>{{.ModelName}}</strong>
-        <p>{{.Prompt}}</p>
-        <div class="user-gallery-meta"><span>Seed {{.Seed}}</span><span data-generation-expiry="{{.Media.ExpiresUnix}}">Вычисляем срок хранения</span></div>
-        <div class="user-gallery-actions">
-          <a class="button" href="/generate?variant={{.VariantID}}">Повторить</a>
-          <a class="button ghost" href="{{.Media.URL}}?download=1" download="{{.Media.Filename}}">Скачать</a>
-          <form method="post" action="/generate/library/hide" data-gallery-hide-form><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="media_id" value="{{.Media.ID}}"><button class="user-gallery-hide" type="submit">Убрать</button></form>
+  <div class="media-library-layout">
+    <aside class="media-library-collections" aria-label="Коллекции">
+      <div class="media-library-collections-heading"><strong>Коллекции</strong><span>{{len .Collections}}</span></div>
+      <nav class="media-library-collection-list" aria-label="Фильтр по коллекции">
+        <button class="is-active" type="button" data-gallery-collection-filter="" aria-pressed="true"><span>Все результаты</span><b>{{len .Items}}</b></button>
+        {{range .Collections}}
+        <div class="media-library-collection-row" data-gallery-collection-row="{{.ID}}">
+          <button type="button" data-gallery-collection-filter="{{.ID}}" aria-pressed="false"><span>{{.Name}}</span><b>{{.ItemCount}}</b></button>
+          <button class="media-library-collection-delete" type="button" data-gallery-collection-delete="{{.ID}}" data-collection-name="{{.Name}}" aria-label="Удалить коллекцию {{.Name}}" title="Удалить коллекцию">&#215;</button>
         </div>
+        {{end}}
+      </nav>
+      <form class="media-library-collection-create" action="/generate/library/collections" method="post" data-gallery-collection-create>
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <label><span>Новая коллекция</span><input name="name" type="text" maxlength="60" placeholder="Например, портреты" required></label>
+        <button class="ghost" type="submit">Создать</button>
+      </form>
+    </aside>
+
+    <section class="media-library-results" aria-labelledby="media-library-results-title">
+      <header class="media-library-results-heading">
+        <div><h2 id="media-library-results-title">Результаты</h2><p><strong data-gallery-visible-count>{{len .Items}}</strong> <span data-gallery-visible-label>доступно сейчас</span></p></div>
+        <button class="ghost media-library-select-all" type="button" data-gallery-select-all>Выбрать все видимые</button>
+      </header>
+
+      <div class="media-library-grid" aria-live="polite">
+        {{range .Items}}
+        <article class="media-library-card ui-media-card{{if and .HasMedia .Media.Sensitive}} sensitive-media{{end}}{{if and .HasMedia .Media.Pinned}} is-pinned{{end}}{{if not .HasMedia}} has-error{{end}}"
+          data-gallery-item
+          data-media-type="{{if .HasMedia}}{{.Media.MediaType}}{{else}}error{{end}}"
+          data-state="{{.State}}"
+          data-sensitive="{{if and .HasMedia .Media.Sensitive}}true{{else}}false{{end}}"
+          data-pinned="{{if and .HasMedia .Media.Pinned}}true{{else}}false{{end}}"
+          data-favorite="{{if and .HasMedia .Media.Favorite}}true{{else}}false{{end}}"
+          data-variant-id="{{.VariantID}}"
+          data-template-id="{{.TemplateID}}"
+          data-workflow-id="{{.WorkflowID}}"
+          data-created="{{.CreatedAt.Format "2006-01-02T15:04:05Z07:00"}}"
+          data-search="{{.WorkflowName}} {{.Scenario}} {{.ModelName}} {{.Prompt}} {{range .Media.Tags}}{{.}} {{end}}">
+          {{if .HasMedia}}
+          <div class="media-library-preview-wrap">
+            <label class="media-library-select"><input type="checkbox" value="{{.Media.ID}}" data-gallery-select aria-label="Выбрать {{.Media.Filename}}"><span aria-hidden="true"></span></label>
+            <button class="media-library-preview" type="button" data-gallery-open data-url="{{.Media.URL}}" data-filename="{{.Media.Filename}}" data-media-type="{{.Media.MediaType}}" {{if .Media.Sensitive}}data-sensitive-media{{end}} aria-label="Открыть {{if eq .Media.MediaType "video"}}видео{{else}}изображение{{end}}">
+              {{if eq .Media.MediaType "video"}}
+              <video muted playsinline preload="metadata" src="{{.Media.URL}}"></video><span class="media-library-play" aria-hidden="true">&#9654;</span>
+              {{else}}
+              <img loading="lazy" src="{{.Media.URL}}" alt="{{.Prompt}}">
+              {{end}}
+              {{if .Media.Sensitive}}<span class="sensitive-media-cover"><b>Контент 18+</b><small>Нажмите, чтобы показать</small></span>{{end}}
+            </button>
+          </div>
+          <div class="media-library-card-body" data-media-id="{{.Media.ID}}">
+            <div class="media-library-card-heading"><span>{{.WorkflowName}}</span><time datetime="{{.CreatedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{formatTime .CreatedAt}}</time></div>
+            <strong class="media-library-model">{{.ModelName}}</strong>
+            <p class="media-library-prompt">{{.Prompt}}</p>
+            <div class="media-library-tags" data-gallery-tags>
+              {{range .Media.Tags}}<span data-gallery-tag="{{.}}">{{.}}</span>{{else}}<span class="is-empty">Без тегов</span>{{end}}
+            </div>
+            <div class="media-library-collection-markers" hidden>{{range .Media.Collections}}<span data-gallery-collection-id="{{.ID}}">{{.Name}}</span>{{end}}</div>
+            <div class="media-library-facts">
+              <span>{{formatBytes .Media.SizeBytes}}</span>
+              <span>Seed {{.Seed}}</span>
+              <span data-generation-expiry="{{.Media.ExpiresUnix}}">Вычисляем срок хранения</span>
+            </div>
+            <div class="media-library-primary-actions">
+              {{if eq .Media.MediaType "image"}}{{if $.CanReuseImages}}<button class="button" type="button" data-gallery-use-open>Использовать</button>{{end}}{{else}}<a class="button" href="/generate?variant={{.VariantID}}">Повторить</a>{{end}}
+              <a class="button ghost" href="{{.Media.URL}}?download=1" download="{{.Media.Filename}}">Скачать</a>
+            </div>
+            <div class="media-library-utility-actions">
+              <button type="button" data-gallery-pin aria-pressed="{{if .Media.Pinned}}true{{else}}false{{end}}">{{if .Media.Pinned}}Закреплено{{else}}Закрепить{{end}}</button>
+              <button type="button" data-gallery-favorite aria-pressed="{{if .Media.Favorite}}true{{else}}false{{end}}">{{if .Media.Favorite}}В избранном{{else}}В избранное{{end}}</button>
+              <button type="button" data-gallery-metadata-open>Организовать</button>
+              {{if gt .CompareCount 1}}<button type="button" data-gallery-compare>Сравнить</button>{{end}}
+            </div>
+            <details class="media-library-lineage">
+              <summary>Происхождение и использование</summary>
+              <dl>
+                <div><dt>Сценарий</dt><dd>{{.Scenario}}</dd></div>
+                <div><dt>Исходная задача</dt><dd>{{if .Media.GenerationJobPublicID}}<code>{{.Media.GenerationJobPublicID}}</code>{{else}}Не связана{{end}}</dd></div>
+                <div><dt>Файл</dt><dd>{{.Media.Filename}}</dd></div>
+              </dl>
+              {{if .Media.ReferenceUses}}
+              <div class="media-library-reference-uses"><strong>Использован далее</strong>{{range .Media.ReferenceUses}}<span><code>{{.JobPublicID}}</code> · изображение {{.Number}}{{if .Role}} · {{.Role}}{{end}}</span>{{end}}</div>
+              {{else}}<p>Этот результат ещё не использовался как референс.</p>{{end}}
+            </details>
+            <form method="post" action="/generate/library/hide" data-gallery-hide-form><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="media_id" value="{{.Media.ID}}"><button class="media-library-hide" type="submit">Убрать из медиатеки</button></form>
+          </div>
+          {{else}}
+          <div class="media-library-error-preview" aria-hidden="true"><span>!</span><strong>Генерация не завершена</strong></div>
+          <div class="media-library-card-body">
+            <div class="media-library-card-heading"><span>{{.WorkflowName}}</span><time datetime="{{.CreatedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{formatTime .CreatedAt}}</time></div>
+            <strong class="media-library-model">{{.ModelName}}</strong>
+            <p class="media-library-error-message">{{if .ErrorMessage}}{{.ErrorMessage}}{{else}}Результат не был создан. Параметры сохранены для повторной попытки.{{end}}</p>
+            <a class="button ghost" href="/generate?variant={{.VariantID}}">Открыть параметры</a>
+          </div>
+          {{end}}
+        </article>
+        {{end}}
       </div>
-    </article>
-    {{end}}
+      <div class="media-library-filter-empty ui-empty-state" data-gallery-filter-empty hidden><strong>Ничего не найдено</strong><p>Измените запрос, период или активные фильтры.</p><button class="ghost" type="button" data-gallery-reset>Сбросить фильтры</button></div>
+    </section>
+  </div>
+
+  <section class="media-library-selection-bar" data-gallery-selection-bar hidden aria-label="Действия с выбранными результатами">
+    <strong><span data-gallery-selection-count>0</span> выбрано</strong>
+    <div><button class="ghost" type="button" data-gallery-bulk-export>Скачать ZIP</button><button class="danger" type="button" data-gallery-bulk-hide>Убрать</button><button type="button" data-gallery-selection-clear aria-label="Снять выбор">&#215;</button></div>
   </section>
-  <div class="user-gallery-filter-empty ui-empty-state" data-gallery-filter-empty hidden>По выбранному типу результатов пока нет.</div>
   {{else}}
-  <section class="user-gallery-empty ui-empty-state">
+  <section class="media-library-empty ui-empty-state">
     <strong>Здесь пока нет результатов</strong>
-    <p>После первой успешной генерации изображение или видео появится здесь автоматически.</p>
+    <p>После первой генерации изображение или видео появится здесь автоматически.</p>
     <a class="button" href="/generate">Создать первый результат</a>
   </section>
   {{end}}
+
+  <div class="media-library-dialog" id="gallery-metadata-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="gallery-metadata-title">
+    <button class="media-library-dialog-backdrop" type="button" tabindex="-1" data-gallery-metadata-close aria-label="Закрыть"></button>
+    <form class="media-library-dialog-window ui-dialog" action="/generate/library/metadata" method="post" data-gallery-metadata-form>
+      <div class="ui-dialog__toolbar"><strong id="gallery-metadata-title">Теги и коллекции</strong><button type="button" data-gallery-metadata-close aria-label="Закрыть">&#10005;</button></div>
+      <div class="media-library-dialog-body">
+        <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="media_id" value="">
+        <label class="ui-field"><span>Теги</span><input name="tags" type="text" maxlength="400" placeholder="портрет, студия, вариант 2"><small>Разделяйте теги запятыми.</small></label>
+        <fieldset class="media-library-collection-options"><legend>Коллекции</legend><div data-gallery-metadata-collections>{{range .Collections}}<label class="ui-choice" data-gallery-metadata-collection="{{.ID}}"><input type="checkbox" name="collection_id" value="{{.ID}}"><span><strong>{{.Name}}</strong><small>{{.ItemCount}} результатов</small></span></label>{{else}}<p data-gallery-no-collections>Сначала создайте коллекцию слева.</p>{{end}}</div></fieldset>
+        <p class="media-library-dialog-status" data-gallery-metadata-status aria-live="polite"></p>
+      </div>
+      <div class="media-library-dialog-actions"><button class="ghost" type="button" data-gallery-metadata-close>Отмена</button><button type="submit">Сохранить</button></div>
+    </form>
+  </div>
+
+  {{if .CanReuseImages}}<div class="media-library-dialog" id="gallery-use-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="gallery-use-title">
+    <button class="media-library-dialog-backdrop" type="button" tabindex="-1" data-gallery-use-close aria-label="Закрыть"></button>
+    <form class="media-library-dialog-window ui-dialog" data-gallery-use-form>
+      <div class="ui-dialog__toolbar"><strong id="gallery-use-title">Использовать изображение</strong><button type="button" data-gallery-use-close aria-label="Закрыть">&#10005;</button></div>
+      <div class="media-library-dialog-body">
+        <input type="hidden" name="media_id" value="">
+        <fieldset class="media-library-workflow-options"><legend>Куда добавить</legend>
+          {{if .CanUseImageToImage}}
+          <label class="ui-choice"><input type="radio" name="workflow" value="photoflow-krea2-edit" data-template-id="image-to-image" data-max-slots="2" checked><span><strong>Krea2 · фото и промт</strong><small>Редактирование и перенос деталей</small></span></label>
+          <label class="ui-choice"><input type="radio" name="workflow" value="photoflow-flux2-edit" data-template-id="image-to-image" data-max-slots="4"><span><strong>Flux2 · фото и промт</strong><small>До четырёх референсов</small></span></label>
+          {{end}}
+          {{if .CanUseMiniMaxVideo}}<label class="ui-choice"><input type="radio" name="workflow" value="minimax-h3-video" data-template-id="minimax-h3-video" data-max-slots="4" {{if not $.CanUseImageToImage}}checked{{end}}><span><strong>MiniMax H3 · видео</strong><small>Кадр или свободный референс</small></span></label>{{end}}
+        </fieldset>
+        <div class="media-library-use-fields">
+          <label class="ui-field"><span>Номер изображения</span><select name="slot"><option value="1">Изображение 1</option><option value="2">Изображение 2</option><option value="3">Изображение 3</option><option value="4">Изображение 4</option></select></label>
+          <label class="ui-field"><span>Роль</span><select name="role"><option value="base_scene">Основная сцена</option><option value="identity">Внешность и лицо</option><option value="wardrobe_object">Одежда или предмет</option><option value="pose_composition">Поза и композиция</option><option value="style">Стиль, свет и цвет</option><option value="background">Фон</option><option value="details">Мелкие детали</option><option value="first_frame">Точный первый кадр</option><option value="last_frame">Точный последний кадр</option></select></label>
+        </div>
+        <p class="media-library-use-hint" data-gallery-use-hint>Изображение откроется в первом слоте Krea2.</p>
+      </div>
+      <div class="media-library-dialog-actions"><button class="ghost" type="button" data-gallery-use-close>Отмена</button><button type="submit">Открыть генерацию</button></div>
+    </form>
+  </div>{{end}}
+
+  <div class="media-library-dialog media-library-compare-dialog" id="gallery-compare-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="gallery-compare-title">
+    <button class="media-library-dialog-backdrop" type="button" tabindex="-1" data-gallery-compare-close aria-label="Закрыть"></button>
+    <section class="media-library-dialog-window ui-dialog">
+      <div class="ui-dialog__toolbar"><strong id="gallery-compare-title">Сравнение вариантов</strong><button type="button" data-gallery-compare-close aria-label="Закрыть">&#10005;</button></div>
+      <div class="media-library-compare-grid" data-gallery-compare-grid></div>
+    </section>
+  </div>
+
+  <div class="media-library-dialog media-library-confirm-dialog" id="gallery-confirm-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="gallery-confirm-title">
+    <button class="media-library-dialog-backdrop" type="button" tabindex="-1" data-gallery-confirm-cancel aria-label="Отмена"></button>
+    <section class="media-library-dialog-window ui-dialog">
+      <div class="ui-dialog__toolbar"><strong id="gallery-confirm-title">Подтвердите действие</strong></div>
+      <div class="media-library-dialog-body"><p data-gallery-confirm-message></p></div>
+      <div class="media-library-dialog-actions"><button class="ghost" type="button" data-gallery-confirm-cancel>Отмена</button><button class="danger" type="button" data-gallery-confirm-accept>Подтвердить</button></div>
+    </section>
+  </div>
 
   <div class="generation-lightbox" id="gallery-lightbox" hidden role="dialog" aria-modal="true" aria-label="Просмотр результата">
     <button class="generation-lightbox-backdrop" type="button" tabindex="-1" data-gallery-close aria-label="Закрыть просмотр"></button>

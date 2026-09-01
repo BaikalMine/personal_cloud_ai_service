@@ -1,7 +1,7 @@
 const path = require("node:path");
 const { test, expect } = require("@playwright/test");
 const AxeBuilder = require("@axe-core/playwright").default;
-const { settlePage, assertNoViewportOverflow, expectFocusInside } = require("./helpers.cjs");
+const { installPreviewClock, settlePage, assertNoViewportOverflow, expectFocusInside } = require("./helpers.cjs");
 
 const visualStyle = path.join(__dirname, "visual-stability.css");
 const responsiveRoutes = [
@@ -14,6 +14,7 @@ const responsiveRoutes = [
 ];
 
 const open = async (page, route) => {
+  await installPreviewClock(page);
   await page.goto(route, { waitUntil: "domcontentloaded" });
   await settlePage(page);
 };
@@ -70,6 +71,45 @@ test("generation wizard covers Krea2, Flux2 and MiniMax", async ({ page }, testI
   await expect(page.locator(".source-image-card:visible")).toHaveCount(4);
   await expect(page.locator("#minimax-audio-reference")).toBeVisible();
   await expect(page.locator("#minimax-video-reference")).toBeVisible();
+});
+
+test("media library is shared by Krea2, Flux2 and MiniMax", async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+
+  await open(page, "/preview/gallery");
+  await expect(page.locator("[data-gallery-item]")).toHaveCount(6);
+  await page.locator("[data-gallery-search]").fill("Flux 2");
+  await expect(page.locator("[data-gallery-item]:visible")).toHaveCount(1);
+  await page.locator("[data-gallery-search]").fill("");
+
+  await page.locator("[data-gallery-use-open]").first().click();
+  await expect(page.locator("#gallery-use-dialog")).toBeVisible();
+  await expect(page.locator('#gallery-use-dialog input[name="workflow"]')).toHaveCount(3);
+  await page.locator('#gallery-use-dialog input[value="photoflow-krea2-edit"]').check();
+  await expect(page.locator('#gallery-use-dialog select[name="slot"] option[value="3"]')).toHaveAttribute("disabled", "");
+  await page.locator('#gallery-use-dialog input[value="photoflow-flux2-edit"]').check();
+  await expect(page.locator('#gallery-use-dialog select[name="slot"] option[value="4"]')).toBeEnabled();
+  await page.locator('#gallery-use-dialog input[value="minimax-h3-video"]').check();
+  await expect(page.locator("[data-gallery-use-hint]")).toContainText("MiniMax H3");
+  await page.locator("[data-gallery-use-close]").last().click();
+
+  await page.locator("[data-gallery-compare]").first().click();
+  await expect(page.locator("[data-gallery-compare-grid] figure")).toHaveCount(2);
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#gallery-compare-dialog")).toBeHidden();
+
+  await page.locator("[data-gallery-select]").first().check();
+  await expect(page.locator("[data-gallery-selection-bar]")).toBeVisible();
+
+  for (const target of [
+    { workflow: "photoflow-krea2-edit", template: "image-to-image", slot: 2 },
+    { workflow: "photoflow-flux2-edit", template: "image-to-image", slot: 4 },
+    { workflow: "minimax-h3-video", template: "minimax-h3-video", slot: 3 },
+  ]) {
+    await open(page, `/preview/generate?template=${target.template}&workflow=${target.workflow}&media=1&slot=${target.slot}&role=style`);
+    await expect(page.locator(`.generation-workflow-choice.is-selected[data-preset-id="${target.workflow}"]`)).toBeVisible();
+    await expect(page.locator(`[data-image-slot="${target.slot}"] [data-image-name]`)).toHaveText("AI-Gateway-Krea2-portrait.png");
+  }
 });
 
 test("wizard, image picker and lightbox work from the keyboard", async ({ page }, testInfo) => {

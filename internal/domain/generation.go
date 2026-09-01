@@ -18,6 +18,10 @@ type GenerationRecipeRow struct {
 // captures the resolved seed and user-visible settings for safe reuse later.
 type GenerationVariantRow struct {
 	ID             int64
+	JobID          *int64
+	JobPublicID    string
+	RequestID      string
+	ParentJobID    *int64
 	UserID         int64
 	PromptID       string
 	TemplateID     string
@@ -44,10 +48,46 @@ type GenerationAccessPolicy struct {
 }
 
 type GenerationVariantMedia struct {
-	ID            int64
-	MediaType     string
-	Filename      string
-	ExpiresAt     time.Time
-	Sensitive     bool
-	VisualPending bool
+	ID                    int64
+	PromptID              string
+	MediaType             string
+	MIMEType              string
+	Filename              string
+	SizeBytes             int64
+	CreatedAt             time.Time
+	ExpiresAt             time.Time
+	Sensitive             bool
+	VisualPending         bool
+	Pinned                bool
+	Favorite              bool
+	GenerationJobID       *int64
+	GenerationJobPublicID string
+	Tags                  []string
+	Collections           []GenerationMediaCollection
+	ReferenceUses         []GenerationMediaReferenceUse
+}
+
+type GenerationMediaCollection struct {
+	ID        int64
+	Name      string
+	ItemCount int64
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type GenerationMediaReferenceRecord struct {
+	SourceMediaID   int64
+	SourceMediaName string
+	Number          int
+	Role            string
+}
+
+type GenerationMediaReferenceUse struct {
+	JobID       int64
+	JobPublicID string
+	TemplateID  string
+	WorkflowID  string
+	Number      int
+	Role        string
+	CreatedAt   time.Time
 }

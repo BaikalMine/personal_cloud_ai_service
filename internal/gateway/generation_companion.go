@@ -34,6 +34,9 @@ type generationRecipeView struct {
 
 type generationVariantView struct {
 	ID              int64                 `json:"id"`
+	JobID           string                `json:"job_id,omitempty"`
+	RequestID       string                `json:"request_id,omitempty"`
+	ParentJobID     *int64                `json:"parent_job_id,omitempty"`
 	PromptID        string                `json:"prompt_id"`
 	TemplateID      string                `json:"template_id"`
 	WorkflowID      string                `json:"workflow_id"`
@@ -306,24 +309,52 @@ func (a *App) generationVariantViews(ctx context.Context, userID int64) ([]gener
 	if err != nil {
 		return nil, err
 	}
+	return a.generationVariantViewsFromRows(ctx, userID, rows)
+}
+
+func (a *App) generationLibraryVariantViews(ctx context.Context, userID int64) ([]generationVariantView, error) {
+	rows, err := a.store.ListGenerationLibraryVariants(ctx, userID, 500, time.Now().Add(-a.retentionPolicy().GenerationHistory))
+	if err != nil {
+		return nil, err
+	}
+	return a.generationVariantViewsFromRows(ctx, userID, rows)
+}
+
+func (a *App) generationVariantViewsFromRows(ctx context.Context, userID int64, rows []domain.GenerationVariantRow) ([]generationVariantView, error) {
+	promptIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		promptIDs = append(promptIDs, row.PromptID)
+	}
+	mediaByPrompt, err := a.store.ListGenerationMediaForPrompts(ctx, userID, promptIDs)
+	if err != nil {
+		return nil, err
+	}
 	views := make([]generationVariantView, 0, len(rows))
 	for _, row := range rows {
 		payload, err := a.decodeGenerationSavedPayload(row.PayloadCipher)
 		if err != nil {
 			return nil, err
 		}
-		media, err := a.store.ListGenerationVariantMedia(ctx, userID, row.PromptID)
-		if err != nil {
-			return nil, err
+		view := generationVariantView{
+			ID: row.ID, JobID: row.JobPublicID, RequestID: row.RequestID, ParentJobID: row.ParentJobID,
+			PromptID: row.PromptID, TemplateID: row.TemplateID, WorkflowID: row.WorkflowID, ModelName: row.ModelName,
+			Seed: row.Seed, State: row.State, Values: payload.Values, CreatedAt: row.CreatedAt,
+			FinishedAt: row.FinishedAt, ErrorMessage: row.ErrorMessage,
 		}
-		view := generationVariantView{ID: row.ID, PromptID: row.PromptID, TemplateID: row.TemplateID, WorkflowID: row.WorkflowID, ModelName: row.ModelName, Seed: row.Seed, State: row.State, Values: payload.Values, CreatedAt: row.CreatedAt, FinishedAt: row.FinishedAt, ErrorMessage: row.ErrorMessage}
 		if row.FinishedAt != nil {
 			view.DurationSeconds = int64(row.FinishedAt.Sub(row.CreatedAt).Seconds())
 		} else {
 			view.DurationSeconds = int64(time.Since(row.CreatedAt).Seconds())
 		}
-		for _, item := range media {
-			view.Media = append(view.Media, generationMediaView{ID: item.ID, URL: "/generate/library/" + strconv.FormatInt(item.ID, 10), Filename: item.Filename, MediaType: item.MediaType, ExpiresUnix: item.ExpiresAt.UnixMilli(), Sensitive: item.Sensitive || item.VisualPending})
+		for _, item := range mediaByPrompt[row.PromptID] {
+			view.Media = append(view.Media, generationMediaView{
+				ID: item.ID, URL: "/generate/library/" + strconv.FormatInt(item.ID, 10), Filename: item.Filename,
+				MediaType: item.MediaType, MIMEType: item.MIMEType, SizeBytes: item.SizeBytes, CreatedUnix: item.CreatedAt.UnixMilli(),
+				ExpiresUnix: item.ExpiresAt.UnixMilli(), Sensitive: item.Sensitive || item.VisualPending,
+				Pinned: item.Pinned, Favorite: item.Favorite, Tags: item.Tags, Collections: item.Collections,
+				GenerationJobID: item.GenerationJobID, GenerationJobPublicID: item.GenerationJobPublicID,
+				ReferenceUses: item.ReferenceUses,
+			})
 		}
 		views = append(views, view)
 	}

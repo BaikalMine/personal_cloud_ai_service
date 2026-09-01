@@ -127,10 +127,68 @@ func (s *Store) ListGenerationVariants(ctx context.Context, userID int64, limit 
 	return items, rows.Err()
 }
 
+func (s *Store) ListGenerationLibraryVariants(ctx context.Context, userID int64, limit int, finishedAfter time.Time) ([]domain.GenerationVariantRow, error) {
+	if finishedAfter.IsZero() {
+		return nil, errors.New("generation history boundary is required")
+	}
+	limit = boundedLimit(limit, 1, 500)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT variant.id,variant.user_id,variant.prompt_id,variant.template_id,variant.workflow_id,variant.model_name,
+		       variant.seed,variant.payload_cipher,variant.state,variant.created_at,variant.finished_at,
+		       variant.state_changed_at,variant.error_message,variant.job_id,COALESCE(job.public_id,''),
+		       COALESCE(job.request_id,''),job.parent_job_id
+		FROM quick_generation_variants variant
+		LEFT JOIN generation_jobs job ON job.id=variant.job_id
+		WHERE variant.user_id=$1 AND (
+		  variant.state IN ('queued','running') OR COALESCE(variant.finished_at,variant.created_at) > $3 OR EXISTS (
+		    SELECT 1 FROM content_events event JOIN content_media media ON media.event_id=event.id
+		    WHERE event.user_id=variant.user_id AND event.external_id=variant.prompt_id
+		      AND event.service='comfyui' AND event.kind='comfyui_prompt'
+		      AND media.pinned_at IS NOT NULL AND media.expires_at > now() AND media.profile_hidden_at IS NULL
+		  )
+		)
+		ORDER BY EXISTS (
+		  SELECT 1 FROM content_events event JOIN content_media media ON media.event_id=event.id
+		  WHERE event.user_id=variant.user_id AND event.external_id=variant.prompt_id
+		    AND event.service='comfyui' AND event.kind='comfyui_prompt'
+		    AND media.pinned_at IS NOT NULL AND media.expires_at > now() AND media.profile_hidden_at IS NULL
+		) DESC,variant.created_at DESC,variant.id DESC LIMIT $2
+	`, userID, limit, finishedAfter)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.GenerationVariantRow, 0)
+	for rows.Next() {
+		var item domain.GenerationVariantRow
+		var jobID, parentJobID sql.NullInt64
+		if err := rows.Scan(&item.ID, &item.UserID, &item.PromptID, &item.TemplateID, &item.WorkflowID, &item.ModelName,
+			&item.Seed, &item.PayloadCipher, &item.State, &item.CreatedAt, &item.FinishedAt, &item.StateChangedAt,
+			&item.ErrorMessage, &jobID, &item.JobPublicID, &item.RequestID, &parentJobID); err != nil {
+			return nil, err
+		}
+		if jobID.Valid {
+			value := jobID.Int64
+			item.JobID = &value
+		}
+		if parentJobID.Valid {
+			value := parentJobID.Int64
+			item.ParentJobID = &value
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (s *Store) DeleteExpiredGenerationVariants(ctx context.Context, before time.Time) (int64, error) {
 	result, err := s.db.ExecContext(ctx, `
-		DELETE FROM quick_generation_variants
+		DELETE FROM quick_generation_variants variant
 		WHERE state NOT IN ('queued','running') AND COALESCE(finished_at,created_at) <= $1
+		  AND NOT EXISTS (
+		    SELECT 1 FROM content_events event JOIN content_media media ON media.event_id=event.id
+		    WHERE event.user_id=variant.user_id AND event.external_id=variant.prompt_id
+		      AND media.pinned_at IS NOT NULL AND media.expires_at > now()
+		  )
 	`, before)
 	if err != nil {
 		return 0, err
@@ -227,27 +285,9 @@ func uniqueStrings(items []string) []string {
 }
 
 func (s *Store) ListGenerationVariantMedia(ctx context.Context, userID int64, promptID string) ([]domain.GenerationVariantMedia, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id,m.media_type,m.original_name,m.expires_at,e.is_sensitive,
-		       (m.media_type='image' AND m.visual_sensitivity_classified_at IS NULL)
-		FROM content_media m JOIN content_events e ON e.id=m.event_id
-		WHERE e.user_id=$1 AND e.service='comfyui' AND e.kind='comfyui_prompt' AND e.external_id=$2
-		  AND e.expires_at > now() AND m.expires_at > now() AND m.profile_hidden_at IS NULL
-		ORDER BY m.created_at DESC,m.id DESC
-	`, userID, strings.TrimSpace(promptID))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := make([]domain.GenerationVariantMedia, 0)
-	for rows.Next() {
-		var item domain.GenerationVariantMedia
-		if err := rows.Scan(&item.ID, &item.MediaType, &item.Filename, &item.ExpiresAt, &item.Sensitive, &item.VisualPending); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
+	promptID = strings.TrimSpace(promptID)
+	items, err := s.ListGenerationMediaForPrompts(ctx, userID, []string{promptID})
+	return items[promptID], err
 }
 
 func (s *Store) AverageGenerationDuration(ctx context.Context) (time.Duration, error) {

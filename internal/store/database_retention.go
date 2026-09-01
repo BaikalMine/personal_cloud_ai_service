@@ -102,18 +102,27 @@ func (s *Store) CleanupDatabaseRetention(ctx context.Context, cutoffs domain.Dat
 			DELETE FROM gateway_observations item USING doomed WHERE item.id=doomed.id`},
 		{name: "quick_generation_variants", before: cutoffs.GenerationVariants, query: `
 			WITH doomed AS (
-				SELECT id FROM quick_generation_variants
-				WHERE state NOT IN ('queued','running') AND COALESCE(finished_at,created_at) < $1
-				ORDER BY COALESCE(finished_at,created_at),id LIMIT $2::integer FOR UPDATE SKIP LOCKED
+				SELECT variant.id FROM quick_generation_variants variant
+				WHERE variant.state NOT IN ('queued','running') AND COALESCE(variant.finished_at,variant.created_at) < $1
+				  AND NOT EXISTS (
+				    SELECT 1 FROM content_events event JOIN content_media media ON media.event_id=event.id
+				    WHERE event.user_id=variant.user_id AND event.external_id=variant.prompt_id
+				      AND media.pinned_at IS NOT NULL AND media.expires_at > now()
+				  )
+				ORDER BY COALESCE(variant.finished_at,variant.created_at),variant.id LIMIT $2::integer FOR UPDATE SKIP LOCKED
 			)
 			DELETE FROM quick_generation_variants item USING doomed WHERE item.id=doomed.id`},
 		{name: "generation_jobs", before: cutoffs.GenerationJobs, query: `
 			WITH doomed AS (
-				SELECT id FROM generation_jobs
-				WHERE state IN ('completed','failed','cancelled','expired')
-				  AND resources_released_at IS NOT NULL
-				  AND COALESCE(finished_at,updated_at) < $1
-				ORDER BY COALESCE(finished_at,updated_at),id LIMIT $2::integer FOR UPDATE SKIP LOCKED
+				SELECT job.id FROM generation_jobs job
+				WHERE job.state IN ('completed','failed','cancelled','expired')
+				  AND job.resources_released_at IS NOT NULL
+				  AND COALESCE(job.finished_at,job.updated_at) < $1
+				  AND NOT EXISTS (
+				    SELECT 1 FROM content_events event JOIN content_media media ON media.event_id=event.id
+				    WHERE event.generation_job_id=job.id AND media.pinned_at IS NOT NULL AND media.expires_at > now()
+				  )
+				ORDER BY COALESCE(job.finished_at,job.updated_at),job.id LIMIT $2::integer FOR UPDATE SKIP LOCKED
 			)
 			DELETE FROM generation_jobs item USING doomed WHERE item.id=doomed.id`},
 		{name: "comfy_output_ownership", before: cutoffs.OutputOwnerships, query: `
