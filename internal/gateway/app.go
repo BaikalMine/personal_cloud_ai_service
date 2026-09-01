@@ -50,6 +50,7 @@ var staticJavaScriptAssetPaths = []string{
 	"static/generation-video.js",
 	"static/generation-wizard.js",
 	"static/notifications.js",
+	"static/suggestions.js",
 }
 
 var staticJavaScriptAssets = func() map[string]string {
@@ -292,6 +293,7 @@ func (a *App) publicMux() http.Handler {
 	mux.Handle("/admin/", a.requireAdmin(http.HandlerFunc(a.handleAdminRoutes)))
 	mux.Handle("/app", a.requireAuth(http.HandlerFunc(a.handleApp)))
 	mux.Handle("/suggestions", a.requireAuth(a.featureSuggestionsOnly(http.HandlerFunc(a.handleSuggestions))))
+	mux.Handle("/suggestions/", a.requireAuth(a.featureSuggestionsOnly(http.HandlerFunc(a.handleSuggestions))))
 	mux.Handle("/account/profile", a.requireAuth(http.HandlerFunc(a.handleAccountProfile)))
 	mux.Handle("/account/password", a.requireAuth(http.HandlerFunc(a.handleAccountPassword)))
 	mux.Handle("/account/quick-generation-priority", a.requireAuth(http.HandlerFunc(a.handleAccountQuickGenerationPriority)))

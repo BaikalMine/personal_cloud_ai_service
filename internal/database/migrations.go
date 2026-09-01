@@ -1147,6 +1147,43 @@ var migrationCatalog = []migration{
 			`CREATE INDEX IF NOT EXISTS generation_jobs_batch_state_idx ON generation_jobs(batch_id,state,batch_position) WHERE batch_id IS NOT NULL`,
 		},
 	},
+	{
+		version: 49,
+		name:    "feature_suggestion_review_workflow",
+		statements: []string{
+			`ALTER TABLE feature_suggestions ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'other' CHECK (kind IN ('lora','model','workflow','other'))`,
+			`ALTER TABLE feature_suggestions ADD COLUMN IF NOT EXISTS json_size_bytes BIGINT NOT NULL DEFAULT 0 CHECK (json_size_bytes >= 0 AND json_size_bytes <= 5242880)`,
+			`UPDATE feature_suggestions SET json_size_bytes=GREATEST(octet_length(json_cipher)-28,0) WHERE json_name <> '' AND json_size_bytes=0`,
+			`ALTER TABLE feature_suggestions ADD COLUMN IF NOT EXISTS scan_status TEXT NOT NULL DEFAULT 'none' CHECK (scan_status IN ('none','queued','scanning','clean','flagged','error'))`,
+			`ALTER TABLE feature_suggestions ADD COLUMN IF NOT EXISTS review_comment_cipher BYTEA NOT NULL DEFAULT '\x'::bytea`,
+			`ALTER TABLE feature_suggestions ADD COLUMN IF NOT EXISTS reviewed_by BIGINT NULL REFERENCES users(id) ON DELETE SET NULL`,
+			`ALTER TABLE feature_suggestions ADD COLUMN IF NOT EXISTS reviewed_by_username TEXT NOT NULL DEFAULT '' CHECK (char_length(reviewed_by_username) <= 128)`,
+			`ALTER TABLE feature_suggestions ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ NULL`,
+			`ALTER TABLE feature_suggestions ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ NULL`,
+			`ALTER TABLE feature_suggestions DROP CONSTRAINT IF EXISTS feature_suggestions_status_check`,
+			`UPDATE feature_suggestions SET
+				scan_status=CASE status WHEN 'clean' THEN 'clean' WHEN 'flagged' THEN 'flagged' WHEN 'error' THEN 'error' ELSE 'scanning' END,
+				status=CASE status WHEN 'scanning' THEN 'scanning' ELSE 'review' END,
+				submitted_at=COALESCE(submitted_at,created_at)`,
+			`ALTER TABLE feature_suggestions ALTER COLUMN status SET DEFAULT 'draft'`,
+			`ALTER TABLE feature_suggestions ADD CONSTRAINT feature_suggestions_status_check CHECK (status IN ('draft','submitted','scanning','review','accepted','rejected'))`,
+			`CREATE INDEX IF NOT EXISTS feature_suggestions_status_created_idx ON feature_suggestions(status,created_at DESC,id DESC)`,
+			`CREATE INDEX IF NOT EXISTS feature_suggestions_user_created_idx ON feature_suggestions(user_id,created_at DESC,id DESC) WHERE user_id IS NOT NULL`,
+			`ALTER TABLE feature_suggestion_scans ADD COLUMN IF NOT EXISTS source_index INTEGER NOT NULL DEFAULT 0`,
+			`WITH ranked AS (
+				SELECT id,(row_number() OVER (PARTITION BY suggestion_id,kind ORDER BY id)-1)::integer AS source_index
+				FROM feature_suggestion_scans
+			) UPDATE feature_suggestion_scans scan SET source_index=ranked.source_index FROM ranked WHERE scan.id=ranked.id`,
+			`ALTER TABLE feature_suggestion_scans DROP CONSTRAINT IF EXISTS feature_suggestion_scans_source_index_check`,
+			`ALTER TABLE feature_suggestion_scans ADD CONSTRAINT feature_suggestion_scans_source_index_check CHECK (source_index BETWEEN 0 AND 15)`,
+			`ALTER TABLE feature_suggestion_scans ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count BETWEEN 0 AND 100)`,
+			`ALTER TABLE feature_suggestion_scans ADD COLUMN IF NOT EXISTS lease_token TEXT NOT NULL DEFAULT '' CHECK (char_length(lease_token) <= 96)`,
+			`ALTER TABLE feature_suggestion_scans ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ NULL`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS feature_suggestion_scans_source_idx ON feature_suggestion_scans(suggestion_id,kind,source_index)`,
+			`DROP INDEX IF EXISTS feature_suggestion_scans_pending_idx`,
+			`CREATE INDEX feature_suggestion_scans_pending_idx ON feature_suggestion_scans(status,lease_expires_at,created_at,id) WHERE status IN ('queued','in-progress')`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

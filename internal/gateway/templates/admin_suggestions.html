@@ -1,18 +1,56 @@
 {{define "admin_suggestions"}}
 {{template "head" .}}
 {{template "admin_nav" .}}
-<main class="page" id="main-content">
-  <section class="hero compact-hero"><div><p class="eyebrow">Входящие запросы</p><h1>Предложения пользователей</h1><p>{{if .VirusTotalConfigured}}Проверка выполняется через VirusTotal. Ничего из предложений не запускается автоматически.{{else}}VirusTotal не настроен: новые предложения не принимаются.{{end}}</p></div></section>
-  <section class="stack-list suggestion-list">
-    {{range .Suggestions}}
-    {{$suggestion := .}}<article class="panel suggestion-item">
-      <div class="panel-heading"><div><p class="section-kicker">{{.Username}} · {{formatTime .CreatedAt}}</p><h2>{{.Title}}</h2></div><span class="badge {{if eq .Status "clean"}}ok{{else if eq .Status "flagged"}}danger{{else}}warning{{end}}">{{if eq .Status "clean"}}Проверено: чисто{{else if eq .Status "flagged"}}Обнаружены угрозы{{else if eq .Status "error"}}Ошибка проверки{{else}}Проверяется{{end}}</span></div>
-      <p class="suggestion-description">{{.Description}}</p>
-      {{if .Links}}<div class="suggestion-links"><strong>Ссылки</strong>{{range .Links}}{{if eq $suggestion.Status "clean"}}<a href="{{.}}" target="_blank" rel="noreferrer noopener">{{.}}</a>{{else}}<span>{{.}}</span>{{end}}{{end}}</div>{{end}}
-      {{if .JSONName}}<p class="suggestion-json"><strong>JSON:</strong> {{.JSONName}} · {{formatBytes .JSONSize}}{{if eq .Status "clean"}} · <a href="/admin/suggestions/{{.ID}}/json">Скачать проверенный JSON</a>{{else}} · <span class="muted">Скачивание откроется после чистой проверки</span>{{end}}</p>{{end}}
-      <div class="suggestion-scans">{{range .Scans}}<div><strong>{{.SourceName}}</strong><span>{{if eq .Status "completed"}}{{.Harmless}} чисто · {{.Undetected}} без вердикта{{else if eq .Status "error"}}Ошибка VirusTotal{{else}}{{if eq .Status "in-progress"}}Проверяется{{else}}В очереди VirusTotal{{end}}{{end}}</span>{{if or (gt .Malicious 0) (gt .Suspicious 0)}}<b>{{.Malicious}} угроз · {{.Suspicious}} подозрений</b>{{end}}{{if .Error}}<small>{{.Error}}</small>{{end}}</div>{{end}}</div>
-    </article>
-    {{else}}<section class="panel"><p class="muted">Предложений пока нет.</p></section>{{end}}
+<main class="page admin-suggestions-page" id="main-content">
+  <section class="hero admin-suggestion-hero">
+    <div><p class="eyebrow">Входящие запросы</p><h1>Предложения</h1><p class="hero-copy">Проверяйте материалы, оставляйте решение пользователю и передавайте принятые идеи в работу вручную.</p></div>
+    <div class="admin-suggestion-service-state"><span class="badge {{if .PublicIntakeEnabled}}ok{{else}}neutral{{end}}">Приём {{if .PublicIntakeEnabled}}включён{{else}}скрыт{{end}}</span><span class="badge {{if .VirusTotalConfigured}}ok{{else}}danger{{end}}">VirusTotal {{if .VirusTotalConfigured}}подключён{{else}}не настроен{{end}}</span></div>
+  </section>
+
+  {{if .Message}}<p class="success-box ui-status-banner is-success" aria-live="polite">{{.Message}}</p>{{end}}
+  {{if .Error}}<p class="alert ui-status-banner is-error" role="alert">{{.Error}}</p>{{end}}
+  {{if not .PublicIntakeEnabled}}<p class="ui-status-banner is-info">Пользовательская форма пока скрыта. Сохранённые предложения и административная очередь остаются доступны.</p>{{end}}
+
+  <section class="admin-suggestion-queue" aria-labelledby="admin-suggestion-queue-title">
+    <header class="admin-suggestion-queue-heading"><div><p class="section-kicker">Очередь</p><h2 id="admin-suggestion-queue-title">На рассмотрении</h2></div><span>{{len .Suggestions}}</span></header>
+    <div class="admin-suggestion-list">
+      {{range .Suggestions}}
+      <article class="admin-suggestion-item">
+        <header class="admin-suggestion-item-heading">
+          <div><div class="admin-suggestion-origin"><span class="suggestion-kind">{{.KindLabel}}</span><span>{{.Username}}{{if .AuthorDeleted}} · пользователь удалён{{end}}</span><span>{{formatTime .CreatedAt}}</span></div><h3>{{.Title}}</h3></div>
+          <span class="badge {{.StatusClass}}">{{.StatusLabel}}</span>
+        </header>
+
+        <div class="admin-suggestion-body">
+          <section class="admin-suggestion-summary"><h4>Запрос пользователя</h4><p>{{.Description}}</p>{{if .ReviewComment}}<div class="suggestion-review-note"><strong>Решение {{if .ReviewedByUsername}}· {{.ReviewedByUsername}}{{if .ReviewerDeleted}} (удалён){{end}}{{end}}</strong><p>{{.ReviewComment}}</p></div>{{end}}</section>
+          <section class="admin-suggestion-materials"><div class="admin-suggestion-materials-heading"><h4>Материалы</h4><span>{{if gt .AttachmentCount 0}}{{.AttachmentCount}} шт. · {{.ScanStatusLabel}}{{else}}Только текст{{end}}</span></div>
+            {{if .Links}}<div class="admin-suggestion-sources">{{range .Links}}<div class="admin-suggestion-source"><span aria-hidden="true">↗</span><div><strong>{{.SourceName}}</strong>{{if .Safe}}<a href="{{.URL}}" target="_blank" rel="noreferrer noopener">{{.URL}}</a>{{else}}<span>{{.URL}}</span><small>Ссылка откроется после чистой проверки</small>{{end}}</div></div>{{end}}</div>{{end}}
+            {{if .JSONName}}<div class="admin-suggestion-source"><span aria-hidden="true">{ }</span><div><strong>{{.JSONName}}</strong><span>{{formatBytes .JSONSizeBytes}}</span>{{if .CanDownloadJSON}}<a href="/admin/suggestions/{{.ID}}/json">Скачать проверенный JSON</a>{{else}}<small>Скачивание недоступно до чистой проверки файла</small>{{end}}</div></div>{{end}}
+            {{if eq .AttachmentCount 0}}<p class="admin-suggestion-no-files">Пользователь не приложил файлы или ссылки. Администратор получает только описание.</p>{{end}}
+          </section>
+        </div>
+
+        {{if .Scans}}<details class="admin-suggestion-diagnostics"><summary>Диагностика VirusTotal</summary><div>{{range .Scans}}<section><header><strong>{{.SourceName}}</strong><span class="badge {{.StatusClass}}">{{.StatusLabel}}</span></header><p>Попыток: {{.AttemptCount}}{{if .CheckedAt}} · проверено {{formatTime .CheckedAt}}{{end}}</p>{{if eq .Status "completed"}}<p>Безопасных: {{.Harmless}} · без вердикта: {{.Undetected}} · угроз: {{.Malicious}} · подозрений: {{.Suspicious}}</p>{{end}}{{if .Error}}<p class="text-danger">{{.Error}}</p>{{end}}</section>{{end}}</div></details>{{end}}
+
+        {{if eq .Status "review"}}
+        <footer class="admin-suggestion-review">
+          <form method="post" action="/admin/suggestions/{{.ID}}/decision">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <label><span>Комментарий пользователю</span><textarea name="comment" rows="2" maxlength="1000" placeholder="Объясните решение; при отклонении комментарий обязателен"></textarea></label>
+            <div class="admin-suggestion-review-actions">{{if .CanAccept}}<button type="submit" name="decision" value="accepted">Принять в работу</button>{{else}}<span>Принятие недоступно: вложения не прошли чистую проверку.</span>{{end}}<button class="danger" type="submit" name="decision" value="rejected">Отклонить</button></div>
+          </form>
+          {{if .CanRetry}}<form method="post" action="/admin/suggestions/{{.ID}}/retry"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="ghost" type="submit" {{if not $.VirusTotalConfigured}}disabled{{end}}>Проверить повторно</button></form>{{end}}
+        </footer>
+        {{else if or (eq .Status "submitted") (eq .Status "scanning")}}
+        <footer class="admin-suggestion-progress"><span class="status-pulse" aria-hidden="true"></span><div><strong>{{.StatusLabel}}</strong><p>{{.StatusHint}}</p></div></footer>
+        {{else}}
+        <footer class="admin-suggestion-closed"><strong>{{.StatusLabel}}</strong>{{if .ReviewedAt}}<span>{{formatTime .ReviewedAt}}</span>{{end}}</footer>
+        {{end}}
+      </article>
+      {{else}}
+      <div class="ui-empty-state admin-suggestion-empty"><span aria-hidden="true">✓</span><div><h3>Очередь пуста</h3><p>Отправленные пользователями предложения появятся здесь после сохранения.</p></div></div>
+      {{end}}
+    </div>
   </section>
 </main>
 </body></html>

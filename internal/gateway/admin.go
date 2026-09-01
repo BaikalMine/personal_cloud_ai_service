@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -99,7 +100,7 @@ func (a *App) handleAdminRoutes(w http.ResponseWriter, r *http.Request) {
 	case path == "audit":
 		a.handleAdminAudit(w, r)
 	case strings.HasPrefix(path, "suggestions/"):
-		a.handleAdminSuggestionDownload(w, r, strings.TrimPrefix(path, "suggestions/"))
+		a.handleAdminSuggestionAction(w, r, strings.TrimPrefix(path, "suggestions/"))
 	case path == "suggestions":
 		a.handleAdminSuggestions(w, r)
 	default:
@@ -107,23 +108,41 @@ func (a *App) handleAdminRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (a *App) handleAdminSuggestionDownload(w http.ResponseWriter, r *http.Request, rawID string) {
-	if r.Method != http.MethodGet || !strings.HasSuffix(rawID, "/json") {
+func (a *App) handleAdminSuggestionAction(w http.ResponseWriter, r *http.Request, rawPath string) {
+	parts := strings.Split(strings.Trim(rawPath, "/"), "/")
+	if len(parts) != 2 {
 		http.NotFound(w, r)
 		return
 	}
-	id, err := strconv.ParseInt(strings.TrimSuffix(rawID, "/json"), 10, 64)
+	id, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil || id <= 0 {
 		http.NotFound(w, r)
 		return
 	}
-	suggestion, err := a.store.FeatureSuggestionByID(r.Context(), id)
-	if err != nil || suggestion.Status != "clean" || suggestion.JSONName == "" {
+	switch parts[1] {
+	case "json":
+		a.handleAdminSuggestionDownload(w, r, id)
+	case "retry":
+		a.handleAdminSuggestionRetry(w, r, id)
+	case "decision":
+		a.handleAdminSuggestionDecision(w, r, id)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (a *App) handleAdminSuggestionDownload(w http.ResponseWriter, r *http.Request, id int64) {
+	if r.Method != http.MethodGet {
+		http.NotFound(w, r)
+		return
+	}
+	suggestion, err := a.store.FeatureSuggestionJSONForAdmin(r.Context(), id)
+	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
 	payload, err := a.contentCipher.DecryptBytes(suggestion.JSONCipher)
-	if err != nil || !json.Valid(payload) {
+	if err != nil || int64(len(payload)) != suggestion.JSONSizeBytes || !json.Valid(payload) {
 		http.Error(w, "не удалось подготовить JSON", http.StatusInternalServerError)
 		return
 	}
@@ -137,10 +156,6 @@ func (a *App) handleAdminSuggestionDownload(w http.ResponseWriter, r *http.Reque
 }
 
 func (a *App) handleAdminSuggestions(w http.ResponseWriter, r *http.Request) {
-	if !a.cfg.FeatureSuggestionsEnabled {
-		http.NotFound(w, r)
-		return
-	}
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
 		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
@@ -153,20 +168,116 @@ func (a *App) handleAdminSuggestions(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]featureSuggestionView, 0, len(rows))
 	for _, row := range rows {
-		description, descriptionErr := a.contentCipher.Decrypt(row.DescriptionCipher)
-		linksRaw, linksErr := a.contentCipher.Decrypt(row.LinksCipher)
-		jsonPayload, jsonErr := a.contentCipher.DecryptBytes(row.JSONCipher)
-		if descriptionErr != nil || linksErr != nil || jsonErr != nil {
-			description, linksRaw, jsonPayload = "[не удалось расшифровать данные]", "[]", nil
+		item, decodeErr := a.featureSuggestionView(row)
+		if decodeErr != nil {
+			statusLabel, statusClass, statusHint := featureSuggestionStatus(row.Status)
+			item = featureSuggestionView{FeatureSuggestionRow: row, Description: "[не удалось расшифровать данные]", KindLabel: featureSuggestionKindLabel(row.Kind), StatusLabel: statusLabel, StatusClass: statusClass, StatusHint: statusHint, ScanStatusLabel: featureSuggestionScanStatusLabel(row.ScanStatus)}
 		}
-		var links []string
-		_ = json.Unmarshal([]byte(linksRaw), &links)
-		items = append(items, featureSuggestionView{FeatureSuggestionRow: row, Description: description, Links: links, JSONSize: len(jsonPayload)})
+		items = append(items, item)
 	}
 	a.render(w, r, "admin_suggestions", map[string]any{
 		"Title": "Предложения пользователей", "Suggestions": items,
 		"VirusTotalConfigured": a.virusTotal != nil && a.virusTotal.Configured(),
+		"PublicIntakeEnabled":  a.cfg.FeatureSuggestionsEnabled,
+		"Message":              adminSuggestionMessage(r.URL.Query().Get("message")),
+		"Error":                adminSuggestionError(r.URL.Query().Get("error")),
 	})
+}
+
+func (a *App) handleAdminSuggestionRetry(w http.ResponseWriter, r *http.Request, id int64) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
+	if !a.validCSRF(r) {
+		http.Error(w, "доступ запрещён", http.StatusForbidden)
+		return
+	}
+	if a.virusTotal == nil || !a.virusTotal.Configured() {
+		http.Redirect(w, r, "/admin/suggestions?error=vt_unavailable", http.StatusSeeOther)
+		return
+	}
+	if err := a.store.RetryFeatureSuggestionScans(r.Context(), id); err != nil {
+		if errors.Is(err, store.ErrFeatureSuggestionStateConflict) || errors.Is(err, sql.ErrNoRows) {
+			http.Redirect(w, r, "/admin/suggestions?error=state", http.StatusSeeOther)
+			return
+		}
+		http.Error(w, "не удалось повторить проверку", http.StatusInternalServerError)
+		return
+	}
+	admin := a.currentUser(r)
+	a.audit(r.Context(), &admin.ID, "feature_suggestion_scan_retried", "feature_suggestion", &id, a.clientIP(r), r.UserAgent(), nil)
+	http.Redirect(w, r, "/admin/suggestions?message=retry", http.StatusSeeOther)
+}
+
+func (a *App) handleAdminSuggestionDecision(w http.ResponseWriter, r *http.Request, id int64) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
+	if !a.validCSRF(r) {
+		http.Error(w, "доступ запрещён", http.StatusForbidden)
+		return
+	}
+	decision := strings.TrimSpace(r.FormValue("decision"))
+	comment := strings.TrimSpace(r.FormValue("comment"))
+	if decision != "accepted" && decision != "rejected" {
+		http.Error(w, "неизвестное решение", http.StatusBadRequest)
+		return
+	}
+	if len([]rune(comment)) > 1000 || (decision == "rejected" && len([]rune(comment)) < 3) {
+		http.Redirect(w, r, "/admin/suggestions?error=comment", http.StatusSeeOther)
+		return
+	}
+	commentCipher, err := a.contentCipher.Encrypt(comment)
+	if err != nil {
+		http.Error(w, "не удалось защитить комментарий", http.StatusInternalServerError)
+		return
+	}
+	admin := a.currentUser(r)
+	if err := a.store.SetFeatureSuggestionDecision(r.Context(), id, admin.ID, admin.Username, decision, commentCipher); err != nil {
+		switch {
+		case errors.Is(err, store.ErrFeatureSuggestionUnsafeDecision):
+			http.Redirect(w, r, "/admin/suggestions?error=unsafe", http.StatusSeeOther)
+		case errors.Is(err, store.ErrFeatureSuggestionStateConflict), errors.Is(err, sql.ErrNoRows):
+			http.Redirect(w, r, "/admin/suggestions?error=state", http.StatusSeeOther)
+		default:
+			http.Error(w, "не удалось сохранить решение", http.StatusInternalServerError)
+		}
+		return
+	}
+	a.audit(r.Context(), &admin.ID, "feature_suggestion_"+decision, "feature_suggestion", &id, a.clientIP(r), r.UserAgent(), map[string]any{"comment_provided": comment != ""})
+	http.Redirect(w, r, "/admin/suggestions?message="+decision, http.StatusSeeOther)
+}
+
+func adminSuggestionMessage(code string) string {
+	switch code {
+	case "retry":
+		return "Повторная проверка поставлена в очередь."
+	case "accepted":
+		return "Предложение принято в работу. Ничего не устанавливалось автоматически."
+	case "rejected":
+		return "Предложение отклонено, комментарий доступен пользователю."
+	default:
+		return ""
+	}
+}
+
+func adminSuggestionError(code string) string {
+	switch code {
+	case "vt_unavailable":
+		return "VirusTotal не настроен, повторную проверку пока нельзя запустить."
+	case "unsafe":
+		return "Нельзя принять предложение: не все вложения прошли проверку без замечаний."
+	case "comment":
+		return "Для отклонения укажите понятную причину до 1000 символов."
+	case "state":
+		return "Состояние предложения уже изменилось. Обновите очередь и повторите действие."
+	default:
+		return ""
+	}
 }
 
 func (a *App) handleAdminSystemOverview(w http.ResponseWriter, r *http.Request) {

@@ -1,22 +1,74 @@
 {{define "suggestions"}}
 {{template "head" .}}
 {{template "nav" .}}
-<main class="page narrow-page" id="main-content">
-  <section class="hero compact-hero"><div><p class="eyebrow">Развитие сервиса</p><h1>Предложить улучшение</h1><p>Модель, LoRA или workflow можно предложить без доступа к серверу.</p></div></section>
-  {{if .Message}}<p class="success-box">{{.Message}}</p>{{end}}
-  {{if .Error}}<p class="alert">{{.Error}}</p>{{end}}
-  {{if .VirusTotalConfigured}}
-  <form class="panel form-grid suggestion-form" method="post" action="/suggestions" enctype="multipart/form-data">
-    <input type="hidden" name="csrf" value="{{.CSRF}}">
-    <label class="full"><span>Что добавить</span><input name="title" required minlength="3" maxlength="120" placeholder="Например: LoRA для портретов или новый workflow"></label>
-    <label class="full"><span>Описание</span><textarea name="description" required minlength="10" maxlength="4000" rows="7" placeholder="Для чего это нужно, с какими моделями работает, чего ожидаете от результата."></textarea></label>
-    <label class="full"><span>Ссылки на источник</span><textarea name="links" rows="4" placeholder="До трёх ссылок: по одной в строке"></textarea><small>Gateway не открывает эти адреса и не скачивает файлы. Каждая ссылка отправляется в VirusTotal.</small></label>
-    <label class="full"><span>Workflow JSON</span><input name="workflow_json" type="file" accept="application/json,.json"><small>Только корректный JSON до 5 МБ. Он не выполняется Gateway и отправляется в VirusTotal на проверку.</small></label>
-    <div class="full form-actions"><button type="submit">Отправить на проверку</button></div>
-  </form>
-  {{else}}
-  <section class="panel"><h2>Проверка ещё не подключена</h2><p class="panel-intro">Администратор должен добавить ключ VirusTotal. До этого момента предложения с файлами и ссылками не принимаются.</p></section>
-  {{end}}
+<main class="page suggestions-page" id="main-content">
+  <section class="hero suggestion-hero">
+    <div><p class="eyebrow">Обратная связь</p><h1>Предложения</h1><p class="hero-copy">Расскажите, какую LoRA, модель или workflow стоит добавить. Ссылки и JSON можно приложить, но это не обязательно.</p></div>
+    <span class="suggestion-intake-state"><span aria-hidden="true"></span>Приём открыт</span>
+  </section>
+
+  {{if .Message}}<p class="success-box ui-status-banner is-success" aria-live="polite">{{.Message}}</p>{{end}}
+  {{if .Error}}<p class="alert ui-status-banner is-error" role="alert">{{.Error}}</p>{{end}}
+
+  <div class="suggestion-workspace">
+    <section class="panel suggestion-composer" aria-labelledby="suggestion-composer-title">
+      <header class="suggestion-section-heading">
+        <div><p class="section-kicker">{{if .Form.ID}}Черновик #{{.Form.ID}}{{else}}Новое предложение{{end}}</p><h2 id="suggestion-composer-title">{{if .Form.ID}}Продолжить редактирование{{else}}Что стоит добавить{{end}}</h2></div>
+        {{if .Form.ID}}<a class="text-link" href="/suggestions">Закрыть черновик</a>{{end}}
+      </header>
+      <form class="suggestion-form" method="post" action="/suggestions" enctype="multipart/form-data">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        {{if .Form.ID}}<input type="hidden" name="suggestion_id" value="{{.Form.ID}}">{{end}}
+
+        <fieldset class="suggestion-kind-picker">
+          <legend>Тип предложения</legend>
+          <div class="ui-segmented ui-segmented--cards">
+            <label class="ui-choice"><input type="radio" name="kind" value="lora" {{if eq .Form.Kind "lora"}}checked{{end}}><span><b>LoRA</b><small>Стиль, персонаж или движение</small></span></label>
+            <label class="ui-choice"><input type="radio" name="kind" value="model" {{if eq .Form.Kind "model"}}checked{{end}}><span><b>Модель</b><small>Checkpoint или encoder</small></span></label>
+            <label class="ui-choice"><input type="radio" name="kind" value="workflow" {{if eq .Form.Kind "workflow"}}checked{{end}}><span><b>Workflow</b><small>Готовая схема ComfyUI</small></span></label>
+            <label class="ui-choice"><input type="radio" name="kind" value="other" {{if eq .Form.Kind "other"}}checked{{end}}><span><b>Другое</b><small>Идея или улучшение</small></span></label>
+          </div>
+        </fieldset>
+
+        <label class="ui-field"><span>Название</span><input name="title" value="{{.Form.Title}}" required minlength="3" maxlength="120" placeholder="Коротко: что нужно добавить"></label>
+        <label class="ui-field"><span>Описание</span><textarea name="description" maxlength="4000" rows="6" placeholder="Для чего это нужно, с чем работает и какого результата вы ждёте">{{.Form.Description}}</textarea><small class="field-hint">Для отправки нужно не менее 10 символов. Черновик можно сохранить раньше.</small></label>
+
+        <section class="suggestion-attachments" aria-labelledby="suggestion-attachments-title">
+          <div class="suggestion-subheading"><div><h3 id="suggestion-attachments-title">Материалы</h3><p>Опционально. Без вложений администратор получит только ваш текст.</p></div><span>до 3 ссылок · JSON до 5 МБ</span></div>
+          {{if not .VirusTotalConfigured}}<p class="ui-status-banner is-warning">Текстовое предложение можно отправить. Ссылки и JSON останутся в черновике до восстановления VirusTotal.</p>{{end}}
+          <div class="suggestion-attachment-grid">
+            <label class="ui-field"><span>Ссылки</span><textarea name="links" rows="4" placeholder="По одной ссылке в строке">{{.Form.Links}}</textarea><small class="field-hint">Gateway не открывает ссылки. Перед просмотром они проходят VirusTotal.</small></label>
+            <label class="ui-field suggestion-file-field"><span>Workflow JSON</span><span class="suggestion-file-control" data-suggestion-file-control><input name="workflow_json" type="file" accept="application/json,.json" aria-describedby="suggestion-json-hint"><span class="suggestion-file-button" aria-hidden="true">Выбрать JSON</span><span class="suggestion-file-name" data-suggestion-file-name>Файл не выбран</span></span><small class="field-hint" id="suggestion-json-hint">Файл сохраняется зашифрованным и никогда не запускается автоматически.</small></label>
+          </div>
+          {{if .Form.JSONName}}<div class="suggestion-saved-file"><span aria-hidden="true">{ }</span><div><strong>{{.Form.JSONName}}</strong><small>{{formatBytes .Form.JSONSize}} · сохранён в черновике</small></div><label><input type="checkbox" name="remove_json" value="1"><span>Удалить</span></label></div>{{end}}
+        </section>
+
+        <footer class="suggestion-form-actions">
+          <p>Принятие предложения не устанавливает модели, LoRA или ноды автоматически.</p>
+          <div><button class="ghost" type="submit" name="action" value="save">Сохранить черновик</button><button type="submit" name="action" value="submit">Отправить</button></div>
+        </footer>
+      </form>
+    </section>
+
+    <section class="suggestion-history" aria-labelledby="suggestion-history-title">
+      <header class="suggestion-history-heading"><div><p class="section-kicker">История</p><h2 id="suggestion-history-title">Мои предложения</h2></div><span>{{len .Suggestions}}</span></header>
+      <div class="suggestion-user-list">
+        {{range .Suggestions}}
+        <article class="suggestion-user-item">
+          <header><div><span class="suggestion-kind">{{.KindLabel}}</span><h3>{{.Title}}</h3></div><span class="badge {{.StatusClass}}">{{.StatusLabel}}</span></header>
+          <p class="suggestion-user-description">{{.Description}}</p>
+          <div class="suggestion-user-meta"><span>{{formatTime .UpdatedAt}}</span>{{if gt .AttachmentCount 0}}<span>{{.AttachmentCount}} материал{{if gt .AttachmentCount 1}}а{{end}}</span>{{else}}<span>Только текст</span>{{end}}</div>
+          <p class="suggestion-status-hint">{{.StatusHint}}</p>
+          {{if .ReviewComment}}<div class="suggestion-review-note"><strong>Комментарий администратора</strong><p>{{.ReviewComment}}</p></div>{{end}}
+          {{if .CanEdit}}<footer><a class="button ghost" href="/suggestions?edit={{.ID}}">Редактировать</a><form method="post" action="/suggestions/{{.ID}}/delete"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger" type="submit" data-confirm="Удалить этот черновик?">Удалить</button></form></footer>{{end}}
+        </article>
+        {{else}}
+        <div class="ui-empty-state suggestion-empty"><span aria-hidden="true">+</span><div><h3>Здесь появится история</h3><p>Черновики и отправленные предложения останутся доступны с актуальным статусом.</p></div></div>
+        {{end}}
+      </div>
+    </section>
+  </div>
 </main>
+<script src="/static/suggestions.js?v={{.AssetVersion}}"></script>
 </body></html>
 {{end}}

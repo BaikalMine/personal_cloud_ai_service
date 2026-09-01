@@ -10,6 +10,11 @@ const batchPath = path.join(projectRoot, "internal/gateway/static/generation-bat
 const generateTemplatePath = path.join(projectRoot, "internal/gateway/templates/generate.html");
 const gatewayRoutesPath = path.join(projectRoot, "internal/gateway/generation.go");
 const galleryPath = path.join(projectRoot, "internal/gateway/templates/gallery.html");
+const suggestionsPath = path.join(projectRoot, "internal/gateway/templates/suggestions.html");
+const adminSuggestionsPath = path.join(projectRoot, "internal/gateway/templates/admin_suggestions.html");
+const layoutPath = path.join(projectRoot, "internal/gateway/templates/_layout.html");
+const appPath = path.join(projectRoot, "internal/gateway/app.go");
+const suggestionStorePath = path.join(projectRoot, "internal/store/feature_suggestions.go");
 const templateRoot = path.join(projectRoot, "internal/gateway/templates");
 const previewPath = path.join(projectRoot, "cmd/ui-preview/main.go");
 const css = fs.readFileSync(stylePath, "utf8");
@@ -18,6 +23,11 @@ const batchScript = fs.readFileSync(batchPath, "utf8");
 const generateTemplate = fs.readFileSync(generateTemplatePath, "utf8");
 const gatewayRoutes = fs.readFileSync(gatewayRoutesPath, "utf8");
 const galleryTemplate = fs.readFileSync(galleryPath, "utf8");
+const suggestionsTemplate = fs.readFileSync(suggestionsPath, "utf8");
+const adminSuggestionsTemplate = fs.readFileSync(adminSuggestionsPath, "utf8");
+const layoutTemplate = fs.readFileSync(layoutPath, "utf8");
+const appSource = fs.readFileSync(appPath, "utf8");
+const suggestionStore = fs.readFileSync(suggestionStorePath, "utf8");
 const templates = fs.readdirSync(templateRoot)
   .filter((name) => name.endsWith(".html"))
   .map((name) => fs.readFileSync(path.join(templateRoot, name), "utf8"))
@@ -156,4 +166,21 @@ test("controlled generation batches are wired through the form, job center, and 
   for (const route of ["/generate/batches", "/generate/batches/cancel", "/generate/batches/winner"]) {
     assert.ok(gatewayRoutes.includes(route), `missing batch route ${route}`);
   }
+});
+
+test("suggestions keep public intake hidden without hiding the admin review queue", () => {
+  assert.match(suggestionsTemplate, /name="action" value="save"/);
+  assert.match(suggestionsTemplate, /name="action" value="submit"/);
+  assert.match(suggestionsTemplate, /Без вложений администратор получит только ваш текст/);
+  assert.match(suggestionsTemplate, /Мои предложения/);
+  assert.match(adminSuggestionsTemplate, /Диагностика VirusTotal/);
+  assert.match(adminSuggestionsTemplate, /CanDownloadJSON/);
+  assert.match(adminSuggestionsTemplate, /name="decision" value="accepted"/);
+  assert.match(adminSuggestionsTemplate, /name="decision" value="rejected"/);
+  assert.doesNotMatch(adminSuggestionsTemplate, /установить|install|копировать модель/i);
+  assert.match(appSource, /mux\.Handle\("\/suggestions\/"/);
+  assert.match(suggestionStore, /status IN \('review','accepted'\)/);
+  assert.match(suggestionStore, /scan\.status='completed' AND scan\.malicious=0 AND scan\.suspicious=0/);
+  const adminNavLine = layoutTemplate.split(/\r?\n/).find((line) => line.includes('href="/admin/suggestions"'));
+  assert.ok(adminNavLine && !adminNavLine.includes("FeatureSuggestionsEnabled"), adminNavLine);
 });

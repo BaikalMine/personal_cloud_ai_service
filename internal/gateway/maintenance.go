@@ -56,7 +56,7 @@ func (a *App) maintenanceWorkerSpecs() []maintenanceWorkerSpec {
 			RetryDelay: shortRetry, MaxBackoff: 2 * time.Minute, Run: a.pruneUnauthorizedWebSockets,
 		},
 		{
-			Key: "suggestion_scans", Name: "Проверка предложений", Interval: maintenanceInterval, Timeout: 2 * time.Minute, InitialDelay: 5 * time.Second,
+			Key: "suggestion_scans", Name: "Проверка предложений", Interval: time.Minute, Timeout: 2 * time.Minute, InitialDelay: 5 * time.Second,
 			RetryDelay: time.Minute, MaxBackoff: maintenanceInterval, Run: a.refreshFeatureSuggestionScans,
 		},
 		{

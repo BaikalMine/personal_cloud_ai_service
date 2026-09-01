@@ -296,6 +296,28 @@ func TestControlledGenerationBatchesMigration(t *testing.T) {
 	}
 }
 
+func TestFeatureSuggestionReviewWorkflowMigration(t *testing.T) {
+	var suggestionMigration *migration
+	for index := range migrationCatalog {
+		if migrationCatalog[index].version == 49 {
+			suggestionMigration = &migrationCatalog[index]
+			break
+		}
+	}
+	if suggestionMigration == nil || suggestionMigration.name != "feature_suggestion_review_workflow" {
+		t.Fatal("feature suggestion review workflow migration is missing")
+	}
+	sql := strings.Join(suggestionMigration.statements, "\n")
+	for _, expected := range []string{
+		"json_size_bytes", "scan_status", "review_comment_cipher", "reviewed_by", "submitted_at", "reviewed_at",
+		"'draft','submitted','scanning','review','accepted','rejected'", "source_index", "lease_expires_at",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("feature suggestion review migration does not contain %q: %s", expected, sql)
+		}
+	}
+}
+
 func TestQuickGenerationRequestTelemetryMigration(t *testing.T) {
 	var telemetryMigration *migration
 	for index := range migrationCatalog {

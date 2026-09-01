@@ -718,13 +718,33 @@ func main() {
 		},
 	}))
 	mux.HandleFunc("/preview/media", render("admin_media_viewer", "Просмотр результата", map[string]any{"Filename": "AI-Gateway-preview-result.png", "MediaID": int64(42), "MediaType": "image"}))
-	mux.HandleFunc("/preview/suggestions", render("suggestions", "Предложить улучшение", map[string]any{"VirusTotalConfigured": true}))
-	previewSuggestions := []map[string]any{{
-		"ID": int64(9), "Username": "rayka", "Title": "Новая LoRA для портретного движения", "Description": "Добавить адаптер для более естественного движения волос и ткани.", "Status": "clean", "CreatedAt": now.Add(-5 * time.Hour),
-		"Links": []string{"https://example.test/model/9"}, "JSONName": "portrait-motion.json", "JSONSize": 18432,
-		"Scans": []map[string]any{{"SourceName": "Ссылка 1", "Status": "completed", "Harmless": 73, "Undetected": 4, "Malicious": 0, "Suspicious": 0}},
-	}}
-	mux.HandleFunc("/preview/admin-suggestions", render("admin_suggestions", "Предложения пользователей", map[string]any{"VirusTotalConfigured": true, "Suggestions": previewSuggestions}))
+	previewUserSuggestions := []map[string]any{
+		{"ID": int64(12), "KindLabel": "Workflow", "Title": "Портретный workflow с несколькими референсами", "Description": "Нужен готовый путь для переноса одежды и фона из отдельных изображений.", "Status": "draft", "StatusLabel": "Черновик", "StatusClass": "neutral", "StatusHint": "Можно продолжить редактирование и отправить позже.", "AttachmentCount": 1, "CanEdit": true, "UpdatedAt": now.Add(-18 * time.Minute)},
+		{"ID": int64(11), "KindLabel": "LoRA", "Title": "LoRA для естественного движения ткани", "Description": "Адаптер для MiniMax H3 с более спокойным движением волос и одежды.", "Status": "scanning", "StatusLabel": "Проверяется", "StatusClass": "info", "StatusHint": "Проверяем приложенные ссылки и JSON.", "AttachmentCount": 2, "UpdatedAt": now.Add(-2 * time.Hour)},
+		{"ID": int64(8), "KindLabel": "Модель", "Title": "Модель для предметной съёмки", "Description": "Нужна модель для каталожных кадров небольших объектов.", "Status": "accepted", "StatusLabel": "Принято", "StatusClass": "ok", "StatusHint": "Предложение принято в работу без автоматической установки.", "AttachmentCount": 0, "ReviewComment": "Добавили в список на тестирование качества.", "UpdatedAt": now.Add(-26 * time.Hour)},
+	}
+	mux.HandleFunc("/preview/suggestions", render("suggestions", "Предложения", map[string]any{
+		"VirusTotalConfigured": true,
+		"Form":                 map[string]any{"ID": int64(0), "Kind": "workflow", "Title": "", "Description": "", "Links": "", "JSONName": "", "JSONSize": int64(0)},
+		"Suggestions":          previewUserSuggestions,
+	}))
+	previewSuggestions := []map[string]any{
+		{
+			"ID": int64(9), "Username": "rayka", "KindLabel": "LoRA", "Title": "Новая LoRA для портретного движения", "Description": "Добавить адаптер для более естественного движения волос и ткани.", "Status": "review", "StatusLabel": "На рассмотрении", "StatusClass": "warning", "CreatedAt": now.Add(-5 * time.Hour),
+			"AttachmentCount": 2, "ScanStatusLabel": "Проверено", "CanAccept": true, "CanReject": true, "CanRetry": true, "CanDownloadJSON": true, "JSONName": "portrait-motion.json", "JSONSizeBytes": int64(18432),
+			"Links": []map[string]any{{"SourceName": "Ссылка 1", "URL": "https://huggingface.co/example/portrait-motion", "Safe": true}},
+			"Scans": []map[string]any{{"SourceName": "Ссылка 1", "Status": "completed", "StatusLabel": "Проверено", "StatusClass": "ok", "Harmless": 73, "Undetected": 4, "Malicious": 0, "Suspicious": 0, "AttemptCount": 1}, {"SourceName": "portrait-motion.json", "Status": "completed", "StatusLabel": "Проверено", "StatusClass": "ok", "Harmless": 68, "Undetected": 2, "Malicious": 0, "Suspicious": 0, "AttemptCount": 1}},
+		},
+		{
+			"ID": int64(10), "Username": "demo4518", "KindLabel": "Workflow", "Title": "Workflow для последовательной генерации ракурсов", "Description": "Хочу получать три согласованных изображения объекта для карточки товара.", "Status": "scanning", "StatusLabel": "Проверяется", "StatusClass": "info", "StatusHint": "Проверяем приложенные ссылки и JSON.", "CreatedAt": now.Add(-90 * time.Minute), "AttachmentCount": 1, "ScanStatusLabel": "Проверяется",
+			"Links": []map[string]any{{"SourceName": "Ссылка 1", "URL": "https://github.com/example/workflow", "Safe": false}},
+			"Scans": []map[string]any{{"SourceName": "Ссылка 1", "Status": "in-progress", "StatusLabel": "Проверяется", "StatusClass": "info", "AttemptCount": 1}},
+		},
+		{
+			"ID": int64(7), "Username": "old-user", "AuthorDeleted": true, "KindLabel": "Другое", "Title": "Добавить готовый профиль света", "Description": "Текстовое предложение без вложений: администратор видит только это описание.", "Status": "accepted", "StatusLabel": "Принято", "StatusClass": "ok", "CreatedAt": now.Add(-48 * time.Hour), "AttachmentCount": 0, "ScanStatusLabel": "Без вложений", "ReviewComment": "Принято в список продуктовых улучшений.", "ReviewedByUsername": "admin", "ReviewedAt": timePointer(now.Add(-36 * time.Hour)),
+		},
+	}
+	mux.HandleFunc("/preview/admin-suggestions", render("admin_suggestions", "Предложения", map[string]any{"VirusTotalConfigured": true, "PublicIntakeEnabled": false, "Suggestions": previewSuggestions}))
 	mux.HandleFunc("/preview/bad-gateway", render("bad_gateway", "Сервис недоступен", map[string]any{"Service": "ComfyUI"}))
 	mux.HandleFunc("/preview/forbidden", render("service_forbidden", "Доступ запрещён", map[string]any{"Service": "ComfyUI"}))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/preview/admin", http.StatusFound) })

@@ -80,6 +80,16 @@ redefine the shared focus, disabled, loading or semantic state language.
 - Resource history uses real timestamps and states its period, sample count, min, max and current values. Generation starts appear as markers; gauges are reserved for current CPU, RAM, GPU and VRAM values.
 - The canonical operations preview must include running and overdue jobs, a mixed dependency state, a worker retry, storage growth and generation failures so visual regression cannot pass on an unrealistically empty page.
 
+## Suggestion Review Contract
+
+- `FEATURE_SUGGESTIONS_ENABLED` controls only public intake and its user navigation entry. The administrative review queue remains available when intake is hidden, and toggling the flag never migrates or deletes stored proposals.
+- A proposal follows one visible lifecycle: draft, submitted, scanning, review, accepted or rejected. Drafts are owner-only and editable; submitted proposals cannot be silently rewritten.
+- Text is sufficient for submission. Up to three source links and one valid JSON file up to 5 MB are optional. The selected filename is shown inside the upload control, and an already saved draft attachment remains explicit until replaced or removed.
+- Users see the lifecycle status and administrator comment without VirusTotal identifiers, counters or raw errors. Administrators see per-source diagnostics, but an unchecked link is not clickable and JSON is downloadable only after the saved file itself has a clean result.
+- Accepting a proposal records a review decision; it never installs nodes, loads a workflow or copies a model or LoRA into ComfyUI. Rejection requires a useful user-facing comment.
+- Desktop intake keeps composition and personal history in two readable columns. They stack before either column becomes cramped; narrow-screen review actions become full-width without changing decision order.
+- Canonical previews cover draft, scanning, review, accepted, text-only and deleted-author states. Interaction tests select a JSON file, open diagnostics and verify the only available safe review actions.
+
 ## Verification
 
 `/preview/components` in `cmd/ui-preview` renders the canonical states. The

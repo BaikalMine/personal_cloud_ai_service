@@ -131,6 +131,7 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	assertComfyOutputCleanupLifecycle(t, ctx, db, repository, registeredUserID)
 	assertContentMediaChunksLifecycle(t, ctx, db, repository, registeredUserID)
 	assertPromptAssistantQualityLifecycle(t, ctx, db, repository, registeredUserID)
+	assertFeatureSuggestionLifecycle(t, ctx, db, repository, registeredUserID, adminID)
 
 	sessionToken := "integration-session-token"
 	sessionHash := security.HashToken(sessionToken)
@@ -1262,6 +1263,152 @@ func assertObservabilityLifecycle(t *testing.T, ctx context.Context, repository 
 	if err != nil || trace.Job.PublicID == "" || trace.Job.FinishedAt == nil || len(trace.Transitions) == 0 ||
 		len(trace.ServiceObservations) < 2 || len(trace.ProxyRequests) == 0 || len(trace.AuditEvents) == 0 || len(trace.ContentEvents) == 0 {
 		t.Fatalf("generation trace=%+v err=%v", trace, err)
+	}
+}
+
+func assertFeatureSuggestionLifecycle(t *testing.T, ctx context.Context, db *sql.DB, repository *store.Store, userID, adminID int64) {
+	t.Helper()
+	record := func(kind, title, jsonName string, jsonSize int64) domain.FeatureSuggestionRecord {
+		return domain.FeatureSuggestionRecord{
+			UserID: userID, Username: "suggestion-owner", Kind: kind, Title: title,
+			DescriptionCipher: []byte("encrypted-description"), LinksCipher: []byte("encrypted-links"),
+			JSONName: jsonName, JSONCipher: []byte("encrypted-json"), JSONSizeBytes: jsonSize,
+		}
+	}
+
+	textDraft, err := repository.CreateFeatureSuggestionDraft(ctx, record("other", "Текстовая идея", "", 0))
+	if err != nil || textDraft.Status != "draft" || textDraft.ScanStatus != "none" {
+		t.Fatalf("create text suggestion draft=%+v err=%v", textDraft, err)
+	}
+	updated, err := repository.UpdateFeatureSuggestionDraft(ctx, textDraft.ID, userID, record("model", "Обновлённая текстовая идея", "", 0))
+	if err != nil || updated.Kind != "model" || updated.Title != "Обновлённая текстовая идея" {
+		t.Fatalf("update suggestion draft=%+v err=%v", updated, err)
+	}
+	if _, err := repository.UpdateFeatureSuggestionDraft(ctx, textDraft.ID, userID+999, record("model", "Чужое изменение", "", 0)); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("foreign suggestion draft update error=%v, want sql.ErrNoRows", err)
+	}
+	textReview, scans, err := repository.SubmitFeatureSuggestion(ctx, textDraft.ID, userID, nil)
+	if err != nil || textReview.Status != "review" || textReview.ScanStatus != "none" || len(scans) != 0 {
+		t.Fatalf("submit text suggestion=%+v scans=%+v err=%v", textReview, scans, err)
+	}
+	if err := repository.SetFeatureSuggestionDecision(ctx, textDraft.ID, adminID, "admin", "accepted", []byte("accepted-comment")); err != nil {
+		t.Fatalf("accept text suggestion: %v", err)
+	}
+
+	attachedDraft, err := repository.CreateFeatureSuggestionDraft(ctx, record("workflow", "Workflow с материалами", "workflow.json", 128))
+	if err != nil {
+		t.Fatal(err)
+	}
+	attached, createdScans, err := repository.SubmitFeatureSuggestion(ctx, attachedDraft.ID, userID, []domain.FeatureSuggestionScanRecord{
+		{Kind: "url", SourceName: "Ссылка 1", SourceIndex: 0},
+		{Kind: "json", SourceName: "workflow.json", SourceIndex: 0},
+	})
+	if err != nil || attached.Status != "submitted" || attached.ScanStatus != "queued" || len(createdScans) != 2 {
+		t.Fatalf("submit attached suggestion=%+v scans=%+v err=%v", attached, createdScans, err)
+	}
+	claimed, err := repository.ClaimFeatureSuggestionScans(ctx, 4, time.Minute)
+	if err != nil || len(claimed) != 2 {
+		t.Fatalf("claim suggestion scans=%+v err=%v", claimed, err)
+	}
+	for _, scan := range claimed {
+		if scan.LeaseToken == "" || scan.LeaseExpiresAt == nil {
+			t.Fatalf("claimed scan has no lease: %+v", scan)
+		}
+		if err := repository.SetFeatureSuggestionScanResult(ctx, scan.ID, scan.LeaseToken, "analysis-clean-"+strconv.FormatInt(scan.ID, 10), "completed", 0, 0, 68, 2, 0, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repository.RefreshFeatureSuggestionStatus(ctx, attached.ID); err != nil {
+		t.Fatal(err)
+	}
+	attached, err = repository.FeatureSuggestionByID(ctx, attached.ID)
+	if err != nil || attached.Status != "review" || attached.ScanStatus != "clean" || len(attached.Scans) != 2 {
+		t.Fatalf("clean attached suggestion=%+v err=%v", attached, err)
+	}
+	if _, err := repository.FeatureSuggestionJSONForAdmin(ctx, attached.ID); err != nil {
+		t.Fatalf("clean JSON was not downloadable: %v", err)
+	}
+	if err := repository.SetFeatureSuggestionDecision(ctx, attached.ID, adminID, "admin", "accepted", []byte("scheduled")); err != nil {
+		t.Fatalf("accept clean suggestion: %v", err)
+	}
+	if err := repository.RetryFeatureSuggestionScans(ctx, attached.ID); !errors.Is(err, store.ErrFeatureSuggestionStateConflict) {
+		t.Fatalf("retry accepted suggestion error=%v, want state conflict", err)
+	}
+
+	flaggedDraft, err := repository.CreateFeatureSuggestionDraft(ctx, record("lora", "LoRA с риском", "unsafe.json", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	flagged, _, err := repository.SubmitFeatureSuggestion(ctx, flaggedDraft.ID, userID, []domain.FeatureSuggestionScanRecord{{Kind: "json", SourceName: "unsafe.json", SourceIndex: 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err = repository.ClaimFeatureSuggestionScans(ctx, 1, time.Minute)
+	if err != nil || len(claimed) != 1 || claimed[0].SuggestionID != flagged.ID {
+		t.Fatalf("claim flagged scan=%+v err=%v", claimed, err)
+	}
+	if err := repository.SetFeatureSuggestionScanResult(ctx, claimed[0].ID, claimed[0].LeaseToken, "analysis-flagged", "completed", 1, 0, 5, 1, 0, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.RefreshFeatureSuggestionStatus(ctx, flagged.ID); err != nil {
+		t.Fatal(err)
+	}
+	flagged, err = repository.FeatureSuggestionByID(ctx, flagged.ID)
+	if err != nil || flagged.Status != "review" || flagged.ScanStatus != "flagged" {
+		t.Fatalf("flagged suggestion=%+v err=%v", flagged, err)
+	}
+	if _, err := repository.FeatureSuggestionJSONForAdmin(ctx, flagged.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("flagged JSON download error=%v, want sql.ErrNoRows", err)
+	}
+	if err := repository.SetFeatureSuggestionDecision(ctx, flagged.ID, adminID, "admin", "accepted", []byte("unsafe")); !errors.Is(err, store.ErrFeatureSuggestionUnsafeDecision) {
+		t.Fatalf("unsafe accept error=%v, want ErrFeatureSuggestionUnsafeDecision", err)
+	}
+	if err := repository.RetryFeatureSuggestionScans(ctx, flagged.ID); err != nil {
+		t.Fatalf("retry flagged suggestion: %v", err)
+	}
+	var suggestionCount, scanCount int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM feature_suggestions WHERE id=$1`, flagged.ID).Scan(&suggestionCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM feature_suggestion_scans WHERE suggestion_id=$1`, flagged.ID).Scan(&scanCount); err != nil {
+		t.Fatal(err)
+	}
+	if suggestionCount != 1 || scanCount != 1 {
+		t.Fatalf("retry duplicated suggestion: suggestions=%d scans=%d", suggestionCount, scanCount)
+	}
+	claimed, err = repository.ClaimFeatureSuggestionScans(ctx, 1, time.Minute)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim retried scan=%+v err=%v", claimed, err)
+	}
+	if err := repository.SetFeatureSuggestionScanError(ctx, claimed[0].ID, claimed[0].LeaseToken, "temporary scan failure", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.RefreshFeatureSuggestionStatus(ctx, flagged.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SetFeatureSuggestionDecision(ctx, flagged.ID, adminID, "admin", "rejected", []byte("rejected-comment")); err != nil {
+		t.Fatalf("reject suggestion after failed retry: %v", err)
+	}
+
+	deleteDraft, err := repository.CreateFeatureSuggestionDraft(ctx, record("other", "Удаляемый черновик", "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := repository.DeleteFeatureSuggestionDraft(ctx, deleteDraft.ID, userID)
+	if err != nil || !deleted {
+		t.Fatalf("delete suggestion draft=%v err=%v", deleted, err)
+	}
+	if _, err := repository.FeatureSuggestionByID(ctx, deleteDraft.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("deleted suggestion lookup error=%v, want sql.ErrNoRows", err)
+	}
+
+	adminRows, err := repository.ListFeatureSuggestions(ctx, 20)
+	if err != nil || len(adminRows) != 3 {
+		t.Fatalf("admin suggestion list length=%d err=%v", len(adminRows), err)
+	}
+	userRows, err := repository.ListFeatureSuggestionsByUser(ctx, userID, 20)
+	if err != nil || len(userRows) != 3 {
+		t.Fatalf("user suggestion list length=%d err=%v", len(userRows), err)
 	}
 }
 

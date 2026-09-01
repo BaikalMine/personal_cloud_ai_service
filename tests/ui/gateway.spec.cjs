@@ -12,6 +12,8 @@ const responsiveRoutes = [
   { route: "/preview/users", snapshot: "users.png" },
   { route: "/preview/admin", snapshot: "admin-dashboard.png" },
   { route: "/preview/content", snapshot: "ai-content.png" },
+  { route: "/preview/suggestions", snapshot: "suggestions.png" },
+  { route: "/preview/admin-suggestions", snapshot: "admin-suggestions.png" },
 ];
 
 const open = async (page, route) => {
@@ -30,6 +32,31 @@ test("key surfaces fit every supported viewport", async ({ page }, testInfo) => 
     await assertNoViewportOverflow(page, `${testInfo.project.name} ${route}`);
     await expect(page).toHaveScreenshot(snapshot, { fullPage: true, stylePath: visualStyle });
   }
+});
+
+test("suggestion intake and review expose one clear next action", async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+
+  await open(page, "/preview/suggestions");
+  await expect(page.locator('.suggestion-kind-picker input[name="kind"]')).toHaveCount(4);
+  await expect(page.getByRole("button", { name: "Сохранить черновик" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Отправить", exact: true })).toBeVisible();
+  await page.locator('input[name="workflow_json"]').setInputFiles({
+    name: "portrait-workflow.json",
+    mimeType: "application/json",
+    buffer: Buffer.from('{"version": 1}'),
+  });
+  await expect(page.locator("[data-suggestion-file-name]")).toHaveText("portrait-workflow.json");
+  await expect(page.locator(".suggestion-user-item")).toHaveCount(3);
+  await expect(page.locator(".suggestion-user-item").nth(2)).toContainText("Комментарий администратора");
+
+  await open(page, "/preview/admin-suggestions");
+  await expect(page.locator(".admin-suggestion-item")).toHaveCount(3);
+  await expect(page.getByRole("link", { name: "Скачать проверенный JSON" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Принять в работу" })).toHaveCount(1);
+  await expect(page.locator(".admin-suggestion-no-files")).toContainText("только описание");
+  await page.locator(".admin-suggestion-diagnostics").first().getByText("Диагностика VirusTotal").click();
+  await expect(page.locator(".admin-suggestion-diagnostics").first()).toHaveAttribute("open", "");
 });
 
 test("generation wizard covers Krea2, Flux2 and MiniMax", async ({ page }, testInfo) => {
@@ -96,6 +123,8 @@ test("controlled generation batches stay clear and usable at every viewport", as
   await expect(group.getByRole("button", { name: "Новая ветка" })).toBeVisible();
   await expect(group).toHaveScreenshot("generation-batch-group.png", { stylePath: visualStyle });
   await assertNoViewportOverflow(page, `${testInfo.project.name} generation batch workbench`);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await settlePage(page);
   await expect(page).toHaveScreenshot("generation-batch-workbench.png", { fullPage: true, stylePath: visualStyle });
 
   const compareChecks = group.locator('.generation-batch-compare-toggle input[type="checkbox"]');
@@ -382,7 +411,7 @@ test("operations center puts live work and failures before analytics", async ({ 
 
 test("critical product surfaces have no serious axe violations", async ({ page }, testInfo) => {
   desktopOnly(testInfo);
-  const routes = ["/preview/components", "/preview/generate", "/preview/gallery", "/preview/profile", "/preview/invites", "/preview/users", "/preview/content", "/preview/admin"];
+  const routes = ["/preview/components", "/preview/generate", "/preview/gallery", "/preview/profile", "/preview/invites", "/preview/users", "/preview/content", "/preview/admin", "/preview/suggestions", "/preview/admin-suggestions"];
   const routeViolations = [];
 
   for (const route of routes) {

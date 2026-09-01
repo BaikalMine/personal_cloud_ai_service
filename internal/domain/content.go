@@ -184,44 +184,62 @@ type UnhashedComfyMedia struct {
 type FeatureSuggestionRecord struct {
 	UserID            int64
 	Username          string
+	Kind              string
 	Title             string
 	DescriptionCipher []byte
 	LinksCipher       []byte
 	JSONName          string
 	JSONCipher        []byte
+	JSONSizeBytes     int64
 }
 
 type FeatureSuggestionScanRecord struct {
-	Kind       string
-	SourceName string
+	Kind        string
+	SourceName  string
+	SourceIndex int
 }
 
 type FeatureSuggestionScan struct {
-	ID         int64
-	Kind       string
-	SourceName string
-	AnalysisID string
-	Status     string
-	Malicious  int
-	Suspicious int
-	Harmless   int
-	Undetected int
-	Timeout    int
-	Error      string
-	CheckedAt  *time.Time
+	ID             int64
+	SuggestionID   int64
+	Kind           string
+	SourceName     string
+	SourceIndex    int
+	AnalysisID     string
+	Status         string
+	Malicious      int
+	Suspicious     int
+	Harmless       int
+	Undetected     int
+	Timeout        int
+	Error          string
+	AttemptCount   int
+	LeaseToken     string
+	LeaseExpiresAt *time.Time
+	CheckedAt      *time.Time
 }
 
 type FeatureSuggestionRow struct {
-	ID                int64
-	UserID            int64
-	Username          string
-	Title             string
-	DescriptionCipher []byte
-	LinksCipher       []byte
-	JSONName          string
-	JSONCipher        []byte
-	Status            string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	Scans             []FeatureSuggestionScan
+	ID                  int64
+	UserID              int64
+	Username            string
+	AuthorDeleted       bool
+	Kind                string
+	Title               string
+	DescriptionCipher   []byte
+	LinksCipher         []byte
+	JSONName            string
+	JSONCipher          []byte
+	JSONSizeBytes       int64
+	Status              string
+	ScanStatus          string
+	ReviewCommentCipher []byte
+	ReviewedBy          int64
+	ReviewedByUsername  string
+	ReviewerDeleted     bool
+	SubmittedAt         *time.Time
+	ReviewedAt          *time.Time
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	Scans               []FeatureSuggestionScan
 }
