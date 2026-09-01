@@ -99,6 +99,7 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 		return a.requireAuth(a.requireServiceAccess("quick_generation", next))
 	}
 	page := quick(http.HandlerFunc(a.handleGeneratePage))
+	capabilities := quick(http.HandlerFunc(a.handleGenerationCapabilities))
 	gallery := quick(http.HandlerFunc(a.handleGenerationGalleryPage))
 	run := quick(http.HandlerFunc(a.handleGenerateRun))
 	recover := quick(http.HandlerFunc(a.handleRecoverGeneration))
@@ -117,6 +118,7 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 	uploadVideo := quick(a.requireQuickGenerationTypes([]string{"minimax-h3-video"}, a.quickGenerationVideoUploadHandler()))
 	mux.Handle("/generate", page)
 	mux.Handle("/generate/", page)
+	mux.Handle("/generate/capabilities", capabilities)
 	mux.Handle("/gallery", gallery)
 	mux.Handle("/gallery/", gallery)
 	mux.Handle("/generate/upload/image", upload)
@@ -196,6 +198,12 @@ func (a *App) handleGeneratePage(w http.ResponseWriter, r *http.Request) {
 		view := workflowView{
 			ID: definition.ID, Name: definition.Name, Description: definition.Description,
 			RequiresImage: definition.RequiresImage, AllowsImages: definition.AllowsImages,
+		}
+		if manifest, ok := workflowManifestByID(definition.ID); ok {
+			view.Name = manifest.Name
+			view.Description = manifest.Description
+			view.RequiresImage = manifest.requiresInput("image")
+			view.AllowsImages = manifest.maximumInput("image") > 0
 		}
 		if definition.AdminOnly && user.Role != "admin" {
 			view.Restricted = true

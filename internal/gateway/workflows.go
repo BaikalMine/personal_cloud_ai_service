@@ -238,6 +238,10 @@ func (input generationForm) images() []string {
 }
 
 func loadWorkflowDefinitions() ([]workflowDefinition, error) {
+	manifests := workflowManifests()
+	if err := validateWorkflowManifests(manifests); err != nil {
+		return nil, err
+	}
 	paths, err := fs.Glob(workflowFS, "workflows/*.json")
 	if err != nil {
 		return nil, err
@@ -256,6 +260,11 @@ func loadWorkflowDefinitions() ([]workflowDefinition, error) {
 			return nil, fmt.Errorf("workflow %s is incomplete", path)
 		}
 		definitions = append(definitions, definition)
+	}
+	for _, manifest := range manifests {
+		if _, ok := findWorkflow(definitions, manifest.DefinitionID); !ok {
+			return nil, fmt.Errorf("workflow manifest %s references missing definition %s", manifest.ID, manifest.DefinitionID)
+		}
 	}
 	return definitions, nil
 }
@@ -490,11 +499,15 @@ func appendKrea2TextLoras(nodes map[string]map[string]any, input generationForm)
 // Shared request fields are normalized once; family-specific options are only
 // normalized and validated by the workflow that actually consumes them.
 func (definition workflowDefinition) normalizeAndValidate(input *generationForm) error {
+	manifest, hasManifest := workflowManifestByID(definition.ID)
 	if input.OutputMegapixels == 0 {
 		input.OutputMegapixels = float64(input.Width*input.Height) / (1024 * 1024)
 	}
 	if input.DimensionMultiple == 0 {
 		input.DimensionMultiple = 16
+	}
+	if input.AspectRatio == "" {
+		input.AspectRatio = "custom"
 	}
 	if input.AspectRatio != "" && input.AspectRatio != "custom" {
 		var err error
@@ -564,6 +577,11 @@ func (definition workflowDefinition) normalizeAndValidate(input *generationForm)
 	if err := definition.normalizeAndValidateSpecific(input); err != nil {
 		return err
 	}
+	if hasManifest {
+		if err := validateWorkflowManifestInput(manifest, *input); err != nil {
+			return err
+		}
+	}
 	if input.Seed < 0 {
 		seed, err := randomSeed()
 		if err != nil {
@@ -587,21 +605,7 @@ func (definition workflowDefinition) normalizeAndValidateSpecific(input *generat
 		if input.MaxLongestSide == 0 {
 			input.MaxLongestSide = 2160
 		}
-		if input.EditAspectPreset == "" {
-			input.EditAspectPreset = "custom"
-		}
-		if input.EditResizeMethod == "" {
-			input.EditResizeMethod = "lanczos"
-		}
-		if input.EditProportion == "" {
-			input.EditProportion = "crop"
-		}
-		if input.EditCropLocation == "" {
-			input.EditCropLocation = "center"
-		}
-		if input.EditPadColor == "" {
-			input.EditPadColor = "0, 0, 0"
-		}
+		normalizeEditFrameDefaults(input)
 		if !allowedEditFrame(input.EditAspectPreset, input.EditResizeMethod, input.EditProportion, input.EditCropLocation, input.EditPadColor) {
 			return errors.New("некорректные параметры кадра Flux2")
 		}
@@ -630,6 +634,7 @@ func (definition workflowDefinition) normalizeAndValidateSpecific(input *generat
 			return errors.New("Flux2: фото и промт поддерживает до четырёх изображений")
 		}
 	case "image-to-image-krea2":
+		normalizeEditFrameDefaults(input)
 		if input.GroundingPixels == 0 {
 			input.GroundingPixels = 768
 		}
@@ -687,6 +692,24 @@ func (definition workflowDefinition) normalizeAndValidateSpecific(input *generat
 		}
 	}
 	return nil
+}
+
+func normalizeEditFrameDefaults(input *generationForm) {
+	if input.EditAspectPreset == "" {
+		input.EditAspectPreset = "custom"
+	}
+	if input.EditResizeMethod == "" {
+		input.EditResizeMethod = "lanczos"
+	}
+	if input.EditProportion == "" {
+		input.EditProportion = "crop"
+	}
+	if input.EditCropLocation == "" {
+		input.EditCropLocation = "center"
+	}
+	if input.EditPadColor == "" {
+		input.EditPadColor = "0, 0, 0"
+	}
 }
 
 func allowedFlux2UpscaleMode(value string) bool {
@@ -1396,7 +1419,7 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 	if err != nil {
 		return generationForm{}, errors.New("некорректный seed")
 	}
-	return generationForm{
+	input := generationForm{
 		TemplateID: strings.TrimSpace(r.Form.Get("template_id")), PresetID: strings.TrimSpace(r.Form.Get("generation_workflow")), ModelID: strings.TrimSpace(r.Form.Get("model")),
 		InputImage: strings.TrimSpace(r.Form.Get("input_image")), InputAudio: strings.TrimSpace(r.Form.Get("input_audio")), InputVideo: strings.TrimSpace(r.Form.Get("input_video")), Positive: strings.TrimSpace(r.Form.Get("positive_prompt")),
 		Negative: strings.TrimSpace(r.Form.Get("negative_prompt")), Width: width, Height: height, Steps: steps,
@@ -1445,7 +1468,13 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 			strings.TrimSpace(r.Form.Get("input_image_3")),
 			strings.TrimSpace(r.Form.Get("input_image_4")),
 		},
-	}, nil
+	}
+	if manifest, ok := workflowManifestForInput(input); ok {
+		if err := applyWorkflowManifestForm(manifest, r.Form, &input); err != nil {
+			return generationForm{}, err
+		}
+	}
+	return input, nil
 }
 
 func allowedGenerationSampler(value string) bool {

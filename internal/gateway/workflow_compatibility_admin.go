@@ -186,44 +186,28 @@ func compatibilityScenariosForModel(model generationModel, catalog generationMod
 	scenarios := make([]workflowCompatibilityScenario, 0, 5)
 	switch model.Family {
 	case modelFamilyKrea2:
-		textInput := input
-		textInput.BaseMegapixels = 1
-		textInput.OutputMegapixels = 1.9
-		textInput.UpscaleSteps = 4
-		textInput.DetailSteps = 8
-		textInput.DetailCFG = 1
-		textInput.UpscaleDenoise = 0.15
-		textInput.DetailDenoise = 0.1
-		textInput.UpscaleSampler = "euler"
-		textInput.DetailSampler = "euler"
-		textInput.DetailScheduler = "simple"
-		textInput.ColorMethod = "reinhard_lab"
-		textInput.ColorMode = "per_frame"
-		textInput.ColorStrength = 1
+		textManifest := krea2TextWorkflowManifest()
+		textMode, _ := textManifest.mode("text")
+		textInput := compatibilityManifestInput(model, textManifest)
 		if model.Lora != "" {
 			textInput.LoraNames[0] = model.Lora
 			textInput.LoraModel[0] = model.LoraStrength
 			textInput.LoraClip[0] = 1
 		}
 		scenarios = append(scenarios, workflowCompatibilityScenario{
-			ID: "krea-text:" + modelKey, Name: "Текст в изображение", Description: "PhotoFlow Krea2 с апскейлом и детализацией.",
-			Definition: definitions["text-to-image-krea2"], Input: textInput,
+			ID: "krea-text:" + modelKey, Name: textMode.Name, Description: textManifest.Description,
+			Definition: definitions[textManifest.DefinitionID], Input: textInput,
 		})
 		if model.SupportsImage {
-			editInput := input
+			editManifest := krea2EditWorkflowManifest()
+			editMode, _ := editManifest.mode("edit")
+			editInput := compatibilityManifestInput(model, editManifest)
 			editInput.InputImage = "gateway-compatibility/source.png"
 			editInput.ReferenceImages[0] = "gateway-compatibility/reference.png"
-			editInput.ReferenceBoost = 1
-			editInput.GroundingPixels = 768
-			editInput.UpscaleFactor = 1.5
-			editInput.UpscaleSteps = 4
-			editInput.UpscaleDenoise = 0.15
-			editInput.UpscaleSampler = "deis"
-			editInput.UpscaleScheduler = "simple"
 			editInput.IdentityLora = model.IdentityLora
 			scenarios = append(scenarios, workflowCompatibilityScenario{
-				ID: "krea-edit:" + modelKey, Name: "Фото и промт", Description: "Krea2 Identity Edit с двумя изображениями и финишной обработкой.",
-				Definition: definitions["image-to-image-krea2"], Input: editInput,
+				ID: "krea-edit:" + modelKey, Name: editMode.Name, Description: editManifest.Description,
+				Definition: definitions[editManifest.DefinitionID], Input: editInput,
 			})
 		}
 	case modelFamilyFlux2:
@@ -233,33 +217,37 @@ func compatibilityScenariosForModel(model generationModel, catalog generationMod
 			ID: "flux-text:" + modelKey, Name: "Текстовый граф", Description: "Базовый Flux2 text-to-image workflow Gateway.",
 			Definition: definitions["text-to-image-flux2"], Input: textInput,
 		})
-		editInput := input
+		editManifest := flux2EditWorkflowManifest()
+		editMode, _ := editManifest.mode("edit")
+		editInput := compatibilityManifestInput(model, editManifest)
 		editInput.InputImage = "gateway-compatibility/source.png"
 		editInput.ReferenceImages = [3]string{"gateway-compatibility/reference-2.png", "gateway-compatibility/reference-3.png", "gateway-compatibility/reference-4.png"}
-		editInput.SourceMegapixels = 1
-		editInput.FluxGuidance = 3
-		editInput.FluxDetailerSteps = 8
-		editInput.FluxActiveScale = 1
-		editInput.FluxTokenWhiten = 0
-		editInput.FluxNormEqualize = 0.5
-		editInput.FluxUpscaleMode = "none"
 		scenarios = append(scenarios, workflowCompatibilityScenario{
-			ID: "flux-edit:" + modelKey, Name: "Фото и промт", Description: "Flux2 Edit с четырьмя изображениями и полным conditioning.",
-			Definition: definitions["image-to-image-flux2"], Input: editInput,
+			ID: "flux-edit:" + modelKey, Name: editMode.Name, Description: editManifest.Description,
+			Definition: definitions[editManifest.DefinitionID], Input: editInput,
+		})
+		postInput := editInput
+		postInput.FluxUpscaleMode = "both"
+		scenarios = append(scenarios, workflowCompatibilityScenario{
+			ID: "flux-post:" + modelKey, Name: "Полная обработка Flux2", Description: "Ultimate SD Upscale, SeedVR2 и финальный LUT.",
+			Definition: definitions[editManifest.DefinitionID], Input: postInput,
 		})
 	case modelFamilyMiniMaxH3:
-		definition := definitions["minimax-h3-video"]
+		manifest := miniMaxH3WorkflowManifest()
+		definition := definitions[manifest.DefinitionID]
 		if !model.VideoReferenceOnly {
+			mode, _ := manifest.mode(miniMaxH3FrameMode)
 			frames := compatibilityMiniMaxInput(input)
 			frames.VideoMode = miniMaxH3FrameMode
 			frames.InputImage = "gateway-compatibility/first.png"
 			frames.ReferenceImages[0] = "gateway-compatibility/last.png"
 			scenarios = append(scenarios, workflowCompatibilityScenario{
-				ID: "minimax-frames:" + modelKey, Name: "Первый и последний кадр", Description: "FL2VA: два ключевых кадра с автоматическим размером референса.",
+				ID: "minimax-frames:" + modelKey, Name: mode.Name, Description: mode.Description,
 				Definition: definition, Input: frames,
 			})
 		}
 
+		mode, _ := manifest.mode(miniMaxH3ReferenceMode)
 		references := compatibilityMiniMaxInput(input)
 		references.VideoMode = miniMaxH3ReferenceMode
 		references.InputImage = "gateway-compatibility/reference-1.png"
@@ -273,7 +261,7 @@ func compatibilityScenariosForModel(model generationModel, catalog generationMod
 			references.LoraClip[0] = lora.DefaultStrength
 		}
 		scenarios = append(scenarios, workflowCompatibilityScenario{
-			ID: "minimax-references:" + modelKey, Name: "Свободные референсы", Description: "REF2VA: четыре фото, аудио, видео, звук видеореференса и опциональная LoRA.",
+			ID: "minimax-references:" + modelKey, Name: mode.Name, Description: mode.Description,
 			Definition: definition, Input: references,
 		})
 
@@ -343,49 +331,39 @@ func compatibilityBaseInput(model generationModel) generationForm {
 	}
 }
 
+func compatibilityManifestInput(model generationModel, manifest workflowManifest) generationForm {
+	base := compatibilityBaseInput(model)
+	input := base
+	if err := applyWorkflowManifestDefaults(manifest, &input); err != nil {
+		return base
+	}
+	input.TemplateID = manifest.TemplateID
+	input.PresetID = manifest.ID
+	input.Positive = base.Positive
+	input.Steps = base.Steps
+	input.CFG = base.CFG
+	input.Sampler = base.Sampler
+	input.Scheduler = base.Scheduler
+	input.Seed = base.Seed
+	return input
+}
+
 func compatibilityMiniMaxInput(input generationForm) generationForm {
+	manifest := miniMaxH3WorkflowManifest()
+	if err := applyWorkflowManifestDefaults(manifest, &input); err != nil {
+		return input
+	}
 	input.Width = 768
 	input.Height = 1344
 	input.OutputMegapixels = float64(input.Width*input.Height) / (1024 * 1024)
-	input.VideoQuality = 480
-	input.VideoDurationSeconds = 5
 	input.VideoSteps = input.Steps
 	input.VideoSampler = input.Sampler
 	input.VideoScheduler = input.Scheduler
-	input.VideoShiftVideo = 11
-	input.VideoShiftAudio = 3
-	input.VideoReferenceDuration = 5
-	input.VideoReferenceSize = "match"
-	input.VideoAspect = "9:16"
-	input.VideoResizeMethod = "nearest-exact"
-	input.VideoProportion = "crop"
-	input.VideoCropLocation = "center"
-	input.VideoPadColor = "0, 0, 0"
-	input.VideoMemoryMLP = "auto"
-	input.VideoMemoryChunkRows = 4096
-	input.VideoMemoryPrecision = "Auto"
-	input.VideoMemoryQKV = "Auto"
-	input.VideoMemoryAttention = "Standard"
-	input.VideoAIMDOResidency = "0 blocks"
-	input.VideoSparseBudget = 0.30
-	input.VideoSparseSchedule = "Hold"
-	input.VideoSparseEarlyKV = 0.5
-	input.VideoSparseLateKV = 0.5
-	input.VideoSparseBackend = "Kitchen INT8"
-	input.VideoRIFECheckpoint = "rife49.pth"
-	input.VideoRIFEMultiplier = 2
-	input.VideoRIFEDtype = "float32"
-	input.VideoRIFEBatchSize = 1
-	input.VideoRTXScale = 2
-	input.VideoRTXQuality = "ULTRA"
-	input.VideoColorMethod = "adain"
-	input.VideoSharpenMethod = "rcas"
-	input.VideoSharpenStrength = 0.8
-	input.VideoSharpenRadius = 1
-	input.VideoSharpenThreshold = 0.05
-	input.VideoSharpenIterations = 10
+	if input.VideoIntegratedTurbo {
+		input.VideoShiftVideo = 12
+		input.VideoShiftAudio = 7
+	}
 	input.VideoFilename = "AI-Gateway-Compatibility"
-	input.VideoOutputCRF = 19
 	return input
 }
 

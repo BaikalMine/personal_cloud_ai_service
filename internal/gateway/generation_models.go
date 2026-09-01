@@ -429,13 +429,13 @@ func buildGenerationPresets(catalog generationModelCatalog) []generationPreset {
 	}
 	presets := make([]generationPreset, 0, 4)
 	if krea != nil {
-		preset := presetFromModel("photoflow-krea2", "text-to-image", "PhotoFlow Krea2",
-			"Двухэтапная генерация Krea2 с апскейлом и финальной детализацией.", *krea, false)
+		manifest := krea2TextWorkflowManifest()
+		preset := presetFromModel(manifest.ID, manifest.TemplateID, manifest.Name, manifest.Description, *krea, manifest.requiresInput("image"))
 		preset.ModelCount = kreaCount
 		presets = append(presets, preset)
 		if kreaEdit != nil {
-			edit := presetFromModel("photoflow-krea2-edit", "image-to-image", "Krea 2: редактирование",
-				"Сохраняет исходное фото и применяет инструкцию через оригинальный Krea2 Turbo identity workflow.", *kreaEdit, true)
+			editManifest := krea2EditWorkflowManifest()
+			edit := presetFromModel(editManifest.ID, editManifest.TemplateID, editManifest.Name, editManifest.Description, *kreaEdit, editManifest.requiresInput("image"))
 			// The original identity-edit recipe is trained for Krea2 Turbo at
 			// 8-12 steps and CFG 1.0; arbitrary Krea fine-tunes visibly diverge.
 			edit.DefaultSteps = 8
@@ -443,15 +443,17 @@ func buildGenerationPresets(catalog generationModelCatalog) []generationPreset {
 			edit.DefaultSampler = "euler"
 			edit.DefaultScheduler = "simple"
 			edit.ModelCount = kreaCount
-			edit.MaxInputImages = 2
+			edit.MaxInputImages = editManifest.maximumInput("image")
+			edit.AllowsImages = edit.MaxInputImages > 0
 			presets = append(presets, edit)
 		}
 	}
 	if flux != nil {
-		preset := presetFromModel("photoflow-flux2-edit", "image-to-image", "Flux2 Редактирование",
-			"Редактирование исходного изображения через совместимую схему Flux 2.", *flux, true)
+		manifest := flux2EditWorkflowManifest()
+		preset := presetFromModel(manifest.ID, manifest.TemplateID, manifest.Name, manifest.Description, *flux, manifest.requiresInput("image"))
 		preset.ModelCount = fluxCount
-		preset.MaxInputImages = 4
+		preset.MaxInputImages = manifest.maximumInput("image")
+		preset.AllowsImages = preset.MaxInputImages > 0
 		presets = append(presets, preset)
 	}
 	var miniMax *generationModel
@@ -472,11 +474,11 @@ func buildGenerationPresets(catalog generationModelCatalog) []generationPreset {
 		}
 	}
 	if miniMax != nil {
-		preset := presetFromModel("minimax-h3-video", "minimax-h3-video", "MiniMax H3: видео",
-			"Текст в видео, первый и последний кадр или до четырёх референсов. Звук создаётся вместе с видео.", *miniMax, false)
+		manifest := miniMaxH3WorkflowManifest()
+		preset := presetFromModel(manifest.ID, manifest.TemplateID, manifest.Name, manifest.Description, *miniMax, manifest.requiresInput("image"))
 		preset.ModelCount = miniMaxCount
-		preset.MaxInputImages = 4
-		preset.AllowsImages = true
+		preset.MaxInputImages = manifest.maximumInput("image")
+		preset.AllowsImages = preset.MaxInputImages > 0
 		presets = append(presets, preset)
 	}
 	return presets

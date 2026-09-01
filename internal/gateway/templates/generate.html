@@ -2,7 +2,7 @@
 {{template "head" .}}
 <script src="/static/generate.js?v={{.AssetVersion}}" defer></script>
 {{template "nav" .}}
-<main class="page generation-page" id="main-content" data-comfy-generation data-selected-workflow="{{.SelectedWorkflow}}" data-preview-output="{{.PreviewOutputURL}}" data-generation-retention="{{.Retention.GenerationHistoryLabel}}" data-media-retention="{{.Retention.GenerationMediaLabel}}">
+<main class="page generation-page" id="main-content" data-comfy-generation data-workflow-capabilities-url="/generate/capabilities" data-selected-workflow="{{.SelectedWorkflow}}" data-preview-output="{{.PreviewOutputURL}}" data-generation-retention="{{.Retention.GenerationHistoryLabel}}" data-media-retention="{{.Retention.GenerationMediaLabel}}">
   <section class="hero generation-hero">
     <div>
       <p class="eyebrow">ComfyUI без сложного интерфейса</p>

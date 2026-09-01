@@ -229,6 +229,7 @@
   const selectedImageFile = (item) => selectedImages.get(item?.index) || item?.input?.files?.[0] || null;
   const selectedImageSource = (item) => selectedImageFile(item) || gallerySelections.get(item?.index) || null;
   const hasSelectedImage = (item) => Boolean(selectedImageSource(item));
+  const workflowManifestsByID = new Map();
   const referenceRoleLabels = {
     base_scene: "Основной кадр и композиция",
     identity: "Внешность и лицо",
@@ -241,6 +242,54 @@
   const numericValue = (value, fallback = 0) => {
     const parsed = Number(String(value).replaceAll(",", "."));
     return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const workflowControls = (name) => {
+    const control = form?.elements?.namedItem(name);
+    if (!control) return [];
+    if (typeof RadioNodeList !== "undefined" && control instanceof RadioNodeList) return [...control];
+    return [control];
+  };
+  const selectedWorkflowManifest = () => workflowManifestsByID.get(generationWorkflowID?.value || "") || workflowManifestsByID.get(templateID?.value || "") || null;
+  const applyWorkflowCapabilityConstraints = () => {
+    const manifest = selectedWorkflowManifest();
+    if (!manifest) return;
+    (manifest.parameters || []).forEach((parameter) => {
+      workflowControls(parameter.name).forEach((control) => {
+        control.dataset.workflowParameter = parameter.name;
+        if (parameter.minimum !== undefined && "min" in control) control.min = String(parameter.minimum);
+        if (parameter.maximum !== undefined && "max" in control) control.max = String(parameter.maximum);
+        if (parameter.step !== undefined && "step" in control) control.step = String(parameter.step);
+        if (parameter.max_length && "maxLength" in control) control.maxLength = Number(parameter.max_length);
+      });
+    });
+    const imageInput = (manifest.inputs || []).find((input) => input.kind === "image");
+    if (!imageInput?.roles?.length) return;
+    imageInput.roles.forEach((role) => { referenceRoleLabels[role.id] = role.name; });
+    imageSlots.forEach((item) => {
+      if (!item.role) return;
+      [...item.role.options].forEach((option) => {
+        const role = imageInput.roles.find((candidate) => candidate.id === option.value);
+        if (role) option.textContent = role.name;
+      });
+    });
+  };
+  const loadWorkflowCapabilities = async () => {
+    const endpoint = root.dataset.workflowCapabilitiesUrl;
+    if (!endpoint) return;
+    try {
+      const response = await fetch(endpoint, { headers: { Accept: "application/json" }, credentials: "same-origin" });
+      if (!response.ok) return;
+      const catalog = await response.json();
+      if (Number(catalog.schema_version) !== 1 || !Array.isArray(catalog.workflows)) return;
+      catalog.workflows.forEach((manifest) => {
+        if (manifest?.id) workflowManifestsByID.set(manifest.id, manifest);
+        if (manifest?.template_id) workflowManifestsByID.set(manifest.template_id, manifest);
+      });
+      applyWorkflowCapabilityConstraints();
+      syncMiniMaxVideoModelRules(false);
+    } catch (_) {
+      // The embedded form remains a functional fallback while Gateway reconnects.
+    }
   };
   const miniMaxMode = () => miniMaxVideoModeSelect?.value || "frames";
   const setMiniMaxMode = (value) => {
@@ -262,6 +311,12 @@
     const option = model?.selectedOptions?.[0];
     const integratedTurbo = option?.dataset.videoIntegratedTurbo === "true";
     const referenceOnly = option?.dataset.videoReferenceOnly === "true";
+    const turbo = !integratedTurbo && !applyModelDefaults && Boolean(miniMaxVideoTurbo?.checked);
+    const manifest = workflowManifestsByID.get("minimax-h3-video");
+    const profileID = integratedTurbo ? "integrated_turbo" : turbo ? "turbo" : "regular";
+    const profile = manifest?.quality_profiles?.find((candidate) => candidate.id === profileID);
+    const profileRule = (name) => profile?.parameters?.[name] || null;
+    const profileValue = (name, fallback) => profileRule(name)?.value ?? fallback;
     const frameOption = miniMaxVideoModeInputs.find((input) => input.value === "frames");
     if (frameOption) frameOption.disabled = referenceOnly;
     if (referenceOnly && miniMaxMode() !== "references") {
@@ -270,11 +325,11 @@
       syncMiniMaxAudioReference();
     }
     if (applyModelDefaults && option?.value) {
-      if (miniMaxVideoSteps) miniMaxVideoSteps.value = option.dataset.defaultSteps || (integratedTurbo ? "8" : "25");
-      if (miniMaxVideoSampler) miniMaxVideoSampler.value = option.dataset.defaultSampler || "euler";
-      if (miniMaxVideoScheduler) miniMaxVideoScheduler.value = option.dataset.defaultScheduler || "simple";
-      if (miniMaxVideoShiftVideo) miniMaxVideoShiftVideo.value = option.dataset.defaultVideoShift || (integratedTurbo ? "12" : "11");
-      if (miniMaxVideoShiftAudio) miniMaxVideoShiftAudio.value = option.dataset.defaultAudioShift || (integratedTurbo ? "7" : "3");
+      if (miniMaxVideoSteps) miniMaxVideoSteps.value = option.dataset.defaultSteps || String(profileValue("video_steps", 25));
+      if (miniMaxVideoSampler) miniMaxVideoSampler.value = option.dataset.defaultSampler || String(profileValue("video_sampler", "euler"));
+      if (miniMaxVideoScheduler) miniMaxVideoScheduler.value = option.dataset.defaultScheduler || String(profileValue("video_scheduler", "simple"));
+      if (miniMaxVideoShiftVideo) miniMaxVideoShiftVideo.value = option.dataset.defaultVideoShift || String(profileValue("video_shift_video", 11));
+      if (miniMaxVideoShiftAudio) miniMaxVideoShiftAudio.value = option.dataset.defaultAudioShift || String(profileValue("video_shift_audio", 3));
       if (miniMaxVideoTurbo) miniMaxVideoTurbo.checked = false;
     }
     if (integratedTurbo && miniMaxVideoTurbo) miniMaxVideoTurbo.checked = false;
@@ -287,18 +342,18 @@
     if (miniMaxVideoModelProfile) miniMaxVideoModelProfile.textContent = integratedTurbo
       ? "H3 Eros Max beta4 · только reference-путь · встроенный Turbo · Euler · 6–8 шагов · Sigma 12 / 7."
       : "MiniMax H3 v4 · FL2VA для точных кадров, REF2VA для свободных референсов · Turbo опционален.";
-    const turbo = !integratedTurbo && Boolean(miniMaxVideoTurbo?.checked);
     if (miniMaxVideoSteps) {
-      miniMaxVideoSteps.min = integratedTurbo ? "6" : turbo ? "4" : "20";
-      miniMaxVideoSteps.max = integratedTurbo ? "8" : turbo ? "8" : "25";
+      miniMaxVideoSteps.min = String(profileRule("video_steps")?.minimum ?? (integratedTurbo ? 6 : turbo ? 4 : 20));
+      miniMaxVideoSteps.max = String(profileRule("video_steps")?.maximum ?? (integratedTurbo || turbo ? 8 : 25));
       const current = Number(miniMaxVideoSteps.value);
       if (!Number.isFinite(current) || current < Number(miniMaxVideoSteps.min) || current > Number(miniMaxVideoSteps.max)) {
-        miniMaxVideoSteps.value = integratedTurbo ? "8" : turbo ? "6" : "25";
+        miniMaxVideoSteps.value = String(profileValue("video_steps", integratedTurbo ? 8 : turbo ? 6 : 25));
       }
     }
     if (miniMaxVideoSampler) {
-      if (integratedTurbo) miniMaxVideoSampler.value = "euler";
-      miniMaxVideoSampler.disabled = integratedTurbo || turbo;
+      const samplerLocked = profileRule("video_sampler")?.locked ?? (integratedTurbo || turbo);
+      if (samplerLocked) miniMaxVideoSampler.value = String(profileValue("video_sampler", "euler"));
+      miniMaxVideoSampler.disabled = samplerLocked;
     }
     if (miniMaxVideoModeHint && referenceOnly) {
       miniMaxVideoModeHint.textContent = "Выбрано: Eros Max использует REF2VA. Ролик строится по промту; фото, видео и аудио необязательны.";
@@ -1270,6 +1325,7 @@
     const isFluxEdit = family === "flux2" && isEdit;
     const isMiniMax = family === "minimax_h3";
     const minimumDimension = isEdit && preserveOriginalSize?.checked ? 16 : 256;
+    applyWorkflowCapabilityConstraints();
     if (width) width.min = String(minimumDimension);
     if (height) height.min = String(minimumDimension);
     if (generationOpenExact) {
@@ -3022,6 +3078,7 @@
   });
 
   const initialID = root.dataset.selectedWorkflow || "";
+  loadWorkflowCapabilities();
   const initial = initialID ? root.querySelector(`[data-workflow-id="${CSS.escape(initialID)}"]`) : null;
   if (initial) chooseScenario(initial);
   if (root.dataset.previewOutput) {
