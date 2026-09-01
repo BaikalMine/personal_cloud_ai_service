@@ -152,8 +152,8 @@ func (s *Store) InsertContentMedia(ctx context.Context, media domain.ContentMedi
 	}
 	var expiresAtStored time.Time
 	err := s.db.QueryRowContext(ctx, `
-		INSERT INTO content_media(event_id,media_type,mime_type,original_name,subfolder,storage_type,payload_cipher,size_bytes,content_hash,expires_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		INSERT INTO content_media(event_id,media_type,mime_type,original_name,subfolder,storage_type,payload_cipher,size_bytes,content_hash,expires_at,storage_format)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'inline_v1')
 		ON CONFLICT (event_id,original_name,subfolder,storage_type) DO NOTHING
 		RETURNING expires_at
 	`, media.EventID, media.MediaType, media.MIMEType, media.OriginalName, media.Subfolder,
@@ -185,7 +185,8 @@ func (s *Store) SetContentGenerationState(ctx context.Context, userID int64, pro
 func (s *Store) ListPendingVisualSensitiveMedia(ctx context.Context, limit int) ([]domain.PendingSensitiveMedia, error) {
 	limit = boundedLimit(limit, 1, 20)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id,m.event_id,e.generation_job_id,e.correlation_id,m.mime_type,m.payload_cipher
+		SELECT m.id,m.event_id,e.generation_job_id,e.correlation_id,m.mime_type,m.payload_cipher,
+		       m.size_bytes,m.storage_format
 		FROM content_media m
 		JOIN content_events e ON e.id=m.event_id
 		WHERE m.media_type='image' AND m.visual_sensitivity_classified_at IS NULL
@@ -200,7 +201,8 @@ func (s *Store) ListPendingVisualSensitiveMedia(ctx context.Context, limit int) 
 	items := make([]domain.PendingSensitiveMedia, 0)
 	for rows.Next() {
 		var item domain.PendingSensitiveMedia
-		if err := rows.Scan(&item.ID, &item.EventID, &item.GenerationJobID, &item.CorrelationID, &item.MIMEType, &item.PayloadCipher); err != nil {
+		if err := rows.Scan(&item.ID, &item.EventID, &item.GenerationJobID, &item.CorrelationID, &item.MIMEType,
+			&item.PayloadCipher, &item.SizeBytes, &item.StorageFormat); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -304,12 +306,12 @@ func (s *Store) listUserGenerationMedia(ctx context.Context, userID int64, media
 func (s *Store) ContentMediaByIDForUser(ctx context.Context, id, userID int64) (domain.ContentMediaRow, error) {
 	var media domain.ContentMediaRow
 	err := s.db.QueryRowContext(ctx, `
-		SELECT m.id,m.media_type,m.mime_type,m.original_name,m.payload_cipher
+		SELECT m.id,m.media_type,m.mime_type,m.original_name,m.payload_cipher,m.size_bytes,m.storage_format
 		FROM content_media m
 		JOIN content_events e ON e.id=m.event_id
 		WHERE m.id=$1 AND e.user_id=$2 AND e.service='comfyui' AND e.kind='comfyui_prompt'
 		  AND e.expires_at > now() AND m.expires_at > now() AND m.profile_hidden_at IS NULL
-	`, id, userID).Scan(&media.ID, &media.MediaType, &media.MIMEType, &media.OriginalName, &media.PayloadCipher)
+	`, id, userID).Scan(&media.ID, &media.MediaType, &media.MIMEType, &media.OriginalName, &media.PayloadCipher, &media.SizeBytes, &media.StorageFormat)
 	return media, err
 }
 
@@ -420,10 +422,10 @@ func (s *Store) ContentRetentionStats(ctx context.Context) (domain.ContentRetent
 func (s *Store) ContentMediaByID(ctx context.Context, id int64) (domain.ContentMediaRow, error) {
 	var media domain.ContentMediaRow
 	err := s.db.QueryRowContext(ctx, `
-		SELECT m.id,m.media_type,m.mime_type,m.original_name,m.payload_cipher
+		SELECT m.id,m.media_type,m.mime_type,m.original_name,m.payload_cipher,m.size_bytes,m.storage_format
 		FROM content_media m JOIN content_events e ON e.id=m.event_id
 		WHERE m.id=$1 AND m.expires_at > now() AND e.expires_at > now()
-	`, id).Scan(&media.ID, &media.MediaType, &media.MIMEType, &media.OriginalName, &media.PayloadCipher)
+	`, id).Scan(&media.ID, &media.MediaType, &media.MIMEType, &media.OriginalName, &media.PayloadCipher, &media.SizeBytes, &media.StorageFormat)
 	return media, err
 }
 
@@ -491,10 +493,10 @@ func (s *Store) DeleteExpiredNonComfyMedia(ctx context.Context) (int64, error) {
 func (s *Store) UnhashedComfyMedia(ctx context.Context, limit int) ([]domain.UnhashedComfyMedia, error) {
 	limit = boundedLimit(limit, 1, 100)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id,m.payload_cipher
+		SELECT m.id,m.payload_cipher,m.size_bytes,m.storage_format
 		FROM content_media m
 		JOIN content_events e ON e.id=m.event_id
-		WHERE e.service='comfyui' AND m.expires_at > now() AND m.content_hash=''
+		WHERE e.service='comfyui' AND m.expires_at > now() AND m.content_hash='' AND m.storage_format='inline_v1'
 		ORDER BY m.id
 		LIMIT $1
 	`, limit)
@@ -505,7 +507,7 @@ func (s *Store) UnhashedComfyMedia(ctx context.Context, limit int) ([]domain.Unh
 	items := make([]domain.UnhashedComfyMedia, 0)
 	for rows.Next() {
 		var item domain.UnhashedComfyMedia
-		if err := rows.Scan(&item.ID, &item.PayloadCipher); err != nil {
+		if err := rows.Scan(&item.ID, &item.PayloadCipher, &item.SizeBytes, &item.StorageFormat); err != nil {
 			return nil, err
 		}
 		items = append(items, item)

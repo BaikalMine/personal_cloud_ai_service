@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -528,11 +527,6 @@ func (a *App) handleAdminContentMedia(w http.ResponseWriter, r *http.Request, ra
 		})
 		return
 	}
-	payload, err := a.contentCipher.DecryptBytes(media.PayloadCipher)
-	if err != nil {
-		http.Error(w, "ошибка расшифровки медиа", http.StatusInternalServerError)
-		return
-	}
 	contentType, inline := safeAdminMediaType(media.MediaType, media.MIMEType)
 	disposition := "attachment"
 	if inline && r.URL.Query().Get("download") != "1" {
@@ -542,13 +536,23 @@ func (a *App) handleAdminContentMedia(w http.ResponseWriter, r *http.Request, ra
 	if filename == "." || filename == "/" || filename == "" {
 		filename = "media"
 	}
+	payload, err := a.materializeContentMedia(r.Context(), media)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, errMediaMemoryBudget) {
+			status = http.StatusTooManyRequests
+		}
+		http.Error(w, "медиа временно недоступно", status)
+		return
+	}
+	defer payload.Close()
 	dispositionHeader := mime.FormatMediaType(disposition, map[string]string{"filename": filename})
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", dispositionHeader)
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
 	w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
-	http.ServeContent(w, r, filename, time.Time{}, bytes.NewReader(payload))
+	http.ServeContent(w, r, filename, time.Time{}, payload)
 }
 
 // acquireAdminMediaSlot queues thumbnail requests instead of rejecting the

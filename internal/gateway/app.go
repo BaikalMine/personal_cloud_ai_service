@@ -44,6 +44,9 @@ func Run() error {
 	if err != nil {
 		return err
 	}
+	if err := prepareMediaSpool(cfg.MediaSpoolDir); err != nil {
+		return err
+	}
 	startupCtx, cancelStartup := context.WithTimeout(context.Background(), 2*time.Minute)
 	db, err := database.Open(startupCtx, cfg.DatabaseURL)
 	if err != nil {
@@ -129,6 +132,8 @@ func Run() error {
 		maintenanceWorkers:   newMaintenanceRegistry(time.Now),
 		maintenanceDone:      make(chan struct{}),
 		serviceLatencies:     newServiceLatencyRegistry(),
+		mediaOperations:      newMediaOperationRegistry(),
+		mediaBytes:           newWeightedByteLimiter(cfg.MediaInFlightLimitBytes),
 		proxyCounts:          map[string]int64{},
 	}
 
@@ -294,6 +299,7 @@ func (a *App) adminMux() http.Handler {
 	mux.Handle("/mining/toggle", a.requireAuth(http.HandlerFunc(a.handleMiningToggle)))
 	mux.Handle("/mining/icon/", a.requireAuth(http.HandlerFunc(a.handleMinerIcon)))
 	mux.Handle("/metrics", a.adminLANOnly(http.HandlerFunc(a.handlePrometheusMetrics)))
+	a.registerPprofRoutes(mux)
 	mux.Handle("/admin", a.requireLANAdmin(http.HandlerFunc(a.handleAdminDashboard)))
 	mux.Handle("/admin/", a.requireLANAdmin(http.HandlerFunc(a.handleAdminRoutes)))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

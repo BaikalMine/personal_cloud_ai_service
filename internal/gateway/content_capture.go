@@ -5,14 +5,15 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -42,6 +43,12 @@ type proxyContentCapture struct {
 	mimeType         string
 	isMedia          bool
 	status           int
+	mediaSpool       *os.File
+	mediaSpoolPath   string
+	mediaDigest      hash.Hash
+	mediaSize        int64
+	mediaWriteErr    error
+	mediaComplete    bool
 	releaseOnce      sync.Once
 	release          func()
 }
@@ -74,14 +81,65 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 }
 
 func (c *proxyContentCapture) Release() {
-	if c != nil && c.release != nil {
-		c.releaseOnce.Do(c.release)
+	if c == nil {
+		return
 	}
+	c.releaseOnce.Do(func() {
+		if c.mediaSpool != nil {
+			_ = c.mediaSpool.Close()
+		}
+		if c.mediaSpoolPath != "" {
+			_ = os.Remove(c.mediaSpoolPath)
+		}
+		if c.release != nil {
+			c.release()
+		}
+	})
+}
+
+func (c *proxyContentCapture) writeMedia(payload []byte) (int, error) {
+	original := len(payload)
+	if c == nil || c.mediaSpool == nil || c.mediaWriteErr != nil {
+		return original, nil
+	}
+	remaining := int64(maxCapturedMedia) - c.mediaSize
+	c.mediaSize += int64(original)
+	if remaining <= 0 {
+		c.response.truncated = c.response.truncated || original > 0
+		return original, nil
+	}
+	accepted := payload
+	if int64(len(accepted)) > remaining {
+		accepted = accepted[:remaining]
+		c.response.truncated = true
+	}
+	if len(accepted) > 0 {
+		written, err := c.mediaSpool.Write(accepted)
+		if err == nil && written != len(accepted) {
+			err = io.ErrShortWrite
+		}
+		if err != nil {
+			c.mediaWriteErr = err
+			return original, nil
+		}
+		_, _ = c.mediaDigest.Write(accepted)
+	}
+	return original, nil
 }
 
 type captureReadCloser struct {
 	io.Reader
 	io.Closer
+	onEOF func()
+}
+
+func (reader *captureReadCloser) Read(payload []byte) (int, error) {
+	read, err := reader.Reader.Read(payload)
+	if errors.Is(err, io.EOF) && reader.onEOF != nil {
+		reader.onEOF()
+		reader.onEOF = nil
+	}
+	return read, err
 }
 
 func contentPersistenceContext(requestContext context.Context) (context.Context, context.CancelFunc) {
@@ -94,7 +152,8 @@ func (a *App) beginContentCapture(r *http.Request, user *User, service string) (
 	if user == nil {
 		return nil, nil
 	}
-	if service == "comfyui" && r.Method == http.MethodGet && (r.URL.Path == "/view" || r.URL.Path == "/viewvideo") {
+	if service == "comfyui" && r.Method == http.MethodGet && strings.TrimSpace(r.Header.Get("Range")) == "" &&
+		(r.URL.Path == "/view" || r.URL.Path == "/viewvideo") {
 		select {
 		case a.mediaCaptureSlots <- struct{}{}:
 		default:
@@ -110,10 +169,16 @@ func (a *App) beginContentCapture(r *http.Request, user *User, service string) (
 		if r.URL.Path == "/viewvideo" {
 			mediaType = "video"
 		}
+		spool, err := os.CreateTemp(a.mediaSpoolDir(), "gateway-media-capture-*")
+		if err != nil {
+			<-a.mediaCaptureSlots
+			return nil, fmt.Errorf("create media capture spool: %w", err)
+		}
 		capture := &proxyContentCapture{
 			userID: user.ID, service: service, path: r.URL.Path, mediaName: name,
 			mediaSubfolder: subfolder, mediaStorageType: storageType,
-			mediaType: mediaType, isMedia: true, response: newLimitedBuffer(maxCapturedMedia),
+			mediaType: mediaType, isMedia: true, mediaSpool: spool, mediaSpoolPath: spool.Name(),
+			mediaDigest: sha256.New(),
 		}
 		capture.release = func() { <-a.mediaCaptureSlots }
 		return capture, nil
@@ -151,7 +216,23 @@ func attachResponseCapture(resp *http.Response) {
 	}
 	capture.mimeType = strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0])
 	capture.status = resp.StatusCode
-	resp.Body = &captureReadCloser{Reader: io.TeeReader(resp.Body, &capture.response), Closer: resp.Body}
+	writer := io.Writer(&capture.response)
+	if capture.isMedia {
+		writer = mediaCaptureWriter{capture: capture}
+	}
+	onEOF := func() {}
+	if capture.isMedia {
+		onEOF = func() { capture.mediaComplete = true }
+	}
+	resp.Body = &captureReadCloser{Reader: io.TeeReader(resp.Body, writer), Closer: resp.Body, onEOF: onEOF}
+}
+
+type mediaCaptureWriter struct {
+	capture *proxyContentCapture
+}
+
+func (writer mediaCaptureWriter) Write(payload []byte) (int, error) {
+	return writer.capture.writeMedia(payload)
 }
 
 func (a *App) persistContentCapture(ctx context.Context, capture *proxyContentCapture) error {
@@ -205,40 +286,15 @@ func (a *App) persistContentCapture(ctx context.Context, capture *proxyContentCa
 }
 
 func (a *App) persistComfyMedia(ctx context.Context, capture *proxyContentCapture) error {
-	if capture.status < 200 || capture.status >= 300 || len(capture.response.data) == 0 || capture.response.truncated {
+	if capture == nil || capture.status != http.StatusOK || !capture.mediaComplete || capture.mediaSpool == nil ||
+		capture.mediaSize <= 0 || capture.mediaWriteErr != nil || capture.response.truncated {
 		return nil
 	}
-	used, err := a.store.ContentMediaBytesForUser(ctx, capture.userID)
-	if err != nil || used+int64(len(capture.response.data)) > maxMediaBytesPerUser {
-		return err
+	if _, err := capture.mediaSpool.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("rewind media capture spool: %w", err)
 	}
-	eventID, err := a.store.ComfyOutputEventID(ctx, capture.userID, capture.mediaName,
-		capture.mediaSubfolder, capture.mediaStorageType)
-	if errors.Is(err, sql.ErrNoRows) {
-		eventID, err = a.store.LatestComfyContentEventID(ctx, capture.userID)
-	}
-	if err != nil {
-		return nil
-	}
-	payload, err := a.contentCipher.EncryptBytes(capture.response.data)
-	if err != nil {
-		return err
-	}
-	mimeType := capture.mimeType
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
-	digest := sha256.Sum256(capture.response.data)
-	err = a.store.InsertContentMedia(ctx, domain.ContentMediaRecord{
-		EventID: eventID, MediaType: capture.mediaType, MIMEType: mimeType,
-		OriginalName: capture.mediaName, Subfolder: capture.mediaSubfolder, StorageType: capture.mediaStorageType,
-		PayloadCipher: payload, SizeBytes: int64(len(capture.response.data)), ContentHash: hex.EncodeToString(digest[:]),
-		ExpiresAt: time.Now().Add(a.retentionPolicy().GenerationMedia),
-	})
-	if err == nil && capture.mediaType == "image" {
-		a.queueSensitiveMediaClassification()
-	}
-	return err
+	return a.persistComfyMediaReader(ctx, capture, capture.mediaSpool,
+		capture.mediaSize, hex.EncodeToString(capture.mediaDigest.Sum(nil)))
 }
 
 func parseOpenWebCapture(requestBody, responseBody []byte) (externalID, model, prompt, response, metadata string, err error) {

@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +32,7 @@ const (
 	defaultDependencyOffline   = 3 * time.Minute
 	defaultComfyObjectInfoTTL  = 30 * time.Second
 	defaultComfyObjectInfoMax  = 24 * time.Hour
+	defaultMediaInflightMB     = 256
 )
 
 // RetentionPolicy is the single source of truth for data lifetime. Generation
@@ -154,6 +156,9 @@ type Config struct {
 	DependencyOfflineAfter    time.Duration
 	ComfyObjectInfoCacheTTL   time.Duration
 	ComfyObjectInfoMaxStale   time.Duration
+	MediaInFlightLimitBytes   int64
+	MediaSpoolDir             string
+	PprofEnabled              bool
 	Retention                 RetentionPolicy
 	DatabaseCleanupBatchSize  int
 	DatabaseCleanupMaxBatches int
@@ -275,6 +280,21 @@ func Load() (Config, error) {
 	if comfyObjectInfoMaxStale < comfyObjectInfoCacheTTL || comfyObjectInfoMaxStale > 7*24*time.Hour {
 		return Config{}, fmt.Errorf("COMFY_OBJECT_INFO_MAX_STALE must be at least COMFY_OBJECT_INFO_CACHE_TTL and no more than 7d")
 	}
+	mediaInflightMB, err := integerEnv("MEDIA_INFLIGHT_LIMIT_MB", defaultMediaInflightMB)
+	if err != nil {
+		return Config{}, err
+	}
+	if mediaInflightMB < 64 || mediaInflightMB > 2048 {
+		return Config{}, fmt.Errorf("MEDIA_INFLIGHT_LIMIT_MB must be between 64 and 2048")
+	}
+	mediaSpoolDir := filepath.Clean(strings.TrimSpace(env("MEDIA_SPOOL_DIR", filepath.Join(os.TempDir(), "ai-access-gateway-media"))))
+	if !filepath.IsAbs(mediaSpoolDir) {
+		return Config{}, fmt.Errorf("MEDIA_SPOOL_DIR must be an absolute path")
+	}
+	pprofEnabled, err := booleanEnv("PPROF_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
 	retention, err := loadRetentionPolicy()
 	if err != nil {
 		return Config{}, err
@@ -376,6 +396,9 @@ func Load() (Config, error) {
 		DependencyOfflineAfter:    dependencyOfflineAfter,
 		ComfyObjectInfoCacheTTL:   comfyObjectInfoCacheTTL,
 		ComfyObjectInfoMaxStale:   comfyObjectInfoMaxStale,
+		MediaInFlightLimitBytes:   int64(mediaInflightMB) << 20,
+		MediaSpoolDir:             mediaSpoolDir,
+		PprofEnabled:              pprofEnabled,
 		Retention:                 retention,
 		DatabaseCleanupBatchSize:  databaseCleanupBatchSize,
 		DatabaseCleanupMaxBatches: databaseCleanupMaxBatches,
@@ -551,6 +574,18 @@ func integerEnv(key string, fallback int) (int, error) {
 	value, err := strconv.Atoi(raw)
 	if err != nil {
 		return 0, fmt.Errorf("%s: invalid integer %q", key, raw)
+	}
+	return value, nil
+}
+
+func booleanEnv(key string, fallback bool) (bool, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("%s: invalid boolean %q", key, raw)
 	}
 	return value, nil
 }

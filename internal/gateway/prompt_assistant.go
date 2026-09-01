@@ -16,6 +16,7 @@ import (
 const (
 	maxPromptAssistantInput          = 4000
 	maxPromptAssistantReferenceBytes = 64 << 20
+	promptAssistantMemoryReservation = 192 << 20
 )
 
 func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
@@ -67,6 +68,12 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer releaseAssistant()
+	releaseMedia, acquired := a.mediaByteLimiter().tryAcquire(promptAssistantMemoryReservation)
+	if !acquired {
+		writeGenerationError(w, http.StatusTooManyRequests, "обработка медиа уже заняла доступный объём памяти; повторите запрос позже")
+		return
+	}
+	defer releaseMedia()
 	references, err := a.promptAssistantImageReferences(r.Context(), user.ID, r, mode)
 	if err != nil {
 		writeGenerationError(w, http.StatusBadRequest, err.Error())
@@ -226,7 +233,9 @@ func (a *App) promptAssistantImageReferences(ctx context.Context, userID int64, 
 		if err := a.validateGenerationImage(filename, userID); err != nil {
 			return nil, err
 		}
+		fetchStarted := time.Now()
 		image, mimeType, err := a.fetchGenerationInputImage(ctx, filename)
+		a.observeMediaOperation("assistant_reference_fetch", int64(len(image)), fetchStarted, err)
 		if err != nil {
 			return nil, fmt.Errorf("не удалось прочитать изображение %d для ассистента", number)
 		}
@@ -234,6 +243,19 @@ func (a *App) promptAssistantImageReferences(ctx context.Context, userID int64, 
 		if totalBytes > maxPromptAssistantReferenceBytes {
 			return nil, fmt.Errorf("общий размер изображений для ассистента превышает 64 МБ")
 		}
+		prepareStarted := time.Now()
+		prepared, preparedMIME, changed, prepareErr := prepareVisionReference(image, mimeType)
+		a.observeMediaOperation("assistant_reference_prepare", int64(len(image)), prepareStarted, prepareErr)
+		if prepareErr != nil {
+			clear(image)
+			return nil, fmt.Errorf("не удалось подготовить изображение %d для ассистента", number)
+		}
+		if changed {
+			clear(image)
+		}
+		image = prepared
+		mimeType = preparedMIME
+		a.mediaOperationRegistry().observe("assistant_reference_payload", int64(len(image)), 0, nil)
 		referenceNumber := number
 		if mode == promptassistant.ModeTextToVideo {
 			// MiniMax numbers only the references that actually reach the node.

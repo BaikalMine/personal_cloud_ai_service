@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"ai-access-gateway/internal/domain"
 	"ai-access-gateway/internal/moderation"
 )
 
@@ -41,15 +42,19 @@ func (a *App) queueSensitiveMediaClassification() {
 					jobID = *item.GenerationJobID
 				}
 				itemCtx := traceContext(ctx, item.CorrelationID, jobID, "")
-				image, err := a.contentCipher.DecryptBytes(item.PayloadCipher)
+				image, err := a.readContentMediaBytes(itemCtx, domain.ContentMediaRow{
+					ID: item.ID, MIMEType: item.MIMEType, PayloadCipher: item.PayloadCipher,
+					SizeBytes: item.SizeBytes, StorageFormat: item.StorageFormat,
+				}, maxCapturedMedia)
 				if err != nil {
-					log.Printf("decrypt media %d for visual sensitivity classification: %v", item.ID, err)
+					log.Printf("read media %d for visual sensitivity classification: %v", item.ID, err)
 					continue
 				}
 				imageCtx, imageCancel := context.WithTimeout(itemCtx, sensitiveMediaClassificationTimeout)
 				started := time.Now()
 				sensitive, err := a.contentModerator.ClassifyImage(imageCtx, image, item.MIMEType)
 				imageCancel()
+				clear(image)
 				a.observeServiceCall(itemCtx, dependencyModerator, "classify_image", started, err, false, "moderation_failed", "")
 				if err != nil {
 					if errors.Is(err, moderation.ErrUnsupportedImage) {

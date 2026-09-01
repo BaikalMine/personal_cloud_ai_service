@@ -1,11 +1,12 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -59,6 +60,10 @@ func (a *App) handleGenerationGalleryPage(w http.ResponseWriter, r *http.Request
 }
 
 func (a *App) handleReuseGenerationLibraryImage(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
+	var operationErr error
+	var mediaSize int64
+	defer func() { a.observeMediaOperation("gallery_reuse", mediaSize, started, operationErr) }()
 	if r.Method != http.MethodPost {
 		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
@@ -82,20 +87,27 @@ func (a *App) handleReuseGenerationLibraryImage(w http.ResponseWriter, r *http.R
 		writeGenerationError(w, http.StatusBadRequest, "для видеореференса можно выбрать только изображение")
 		return
 	}
-	payload, err := a.contentCipher.DecryptBytes(media.PayloadCipher)
-	if err != nil {
-		writeGenerationError(w, http.StatusInternalServerError, "не удалось подготовить изображение из галереи")
-		return
-	}
-	if len(payload) == 0 || int64(len(payload)) > maxComfyUploadBody-(1<<20) {
+	mediaSize = media.SizeBytes
+	if media.SizeBytes <= 0 || media.SizeBytes > maxComfyUploadBody-(1<<20) {
 		writeGenerationError(w, http.StatusRequestEntityTooLarge, "изображение из галереи слишком большое")
 		return
 	}
-	uploadRequest, err := newGenerationLibraryImageUploadRequest(r.Context(), media.OriginalName, payload)
+	payload, err := a.materializeContentMedia(r.Context(), media)
 	if err != nil {
+		operationErr = err
 		writeGenerationError(w, http.StatusInternalServerError, "не удалось подготовить изображение из галереи")
 		return
 	}
+	defer payload.Close()
+	uploadRequest, err := newGenerationLibraryImageUploadRequestFromReader(
+		r.Context(), media.OriginalName, payload, a.mediaSpoolDir(),
+	)
+	if err != nil {
+		operationErr = err
+		writeGenerationError(w, http.StatusInternalServerError, "не удалось подготовить изображение из галереи")
+		return
+	}
+	defer uploadRequest.Body.Close()
 	uploadRequest.RemoteAddr = r.RemoteAddr
 	uploadRequest.Host = r.Host
 	uploadRequest.Header.Set("User-Agent", r.UserAgent())
@@ -128,18 +140,28 @@ func (a *App) handleGenerationLibraryImages(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]any{"images": items})
 }
 
-func newGenerationLibraryImageUploadRequest(ctx context.Context, filename string, payload []byte) (*http.Request, error) {
+func newGenerationLibraryImageUploadRequestFromReader(ctx context.Context, filename string, payload io.Reader, directory string) (request *http.Request, operationErr error) {
 	filename = filepath.Base(strings.ReplaceAll(strings.TrimSpace(filename), "\\", "/"))
 	if filename == "" || filename == "." {
 		filename = "gallery-image.png"
 	}
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
+	file, err := os.CreateTemp(directory, "gateway-media-reuse-*")
+	if err != nil {
+		return nil, fmt.Errorf("create gallery upload spool: %w", err)
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = file.Close()
+			_ = os.Remove(file.Name())
+		}
+	}()
+	writer := multipart.NewWriter(file)
 	part, err := writer.CreateFormFile("image", filename)
 	if err != nil {
 		return nil, fmt.Errorf("create image part: %w", err)
 	}
-	if _, err := part.Write(payload); err != nil {
+	if _, err := io.Copy(part, payload); err != nil {
 		return nil, fmt.Errorf("write image part: %w", err)
 	}
 	if err := writer.WriteField("type", "input"); err != nil {
@@ -151,12 +173,20 @@ func newGenerationLibraryImageUploadRequest(ctx context.Context, filename string
 	if err := writer.Close(); err != nil {
 		return nil, fmt.Errorf("finish image upload: %w", err)
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "/generate/upload/image", bytes.NewReader(body.Bytes()))
+	length, err := file.Seek(0, io.SeekEnd)
+	if err != nil {
+		return nil, fmt.Errorf("measure gallery upload spool: %w", err)
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("rewind gallery upload spool: %w", err)
+	}
+	request, err = http.NewRequestWithContext(ctx, http.MethodPost, "/generate/upload/image", &removableFileBody{file: file, path: file.Name()})
 	if err != nil {
 		return nil, err
 	}
 	request.Header.Set("Content-Type", writer.FormDataContentType())
-	request.ContentLength = int64(body.Len())
+	request.ContentLength = length
+	cleanup = false
 	return request, nil
 }
 

@@ -1,8 +1,12 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	contentcrypto "ai-access-gateway/internal/content"
 	"ai-access-gateway/internal/database"
 	"ai-access-gateway/internal/domain"
 	"ai-access-gateway/internal/store"
@@ -44,11 +49,12 @@ func TestGatewayIntegrationComfyOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	repository := store.New(db)
-	if _, err := repository.InsertContentEvent(ctx, domain.ContentEventRecord{
+	eventID, err := repository.InsertContentEvent(ctx, domain.ContentEventRecord{
 		UserID: userID, Service: "comfyui", Kind: "comfyui_prompt", ExternalID: "owned-prompt",
 		PromptCipher: []byte{1}, ResponseCipher: []byte{2}, MetadataCipher: []byte{3},
 		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -68,9 +74,17 @@ func TestGatewayIntegrationComfyOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	contentCipher, err := contentcrypto.NewCipher("01234567890123456789012345678901")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spoolDir := t.TempDir()
 	app := &App{
-		cfg:   Config{ComfyUIUpstream: upstreamURL, SessionSecret: "01234567890123456789012345678901"},
-		store: repository,
+		cfg: Config{
+			ComfyUIUpstream: upstreamURL, SessionSecret: "01234567890123456789012345678901",
+			MediaSpoolDir: spoolDir, MediaInFlightLimitBytes: 64 << 20,
+		},
+		store: repository, contentCipher: contentCipher,
 	}
 	if err := app.refreshComfyOutputOwnerships(ctx, userID); err != nil {
 		t.Fatal(err)
@@ -94,6 +108,56 @@ func TestGatewayIntegrationComfyOwnership(t *testing.T) {
 	assertComfyMediaAccess(t, app, user, "/view?filename=input.png&type=input&subfolder="+url.QueryEscape(ownNamespace), true)
 	assertComfyMediaAccess(t, app, user, "/view?filename=input.png&type=input&subfolder=gateway%2Fgateway-aaaaaaaaaaaaaaaaaaaaaaaa", false)
 	assertComfyMediaAccess(t, app, user, "/view?filename=legacy-input.png&type=input", false)
+
+	assertChunkedMediaRoundTrip(t, ctx, db, app, eventID, userID, spoolDir)
+}
+
+func assertChunkedMediaRoundTrip(t *testing.T, ctx context.Context, db *sql.DB, app *App, eventID, userID int64, spoolDir string) {
+	t.Helper()
+	payload := bytes.Repeat([]byte("chunked-media-"), (store.ContentMediaChunkSize/14)+3)
+	digest := sha256.Sum256(payload)
+	if err := app.store.InsertComfyOutputOwnerships(ctx, userID, []domain.ComfyOutputOwnership{{
+		PromptID: "owned-prompt", Filename: "chunked.png", StorageType: "output", MediaType: "image",
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	capture := &proxyContentCapture{
+		userID: userID, service: "comfyui", mediaName: "chunked.png", mediaStorageType: "output",
+		mediaType: "image", mimeType: "image/png", isMedia: true, status: http.StatusOK,
+	}
+	if err := app.persistComfyMediaReader(ctx, capture, bytes.NewReader(payload), int64(len(payload)), hex.EncodeToString(digest[:])); err != nil {
+		t.Fatal(err)
+	}
+	var mediaID int64
+	var storageFormat string
+	var chunkCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT m.id,m.storage_format,(SELECT count(*) FROM content_media_chunks c WHERE c.media_id=m.id)
+		FROM content_media m WHERE m.event_id=$1 AND m.original_name='chunked.png'
+	`, eventID).Scan(&mediaID, &storageFormat, &chunkCount); err != nil {
+		t.Fatal(err)
+	}
+	if storageFormat != "chunked_v1" || chunkCount < 2 {
+		t.Fatalf("chunked storage format=%q chunks=%d", storageFormat, chunkCount)
+	}
+	media, err := app.store.ContentMediaByIDForUser(ctx, mediaID, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialized, err := app.materializeContentMedia(ctx, media)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual, readErr := io.ReadAll(materialized)
+	closeErr := materialized.Close()
+	if readErr != nil || closeErr != nil || !bytes.Equal(actual, payload) {
+		t.Fatalf("materialized media bytes=%d read_err=%v close_err=%v", len(actual), readErr, closeErr)
+	}
+	entries, err := os.ReadDir(spoolDir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("media round trip left spool files=%v err=%v", entries, err)
+	}
 }
 
 func assertComfyMediaAccess(t *testing.T, app *App, user *User, target string, want bool) {

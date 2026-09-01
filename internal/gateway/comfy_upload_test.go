@@ -93,6 +93,20 @@ func TestValidateComfyUploadPayloadAllowsNonImageAudio(t *testing.T) {
 	}
 }
 
+func TestValidateComfyUploadPayloadKindAndVideoSignature(t *testing.T) {
+	mp4 := make([]byte, 16)
+	copy(mp4[4:8], "ftyp")
+	if err := validateComfyUploadPayloadForKind("reference.mp4", mp4, "video"); err != nil {
+		t.Fatalf("MP4 video payload was rejected: %v", err)
+	}
+	if err := validateComfyUploadPayloadForKind("reference.mp4", mp4, "image"); err == nil {
+		t.Fatal("video payload was accepted by the image endpoint")
+	}
+	if err := validateComfyUploadPayloadForKind("reference.mp3", []byte("ID3\x04\x00\x00audio"), "video"); err == nil {
+		t.Fatal("audio payload was accepted by the video endpoint")
+	}
+}
+
 func TestValidateComfyUploadPayloadRejectsUnknownFile(t *testing.T) {
 	if err := validateComfyUploadPayload("payload.bin", []byte("not a supported media file")); err == nil {
 		t.Fatal("unknown upload payload was accepted")
@@ -143,6 +157,7 @@ func TestComfyNamespaceOwnership(t *testing.T) {
 
 func readMultipartValues(t *testing.T, request *http.Request) map[string][]byte {
 	t.Helper()
+	defer request.Body.Close()
 	reader, err := request.MultipartReader()
 	if err != nil {
 		t.Fatal(err)

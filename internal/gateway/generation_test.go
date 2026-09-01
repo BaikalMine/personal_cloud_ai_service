@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -135,14 +136,17 @@ func TestQuickGenerationUploadForwardsNamespacedImageToComfyUI(t *testing.T) {
 	}
 }
 
-func TestFetchGenerationOutputUsesOriginalVideoRoute(t *testing.T) {
-	var requestPath string
+func TestStreamGenerationOutputUsesOriginalVideoRouteAndRange(t *testing.T) {
+	var requestPath, requestRange string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestPath = r.URL.Path
+		requestRange = r.Header.Get("Range")
 		if got := r.URL.Query().Get("filename"); got != "clip.mp4" {
 			t.Fatalf("filename = %q", got)
 		}
 		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Content-Range", "bytes 0-4/5")
+		w.WriteHeader(http.StatusPartialContent)
 		_, _ = w.Write([]byte("video"))
 	}))
 	defer upstream.Close()
@@ -151,17 +155,20 @@ func TestFetchGenerationOutputUsesOriginalVideoRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := &App{cfg: Config{ComfyUIUpstream: upstreamURL}}
-	body, contentType, status, err := app.fetchGenerationOutput(context.Background(), generationOutput{
+	request := httptest.NewRequest(http.MethodGet, "/generate/output", nil)
+	request.Header.Set("Range", "bytes=0-4")
+	response := httptest.NewRecorder()
+	streamed, err := app.streamGenerationOutput(response, request, generationOutput{
 		Filename: "clip.mp4", Type: "output", MediaType: "video",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if requestPath != "/view" {
-		t.Fatalf("video output path = %q", requestPath)
+	if !streamed || requestPath != "/view" || requestRange != "bytes=0-4" {
+		t.Fatalf("video output streamed=%v path=%q range=%q", streamed, requestPath, requestRange)
 	}
-	if status != http.StatusOK || contentType != "video/mp4" || string(body) != "video" {
-		t.Fatalf("output = (%d, %q, %q)", status, contentType, body)
+	if response.Code != http.StatusPartialContent || response.Header().Get("Content-Type") != "video/mp4" || response.Header().Get("Content-Range") != "bytes 0-4/5" || response.Body.String() != "video" {
+		t.Fatalf("output = (%d, %q, %q, %q)", response.Code, response.Header().Get("Content-Type"), response.Header().Get("Content-Range"), response.Body.String())
 	}
 }
 
@@ -176,6 +183,52 @@ func TestReadGenerationOutputArchiveFingerprintsBeyondArchiveLimit(t *testing.T)
 	}
 	if _, _, _, err := readGenerationOutputArchive(bytes.NewReader(payload), 16, int64(len(payload)-1)); err == nil {
 		t.Fatal("output above the absolute fingerprint limit was accepted")
+	}
+}
+
+func TestSpoolGenerationOutputArchiveBoundsDiskAndCleansUp(t *testing.T) {
+	directory := t.TempDir()
+	payload := bytes.Repeat([]byte("video"), 32)
+	file, spoolPath, sizeBytes, contentHash, err := spoolGenerationOutputArchive(
+		bytes.NewReader(payload), directory, int64(len(payload)), 1024,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file == nil || spoolPath == "" || sizeBytes != int64(len(payload)) || len(contentHash) != 64 {
+		t.Fatalf("spool = file:%v path:%q size:%d hash:%q", file, spoolPath, sizeBytes, contentHash)
+	}
+	stored, err := io.ReadAll(file)
+	if err != nil || !bytes.Equal(stored, payload) {
+		t.Fatalf("stored payload=%q err=%v", stored, err)
+	}
+	archive := generationOutputArchive{File: file, path: spoolPath}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(spoolPath); !os.IsNotExist(err) {
+		t.Fatalf("archive spool remains after close: %v", err)
+	}
+
+	file, spoolPath, sizeBytes, contentHash, err = spoolGenerationOutputArchive(
+		bytes.NewReader(payload), directory, 16, 1024,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file != nil || spoolPath != "" || sizeBytes != int64(len(payload)) || len(contentHash) != 64 {
+		t.Fatalf("oversized spool = file:%v path:%q size:%d hash:%q", file, spoolPath, sizeBytes, contentHash)
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("oversized archive left spool files=%v err=%v", entries, err)
+	}
+	if _, _, _, _, err := spoolGenerationOutputArchive(bytes.NewReader(payload), directory, 16, 31); err == nil {
+		t.Fatal("output above fingerprint limit was accepted")
+	}
+	entries, err = os.ReadDir(directory)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("failed archive left spool files=%v err=%v", entries, err)
 	}
 }
 

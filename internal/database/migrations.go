@@ -948,6 +948,26 @@ var migrationCatalog = []migration{
 			`CREATE INDEX IF NOT EXISTS gateway_observations_retention_idx ON gateway_observations(recorded_at,id)`,
 		},
 	},
+	{
+		version: 43,
+		name:    "chunked_content_media",
+		statements: []string{
+			`ALTER TABLE content_media ADD COLUMN IF NOT EXISTS storage_format TEXT NOT NULL DEFAULT 'inline_v1'`,
+			`DO $$ BEGIN
+				IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='content_media_storage_format_check' AND conrelid='content_media'::regclass) THEN
+					ALTER TABLE content_media ADD CONSTRAINT content_media_storage_format_check CHECK (storage_format IN ('inline_v1','chunked_v1'));
+				END IF;
+			END $$`,
+			`CREATE TABLE IF NOT EXISTS content_media_chunks (
+				media_id BIGINT NOT NULL REFERENCES content_media(id) ON DELETE CASCADE,
+				chunk_index INTEGER NOT NULL CHECK (chunk_index >= 0),
+				payload_cipher BYTEA NOT NULL CHECK (octet_length(payload_cipher) > 0),
+				plain_size INTEGER NOT NULL CHECK (plain_size BETWEEN 1 AND 1048576),
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				PRIMARY KEY(media_id,chunk_index)
+			)`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

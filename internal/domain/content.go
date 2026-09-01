@@ -59,6 +59,8 @@ type ContentMediaRow struct {
 	MIMEType      string
 	OriginalName  string
 	PayloadCipher []byte
+	SizeBytes     int64
+	StorageFormat string
 }
 
 type PendingSensitiveMedia struct {
@@ -68,6 +70,8 @@ type PendingSensitiveMedia struct {
 	CorrelationID   string
 	MIMEType        string
 	PayloadCipher   []byte
+	SizeBytes       int64
+	StorageFormat   string
 }
 
 type UserGenerationMedia struct {
@@ -146,6 +150,8 @@ type ComfyOutputCleanupTombstone struct {
 type UnhashedComfyMedia struct {
 	ID            int64
 	PayloadCipher []byte
+	SizeBytes     int64
+	StorageFormat string
 }
 
 type FeatureSuggestionRecord struct {

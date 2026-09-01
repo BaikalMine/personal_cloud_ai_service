@@ -128,6 +128,7 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	assertComfyUserStateIsolation(t, ctx, repository, registeredUserID, adminID)
 	assertComfyInputLifecycle(t, ctx, db, repository, registeredUserID)
 	assertComfyOutputCleanupLifecycle(t, ctx, db, repository, registeredUserID)
+	assertContentMediaChunksLifecycle(t, ctx, db, repository, registeredUserID)
 
 	sessionToken := "integration-session-token"
 	sessionHash := security.HashToken(sessionToken)
@@ -270,6 +271,75 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	}
 	if deleted, err := repository.DeleteUser(ctx, adminID, "admin"); err != nil || deleted {
 		t.Fatalf("admin deletion protection: deleted=%v err=%v", deleted, err)
+	}
+}
+
+func assertContentMediaChunksLifecycle(t *testing.T, ctx context.Context, db *sql.DB, repository *store.Store, userID int64) {
+	t.Helper()
+	expiresAt := time.Now().Add(24 * time.Hour)
+	eventID, err := repository.InsertContentEvent(ctx, domain.ContentEventRecord{
+		UserID: userID, Service: "comfyui", Kind: "comfyui_prompt", ExternalID: "chunked-media-prompt",
+		Model: "model", PromptCipher: []byte{1}, ResponseCipher: []byte{2}, MetadataCipher: []byte{3},
+		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := domain.ContentMediaRecord{
+		EventID: eventID, MediaType: "image", MIMEType: "image/png", OriginalName: "chunked.png",
+		Subfolder: "integration", StorageType: "output", SizeBytes: 5,
+		ContentHash: strings.Repeat("a", 64), ExpiresAt: expiresAt,
+	}
+	writer, err := repository.BeginContentMediaChunks(ctx, record)
+	if err != nil || writer.Skipped() || writer.MediaID() <= 0 {
+		t.Fatalf("begin chunked media: writer=%+v err=%v", writer, err)
+	}
+	if err := writer.WriteChunk(ctx, 1, []byte("wrong-order"), 3); err == nil {
+		t.Fatal("out-of-order media chunk was accepted")
+	}
+	if err := writer.WriteChunk(ctx, 0, []byte("cipher-0"), 3); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.WriteChunk(ctx, 1, []byte("cipher-1"), 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	media, err := repository.ContentMediaByIDForUser(ctx, writer.MediaID(), userID)
+	if err != nil || media.StorageFormat != "chunked_v1" || media.SizeBytes != 5 || len(media.PayloadCipher) != 0 {
+		t.Fatalf("chunked media row=%+v err=%v", media, err)
+	}
+	var chunks []string
+	var plainSizes []int
+	if err := repository.ForEachContentMediaChunk(ctx, media.ID, func(index int, payload []byte, plainSize int) error {
+		chunks = append(chunks, string(payload))
+		plainSizes = append(plainSizes, plainSize)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(chunks, ",") != "cipher-0,cipher-1" || len(plainSizes) != 2 || plainSizes[0] != 3 || plainSizes[1] != 2 {
+		t.Fatalf("chunk sequence=%v sizes=%v", chunks, plainSizes)
+	}
+	duplicate, err := repository.BeginContentMediaChunks(ctx, record)
+	if err != nil || !duplicate.Skipped() {
+		t.Fatalf("duplicate chunked media: writer=%+v err=%v", duplicate, err)
+	}
+	var generatedCount int64
+	if err := db.QueryRowContext(ctx, `SELECT generated_media_count FROM content_events WHERE id=$1`, eventID).Scan(&generatedCount); err != nil || generatedCount != 1 {
+		t.Fatalf("generated media count=%d err=%v", generatedCount, err)
+	}
+	if deleted, err := repository.DeleteContentMediaByIDs(ctx, []int64{media.ID}); err != nil || deleted != 1 {
+		t.Fatalf("delete chunked media=%d err=%v", deleted, err)
+	}
+	var remainingChunks int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM content_media_chunks WHERE media_id=$1`, media.ID).Scan(&remainingChunks); err != nil || remainingChunks != 0 {
+		t.Fatalf("chunk cascade rows=%d err=%v", remainingChunks, err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM content_events WHERE id=$1`, eventID); err != nil {
+		t.Fatal(err)
 	}
 }
 

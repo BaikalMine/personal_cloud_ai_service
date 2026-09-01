@@ -74,10 +74,13 @@ type App struct {
 	maintenanceOnce        sync.Once
 	dependencyOnce         sync.Once
 	observabilityOnce      sync.Once
+	mediaObservabilityOnce sync.Once
 	maintenanceWorkers     *maintenanceRegistry
 	maintenanceDone        chan struct{}
 	dependencyHealth       *dependencyMonitor
 	serviceLatencies       *serviceLatencyRegistry
+	mediaOperations        *mediaOperationRegistry
+	mediaBytes             *weightedByteLimiter
 	objectInfoOnce         sync.Once
 	objectInfoCache        *comfyObjectInfoCache
 	comfyQueueWasBusy      bool

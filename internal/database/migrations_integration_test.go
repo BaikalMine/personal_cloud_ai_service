@@ -53,6 +53,9 @@ func TestDurableGenerationJobsMigrationBackfill(t *testing.T) {
 			       ($1,'migration-prompt-failed','video','minimax-h3-v4','MiniMax H3',13,decode('03','hex'),'error',now()-interval '2 hours',now()-interval '1 hour',now()-interval '1 hour','legacy failure')`, []any{userID}},
 		{`INSERT INTO content_events(user_id,service,kind,external_id,model,generation_state,prompt_cipher,response_cipher,metadata_cipher,expires_at)
 			VALUES ($1,'comfyui','comfyui_prompt','migration-prompt-completed','Krea2','completed',decode('01','hex'),decode('02','hex'),decode('03','hex'),now()+interval '1 day')`, []any{userID}},
+		{`INSERT INTO content_media(event_id,media_type,mime_type,original_name,payload_cipher,size_bytes,expires_at)
+			SELECT id,'image','image/png','migration-inline.png',decode('010203','hex'),3,now()+interval '1 day'
+			FROM content_events WHERE external_id='migration-prompt-completed'`, nil},
 		{`INSERT INTO quick_generation_mining_leases(id,prompt_id,user_id,miner_id,script_path,process_name,resume_mining)
 			VALUES ('migration-lease','migration-prompt-running',$1,$2,'migration/miner/start.bat','migration-miner.exe',true)`, []any{userID, minerID}},
 	}
@@ -72,8 +75,16 @@ func TestDurableGenerationJobsMigrationBackfill(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM generation_job_transitions`).Scan(&transitionCount); err != nil || transitionCount != jobCount {
 		t.Fatalf("backfilled generation job transitions=%d want=%d err=%v", transitionCount, jobCount, err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version IN (40,41,42)`).Scan(&migrationCount); err != nil || migrationCount != 3 {
-		t.Fatalf("generation job migration records=%d want=3 err=%v", migrationCount, err)
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version IN (40,41,42,43)`).Scan(&migrationCount); err != nil || migrationCount != 4 {
+		t.Fatalf("generation job and media migration records=%d want=4 err=%v", migrationCount, err)
+	}
+	var storageFormat string
+	var chunkTablePresent bool
+	if err := db.QueryRowContext(ctx, `SELECT storage_format FROM content_media WHERE original_name='migration-inline.png'`).Scan(&storageFormat); err != nil || storageFormat != "inline_v1" {
+		t.Fatalf("legacy media storage format=%q err=%v", storageFormat, err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT to_regclass('public.content_media_chunks') IS NOT NULL`).Scan(&chunkTablePresent); err != nil || !chunkTablePresent {
+		t.Fatalf("content media chunks table present=%v err=%v", chunkTablePresent, err)
 	}
 
 	var state, requestID string

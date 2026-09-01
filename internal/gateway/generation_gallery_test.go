@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -11,10 +12,14 @@ import (
 
 func TestGenerationLibraryImageUploadRequest(t *testing.T) {
 	payload := []byte("stored-image")
-	request, err := newGenerationLibraryImageUploadRequest(context.Background(), `..\portrait.png`, payload)
+	directory := t.TempDir()
+	request, err := newGenerationLibraryImageUploadRequestFromReader(
+		context.Background(), `..\portrait.png`, bytes.NewReader(payload), directory,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer request.Body.Close()
 	if err := request.ParseMultipartForm(1 << 20); err != nil {
 		t.Fatal(err)
 	}
@@ -32,6 +37,13 @@ func TestGenerationLibraryImageUploadRequest(t *testing.T) {
 	}
 	if request.FormValue("type") != "input" || request.FormValue("overwrite") != "true" {
 		t.Fatal("ComfyUI upload fields are missing")
+	}
+	if err := request.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("gallery reuse left spool files=%v err=%v", entries, err)
 	}
 }
 

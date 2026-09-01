@@ -13,9 +13,11 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -35,6 +37,7 @@ const (
 	maxComfyInputGlobalFiles  = 5000
 	maxComfyUploadResponse    = 64 << 10
 	maxComfyStoredInputBytes  = int64(320 << 20)
+	maxComfyValidationHeader  = 1 << 20
 )
 
 var errForeignComfyAsset = errors.New("ComfyUI asset belongs to another Gateway user")
@@ -57,6 +60,37 @@ type comfyInputReservation struct {
 
 type comfyInputReservationKey struct{}
 
+type comfyUploadPolicyKey struct{}
+
+type comfyUploadPolicy struct {
+	MaxBody int64
+	Kind    string
+}
+
+type removableFileBody struct {
+	file *os.File
+	path string
+	once sync.Once
+	err  error
+}
+
+func (body *removableFileBody) Read(payload []byte) (int, error) {
+	return body.file.Read(payload)
+}
+
+func (body *removableFileBody) Close() error {
+	body.once.Do(func() {
+		closeErr := body.file.Close()
+		removeErr := os.Remove(body.path)
+		if closeErr != nil {
+			body.err = closeErr
+		} else if removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			body.err = removeErr
+		}
+	})
+	return body.err
+}
+
 func isComfyUploadRequest(r *http.Request) bool {
 	return r.Method == http.MethodPost && (r.URL.Path == "/upload/image" || r.URL.Path == "/upload/mask")
 }
@@ -66,26 +100,37 @@ func (a *App) rewriteComfyUpload(w http.ResponseWriter, r *http.Request, user *U
 	return err
 }
 
-func (a *App) rewriteComfyUploadWithName(w http.ResponseWriter, r *http.Request, user *User, targetFilename string) (comfyUploadAsset, error) {
+func (a *App) rewriteComfyUploadWithName(w http.ResponseWriter, r *http.Request, user *User, targetFilename string) (asset comfyUploadAsset, operationErr error) {
 	if user == nil || !isComfyUploadRequest(r) {
 		return comfyUploadAsset{}, nil
 	}
+	started := time.Now()
+	defer func() { a.observeMediaOperation("upload_rewrite", asset.SizeBytes, started, operationErr) }()
 	mediaType, parameters, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "multipart/form-data" || parameters["boundary"] == "" {
 		return comfyUploadAsset{}, errors.New("invalid ComfyUI multipart upload")
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxComfyUploadBody)
-	body, err := io.ReadAll(r.Body)
-	_ = r.Body.Close()
-	if err != nil {
-		return comfyUploadAsset{}, fmt.Errorf("read ComfyUI upload: %w", err)
-	}
+	policy := comfyUploadPolicyFromRequest(r)
+	r.Body = http.MaxBytesReader(w, r.Body, policy.MaxBody)
+	originalBody := r.Body
+	defer originalBody.Close()
 
-	reader := multipart.NewReader(bytes.NewReader(body), parameters["boundary"])
-	var rewritten bytes.Buffer
-	writer := multipart.NewWriter(&rewritten)
+	rewritten, err := os.CreateTemp(a.mediaSpoolDir(), "gateway-media-upload-*")
+	if err != nil {
+		return comfyUploadAsset{}, fmt.Errorf("create ComfyUI upload spool: %w", err)
+	}
+	removeRewritten := true
+	defer func() {
+		if removeRewritten {
+			_ = rewritten.Close()
+			_ = os.Remove(rewritten.Name())
+		}
+	}()
+
+	reader := multipart.NewReader(originalBody, parameters["boundary"])
+	writer := multipart.NewWriter(rewritten)
 	namespace := comfyUploadNamespace(a.comfyClientID(user.ID))
-	asset := comfyUploadAsset{Subfolder: namespace}
+	asset = comfyUploadAsset{Subfolder: namespace}
 	imageParts := 0
 	foundSubfolder := false
 	for {
@@ -96,27 +141,12 @@ func (a *App) rewriteComfyUploadWithName(w http.ResponseWriter, r *http.Request,
 		if nextErr != nil {
 			return comfyUploadAsset{}, fmt.Errorf("parse ComfyUI upload: %w", nextErr)
 		}
-		var payload []byte
-		var readErr error
-		if part.FormName() == "image" {
-			payload, readErr = io.ReadAll(part)
-		} else {
-			payload, readErr = io.ReadAll(io.LimitReader(part, maxComfyUploadField+1))
-		}
-		_ = part.Close()
-		if readErr != nil {
-			return comfyUploadAsset{}, fmt.Errorf("read ComfyUI upload part: %w", readErr)
-		}
-		if part.FormName() != "image" && len(payload) > maxComfyUploadField {
-			return comfyUploadAsset{}, errors.New("ComfyUI upload field is too large")
-		}
-		if part.FormName() == "image" {
+		formName := part.FormName()
+		if formName == "image" {
 			imageParts++
 			if imageParts > 1 {
+				_ = part.Close()
 				return comfyUploadAsset{}, errors.New("multiple files in one ComfyUI upload are not supported")
-			}
-			if err := validateComfyUploadPayload(part.FileName(), payload); err != nil {
-				return comfyUploadAsset{}, err
 			}
 			asset.Filename = part.FileName()
 			if targetFilename != "" {
@@ -124,11 +154,38 @@ func (a *App) rewriteComfyUploadWithName(w http.ResponseWriter, r *http.Request,
 				disposition := mime.FormatMediaType("form-data", map[string]string{"name": part.FormName(), "filename": asset.Filename})
 				part.Header.Set("Content-Disposition", disposition)
 			}
-			digest := sha256.Sum256(payload)
-			asset.SizeBytes = int64(len(payload))
-			asset.ContentHash = hex.EncodeToString(digest[:])
+			target, createErr := writer.CreatePart(part.Header)
+			if createErr != nil {
+				_ = part.Close()
+				return comfyUploadAsset{}, fmt.Errorf("create ComfyUI upload part: %w", createErr)
+			}
+			digest := sha256.New()
+			header := newLimitedBuffer(maxComfyValidationHeader)
+			written, readErr := io.Copy(io.MultiWriter(target, digest, &header), part)
+			_ = part.Close()
+			if readErr != nil {
+				return comfyUploadAsset{}, fmt.Errorf("stream ComfyUI upload part: %w", readErr)
+			}
+			if written <= 0 || written > policy.MaxBody {
+				return comfyUploadAsset{}, errors.New("ComfyUI upload file is too large")
+			}
+			if err := validateComfyUploadPayloadForKind(asset.Filename, header.data, policy.Kind); err != nil {
+				return comfyUploadAsset{}, err
+			}
+			asset.SizeBytes = written
+			asset.ContentHash = hex.EncodeToString(digest.Sum(nil))
+			continue
 		}
-		if part.FormName() == "subfolder" {
+
+		payload, readErr := io.ReadAll(io.LimitReader(part, maxComfyUploadField+1))
+		_ = part.Close()
+		if readErr != nil {
+			return comfyUploadAsset{}, fmt.Errorf("read ComfyUI upload field: %w", readErr)
+		}
+		if len(payload) > maxComfyUploadField {
+			return comfyUploadAsset{}, errors.New("ComfyUI upload field is too large")
+		}
+		if formName == "subfolder" {
 			original, pathErr := normalizeComfyDataPath(string(payload), true)
 			if pathErr != nil {
 				return comfyUploadAsset{}, pathErr
@@ -140,7 +197,7 @@ func (a *App) rewriteComfyUploadWithName(w http.ResponseWriter, r *http.Request,
 			asset.Subfolder = string(payload)
 			foundSubfolder = true
 		}
-		if part.FormName() == "original_ref" && r.URL.Path == "/upload/mask" {
+		if formName == "original_ref" && r.URL.Path == "/upload/mask" {
 			if err := validateComfyUploadReference(payload, namespace); err != nil {
 				return comfyUploadAsset{}, err
 			}
@@ -164,11 +221,32 @@ func (a *App) rewriteComfyUploadWithName(w http.ResponseWriter, r *http.Request,
 	if err := writer.Close(); err != nil {
 		return comfyUploadAsset{}, fmt.Errorf("finish ComfyUI upload: %w", err)
 	}
-	r.Body = io.NopCloser(bytes.NewReader(rewritten.Bytes()))
-	r.ContentLength = int64(rewritten.Len())
-	r.Header.Set("Content-Length", strconv.Itoa(rewritten.Len()))
+	length, err := rewritten.Seek(0, io.SeekEnd)
+	if err != nil {
+		return comfyUploadAsset{}, fmt.Errorf("measure ComfyUI upload spool: %w", err)
+	}
+	if _, err := rewritten.Seek(0, io.SeekStart); err != nil {
+		return comfyUploadAsset{}, fmt.Errorf("rewind ComfyUI upload spool: %w", err)
+	}
+	r.Body = &removableFileBody{file: rewritten, path: rewritten.Name()}
+	r.ContentLength = length
+	r.Header.Set("Content-Length", strconv.FormatInt(length, 10))
 	r.Header.Set("Content-Type", writer.FormDataContentType())
+	removeRewritten = false
 	return asset, nil
+}
+
+func comfyUploadPolicyFromRequest(r *http.Request) comfyUploadPolicy {
+	policy, _ := r.Context().Value(comfyUploadPolicyKey{}).(comfyUploadPolicy)
+	if policy.MaxBody <= 0 {
+		policy.MaxBody = maxComfyUploadBody
+	}
+	switch policy.Kind {
+	case "image", "audio", "video", "media":
+	default:
+		policy.Kind = "media"
+	}
+	return policy
 }
 
 func (a *App) prepareComfyInputUpload(w http.ResponseWriter, r *http.Request, user *User) (*http.Request, *comfyInputReservation, error) {
@@ -332,24 +410,70 @@ func (a *App) releaseComfyInputReservation(reservation *comfyInputReservation) {
 }
 
 func validateComfyUploadPayload(filename string, payload []byte) error {
+	return validateComfyUploadPayloadForKind(filename, payload, "media")
+}
+
+func validateComfyUploadPayloadForKind(filename string, payload []byte, kind string) error {
 	extension := strings.ToLower(filepath.Ext(strings.TrimSpace(filename)))
 	contentType := strings.TrimSpace(strings.Split(http.DetectContentType(payload), ";")[0])
 	imageExpected := contentType == "image/jpeg" || contentType == "image/png" || contentType == "image/gif" || contentType == "image/webp" ||
 		extension == ".jpg" || extension == ".jpeg" || extension == ".png" || extension == ".gif" || extension == ".webp"
 	width, height, err := generationImageDimensions(payload)
-	if err != nil {
-		if imageExpected {
-			return errors.New("не удалось прочитать загружаемое изображение")
+	if err == nil {
+		if kind == "audio" || kind == "video" {
+			return fmt.Errorf("ожидался %s-файл", uploadKindLabel(kind))
 		}
-		if !validComfyAudioPayload(extension, payload) {
-			return errors.New("поддерживаются только PNG, JPEG, GIF, WEBP и аудио WAV, MP3, FLAC, OGG/Opus, M4A или AAC")
+		if width > maxComfyImageSide || height > maxComfyImageSide || int64(width)*int64(height) > maxComfyImagePixels {
+			return fmt.Errorf("изображение слишком большое: максимум %d Мп и %d пикселей по стороне", maxComfyImagePixels/1_000_000, maxComfyImageSide)
 		}
 		return nil
 	}
-	if width > maxComfyImageSide || height > maxComfyImageSide || int64(width)*int64(height) > maxComfyImagePixels {
-		return fmt.Errorf("изображение слишком большое: максимум %d Мп и %d пикселей по стороне", maxComfyImagePixels/1_000_000, maxComfyImageSide)
+	if imageExpected || kind == "image" {
+		return errors.New("не удалось прочитать загружаемое изображение")
 	}
-	return nil
+	if validComfyAudioPayload(extension, payload) {
+		if kind == "video" {
+			return errors.New("ожидался видеофайл")
+		}
+		return nil
+	}
+	if validComfyVideoPayload(extension, payload) {
+		if kind == "audio" {
+			return errors.New("ожидался аудиофайл")
+		}
+		return nil
+	}
+	if kind != "media" {
+		return fmt.Errorf("не удалось прочитать загружаемый %s-файл", uploadKindLabel(kind))
+	}
+	return errors.New("поддерживаются только PNG, JPEG, GIF, WEBP, аудио WAV, MP3, FLAC, OGG/Opus, M4A, AAC и видео MP4, WEBM, MOV или MKV")
+}
+
+func uploadKindLabel(kind string) string {
+	switch kind {
+	case "image":
+		return "графический"
+	case "audio":
+		return "аудио"
+	case "video":
+		return "видео"
+	default:
+		return "медиа"
+	}
+}
+
+func validComfyVideoPayload(extension string, payload []byte) bool {
+	if len(payload) < 12 {
+		return false
+	}
+	switch extension {
+	case ".mp4", ".mov":
+		return bytes.Equal(payload[4:8], []byte("ftyp"))
+	case ".webm", ".mkv":
+		return bytes.Equal(payload[:4], []byte{0x1a, 0x45, 0xdf, 0xa3})
+	default:
+		return false
+	}
 }
 
 func validComfyAudioPayload(extension string, payload []byte) bool {

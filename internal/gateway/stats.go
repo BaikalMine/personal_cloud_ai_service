@@ -78,6 +78,33 @@ func (a *App) handlePrometheusMetrics(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "gateway_service_latency_ms_count{component=%q,operation=%q} %d\n",
 			histogram.Component, histogram.Operation, histogram.Count)
 	}
+	for _, metric := range a.mediaOperationRegistry().snapshot() {
+		for index, upperBound := range mediaDurationBucketsMS {
+			fmt.Fprintf(w, "gateway_media_operation_duration_ms_bucket{stage=%q,outcome=%q,le=%q} %d\n",
+				metric.Stage, metric.Outcome, fmt.Sprint(upperBound), metric.DurationBuckets[index])
+		}
+		fmt.Fprintf(w, "gateway_media_operation_duration_ms_bucket{stage=%q,outcome=%q,le=%q} %d\n",
+			metric.Stage, metric.Outcome, "+Inf", metric.Count)
+		fmt.Fprintf(w, "gateway_media_operation_duration_ms_sum{stage=%q,outcome=%q} %d\n",
+			metric.Stage, metric.Outcome, metric.DurationSumMS)
+		fmt.Fprintf(w, "gateway_media_operation_duration_ms_count{stage=%q,outcome=%q} %d\n",
+			metric.Stage, metric.Outcome, metric.Count)
+		for index, upperBound := range mediaSizeBucketsBytes {
+			fmt.Fprintf(w, "gateway_media_operation_size_bytes_bucket{stage=%q,outcome=%q,le=%q} %d\n",
+				metric.Stage, metric.Outcome, fmt.Sprint(upperBound), metric.SizeBuckets[index])
+		}
+		fmt.Fprintf(w, "gateway_media_operation_size_bytes_bucket{stage=%q,outcome=%q,le=%q} %d\n",
+			metric.Stage, metric.Outcome, "+Inf", metric.Count)
+		fmt.Fprintf(w, "gateway_media_operation_size_bytes_sum{stage=%q,outcome=%q} %d\n",
+			metric.Stage, metric.Outcome, metric.BytesTotal)
+		fmt.Fprintf(w, "gateway_media_operation_size_bytes_count{stage=%q,outcome=%q} %d\n",
+			metric.Stage, metric.Outcome, metric.Count)
+	}
+	mediaBytes := a.mediaByteLimiter().snapshot()
+	fmt.Fprintf(w, "gateway_media_inflight_bytes %d\n", mediaBytes.InUse)
+	fmt.Fprintf(w, "gateway_media_inflight_capacity_bytes %d\n", mediaBytes.Capacity)
+	fmt.Fprintf(w, "gateway_media_inflight_high_water_bytes %d\n", mediaBytes.HighWater)
+	fmt.Fprintf(w, "gateway_media_backpressure_rejections_total %d\n", mediaBytes.Rejections)
 }
 
 func (a *App) recordProxyRequest(ctx context.Context, userID int64, service, method, path string, status int, duration time.Duration, bytesIn, bytesOut int64, ws bool, ip, userAgent string) {

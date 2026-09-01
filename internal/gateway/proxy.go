@@ -195,8 +195,22 @@ func (a *App) proxyHandlerWithPath(service, prefix string, upstream *url.URL, au
 						return
 					}
 				}
+				policy := comfyUploadPolicyFromRequest(r)
+				reservedBytes := r.ContentLength
+				if reservedBytes <= 0 {
+					reservedBytes = policy.MaxBody
+				}
+				releaseBytes, acquired := a.mediaByteLimiter().tryAcquire(reservedBytes)
+				if !acquired {
+					http.Error(w, "суммарный объём одновременных медиа-загрузок превышен", http.StatusTooManyRequests)
+					return
+				}
+				defer releaseBytes()
 				preparedRequest, reservation, uploadErr := a.prepareComfyInputUpload(w, r, user)
 				r = preparedRequest
+				if r.Body != nil {
+					defer r.Body.Close()
+				}
 				if reservation != nil {
 					defer a.releaseComfyInputReservation(reservation)
 				}

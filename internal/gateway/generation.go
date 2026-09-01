@@ -16,6 +16,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"sort"
 	"strconv"
@@ -34,6 +35,7 @@ const (
 	maxGenerationRequest           = 32 << 10
 	maxComfyObjectInfo             = 32 << 20
 	maxGenerationHistory           = 32 << 20
+	maxArchivedGenerationMedia     = int64(512 << 20)
 	maxGenerationOutputFingerprint = int64(2 << 30)
 )
 
@@ -893,18 +895,18 @@ func quickGenerationLimitError(err error) (int, string) {
 }
 
 func (a *App) quickGenerationUploadHandler() http.Handler {
-	return a.quickGenerationUploadHandlerWithLimit(maxComfyUploadBody)
+	return a.quickGenerationUploadHandlerWithLimit(maxComfyUploadBody, "image")
 }
 
 func (a *App) quickGenerationAudioUploadHandler() http.Handler {
-	return a.quickGenerationUploadHandlerWithLimit(32 << 20)
+	return a.quickGenerationUploadHandlerWithLimit(32<<20, "audio")
 }
 
 func (a *App) quickGenerationVideoUploadHandler() http.Handler {
-	return a.quickGenerationUploadHandlerWithLimit(512 << 20)
+	return a.quickGenerationUploadHandlerWithLimit(512<<20, "video")
 }
 
-func (a *App) quickGenerationUploadHandlerWithLimit(maxBody int64) http.Handler {
+func (a *App) quickGenerationUploadHandlerWithLimit(maxBody int64, kind string) http.Handler {
 	proxy := a.proxyRootHandler("comfyui", a.cfg.ComfyUIUpstream, a.cfg.ComfyUIUpstreamAuthHeader)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -912,7 +914,8 @@ func (a *App) quickGenerationUploadHandlerWithLimit(maxBody int64) http.Handler 
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
-		cloned := r.Clone(r.Context())
+		ctx := context.WithValue(r.Context(), comfyUploadPolicyKey{}, comfyUploadPolicy{MaxBody: maxBody, Kind: kind})
+		cloned := r.Clone(ctx)
 		cloned.URL.Path = "/upload/image"
 		cloned.URL.RawPath = ""
 		proxy.ServeHTTP(w, cloned)
@@ -1469,22 +1472,17 @@ func (a *App) handleGenerationOutput(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	body, contentType, status, err := a.fetchGenerationOutput(r.Context(), generationOutput{
+	streamed, err := a.streamGenerationOutput(w, r, generationOutput{
 		Filename: name, Subfolder: subfolder, Type: storageType, MediaType: mediaType,
 	})
 	if err != nil {
-		http.Error(w, "результат временно недоступен", http.StatusBadGateway)
+		if !streamed {
+			http.Error(w, "результат временно недоступен", http.StatusBadGateway)
+		} else {
+			log.Printf("stream generation output %s: %v", name, err)
+		}
 		return
 	}
-	w.Header().Set("Content-Type", contentType)
-	setGenerationDownloadDisposition(w, r, name)
-	w.Header().Set("Cache-Control", "private, no-store")
-	if status != http.StatusOK {
-		w.WriteHeader(status)
-		_, _ = w.Write(body)
-		return
-	}
-	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(body))
 }
 
 func (a *App) handleGenerationLibraryMedia(w http.ResponseWriter, r *http.Request) {
@@ -1509,20 +1507,25 @@ func (a *App) handleGenerationLibraryMedia(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	defer releaseDownload()
-	payload, err := a.contentCipher.DecryptBytes(media.PayloadCipher)
-	if err != nil {
-		http.Error(w, "ошибка расшифровки результата", http.StatusInternalServerError)
-		return
-	}
 	contentType, inline := safeAdminMediaType(media.MediaType, media.MIMEType)
 	if !inline {
 		http.NotFound(w, r)
 		return
 	}
+	payload, err := a.materializeContentMedia(r.Context(), media)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, errMediaMemoryBudget) {
+			status = http.StatusTooManyRequests
+		}
+		http.Error(w, "результат временно недоступен", status)
+		return
+	}
+	defer payload.Close()
 	w.Header().Set("Content-Type", contentType)
 	setGenerationDownloadDisposition(w, r, media.OriginalName)
 	w.Header().Set("Cache-Control", "private, no-store")
-	http.ServeContent(w, r, media.OriginalName, time.Time{}, bytes.NewReader(payload))
+	http.ServeContent(w, r, media.OriginalName, time.Time{}, payload)
 }
 
 // setGenerationDownloadDisposition explicitly starts a browser download when
@@ -1579,12 +1582,20 @@ func (a *App) handleHideGenerationLibraryMedia(w http.ResponseWriter, r *http.Re
 	http.Redirect(w, r, "/gallery", http.StatusSeeOther)
 }
 
-func (a *App) fetchGenerationOutput(ctx context.Context, output generationOutput) ([]byte, string, int, error) {
-	releaseDownload, acquired := acquireBoundedSlot(ctx, a.mediaDownloadSlots, 2*time.Second)
+func (a *App) streamGenerationOutput(w http.ResponseWriter, r *http.Request, output generationOutput) (streamed bool, operationErr error) {
+	started := time.Now()
+	var streamedBytes int64
+	defer func() { a.observeMediaOperation("output_stream", streamedBytes, started, operationErr) }()
+	releaseDownload, acquired := acquireBoundedSlot(r.Context(), a.mediaDownloadSlots, 2*time.Second)
 	if !acquired {
-		return nil, "", 0, errors.New("too many concurrent media downloads")
+		return false, errors.New("too many concurrent media downloads")
 	}
 	defer releaseDownload()
+	releaseMemory, acquired := a.mediaByteLimiter().tryAcquire(1 << 20)
+	if !acquired {
+		return false, errMediaMemoryBudget
+	}
+	defer releaseMemory()
 	endpoint := *a.cfg.ComfyUIUpstream
 	// /view preserves the original media bytes and supports HTTP ranges. The
 	// VideoHelperSuite preview route transcodes MP4 to WebM, which breaks the
@@ -1595,40 +1606,101 @@ func (a *App) fetchGenerationOutput(ctx context.Context, output generationOutput
 	query.Set("subfolder", output.Subfolder)
 	query.Set("type", output.Type)
 	endpoint.RawQuery = query.Encode()
-	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	requestCtx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 	defer cancel()
 	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, endpoint.String(), http.NoBody)
 	if err != nil {
-		return nil, "", 0, err
+		return false, err
 	}
 	if a.cfg.ComfyUIUpstreamAuthHeader != "" {
 		request.Header.Set("Authorization", a.cfg.ComfyUIUpstreamAuthHeader)
 	}
-	response, err := (&http.Client{Timeout: 30 * time.Second, CheckRedirect: rejectUpstreamRedirect}).Do(request)
+	for _, name := range []string{"Range", "If-Range"} {
+		if value := strings.TrimSpace(r.Header.Get(name)); value != "" {
+			request.Header.Set(name, value)
+		}
+	}
+	response, err := (&http.Client{CheckRedirect: rejectUpstreamRedirect}).Do(request)
 	if err != nil {
-		return nil, "", 0, err
+		return false, err
 	}
 	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, "", response.StatusCode, fmt.Errorf("ComfyUI returned HTTP %d", response.StatusCode)
+	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusPartialContent {
+		return false, fmt.Errorf("ComfyUI returned HTTP %d", response.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, maxCapturedMedia+1))
-	if err != nil || len(body) > maxCapturedMedia {
-		return nil, "", response.StatusCode, errors.New("результат превышает допустимый размер")
+	for _, name := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified"} {
+		if value := strings.TrimSpace(response.Header.Get(name)); value != "" {
+			w.Header().Set(name, value)
+		}
 	}
-	contentType := strings.TrimSpace(strings.Split(response.Header.Get("Content-Type"), ";")[0])
-	if contentType == "" {
-		contentType = "application/octet-stream"
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", "application/octet-stream")
 	}
-	return body, contentType, response.StatusCode, nil
+	setGenerationDownloadDisposition(w, r, output.Filename)
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.WriteHeader(response.StatusCode)
+	streamed = true
+	buffer := make([]byte, 64<<10)
+	streamedBytes, err = io.CopyBuffer(w, response.Body, buffer)
+	clear(buffer)
+	return streamed, err
 }
 
 type generationOutputArchive struct {
-	Body        []byte
+	File        *os.File
+	path        string
 	ContentType string
 	Status      int
 	SizeBytes   int64
 	ContentHash string
+}
+
+func (archive *generationOutputArchive) Close() error {
+	if archive == nil {
+		return nil
+	}
+	var closeErr error
+	if archive.File != nil {
+		closeErr = archive.File.Close()
+		archive.File = nil
+	}
+	if archive.path != "" {
+		if removeErr := os.Remove(archive.path); closeErr == nil && removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			closeErr = removeErr
+		}
+		archive.path = ""
+	}
+	return closeErr
+}
+
+type limitedSpoolCapture struct {
+	writer    io.Writer
+	remaining int64
+	truncated bool
+}
+
+func (capture *limitedSpoolCapture) Write(payload []byte) (int, error) {
+	original := len(payload)
+	if capture.remaining <= 0 {
+		capture.truncated = capture.truncated || original > 0
+		return original, nil
+	}
+	accepted := payload
+	if int64(len(accepted)) > capture.remaining {
+		accepted = accepted[:capture.remaining]
+	}
+	written, err := capture.writer.Write(accepted)
+	capture.remaining -= int64(written)
+	if err != nil {
+		return written, err
+	}
+	if written != len(accepted) {
+		return written, io.ErrShortWrite
+	}
+	if len(accepted) < original {
+		capture.truncated = true
+	}
+	return original, nil
 }
 
 func readGenerationOutputArchive(reader io.Reader, archiveLimit, fingerprintLimit int64) ([]byte, int64, string, error) {
@@ -1651,12 +1723,61 @@ func readGenerationOutputArchive(reader io.Reader, archiveLimit, fingerprintLimi
 	return body, sizeBytes, hex.EncodeToString(digest.Sum(nil)), nil
 }
 
-func (a *App) fetchGenerationOutputArchive(ctx context.Context, output generationOutput) (generationOutputArchive, error) {
+func spoolGenerationOutputArchive(reader io.Reader, directory string, archiveLimit, fingerprintLimit int64) (file *os.File, spoolPath string, sizeBytes int64, contentHash string, operationErr error) {
+	if archiveLimit < 0 || fingerprintLimit <= 0 || archiveLimit > fingerprintLimit {
+		return nil, "", 0, "", errors.New("invalid generation output limits")
+	}
+	createdFile, err := os.CreateTemp(directory, "gateway-media-archive-*")
+	if err != nil {
+		return nil, "", 0, "", fmt.Errorf("create generation archive spool: %w", err)
+	}
+	createdPath := createdFile.Name()
+	file = createdFile
+	spoolPath = createdPath
+	cleanup := true
+	defer func() {
+		if !cleanup {
+			return
+		}
+		_ = createdFile.Close()
+		_ = os.Remove(createdPath)
+		file = nil
+		spoolPath = ""
+	}()
+
+	digest := sha256.New()
+	capture := &limitedSpoolCapture{writer: createdFile, remaining: archiveLimit}
+	sizeBytes, err = io.Copy(io.MultiWriter(digest, capture), io.LimitReader(reader, fingerprintLimit+1))
+	if err != nil {
+		return nil, "", 0, "", err
+	}
+	if sizeBytes > fingerprintLimit {
+		return nil, "", sizeBytes, "", errors.New("generation output exceeds fingerprint limit")
+	}
+	contentHash = hex.EncodeToString(digest.Sum(nil))
+	if capture.truncated {
+		return nil, "", sizeBytes, contentHash, nil
+	}
+	if _, err := createdFile.Seek(0, io.SeekStart); err != nil {
+		return nil, "", 0, "", fmt.Errorf("rewind generation archive spool: %w", err)
+	}
+	cleanup = false
+	return file, spoolPath, sizeBytes, contentHash, nil
+}
+
+func (a *App) fetchGenerationOutputArchive(ctx context.Context, output generationOutput) (archive generationOutputArchive, operationErr error) {
+	started := time.Now()
+	defer func() { a.observeMediaOperation("archive_fetch", archive.SizeBytes, started, operationErr) }()
 	releaseDownload, acquired := acquireBoundedSlot(ctx, a.mediaDownloadSlots, 2*time.Second)
 	if !acquired {
 		return generationOutputArchive{}, errors.New("too many concurrent media downloads")
 	}
 	defer releaseDownload()
+	releaseMemory, acquired := a.mediaByteLimiter().tryAcquire(chunkedMediaMemoryReservation)
+	if !acquired {
+		return generationOutputArchive{}, errMediaMemoryBudget
+	}
+	defer releaseMemory()
 	endpoint := *a.cfg.ComfyUIUpstream
 	endpoint.Path = singleJoiningSlash(endpoint.Path, "/view")
 	query := endpoint.Query()
@@ -1681,7 +1802,9 @@ func (a *App) fetchGenerationOutputArchive(ctx context.Context, output generatio
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return generationOutputArchive{}, fmt.Errorf("ComfyUI returned HTTP %d", response.StatusCode)
 	}
-	body, sizeBytes, contentHash, err := readGenerationOutputArchive(response.Body, maxCapturedMedia, maxGenerationOutputFingerprint)
+	file, spoolPath, sizeBytes, contentHash, err := spoolGenerationOutputArchive(
+		response.Body, a.mediaSpoolDir(), maxArchivedGenerationMedia, maxGenerationOutputFingerprint,
+	)
 	if err != nil {
 		return generationOutputArchive{}, err
 	}
@@ -1689,10 +1812,11 @@ func (a *App) fetchGenerationOutputArchive(ctx context.Context, output generatio
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	return generationOutputArchive{
-		Body: body, ContentType: contentType, Status: response.StatusCode,
+	archive = generationOutputArchive{
+		File: file, path: spoolPath, ContentType: contentType, Status: response.StatusCode,
 		SizeBytes: sizeBytes, ContentHash: contentHash,
-	}, nil
+	}
+	return archive, nil
 }
 
 // fetchGenerationInputImage retrieves a previously validated, namespaced upload
@@ -1818,37 +1942,39 @@ func (a *App) archiveGenerationOutputs(ctx context.Context, userID int64, output
 	}
 	var archiveErrors []error
 	for _, output := range outputs {
-		archive, err := a.fetchGenerationOutputArchive(ctx, output)
-		if err != nil {
+		if err := a.archiveGenerationOutput(ctx, userID, output); err != nil {
 			log.Printf("archive generation output %s: %v", output.Filename, err)
 			archiveErrors = append(archiveErrors, fmt.Errorf("archive %s: %w", output.Filename, err))
-			continue
-		}
-		if output.Type == "output" {
-			err = a.store.ScheduleComfyOutputCleanup(ctx, domain.ComfyOutputCleanupTombstone{
-				Filename: output.Filename, Subfolder: output.Subfolder, StorageType: output.Type,
-				SizeBytes: archive.SizeBytes, ContentHash: archive.ContentHash,
-			}, time.Now().Add(a.retentionPolicy().GenerationMedia))
-			if err != nil {
-				log.Printf("schedule generation output cleanup %s: %v", output.Filename, err)
-			}
-		}
-		if a.contentCipher == nil || archive.Body == nil {
-			continue
-		}
-		capture := &proxyContentCapture{
-			userID: userID, service: "comfyui", mediaName: output.Filename,
-			mediaSubfolder: output.Subfolder, mediaStorageType: output.Type,
-			mediaType: output.MediaType, mimeType: archive.ContentType, isMedia: true,
-			status: archive.Status, response: newLimitedBuffer(maxCapturedMedia),
-		}
-		_, _ = capture.response.Write(archive.Body)
-		if err := a.persistComfyMedia(ctx, capture); err != nil {
-			log.Printf("persist generation output %s: %v", output.Filename, err)
-			archiveErrors = append(archiveErrors, fmt.Errorf("persist %s: %w", output.Filename, err))
 		}
 	}
 	return errors.Join(archiveErrors...)
+}
+
+func (a *App) archiveGenerationOutput(ctx context.Context, userID int64, output generationOutput) error {
+	archive, err := a.fetchGenerationOutputArchive(ctx, output)
+	if err != nil {
+		return err
+	}
+	defer archive.Close()
+	if output.Type == "output" {
+		err = a.store.ScheduleComfyOutputCleanup(ctx, domain.ComfyOutputCleanupTombstone{
+			Filename: output.Filename, Subfolder: output.Subfolder, StorageType: output.Type,
+			SizeBytes: archive.SizeBytes, ContentHash: archive.ContentHash,
+		}, time.Now().Add(a.retentionPolicy().GenerationMedia))
+		if err != nil {
+			log.Printf("schedule generation output cleanup %s: %v", output.Filename, err)
+		}
+	}
+	if a.contentCipher == nil || archive.File == nil {
+		return nil
+	}
+	capture := &proxyContentCapture{
+		userID: userID, service: "comfyui", mediaName: output.Filename,
+		mediaSubfolder: output.Subfolder, mediaStorageType: output.Type,
+		mediaType: output.MediaType, mimeType: archive.ContentType, isMedia: true,
+		status: archive.Status,
+	}
+	return a.persistComfyMediaReader(ctx, capture, archive.File, archive.SizeBytes, archive.ContentHash)
 }
 
 func (a *App) rememberGeneration(promptID string, userID int64) {

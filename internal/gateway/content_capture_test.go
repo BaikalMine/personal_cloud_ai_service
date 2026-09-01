@@ -3,10 +3,12 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 )
@@ -131,13 +133,84 @@ func TestMediaCaptureSlotsAreReleased(t *testing.T) {
 	if err != nil || second != nil {
 		t.Fatalf("second capture must be skipped: capture=%v err=%v", second, err)
 	}
+	spoolPath := first.mediaSpoolPath
+	if _, err := first.writeMedia([]byte("streamed-media")); err != nil || len(first.response.data) != 0 {
+		t.Fatalf("media capture used memory buffer: bytes=%d err=%v", len(first.response.data), err)
+	}
 	first.Release()
 	first.Release()
+	if _, err := os.Stat(spoolPath); !os.IsNotExist(err) {
+		t.Fatalf("released media capture left spool file: %v", err)
+	}
 	third, err := app.beginContentCapture(request(), user, "comfyui")
 	if err != nil || third == nil {
 		t.Fatalf("slot was not released: capture=%v err=%v", third, err)
 	}
 	third.Release()
+}
+
+func TestRangeMediaRequestSkipsProxyCapture(t *testing.T) {
+	app := &App{mediaCaptureSlots: make(chan struct{}, 1)}
+	request := httptest.NewRequest(http.MethodGet, "/view?filename=result.mp4&type=output", nil)
+	request.Header.Set("Range", "bytes=0-65535")
+	capture, err := app.beginContentCapture(request, &User{ID: 7}, "comfyui")
+	if err != nil || capture != nil {
+		t.Fatalf("range request must stream without capture: capture=%v err=%v", capture, err)
+	}
+	if len(app.mediaCaptureSlots) != 0 {
+		t.Fatal("range request consumed a media capture slot")
+	}
+}
+
+func TestMediaResponseCaptureRequiresFullBodyAndHTTP200(t *testing.T) {
+	newResponse := func(status int) (*proxyContentCapture, *http.Response) {
+		capture := &proxyContentCapture{isMedia: true, mediaSpool: mustTempFile(t), mediaDigest: sha256.New()}
+		t.Cleanup(capture.Release)
+		request := httptest.NewRequest(http.MethodGet, "/view?filename=result.mp4&type=output", nil)
+		request = request.WithContext(context.WithValue(request.Context(), contentCaptureKey{}, capture))
+		response := &http.Response{
+			StatusCode: status,
+			Body:       io.NopCloser(strings.NewReader("complete-media")),
+			Request:    request,
+			Header:     make(http.Header),
+		}
+		attachResponseCapture(response)
+		return capture, response
+	}
+
+	complete, response := newResponse(http.StatusOK)
+	if _, err := io.ReadAll(response.Body); err != nil {
+		t.Fatal(err)
+	}
+	if !complete.mediaComplete || complete.status != http.StatusOK {
+		t.Fatalf("complete response was not marked ready: complete=%t status=%d", complete.mediaComplete, complete.status)
+	}
+
+	partial, response := newResponse(http.StatusPartialContent)
+	if _, err := io.ReadAll(response.Body); err != nil {
+		t.Fatal(err)
+	}
+	if !partial.mediaComplete || partial.status == http.StatusOK {
+		t.Fatalf("range response state is unexpected: complete=%t status=%d", partial.mediaComplete, partial.status)
+	}
+
+	interrupted, response := newResponse(http.StatusOK)
+	buffer := make([]byte, 4)
+	if _, err := response.Body.Read(buffer); err != nil {
+		t.Fatal(err)
+	}
+	if interrupted.mediaComplete {
+		t.Fatal("partially consumed response was marked complete")
+	}
+}
+
+func mustTempFile(t *testing.T) *os.File {
+	t.Helper()
+	file, err := os.CreateTemp(t.TempDir(), "capture-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return file
 }
 
 func TestOversizedAuditBodyStillReachesUpstreamIntact(t *testing.T) {

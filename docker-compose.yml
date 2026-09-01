@@ -34,6 +34,7 @@ services:
     environment:
       GOMEMLIMIT: 512MiB
       GOGC: "50"
+      MEDIA_SPOOL_DIR: /var/lib/gateway-spool
     ports:
       - "8090:8090"
       - "192.168.1.86:8091:8091"
@@ -47,6 +48,8 @@ services:
     networks:
       - default
       - ai-access-backend
+    volumes:
+      - gateway-spool:/var/lib/gateway-spool
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=16m
@@ -101,6 +104,7 @@ services:
 
 volumes:
   postgres-data:
+  gateway-spool:
   content-moderator-models:
 
 networks:

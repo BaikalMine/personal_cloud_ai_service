@@ -167,6 +167,25 @@ func TestUnifiedContentRetentionDefaultsMigration(t *testing.T) {
 	}
 }
 
+func TestChunkedContentMediaMigration(t *testing.T) {
+	var chunkMigration *migration
+	for index := range migrationCatalog {
+		if migrationCatalog[index].version == 43 {
+			chunkMigration = &migrationCatalog[index]
+			break
+		}
+	}
+	if chunkMigration == nil || chunkMigration.name != "chunked_content_media" {
+		t.Fatal("chunked content media migration is missing")
+	}
+	sql := strings.Join(chunkMigration.statements, "\n")
+	for _, expected := range []string{"storage_format", "inline_v1", "chunked_v1", "content_media_chunks", "ON DELETE CASCADE", "plain_size"} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("chunked media migration does not contain %q: %s", expected, sql)
+		}
+	}
+}
+
 func TestQuickGenerationRequestTelemetryMigration(t *testing.T) {
 	var telemetryMigration *migration
 	for index := range migrationCatalog {

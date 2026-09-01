@@ -7,7 +7,9 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -buildvcs=false -ldflags="-s -w" -o /out/gateway ./cmd/gateway
 
 FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
-RUN adduser -D -H -u 10001 appuser
+RUN adduser -D -H -u 10001 appuser \
+    && mkdir -p /var/lib/gateway-spool \
+    && chown appuser:appuser /var/lib/gateway-spool
 WORKDIR /app
 COPY --from=build /out/gateway /app/gateway
 USER appuser
