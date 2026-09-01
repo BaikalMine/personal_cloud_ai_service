@@ -2,6 +2,36 @@
   const root = document.querySelector("[data-comfy-generation]");
   if (!root) return;
 
+  const generationModules = window.AIGatewayGeneration || {};
+  root.dataset.generationClient = "modular";
+  root.dataset.generationModules = Object.keys(generationModules).sort().join(",");
+  const generationStore = generationModules.store?.createStore?.() || null;
+  const createStateSlice = (name, api, fallbackState) => {
+    let localState = api?.createState?.() || { ...fallbackState };
+    generationStore?.setSlice?.(name, localState, `${name}:ready`);
+    return {
+      get: () => generationStore?.getSlice?.(name) || localState,
+      dispatch: (action, fallbackReduce = (state) => state) => {
+        const current = generationStore?.getSlice?.(name) || localState;
+        localState = api?.reduce?.(current, action) || fallbackReduce(current, action);
+        generationStore?.setSlice?.(name, localState, `${name}:change`);
+        return localState;
+      },
+    };
+  };
+  const wizardSlice = createStateSlice("wizard", generationModules.wizard, {
+    step: 1, scenarioID: "", workflowID: "", requiresImage: false, allowsImages: false,
+    workflowAvailable: false, uploadInFlight: false, selectedCount: 0, primarySelected: false, pendingUploads: 0,
+  });
+  const mediaSlice = createStateSlice("media", generationModules.media, { sources: {}, uploaded: {}, uploading: false, error: "" });
+  const videoSlice = createStateSlice("video", generationModules.video, { mode: "frames", profileID: "regular" });
+  const assistantSlice = createStateSlice("assistant", generationModules.assistant, {
+    status: "idle", approved: false, original: "", suggestion: "", action: "", correlationID: "", error: "",
+  });
+  const jobSlice = createStateSlice("job", generationModules.job, { items: [], revision: 0, live: false, loading: false, activeID: "", error: "" });
+  const recipeSlice = createStateSlice("recipes", generationModules.recipes, { items: [], selectedID: "", loading: false, message: "", status: "" });
+  const historySlice = createStateSlice("history", generationModules.history, { variants: [], collapsed: false, stateFilter: "", templateFilter: "" });
+
   const generationRetentionLabel = root.dataset.generationRetention || "24 часа";
   const mediaRetentionLabel = root.dataset.mediaRetention || generationRetentionLabel;
 
@@ -183,10 +213,6 @@
   const fieldHelps = [...root.querySelectorAll(".field-help[data-tooltip]")];
   const panels = [...root.querySelectorAll("[data-step]")];
   const progress = [...root.querySelectorAll("[data-progress]")];
-  let currentStep = 1;
-  let requiresImage = false;
-  let allowsImages = false;
-  let uploadInFlight = false;
   const previewURLs = new Map();
   const selectedImages = new Map();
   const gallerySelections = new Map();
@@ -200,21 +226,10 @@
   const krea2EditMaxLongestSide = 4096;
   let progressSocket = null;
   let liveProgressReceived = false;
-  let promptAssistantApproved = false;
-  let promptAssistantOriginal = "";
-  let promptAssistantSuggestion = "";
-  let promptAssistantAction = "";
-  let promptAssistantCorrelationID = "";
   let activeGenerationID = "";
   let activeGenerationRequestID = "";
   let pendingParentJobID = "";
-  let savedRecipes = [];
-  let savedVariants = [];
-  let savedJobs = [];
-  let generationJobRevision = 0;
   let generationJobEvents = null;
-  let generationJobsLive = false;
-  let generationJobsLoading = false;
   let galleryPickerSlot = null;
   let galleryPickerImages = [];
   let galleryPickerImagesLoaded = false;
@@ -223,11 +238,13 @@
   let requestedVariantHandled = false;
   const activeGenerationStorageKey = "ai-gateway.active-generation";
   const generationHistoryCollapsedStorageKey = "ai-gateway.generation-history-collapsed";
-  let generationHistoryCollapsed = false;
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const selectedImageFile = (item) => selectedImages.get(item?.index) || item?.input?.files?.[0] || null;
-  const selectedImageSource = (item) => selectedImageFile(item) || gallerySelections.get(item?.index) || null;
+  const selectedImageSource = (item) => generationModules.media?.sourceFrom?.(
+    selectedImageFile(item),
+    gallerySelections.get(item?.index),
+  ) || selectedImageFile(item) || gallerySelections.get(item?.index) || null;
   const hasSelectedImage = (item) => Boolean(selectedImageSource(item));
   const workflowManifestsByID = new Map();
   const referenceRoleLabels = {
@@ -291,21 +308,23 @@
       // The embedded form remains a functional fallback while Gateway reconnects.
     }
   };
-  const miniMaxMode = () => miniMaxVideoModeSelect?.value || "frames";
+  const miniMaxMode = () => generationModules.video?.normalizeMode?.(miniMaxVideoModeSelect?.value) || miniMaxVideoModeSelect?.value || "frames";
   const setMiniMaxMode = (value) => {
     const target = miniMaxVideoModeInputs.find((input) => input.value === value && !input.disabled);
-    if (target) target.checked = true;
+    if (target) {
+      target.checked = true;
+      videoSlice.dispatch({ type: "SET_MODE", mode: target.value }, (state) => ({ ...state, mode: target.value }));
+    }
   };
   const miniMaxAspectDimensions = () => {
-    const presets = {
-      "1:1": [1080, 1080], "4:5": [1080, 1350], "16:9": [1344, 768], "9:16": [1080, 1920],
-      "4:1": [1600, 400], "2:3": [832, 1248], "3:2": [1248, 832], "3:4": [896, 1152],
-      "4:3": [1152, 896], "21:9": [1536, 640],
-    };
-    const source = primaryImageSize
-      ? [primaryImageSize.width, primaryImageSize.height]
-      : (presets[miniMaxVideoAspect?.value || "9:16"] || presets["9:16"]);
-    return miniMaxVideoSwap?.checked ? [source[1], source[0]] : source;
+    const dimensions = generationModules.video?.dimensionsForAspect?.({
+      sourceSize: primaryImageSize,
+      aspect: miniMaxVideoAspect?.value || "9:16",
+      swap: Boolean(miniMaxVideoSwap?.checked),
+    });
+    if (dimensions) return dimensions;
+    const fallback = primaryImageSize ? [primaryImageSize.width, primaryImageSize.height] : [1080, 1920];
+    return miniMaxVideoSwap?.checked ? [fallback[1], fallback[0]] : fallback;
   };
   const syncMiniMaxVideoProfile = ({ applyModelDefaults = false } = {}) => {
     const option = model?.selectedOptions?.[0];
@@ -313,8 +332,9 @@
     const referenceOnly = option?.dataset.videoReferenceOnly === "true";
     const turbo = !integratedTurbo && !applyModelDefaults && Boolean(miniMaxVideoTurbo?.checked);
     const manifest = workflowManifestsByID.get("minimax-h3-video");
-    const profileID = integratedTurbo ? "integrated_turbo" : turbo ? "turbo" : "regular";
-    const profile = manifest?.quality_profiles?.find((candidate) => candidate.id === profileID);
+    const profileID = generationModules.video?.profileID?.({ integratedTurbo, turbo }) || (integratedTurbo ? "integrated_turbo" : turbo ? "turbo" : "regular");
+    videoSlice.dispatch({ type: "SET_PROFILE", profileID }, (state) => ({ ...state, profileID }));
+    const profile = generationModules.video?.findProfile?.(manifest, profileID) || manifest?.quality_profiles?.find((candidate) => candidate.id === profileID);
     const profileRule = (name) => profile?.parameters?.[name] || null;
     const profileValue = (name, fallback) => profileRule(name)?.value ?? fallback;
     const frameOption = miniMaxVideoModeInputs.find((input) => input.value === "frames");
@@ -360,11 +380,17 @@
     }
     if (!miniMaxVideoResolutionPreview) return;
     const quality = Number(miniMaxVideoQuality?.value);
+    const calculated = generationModules.video?.scaledResolution?.({
+      sourceSize: primaryImageSize,
+      aspect: miniMaxVideoAspect?.value || "9:16",
+      swap: Boolean(miniMaxVideoSwap?.checked),
+      maxResolution: quality,
+    });
     const [sourceWidth, sourceHeight] = miniMaxAspectDimensions();
     const scale = Math.min(1, quality / Math.max(1, sourceWidth, sourceHeight));
     const multiple = (value) => Math.max(32, Math.floor(value / 32) * 32);
-    const targetWidth = multiple(sourceWidth * scale);
-    const targetHeight = multiple(sourceHeight * scale);
+    const targetWidth = calculated?.width || multiple(sourceWidth * scale);
+    const targetHeight = calculated?.height || multiple(sourceHeight * scale);
     const sourceLabel = primaryImageSize ? "пропорции Фото 1" : `формат ${miniMaxVideoAspect?.value || "9:16"}`;
     miniMaxVideoResolutionPreview.textContent = `${targetWidth} × ${targetHeight} · ${sourceLabel}`;
   };
@@ -569,7 +595,8 @@
     const primary = imageSlots[0];
     const source = selectedImageSource(primary);
     const previewURL = previewURLs.get(1);
-    const visible = Boolean((requiresImage || allowsImages) && source && previewURL);
+    const wizard = wizardSlice.get();
+    const visible = Boolean((wizard.requiresImage || wizard.allowsImages) && source && previewURL);
     if (selectedImageSummary) selectedImageSummary.hidden = !visible;
     if (!visible) return;
     if (selectedImagePreview) selectedImagePreview.src = previewURL;
@@ -746,17 +773,20 @@
     progressSocket.onclose = () => { progressSocket = null; };
   };
 
-  const closeLightbox = () => {
-    if (!lightbox || lightbox.hidden) return;
-    lightbox.hidden = true;
-    lightboxImage.removeAttribute("src");
-    if (lightboxVideo) {
-      lightboxVideo.pause();
-      lightboxVideo.removeAttribute("src");
-      lightboxVideo.load();
-    }
-    document.body.classList.remove("generation-lightbox-open");
-  };
+  const lightboxController = generationModules.lightbox?.createController?.({
+    elements: {
+      root: lightbox,
+      image: lightboxImage,
+      video: lightboxVideo,
+      name: lightboxName,
+      download: lightboxDownload,
+    },
+    documentRef: document,
+    windowRef: window,
+    store: generationStore,
+    sensitiveContent: { reveal: (button) => window.aiGatewaySensitiveContent?.reveal?.(button) },
+  }) || null;
+  const closeLightbox = () => lightboxController?.close?.();
 
   const closeFieldHelps = (except = null) => {
     fieldHelps.forEach((help) => {
@@ -774,30 +804,18 @@
     help.style.setProperty("--field-help-shift", `${Math.round(boundedCenter - targetCenter)}px`);
   };
 
-  const downloadURL = (outputURL) => {
+  const downloadURL = (outputURL) => generationModules.lightbox?.downloadURL?.(outputURL, window.location.origin) || (() => {
     const url = new URL(outputURL, window.location.origin);
     url.searchParams.set("download", "1");
     return url.pathname + url.search;
-  };
+  })();
 
   const openLightbox = (output) => {
-    if (!lightbox) return;
-    const isVideo = output.media_type === "video";
-    lightboxImage.hidden = isVideo;
-    if (lightboxVideo) lightboxVideo.hidden = !isVideo;
-    if (isVideo && lightboxVideo) {
-      lightboxVideo.src = output.url;
-      lightboxVideo.muted = false;
-      lightboxVideo.play().catch(() => {});
-    } else {
-      lightboxImage.src = output.url;
+    if (lightboxController) {
+      lightboxController.open(output);
+      return;
     }
-    lightboxName.textContent = output.filename;
-    lightboxDownload.href = downloadURL(output.url);
-    lightboxDownload.download = output.filename;
-    lightbox.hidden = false;
-    document.body.classList.add("generation-lightbox-open");
-    lightbox.querySelector(".generation-lightbox-close")?.focus();
+    if (output?.url) window.location.assign(output.url);
   };
 
   lightbox?.querySelectorAll("[data-lightbox-close]").forEach((button) => button.addEventListener("click", closeLightbox));
@@ -828,34 +846,16 @@
   window.addEventListener("resize", () => fieldHelps.filter((help) => help.classList.contains("is-open")).forEach(positionFieldHelp));
 
   const wireVideoPreview = (button, output) => {
-    const video = button?.querySelector("video");
-    if (!video) return;
-    const markUnavailable = () => {
-      button.dataset.videoUnavailable = "true";
-      button.title = "Этот файл не поддерживается браузером. Его можно скачать.";
-    };
-    video.addEventListener("loadeddata", () => { delete button.dataset.videoUnavailable; }, { once: true });
-    video.addEventListener("error", markUnavailable, { once: true });
-    const start = () => {
-      video.muted = true;
-      video.play().catch(() => {});
-    };
-    const stop = () => {
-      video.pause();
-      video.currentTime = 0;
-    };
-    button.addEventListener("pointerenter", start);
-    button.addEventListener("pointerleave", stop);
-    button.addEventListener("focusin", start);
-    button.addEventListener("focusout", stop);
-    button.addEventListener("click", () => {
-      if (window.aiGatewaySensitiveContent?.reveal(button)) return;
-      openLightbox(output);
-    });
+    if (lightboxController) {
+      lightboxController.wireVideoPreview(button, output);
+      return;
+    }
+    button?.addEventListener("click", () => openLightbox(output));
   };
 
   const showStep = (step) => {
-    currentStep = step;
+    const next = wizardSlice.dispatch({ type: "SHOW_STEP", step }, (state) => ({ ...state, step: Math.max(1, Math.min(3, Number(step) || 1)) }));
+    step = next.step;
     panels.forEach((panel) => panel.classList.toggle("is-visible", Number(panel.dataset.step) === step));
     progress.forEach((item) => {
       const number = Number(item.dataset.progress);
@@ -867,11 +867,18 @@
 
   const selectedChoice = () => root.querySelector(".scenario-choice.is-selected");
   const selectedGenerationWorkflow = () => root.querySelector(".generation-workflow-choice.is-selected");
-  const isMiniMaxSelected = () => selectedGenerationWorkflow()?.dataset.family === "minimax_h3";
+  const isMiniMaxSelected = () => selectedGenerationWorkflow()?.dataset.family === "minimax_h3" || templateID.value === "minimax-h3-video";
   const maxInputImages = () => Math.max(1, Number(selectedGenerationWorkflow()?.dataset.maxInputImages || (templateID.value === "minimax-h3-video" ? 4 : 1)));
-  const activeMaxInputImages = () => isMiniMaxSelected() && miniMaxMode() === "frames" ? Math.min(2, maxInputImages()) : maxInputImages();
+  const activeMaxInputImages = () => generationModules.video?.activeImageLimit?.({
+    isMiniMax: isMiniMaxSelected(),
+    mode: miniMaxMode(),
+    maxInputImages: maxInputImages(),
+  }) || (isMiniMaxSelected() && miniMaxMode() === "frames" ? Math.min(2, maxInputImages()) : maxInputImages());
 
-  const miniMaxReferencesAreAvailable = () => isMiniMaxSelected() && miniMaxMode() === "references";
+  const miniMaxReferencesAreAvailable = () => generationModules.video?.referencesAvailable?.({
+    isMiniMax: isMiniMaxSelected(),
+    mode: miniMaxMode(),
+  }) ?? (isMiniMaxSelected() && miniMaxMode() === "references");
   const miniMaxAudioIsAvailable = () => miniMaxReferencesAreAvailable();
 
   const syncMiniMaxAudioReference = () => {
@@ -957,6 +964,13 @@
       syncSelectedImageSummary();
     }
     uploadedImages.delete(item.index);
+    mediaSlice.dispatch({ type: "CLEAR_SOURCE", slot: item.index }, (state) => {
+      const sources = { ...state.sources };
+      const uploaded = { ...state.uploaded };
+      delete sources[String(item.index)];
+      delete uploaded[String(item.index)];
+      return { ...state, sources, uploaded };
+    });
     if (inputImages[item.index - 1]) inputImages[item.index - 1].value = "";
     if (item.previewImage) item.previewImage.removeAttribute("src");
     if (item.preview) item.preview.hidden = true;
@@ -969,7 +983,8 @@
     const isMiniMax = isMiniMaxSelected() || templateID.value === "minimax-h3-video";
     const isImageEdit = templateID.value === "image-to-image";
     const referenceMode = miniMaxMode() === "references";
-    const maximum = (requiresImage || allowsImages) ? activeMaxInputImages() : 0;
+    const wizard = wizardSlice.get();
+    const maximum = (wizard.requiresImage || wizard.allowsImages) ? activeMaxInputImages() : 0;
     const isKrea = selectedGenerationWorkflow()?.dataset.family === "krea2";
     if (imageSourceGrid) imageSourceGrid.dataset.visibleSlots = String(maximum);
     imageSlots.forEach((item) => {
@@ -1012,8 +1027,14 @@
     root.querySelectorAll(".scenario-choice").forEach((item) => item.classList.remove("is-selected"));
     button.classList.add("is-selected");
     templateID.value = button.dataset.workflowId;
-    requiresImage = button.dataset.requiresImage === "true";
-    allowsImages = button.dataset.allowsImages === "true";
+    const requiresImage = button.dataset.requiresImage === "true";
+    const allowsImages = button.dataset.allowsImages === "true";
+    wizardSlice.dispatch({
+      type: "SELECT_SCENARIO",
+      scenarioID: button.dataset.workflowId,
+      requiresImage,
+      allowsImages,
+    }, (state) => ({ ...state, step: 2, scenarioID: button.dataset.workflowId || "", workflowID: "", requiresImage, allowsImages, workflowAvailable: false }));
     generationWorkflowID.value = "";
     root.querySelectorAll(".generation-workflow-choice").forEach((item) => item.classList.remove("is-selected"));
     updateWorkflowCompatibility();
@@ -1026,13 +1047,20 @@
     const hasWorkflow = Boolean(selected && selected.dataset.available === "true");
     const primary = imageSlots[0];
     const hasImage = Boolean(hasSelectedImage(primary) || uploadedImages.get(1));
-    const needsImage = requiresImage;
+    const needsImage = wizardSlice.get().requiresImage;
     const hasPendingUploads = imageSlots.some((item) => (
       item.index <= activeMaxInputImages()
       && hasSelectedImage(item)
       && !uploadedImages.get(item.index)
     )) || hasPendingMiniMaxAudio() || hasPendingMiniMaxVideo();
-    workflowNext.disabled = !hasWorkflow || (needsImage && !hasImage);
+    const wizard = wizardSlice.dispatch({
+      type: "SET_SELECTIONS",
+      selectedCount: imageSlots.filter((item) => item.index <= activeMaxInputImages() && hasSelectedImage(item)).length,
+      primarySelected: hasImage,
+      pendingUploads: hasPendingUploads ? 1 : 0,
+    }, (state) => ({ ...state, selectedCount: hasImage ? 1 : 0, primarySelected: hasImage, pendingUploads: hasPendingUploads ? 1 : 0 }));
+    const canContinue = generationModules.wizard?.canContinue?.({ ...wizard, workflowAvailable: hasWorkflow }) ?? (hasWorkflow && (!needsImage || hasImage));
+    workflowNext.disabled = !canContinue;
     if (!needsImage && !hasPendingUploads) {
       workflowNext.textContent = "Продолжить";
     } else if (hasPendingUploads) {
@@ -1050,7 +1078,8 @@
       if (matches) visible += 1;
     });
     if (miniMaxVideoMode) miniMaxVideoMode.hidden = templateID.value !== "minimax-h3-video";
-    if (imageSourceFields) imageSourceFields.hidden = !(requiresImage || allowsImages);
+    const wizard = wizardSlice.get();
+    if (imageSourceFields) imageSourceFields.hidden = !(wizard.requiresImage || wizard.allowsImages);
     if (workflowNote) workflowNote.hidden = visible > 0;
     syncImageSlots();
     updateWorkflowNext();
@@ -1061,6 +1090,11 @@
     root.querySelectorAll(".generation-workflow-choice").forEach((item) => item.classList.remove("is-selected"));
     button.classList.add("is-selected");
     generationWorkflowID.value = button.dataset.presetId;
+    wizardSlice.dispatch({ type: "SELECT_WORKFLOW", workflowID: button.dataset.presetId, available: button.dataset.available === "true" }, (state) => ({
+      ...state,
+      workflowID: button.dataset.presetId || "",
+      workflowAvailable: button.dataset.available === "true",
+    }));
     updateQuickModelOptions(button);
     applyQuality();
     if (button.dataset.family === "minimax_h3") syncMiniMaxVideoProfile({ applyModelDefaults: true });
@@ -1123,7 +1157,7 @@
   const restoreRequestedVariant = () => {
     if (!requestedVariantID || requestedVariantHandled) return;
     requestedVariantHandled = true;
-    const variant = savedVariants.find((item) => String(item.id) === requestedVariantID);
+    const variant = historySlice.get().variants.find((item) => String(item.id) === requestedVariantID);
     if (!variant) {
       showRepeatNotice("Вариант больше недоступен", `История хранится ${generationRetentionLabel}. Выберите другой результат в галерее.`, true);
       clearRequestedVariantQuery();
@@ -1275,11 +1309,9 @@
   };
 
   const resetPromptAssistantReview = () => {
-    promptAssistantApproved = false;
-    promptAssistantOriginal = "";
-    promptAssistantSuggestion = "";
-    promptAssistantAction = "";
-    promptAssistantCorrelationID = "";
+    assistantSlice.dispatch({ type: "RESET" }, () => ({
+      status: "idle", approved: false, original: "", suggestion: "", action: "", correlationID: "", error: "",
+    }));
     if (promptAssistantReview) promptAssistantReview.hidden = true;
     if (promptAssistantDraft) promptAssistantDraft.value = "";
   };
@@ -1526,19 +1558,22 @@
   });
   positive?.addEventListener("input", () => {
     if (promptAssistantEnabled?.checked && !promptAssistantReview?.hidden) {
-      promptAssistantApproved = false;
+      assistantSlice.dispatch({ type: "PROMPT_EDITED" }, (state) => ({
+        ...state,
+        approved: false,
+        action: state.action === "applied" ? "applied_edited" : state.action,
+      }));
       setPromptAssistantState("Исходный промт изменён. Подготовьте новый вариант или оставьте свой промт.", "review");
     }
-	if (promptAssistantAction === "applied") promptAssistantAction = "applied_edited";
+    if (assistantSlice.get().action === "applied") {
+      assistantSlice.dispatch({ type: "PROMPT_EDITED" }, (state) => ({ ...state, approved: false, action: "applied_edited" }));
+    }
   });
 
   promptAssistantImprove?.addEventListener("click", async () => {
     const original = positive?.value.trim() || "";
-	promptAssistantOriginal = original;
-	promptAssistantSuggestion = "";
-	promptAssistantAction = "";
-	promptAssistantCorrelationID = "";
     const mode = templateID.value;
+    resetPromptAssistantReview();
     if (!original || (mode !== "text-to-image" && mode !== "image-to-image" && mode !== "minimax-h3-video")) {
       setPromptAssistantState("Сначала выберите схему генерации и введите позитивный промт.", "error");
       positive?.focus();
@@ -1546,7 +1581,16 @@
     }
     promptAssistantImprove.disabled = true;
     promptAssistantImprove.classList.add("is-loading");
-    resetPromptAssistantReview();
+    assistantSlice.dispatch({ type: "REQUEST_START", original }, (state) => ({
+      ...state,
+      status: "loading",
+      approved: false,
+      original,
+      suggestion: "",
+      action: "",
+      correlationID: "",
+      error: "",
+    }));
     setPromptAssistantState(promptAssistantThink?.checked ? "Локальная модель e4b обдумывает и дорабатывает промт..." : "Локальная модель e4b дорабатывает промт...", "loading");
     try {
       const body = new URLSearchParams({
@@ -1578,12 +1622,22 @@
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.prompt) throw new Error(payload.error || "Не удалось подготовить вариант");
       promptAssistantDraft.value = payload.prompt;
-	  promptAssistantSuggestion = payload.prompt;
-	  promptAssistantCorrelationID = payload.correlation_id || "";
+      assistantSlice.dispatch({
+        type: "REQUEST_SUCCESS",
+        suggestion: payload.prompt,
+        correlationID: payload.correlation_id || "",
+      }, (state) => ({
+        ...state,
+        status: "review",
+        suggestion: payload.prompt,
+        correlationID: payload.correlation_id || "",
+        error: "",
+      }));
       promptAssistantReview.hidden = false;
       setPromptAssistantState(`Вариант подготовлен моделью ${payload.model || "e4b"}. Подтвердите или отредактируйте его.`, "review");
       promptAssistantDraft.focus({ preventScroll: true });
     } catch (error) {
+      assistantSlice.dispatch({ type: "REQUEST_ERROR", error: error.message }, (state) => ({ ...state, status: "error", error: error.message || "Request failed" }));
       setPromptAssistantState(error.message || "Не удалось подготовить вариант", "error");
     } finally {
       promptAssistantImprove.disabled = false;
@@ -1598,16 +1652,14 @@
       return;
     }
     positive.value = suggestion;
-    promptAssistantApproved = true;
-	promptAssistantAction = "applied";
+    assistantSlice.dispatch({ type: "APPLY", suggestion }, (state) => ({ ...state, status: "approved", approved: true, action: "applied", suggestion }));
     promptAssistantReview.hidden = true;
     setPromptAssistantState("Вариант применён. Его можно дополнительно отредактировать перед генерацией.", "approved");
     positive.focus({ preventScroll: true });
   });
 
   promptAssistantKeep?.addEventListener("click", () => {
-    promptAssistantApproved = true;
-	promptAssistantAction = "kept_original";
+    assistantSlice.dispatch({ type: "KEEP_ORIGINAL" }, (state) => ({ ...state, status: "approved", approved: true, action: "kept_original" }));
     promptAssistantReview.hidden = true;
     setPromptAssistantState("Оставлен ваш исходный промт. Генерацию можно запускать.", "approved");
   });
@@ -1620,11 +1672,12 @@
   });
 
   root.querySelectorAll(".generation-back").forEach((button) => {
-    button.addEventListener("click", () => showStep(Math.max(1, currentStep - 1)));
+    button.addEventListener("click", () => showStep(Math.max(1, wizardSlice.get().step - 1)));
   });
   const handleMiniMaxModeChange = () => {
     const referenceOnly = model?.selectedOptions?.[0]?.dataset.videoReferenceOnly === "true";
     if (referenceOnly && miniMaxMode() !== "references") setMiniMaxMode("references");
+    videoSlice.dispatch({ type: "SET_MODE", mode: miniMaxMode() }, (state) => ({ ...state, mode: miniMaxMode() }));
     if (miniMaxVideoModeHint) miniMaxVideoModeHint.textContent = miniMaxMode() === "references"
       ? referenceOnly
         ? "Выбрано: Eros Max использует REF2VA. Ролик строится по промту; фото, видео и аудио необязательны."
@@ -1853,6 +1906,12 @@
     previewURLs.delete(item.index);
     selectedImages.delete(item.index);
     gallerySelections.set(item.index, entry);
+    const source = generationModules.media?.gallerySource?.(entry) || entry;
+    mediaSlice.dispatch({ type: "SELECT_SOURCE", slot: item.index, source }, (state) => ({
+      ...state,
+      sources: { ...state.sources, [String(item.index)]: source },
+      error: "",
+    }));
     uploadedImages.delete(item.index);
     if (item.input) item.input.value = "";
     if (inputImages[item.index - 1]) inputImages[item.index - 1].value = "";
@@ -1874,6 +1933,12 @@
       return;
     }
     selectedImages.set(item.index, file);
+    const source = generationModules.media?.deviceSource?.(file) || file;
+    mediaSlice.dispatch({ type: "SELECT_SOURCE", slot: item.index, source }, (state) => ({
+      ...state,
+      sources: { ...state.sources, [String(item.index)]: source },
+      error: "",
+    }));
     let url = "";
     try {
       url = URL.createObjectURL(file);
@@ -1905,16 +1970,48 @@
   imagePickerRefresh?.addEventListener("click", () => { refreshGalleryPickerImages().catch(() => {}); });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeGalleryImagePicker(); });
 
+  const uploadSelectedImage = async (item) => {
+    const file = selectedImageFile(item);
+    const galleryImage = gallerySelections.get(item.index);
+    const source = generationModules.media?.sourceFrom?.(file, galleryImage) || file || galleryImage;
+    if (!source) throw new Error("Не удалось прочитать выбранное фото");
+    if (generationModules.media?.uploadImageSource) {
+      return generationModules.media.uploadImageSource(source, {
+        fetcher: fetch,
+        csrf: form.elements.csrf?.value || "",
+      });
+    }
+    let response;
+    if (galleryImage) {
+      const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", media_id: String(galleryImage.id) });
+      response = await fetch("/generate/library/reuse-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+        body,
+        credentials: "same-origin",
+      });
+    } else {
+      const body = new FormData();
+      body.append("image", file, file.name);
+      body.append("type", "input");
+      body.append("overwrite", "true");
+      response = await fetch("/generate/upload/image", { method: "POST", body, credentials: "same-origin" });
+    }
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.name) throw new Error(payload.error || "ComfyUI не принял фото");
+    return { ...payload, value: [payload.subfolder, payload.name].filter(Boolean).join("/"), source };
+  };
+
   workflowNext?.addEventListener("click", async () => {
     if (!generationWorkflowID.value) return;
-    const requiresPrimary = requiresImage;
+    const requiresPrimary = wizardSlice.get().requiresImage;
     const selectedSlots = imageSlots.filter((item) => item.index <= activeMaxInputImages() && hasSelectedImage(item));
     if (!selectedSlots.length && !requiresPrimary && !hasPendingMiniMaxAudio() && !hasPendingMiniMaxVideo()) {
       showStep(3);
       positive?.focus({ preventScroll: true });
       return;
     }
-    if ((requiresPrimary && !selectedSlots.some((item) => item.index === 1)) || uploadInFlight) return;
+    if ((requiresPrimary && !selectedSlots.some((item) => item.index === 1)) || wizardSlice.get().uploadInFlight) return;
     const pendingSlots = selectedSlots.filter((item) => !uploadedImages.get(item.index));
     const pendingAudio = hasPendingMiniMaxAudio();
     const pendingVideo = hasPendingMiniMaxVideo();
@@ -1923,7 +2020,8 @@
       positive?.focus({ preventScroll: true });
       return;
     }
-    uploadInFlight = true;
+    wizardSlice.dispatch({ type: "UPLOAD_START" }, (state) => ({ ...state, uploadInFlight: true }));
+    mediaSlice.dispatch({ type: "UPLOAD_START" }, (state) => ({ ...state, uploading: true, error: "" }));
     workflowNext.disabled = true;
     workflowNext.classList.add("is-loading");
     try {
@@ -1932,26 +2030,15 @@
         const galleryImage = gallerySelections.get(item.index);
         if (!file && !galleryImage) throw new Error("Не удалось прочитать выбранное фото");
         if (item.state) item.state.textContent = galleryImage ? "Передаём ранее созданное фото в ComfyUI..." : "Загружаем фото с устройства...";
-        let response;
-        if (galleryImage) {
-          const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", media_id: String(galleryImage.id) });
-          response = await fetch("/generate/library/reuse-image", {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-            body,
-            credentials: "same-origin",
-          });
-        } else {
-          const body = new FormData();
-          body.append("image", file, file.name);
-          body.append("type", "input");
-          body.append("overwrite", "true");
-          response = await fetch("/generate/upload/image", { method: "POST", body, credentials: "same-origin" });
-        }
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !payload.name) throw new Error(payload.error || "ComfyUI не принял фото");
-        const value = [payload.subfolder, payload.name].filter(Boolean).join("/");
+        const payload = await uploadSelectedImage(item);
+        const value = payload.value;
         uploadedImages.set(item.index, value);
+        mediaSlice.dispatch({ type: "UPLOAD_SUCCESS", slot: item.index, value }, (state) => ({
+          ...state,
+          uploading: false,
+          uploaded: { ...state.uploaded, [String(item.index)]: value },
+          error: "",
+        }));
         if (inputImages[item.index - 1]) inputImages[item.index - 1].value = value;
         if (item.state) item.state.textContent = "Загружено в вашу сессию";
       }
@@ -1986,14 +2073,17 @@
       showStep(3);
       positive?.focus({ preventScroll: true });
     } catch (error) {
+      mediaSlice.dispatch({ type: "UPLOAD_ERROR", error: error.message }, (state) => ({ ...state, uploading: false, error: error.message || "Upload failed" }));
       const failed = pendingSlots.find((item) => !uploadedImages.get(item.index));
       if (failed?.state) failed.state.textContent = error.message || "Не удалось загрузить фото";
       if (pendingAudio && miniMaxAudioState && !uploadedAudio) miniMaxAudioState.textContent = error.message || "Не удалось загрузить аудио";
       if (pendingVideo && miniMaxVideoState && !uploadedVideo) miniMaxVideoState.textContent = error.message || "Не удалось загрузить видео";
       updateWorkflowNext();
     } finally {
-      uploadInFlight = false;
+      wizardSlice.dispatch({ type: "UPLOAD_FINISH" }, (state) => ({ ...state, uploadInFlight: false }));
+      mediaSlice.dispatch({ type: "UPLOAD_FINISH" }, (state) => ({ ...state, uploading: false }));
       workflowNext.classList.remove("is-loading");
+      updateWorkflowNext();
     }
   });
 
@@ -2226,19 +2316,20 @@
 
   const buildGenerationPayload = () => {
     const body = new FormData(form);
+    const assistant = assistantSlice.get();
     const numericFieldNames = new Set([...form.querySelectorAll('input[type="number"], input[data-localized-decimal]')].map((field) => field.name));
     for (const [name, value] of [...body.entries()]) {
       if (numericFieldNames.has(name) && typeof value === "string") body.set(name, value.replaceAll(",", "."));
     }
     body.set("template_id", selectedChoice()?.dataset.workflowId || "");
     body.set("generation_workflow", selectedGenerationWorkflow()?.dataset.presetId || "");
-    body.set("assistant_requested", promptAssistantOriginal ? "true" : "false");
-    body.set("assistant_applied", promptAssistantAction.startsWith("applied") ? "true" : "false");
-    body.set("assistant_template_used", promptAssistantOriginal ? (promptAssistantTemplate?.value || "") : "");
-    body.set("assistant_think_used", promptAssistantOriginal && promptAssistantThink?.checked ? "true" : "false");
-    body.set("assistant_original_prompt", promptAssistantOriginal);
-    body.set("assistant_suggestion", promptAssistantSuggestion);
-    if (promptAssistantCorrelationID) body.set("correlation_id", promptAssistantCorrelationID);
+    body.set("assistant_requested", assistant.original ? "true" : "false");
+    body.set("assistant_applied", assistant.action.startsWith("applied") ? "true" : "false");
+    body.set("assistant_template_used", assistant.original ? (promptAssistantTemplate?.value || "") : "");
+    body.set("assistant_think_used", assistant.original && promptAssistantThink?.checked ? "true" : "false");
+    body.set("assistant_original_prompt", assistant.original);
+    body.set("assistant_suggestion", assistant.suggestion);
+    if (assistant.correlationID) body.set("correlation_id", assistant.correlationID);
     ["input_image", "input_image_2", "input_image_3", "input_image_4"].forEach((name, index) => body.set(name, uploadedImages.get(index + 1) || ""));
     body.set("input_audio", miniMaxAudioIsAvailable() ? uploadedAudio : "");
     body.set("input_video", miniMaxReferencesAreAvailable() ? uploadedVideo : "");
@@ -2262,7 +2353,7 @@
     if (!field) return false;
     const panel = field.closest("[data-step]");
     const step = Number(panel?.dataset.step || 0);
-    if (step > 0 && step !== currentStep) showStep(step);
+    if (step > 0 && step !== wizardSlice.get().step) showStep(step);
     for (let details = field.closest("details"); details; details = details.parentElement?.closest("details")) {
       details.open = true;
     }
@@ -2348,17 +2439,20 @@
   };
 
   const renderRecipes = (recipes) => {
-    savedRecipes = Array.isArray(recipes) ? recipes : [];
+    const items = Array.isArray(recipes) ? recipes : [];
+    recipeSlice.dispatch({ type: "SET_ITEMS", items }, (state) => ({ ...state, items, loading: false }));
     if (!recipeSelect) return;
     const selected = recipeSelect.value;
     recipeSelect.replaceChildren(new Option("Выберите сохранённый набор", ""));
-    savedRecipes.forEach((recipe) => recipeSelect.append(new Option(recipe.name, String(recipe.id))));
-    recipeSelect.value = savedRecipes.some((recipe) => String(recipe.id) === selected) ? selected : "";
+    items.forEach((recipe) => recipeSelect.append(new Option(recipe.name, String(recipe.id))));
+    recipeSelect.value = items.some((recipe) => String(recipe.id) === selected) ? selected : "";
+    recipeSlice.dispatch({ type: "SELECT", id: recipeSelect.value }, (state) => ({ ...state, selectedID: recipeSelect.value }));
     if (recipeApply) recipeApply.disabled = !recipeSelect.value;
     if (recipeDelete) recipeDelete.disabled = !recipeSelect.value;
   };
 
   const refreshRecipes = async () => {
+    recipeSlice.dispatch({ type: "LOAD_START" }, (state) => ({ ...state, loading: true }));
     const response = await fetch("/generate/recipes", { credentials: "same-origin" });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || "Не удалось загрузить наборы");
@@ -2366,6 +2460,7 @@
   };
 
   const setRecipeState = (message, state = "") => {
+    recipeSlice.dispatch({ type: "SET_MESSAGE", message, status: state }, (current) => ({ ...current, message: message || "", status: state || "" }));
     if (!recipeState) return;
     recipeState.textContent = message || "";
     recipeState.dataset.state = state;
@@ -2392,6 +2487,7 @@
       if (!response.ok) throw new Error(payload.error || "Не удалось сохранить набор");
       await refreshRecipes();
       recipeSelect.value = String(payload.recipe?.id || "");
+      recipeSlice.dispatch({ type: "SELECT", id: recipeSelect.value }, (state) => ({ ...state, selectedID: recipeSelect.value }));
       if (recipeApply) recipeApply.disabled = !recipeSelect.value;
       if (recipeDelete) recipeDelete.disabled = !recipeSelect.value;
       if (recipeName) recipeName.value = "";
@@ -2404,7 +2500,8 @@
   };
 
   const applyRecipe = () => {
-    const recipe = savedRecipes.find((item) => String(item.id) === recipeSelect?.value);
+    const recipe = generationModules.recipes?.selectedRecipe?.({ ...recipeSlice.get(), selectedID: recipeSelect?.value || "" })
+      || recipeSlice.get().items.find((item) => String(item.id) === recipeSelect?.value);
     if (!recipe) return;
     if (!applySavedValues(recipe.values)) {
       setRecipeState("Этот workflow сейчас недоступен. Проверьте модели и зависимости ComfyUI.", "error");
@@ -2436,18 +2533,20 @@
     const response = await fetch("/generate/variants", { credentials: "same-origin" });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || "Не удалось загрузить историю вариантов");
-    savedVariants = Array.isArray(payload.variants) ? payload.variants : [];
+    const variants = Array.isArray(payload.variants) ? payload.variants : [];
+    historySlice.dispatch({ type: "SET_VARIANTS", variants }, (state) => ({ ...state, variants }));
     if (imagePicker && !imagePicker.hidden) renderGalleryImagePicker();
     restoreRequestedVariant();
   };
 
   const syncGenerationHistoryVisibility = ({ persist = false } = {}) => {
     if (!variantsContent || !variantsToggle) return;
-    variantsContent.hidden = generationHistoryCollapsed;
-    variantsToggle.textContent = generationHistoryCollapsed ? "Показать" : "Свернуть";
-    variantsToggle.setAttribute("aria-expanded", String(!generationHistoryCollapsed));
+    const collapsed = historySlice.get().collapsed;
+    variantsContent.hidden = collapsed;
+    variantsToggle.textContent = collapsed ? "Показать" : "Свернуть";
+    variantsToggle.setAttribute("aria-expanded", String(!collapsed));
     if (!persist) return;
-    try { window.localStorage.setItem(generationHistoryCollapsedStorageKey, generationHistoryCollapsed ? "true" : "false"); } catch (_) {}
+    try { window.localStorage.setItem(generationHistoryCollapsedStorageKey, collapsed ? "true" : "false"); } catch (_) {}
   };
 
   const jobStateLabels = {
@@ -2491,7 +2590,7 @@
   const cleanModelName = (value) => String(value || "Модель не определена").replaceAll("\\", "/").split("/").pop().replace(/\.(safetensors|ckpt|gguf)$/i, "");
 
   const setJobsConnectionState = (connected) => {
-    generationJobsLive = connected;
+    jobSlice.dispatch({ type: "SET_LIVE", live: connected }, (state) => ({ ...state, live: Boolean(connected) }));
     renderJobCount();
   };
 
@@ -2510,9 +2609,10 @@
 
   const renderJobCount = (shown = null) => {
     if (!variantCount) return;
-    const filteredCount = shown === null ? savedJobs.length : shown;
-    const count = filteredCount === savedJobs.length ? jobCountLabel(savedJobs.length) : `Показано ${filteredCount} из ${savedJobs.length}`;
-    const live = generationJobsLive ? "обновляются автоматически" : "переподключаем обновления";
+    const jobs = jobSlice.get();
+    const filteredCount = shown === null ? jobs.items.length : shown;
+    const count = filteredCount === jobs.items.length ? jobCountLabel(jobs.items.length) : `Показано ${filteredCount} из ${jobs.items.length}`;
+    const live = jobs.live ? "обновляются автоматически" : "переподключаем обновления";
     variantCount.textContent = `${count} · ${live} · хранятся ${generationRetentionLabel}`;
   };
 
@@ -2663,12 +2763,21 @@
 
   const renderJobs = () => {
     if (!variantsSection || !variantList) return;
-    const filteredJobs = savedJobs.filter((job) => (!variantStateFilter?.value || job.state === variantStateFilter.value) && (!variantTemplateFilter?.value || job.template_id === variantTemplateFilter.value));
+    const items = jobSlice.get().items;
+    const filters = historySlice.dispatch({
+      type: "SET_FILTERS",
+      stateFilter: variantStateFilter?.value || "",
+      templateFilter: variantTemplateFilter?.value || "",
+    }, (state) => ({ ...state, stateFilter: variantStateFilter?.value || "", templateFilter: variantTemplateFilter?.value || "" }));
+    const filteredJobs = generationModules.history?.filterJobs?.(items, filters) || items.filter((job) => (
+      (!filters.stateFilter || job.state === filters.stateFilter)
+      && (!filters.templateFilter || job.template_id === filters.templateFilter)
+    ));
     renderJobCount(filteredJobs.length);
     if (filteredJobs.length === 0) {
       const empty = document.createElement("p");
       empty.className = "generation-variant-empty";
-      empty.textContent = savedJobs.length ? "По этим фильтрам заданий нет." : "Заданий пока нет. Первый запуск появится здесь автоматически.";
+      empty.textContent = items.length ? "По этим фильтрам заданий нет." : "Заданий пока нет. Первый запуск появится здесь автоматически.";
       variantList.replaceChildren(empty);
       return;
     }
@@ -2744,25 +2853,30 @@
   };
 
   const refreshJobs = async () => {
-    if (generationJobsLoading) return;
-    generationJobsLoading = true;
+    if (jobSlice.get().loading) return;
+    jobSlice.dispatch({ type: "LOAD_START" }, (state) => ({ ...state, loading: true, error: "" }));
     try {
       const response = await fetch("/generate/jobs", { credentials: "same-origin", cache: "no-store" });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "Не удалось загрузить задания");
-      savedJobs = Array.isArray(payload.jobs) ? payload.jobs : [];
-      generationJobRevision = Math.max(generationJobRevision, Number(payload.revision) || 0);
+      const items = Array.isArray(payload.jobs) ? payload.jobs : [];
+      jobSlice.dispatch({ type: "SET_JOBS", items, revision: payload.revision }, (state) => ({
+        ...state,
+        loading: false,
+        items,
+        revision: Math.max(Number(state.revision) || 0, Number(payload.revision) || 0),
+        error: "",
+      }));
       renderJobs();
     } catch (error) {
-      if (!savedJobs.length && variantList) {
+      jobSlice.dispatch({ type: "LOAD_ERROR", error: error.message }, (state) => ({ ...state, loading: false, error: error.message || "Load failed" }));
+      if (!jobSlice.get().items.length && variantList) {
         const empty = document.createElement("p");
         empty.className = "generation-variant-empty generation-job-load-error";
         empty.textContent = error.message || "Не удалось загрузить задания";
         variantList.replaceChildren(empty);
       }
       setJobsConnectionState(false);
-    } finally {
-      generationJobsLoading = false;
     }
   };
 
@@ -2772,14 +2886,14 @@
       setJobsConnectionState(false);
       return;
     }
-    generationJobEvents = new EventSource(`/generate/jobs/events?since=${encodeURIComponent(generationJobRevision)}`);
+    generationJobEvents = new EventSource(`/generate/jobs/events?since=${encodeURIComponent(jobSlice.get().revision)}`);
     generationJobEvents.addEventListener("open", () => setJobsConnectionState(true));
     generationJobEvents.addEventListener("ready", (event) => {
-      generationJobRevision = Math.max(generationJobRevision, Number(event.data) || 0);
+      jobSlice.dispatch({ type: "SET_REVISION", revision: event.data }, (state) => ({ ...state, revision: Math.max(Number(state.revision) || 0, Number(event.data) || 0) }));
       setJobsConnectionState(true);
     });
     generationJobEvents.addEventListener("jobs", (event) => {
-      generationJobRevision = Math.max(generationJobRevision, Number(event.data) || 0);
+      jobSlice.dispatch({ type: "SET_REVISION", revision: event.data }, (state) => ({ ...state, revision: Math.max(Number(state.revision) || 0, Number(event.data) || 0) }));
       setJobsConnectionState(true);
       refreshJobs();
     });
@@ -2943,10 +3057,13 @@
   });
   variantStateFilter?.addEventListener("change", renderJobs);
   variantTemplateFilter?.addEventListener("change", renderJobs);
-  try { generationHistoryCollapsed = window.localStorage.getItem(generationHistoryCollapsedStorageKey) === "true"; } catch (_) {}
+  try {
+    const collapsed = window.localStorage.getItem(generationHistoryCollapsedStorageKey) === "true";
+    historySlice.dispatch({ type: "SET_COLLAPSED", collapsed }, (state) => ({ ...state, collapsed }));
+  } catch (_) {}
   syncGenerationHistoryVisibility();
   variantsToggle?.addEventListener("click", () => {
-    generationHistoryCollapsed = !generationHistoryCollapsed;
+    historySlice.dispatch({ type: "TOGGLE_COLLAPSED" }, (state) => ({ ...state, collapsed: !state.collapsed }));
     syncGenerationHistoryVisibility({ persist: true });
   });
   generationOpenExact?.addEventListener("click", () => {
@@ -2959,7 +3076,11 @@
   });
   form.addEventListener("input", syncGenerationSummary);
   form.addEventListener("change", syncGenerationSummary);
-  recipeSelect?.addEventListener("change", () => { if (recipeApply) recipeApply.disabled = !recipeSelect.value; if (recipeDelete) recipeDelete.disabled = !recipeSelect.value; });
+  recipeSelect?.addEventListener("change", () => {
+    recipeSlice.dispatch({ type: "SELECT", id: recipeSelect.value }, (state) => ({ ...state, selectedID: recipeSelect.value }));
+    if (recipeApply) recipeApply.disabled = !recipeSelect.value;
+    if (recipeDelete) recipeDelete.disabled = !recipeSelect.value;
+  });
   recipeApply?.addEventListener("click", applyRecipe);
   recipeDelete?.addEventListener("click", deleteRecipe);
   recipeSave?.addEventListener("click", saveRecipe);
@@ -3001,7 +3122,7 @@
       resultStatus.textContent = "Сначала дождитесь результата или отмените текущую задачу.";
       return;
     }
-    if (promptAssistantEnabled?.checked && !promptAssistantApproved) {
+    if (promptAssistantEnabled?.checked && !assistantSlice.get().approved) {
       setPromptAssistantState("Перед генерацией подтвердите вариант ассистента или выберите «Оставить мой промт».", "error");
       promptAssistant?.scrollIntoView({ block: "center", behavior: "smooth" });
       return;
@@ -3029,7 +3150,7 @@
       const body = buildGenerationPayload();
       body.set("client_request_id", activeGenerationRequestID);
       const headers = { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" };
-      if (promptAssistantCorrelationID) headers["X-Correlation-ID"] = promptAssistantCorrelationID;
+      if (assistantSlice.get().correlationID) headers["X-Correlation-ID"] = assistantSlice.get().correlationID;
       const response = await fetch("/generate/run", { method: "POST", headers, body, credentials: "same-origin" });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -3115,4 +3236,5 @@
   window.setInterval(() => refreshJobs().catch(() => {}), 30000);
   window.setInterval(() => refreshVariants().catch(() => {}), 30000);
   window.addEventListener("beforeunload", () => generationJobEvents?.close(), { once: true });
+  generationStore?.emit?.("page:ready", { root, modules: root.dataset.generationModules });
 })();

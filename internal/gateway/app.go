@@ -33,6 +33,31 @@ import (
 //go:embed templates/*.html static/*
 var embeddedFS embed.FS
 
+var staticJavaScriptAssetPaths = []string{
+	"static/app.js",
+	"static/gallery.js",
+	"static/generate.js",
+	"static/generation-assistant.js",
+	"static/generation-history.js",
+	"static/generation-job.js",
+	"static/generation-lightbox.js",
+	"static/generation-media.js",
+	"static/generation-recipes.js",
+	"static/generation-store.js",
+	"static/generation-video.js",
+	"static/generation-wizard.js",
+}
+
+var staticJavaScriptAssets = func() map[string]string {
+	assets := make(map[string]string, len(staticJavaScriptAssetPaths))
+	for _, asset := range staticJavaScriptAssetPaths {
+		assets["/"+asset] = asset
+	}
+	return assets
+}()
+
+var frontendAssetPaths = append([]string{"static/style.css"}, staticJavaScriptAssetPaths...)
+
 type Templates struct {
 	*template.Template
 	AssetVersion string
@@ -221,7 +246,7 @@ func ParseTemplates() (*Templates, error) {
 		return nil, err
 	}
 	hash := sha256.New()
-	for _, path := range []string{"static/style.css", "static/app.js", "static/generate.js", "static/gallery.js"} {
+	for _, path := range frontendAssetPaths {
 		body, err := embeddedFS.ReadFile(path)
 		if err != nil {
 			return nil, err
@@ -243,11 +268,7 @@ func hasString(values []string, wanted string) bool {
 
 func (a *App) publicMux() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/static/style.css", a.handleStaticCSS)
-	mux.HandleFunc("/static/app.js", a.handleStaticJS)
-	mux.HandleFunc("/static/generate.js", a.handleStaticJS)
-	mux.HandleFunc("/static/gallery.js", a.handleStaticJS)
-	mux.HandleFunc("/static/fonts/", a.handleStaticFont)
+	a.registerStaticRoutes(mux)
 	mux.HandleFunc("/healthz", a.handleHealthz)
 	mux.HandleFunc("/readyz", a.handleReadyz)
 	mux.HandleFunc("/login", a.handleLogin)
@@ -284,11 +305,7 @@ func (a *App) registerServiceRoutes(mux *http.ServeMux) {
 
 func (a *App) adminMux() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/static/style.css", a.handleStaticCSS)
-	mux.HandleFunc("/static/app.js", a.handleStaticJS)
-	mux.HandleFunc("/static/generate.js", a.handleStaticJS)
-	mux.HandleFunc("/static/gallery.js", a.handleStaticJS)
-	mux.HandleFunc("/static/fonts/", a.handleStaticFont)
+	a.registerStaticRoutes(mux)
 	mux.HandleFunc("/healthz", a.handleHealthz)
 	mux.HandleFunc("/readyz", a.handleReadyz)
 	mux.HandleFunc("/login", a.handleLogin)
@@ -306,6 +323,14 @@ func (a *App) adminMux() http.Handler {
 		http.Redirect(w, r, "/admin", http.StatusFound)
 	})
 	return mux
+}
+
+func (a *App) registerStaticRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/static/style.css", a.handleStaticCSS)
+	for path := range staticJavaScriptAssets {
+		mux.HandleFunc(path, a.handleStaticJS)
+	}
+	mux.HandleFunc("/static/fonts/", a.handleStaticFont)
 }
 
 func (a *App) securityHeaders(next http.Handler) http.Handler {
@@ -377,11 +402,10 @@ func (a *App) handleStaticJS(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	asset := "static/app.js"
-	if r.URL.Path == "/static/generate.js" {
-		asset = "static/generate.js"
-	} else if r.URL.Path == "/static/gallery.js" {
-		asset = "static/gallery.js"
+	asset, ok := staticJavaScriptAssets[r.URL.Path]
+	if !ok {
+		http.NotFound(w, r)
+		return
 	}
 	body, err := embeddedFS.ReadFile(asset)
 	if err != nil {

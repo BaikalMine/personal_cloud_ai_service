@@ -1,5 +1,14 @@
 {{define "generate"}}
 {{template "head" .}}
+<script src="/static/generation-store.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/generation-wizard.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/generation-media.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/generation-video.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/generation-assistant.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/generation-job.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/generation-recipes.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/generation-history.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/generation-lightbox.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generate.js?v={{.AssetVersion}}" defer></script>
 {{template "nav" .}}
 <main class="page generation-page" id="main-content" data-comfy-generation data-workflow-capabilities-url="/generate/capabilities" data-selected-workflow="{{.SelectedWorkflow}}" data-preview-output="{{.PreviewOutputURL}}" data-generation-retention="{{.Retention.GenerationHistoryLabel}}" data-media-retention="{{.Retention.GenerationMediaLabel}}">

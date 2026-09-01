@@ -36,6 +36,7 @@ func TestGenerateTemplateRenders(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "data-comfy-generation") || !strings.Contains(output.String(), "/static/generate.js") ||
+		!strings.Contains(output.String(), "/static/generation-store.js") || !strings.Contains(output.String(), "/static/generation-media.js") ||
 		!strings.Contains(output.String(), "Krea 2: фото и промт") || !strings.Contains(output.String(), "Диффузионная модель") ||
 		!strings.Contains(output.String(), "generation-editor-profile") || !strings.Contains(output.String(), "prompt-assistant-template") ||
 		!strings.Contains(output.String(), "Перенос внешности и редактирование") || !strings.Contains(output.String(), "prompt-assistant-think") ||
@@ -43,6 +44,35 @@ func TestGenerateTemplateRenders(t *testing.T) {
 		!strings.Contains(output.String(), "Из моих генераций") || !strings.Contains(output.String(), "generation-image-picker-refresh") ||
 		!strings.Contains(output.String(), "generation-image-picker-grid") {
 		t.Fatal("generation template did not render the wizard")
+	}
+}
+
+func TestGenerationJavaScriptModulesAreServed(t *testing.T) {
+	app := &App{}
+	for requestPath, assetPath := range staticJavaScriptAssets {
+		requestPath, assetPath := requestPath, assetPath
+		t.Run(strings.TrimPrefix(requestPath, "/static/"), func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, requestPath, nil)
+			response := httptest.NewRecorder()
+			app.handleStaticJS(response, request)
+			if response.Code != http.StatusOK {
+				t.Fatalf("GET %s status = %d, want %d", requestPath, response.Code, http.StatusOK)
+			}
+			want, err := embeddedFS.ReadFile(assetPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(response.Body.Bytes(), want) {
+				t.Fatalf("GET %s returned the wrong embedded asset", requestPath)
+			}
+		})
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/static/generation-unknown.js", nil)
+	response := httptest.NewRecorder()
+	app.handleStaticJS(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("unknown JavaScript status = %d, want %d", response.Code, http.StatusNotFound)
 	}
 }
 

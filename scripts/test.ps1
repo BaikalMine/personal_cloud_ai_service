@@ -75,6 +75,12 @@ try {
         throw 'JavaScript syntax checks failed.'
     }
 
+    docker run --rm -v "${projectRoot}:/src:ro" -w /src $nodeImage `
+        node --test internal/gateway/testdata/js/generation_modules.test.cjs
+    if ($LASTEXITCODE -ne 0) {
+        throw 'JavaScript unit checks failed.'
+    }
+
     if ($Quick) {
         return
     }
