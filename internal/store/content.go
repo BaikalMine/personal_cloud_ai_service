@@ -18,8 +18,8 @@ func (s *Store) InsertContentEvent(ctx context.Context, event domain.ContentEven
 	var id int64
 	err := s.db.QueryRowContext(ctx, `
 		INSERT INTO content_events
-			(user_id, generation_job_id, correlation_id, service, kind, external_id, model, generation_state, prompt_cipher, response_cipher, metadata_cipher, is_sensitive, sensitivity_classified_at, expires_at)
-		VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9,$10,$11,$12,now(),$13)
+			(user_id, generation_job_id, correlation_id, service, kind, external_id, model, generation_state, prompt_cipher, response_cipher, metadata_cipher, is_sensitive, sensitivity_classified_at, username_snapshot, expires_at)
+		VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9,$10,$11,$12,now(),COALESCE((SELECT username FROM users WHERE id=$1),''),$13)
 		ON CONFLICT DO NOTHING
 		RETURNING id
 	`, event.UserID, event.GenerationJobID, event.CorrelationID, event.Service, event.Kind, event.ExternalID, event.Model, event.GenerationState,
@@ -40,15 +40,14 @@ func (s *Store) ContentRevision(ctx context.Context) (int64, error) {
 func (s *Store) ListContentEvents(ctx context.Context, limit int, username, service string) ([]domain.ContentEventRow, error) {
 	limit = boundedLimit(limit, 1, 500)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT e.id, COALESCE(e.user_id,0), COALESCE(u.username,'Удалённый пользователь'), e.generation_job_id,e.correlation_id,e.service, e.kind, COALESCE(e.external_id,''), e.model,
+		SELECT e.id, COALESCE(e.user_id,0), COALESCE(u.username,NULLIF(e.username_snapshot,''),'Удалённый пользователь'), (e.user_id IS NULL), e.generation_job_id,e.correlation_id,e.service, e.kind, COALESCE(e.external_id,''), e.model,
 		       e.generation_state, e.prompt_cipher, e.response_cipher, e.metadata_cipher, e.is_sensitive,
-		       e.generated_media_count, COALESCE(e.media_expires_at,'epoch'::timestamptz), COUNT(m.id), e.created_at, e.expires_at
+		       e.generated_media_count, COALESCE(e.media_expires_at,'epoch'::timestamptz), COUNT(m.id), e.created_at, e.updated_at, e.expires_at
 		FROM content_events e
 		LEFT JOIN users u ON u.id = e.user_id
 		LEFT JOIN content_media m ON m.event_id = e.id AND m.expires_at > now()
 		WHERE e.expires_at > now()
-		  AND e.kind <> 'prompt_assistant'
-		  AND ($2 = '' OR COALESCE(u.username,'Удалённый пользователь') ILIKE '%' || $2 || '%')
+		  AND ($2 = '' OR COALESCE(u.username,NULLIF(e.username_snapshot,''),'Удалённый пользователь') ILIKE '%' || $2 || '%')
 		  AND ($3 = '' OR e.service = $3)
 		GROUP BY e.id, u.username
 		ORDER BY e.created_at DESC
@@ -62,9 +61,9 @@ func (s *Store) ListContentEvents(ctx context.Context, limit int, username, serv
 	for rows.Next() {
 		var event domain.ContentEventRow
 		var generationJobID sql.NullInt64
-		if err := rows.Scan(&event.ID, &event.UserID, &event.Username, &generationJobID, &event.CorrelationID, &event.Service, &event.Kind,
+		if err := rows.Scan(&event.ID, &event.UserID, &event.Username, &event.AuthorDeleted, &generationJobID, &event.CorrelationID, &event.Service, &event.Kind,
 			&event.ExternalID, &event.Model, &event.GenerationState, &event.PromptCipher, &event.ResponseCipher,
-			&event.MetadataCipher, &event.Sensitive, &event.GeneratedMediaCount, &event.MediaExpiresAt, &event.MediaCount, &event.CreatedAt, &event.ExpiresAt); err != nil {
+			&event.MetadataCipher, &event.Sensitive, &event.GeneratedMediaCount, &event.MediaExpiresAt, &event.MediaCount, &event.CreatedAt, &event.UpdatedAt, &event.ExpiresAt); err != nil {
 			return nil, err
 		}
 		if generationJobID.Valid {
@@ -115,7 +114,8 @@ func (s *Store) ListContentMediaSummaries(ctx context.Context, eventIDs []int64)
 		return result, nil
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id,event_id,media_type,(media_type='image' AND visual_sensitivity_classified_at IS NULL)
+		SELECT id,event_id,media_type,(media_type='image' AND visual_sensitivity_classified_at IS NULL),
+		       GREATEST(created_at,COALESCE(visual_sensitivity_classified_at,created_at),COALESCE(favorite_at,created_at),COALESCE(pinned_at,created_at),COALESCE(profile_hidden_at,created_at))
 		FROM content_media
 		WHERE event_id = ANY($1) AND expires_at > now()
 		ORDER BY event_id,created_at,id
@@ -127,7 +127,7 @@ func (s *Store) ListContentMediaSummaries(ctx context.Context, eventIDs []int64)
 	defer rows.Close()
 	for rows.Next() {
 		var media domain.ContentMediaSummary
-		if err := rows.Scan(&media.ID, &media.EventID, &media.MediaType, &media.VisualPending); err != nil {
+		if err := rows.Scan(&media.ID, &media.EventID, &media.MediaType, &media.VisualPending, &media.UpdatedAt); err != nil {
 			return nil, err
 		}
 		result[media.EventID] = append(result[media.EventID], media)

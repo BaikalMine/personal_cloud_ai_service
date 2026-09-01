@@ -179,8 +179,15 @@ type UpdateOverview struct {
 
 type ContentEventView struct {
 	ID                  int64
+	Key                 string
+	Version             string
 	UserID              int64
 	Username            string
+	AuthorDeleted       bool
+	GenerationJobID     *int64
+	JobID               string
+	RequestID           string
+	CorrelationID       string
 	Service             string
 	Kind                string
 	ExternalID          string
@@ -190,6 +197,13 @@ type ContentEventView struct {
 	Metadata            string
 	Assistant           *ContentAssistantView
 	GenerationState     string
+	JobState            string
+	StateLabel          string
+	StateClass          string
+	StatusMessage       string
+	ErrorCode           string
+	ErrorMessage        string
+	Stages              []ContentStageView
 	Sensitive           bool
 	VisualPending       bool
 	GeneratedMediaCount int64
@@ -198,6 +212,7 @@ type ContentEventView struct {
 	MediaCount          int64
 	Media               []domain.ContentMediaSummary
 	CreatedAt           time.Time
+	UpdatedAt           time.Time
 	ExpiresAt           time.Time
 }
 
@@ -205,8 +220,19 @@ type ContentAssistantView struct {
 	Applied        bool
 	Template       string
 	Think          bool
+	Model          string
 	OriginalPrompt string
 	Suggestion     string
+}
+
+type ContentStageView struct {
+	State        string
+	Label        string
+	Message      string
+	ErrorMessage string
+	Tone         string
+	DurationMS   int64
+	CreatedAt    time.Time
 }
 
 type ContentOverview struct {

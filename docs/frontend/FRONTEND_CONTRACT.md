@@ -47,6 +47,13 @@ redefine the shared focus, disabled, loading or semantic state language.
   menu on every supported viewport.
 - Supported visual widths are 390, 768, 1280, 1440 and 1920 px.
 
+## Generation Wizard Contract
+
+- Generation simplification is project-wide. The shared intent-first wizard covers Krea2 text generation, Krea2 and Flux2 image editing, and MiniMax video; never describe the whole workflow as a MiniMax-only feature.
+- Family-specific controls appear only after the user selects a compatible workflow. Video modes, audio/video references, RIFE, RTX and other video postprocessing remain MiniMax-specific without changing the shared three-step structure.
+- Device upload and personal-library selection are two sources for the same reference slot. Slot count, roles and exact settings come from workflow capabilities rather than duplicated model-specific UI.
+- The primary path uses user-facing intent and result language. Internal branch and node names belong in exact settings or diagnostics, not in the main decision flow.
+
 ## Media Library Contract
 
 - The personal media library is a shared source for every image-capable workflow; do not create a model-specific gallery or picker.
@@ -55,6 +62,14 @@ redefine the shared focus, disabled, loading or semantic state language.
 - Search, type and state filters remain above the results. Collections are a secondary navigation rail on desktop and a readable vertical list on narrow screens.
 - Pinning changes retention and must expose the new deadline. Favorite is organizational only and must not imply extended storage.
 - Source job and downstream reference lineage stay available from each result without competing with the primary reuse and download actions.
+
+## AI Content Task Contract
+
+- One administrative card represents one user task. Prompt-assistant output, the applied prompt, durable job stages, errors and generated media may not split into parallel cards.
+- Media is the visual focus when available. Text-only, failed, cancelled and retention-expired tasks use explicit semantic states instead of empty frames.
+- Deleted accounts retain the username snapshot with an explicit deleted-author label; no broken user link is rendered.
+- SSE reconciliation is keyed by stable task ID and version. Reuse unchanged DOM nodes and preserve scroll, revealed sensitive content and the currently open task dialog.
+- The detail dialog exposes the full prompt flow and diagnostics, traps keyboard focus, closes with Escape and restores focus to the originating card.
 
 ## Verification
 

@@ -1022,6 +1022,29 @@ var migrationCatalog = []migration{
 			`CREATE TRIGGER generation_media_references_change_revision AFTER INSERT OR UPDATE OR DELETE ON generation_media_references FOR EACH STATEMENT EXECUTE FUNCTION bump_content_change_revision()`,
 		},
 	},
+	{
+		version: 45,
+		name:    "unified_content_tasks",
+		statements: []string{
+			`ALTER TABLE content_events ADD COLUMN IF NOT EXISTS username_snapshot TEXT NOT NULL DEFAULT '' CHECK (char_length(username_snapshot) <= 128)`,
+			`UPDATE content_events e SET username_snapshot=u.username FROM users u WHERE e.user_id=u.id AND e.username_snapshot=''`,
+			`ALTER TABLE content_events ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`,
+			`CREATE OR REPLACE FUNCTION touch_content_event_updated_at() RETURNS trigger AS $$
+			BEGIN
+				NEW.updated_at=now();
+				RETURN NEW;
+			END;
+			$$ LANGUAGE plpgsql`,
+			`DROP TRIGGER IF EXISTS content_events_touch_updated_at ON content_events`,
+			`CREATE TRIGGER content_events_touch_updated_at BEFORE UPDATE ON content_events FOR EACH ROW EXECUTE FUNCTION touch_content_event_updated_at()`,
+			`CREATE INDEX IF NOT EXISTS content_events_job_created_idx ON content_events(generation_job_id,created_at,id) WHERE generation_job_id IS NOT NULL`,
+			`CREATE INDEX IF NOT EXISTS content_events_correlation_kind_idx ON content_events(correlation_id,kind,created_at,id) WHERE correlation_id<>''`,
+			`DROP TRIGGER IF EXISTS generation_jobs_content_revision ON generation_jobs`,
+			`CREATE TRIGGER generation_jobs_content_revision AFTER INSERT OR UPDATE OR DELETE ON generation_jobs FOR EACH STATEMENT EXECUTE FUNCTION bump_content_change_revision()`,
+			`DROP TRIGGER IF EXISTS generation_job_transitions_content_revision ON generation_job_transitions`,
+			`CREATE TRIGGER generation_job_transitions_content_revision AFTER INSERT OR UPDATE OR DELETE ON generation_job_transitions FOR EACH STATEMENT EXECUTE FUNCTION bump_content_change_revision()`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

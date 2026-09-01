@@ -22,6 +22,7 @@ type ContentEventRow struct {
 	ID                  int64
 	UserID              int64
 	Username            string
+	AuthorDeleted       bool
 	GenerationJobID     *int64
 	CorrelationID       string
 	Service             string
@@ -37,6 +38,7 @@ type ContentEventRow struct {
 	MediaExpiresAt      time.Time
 	MediaCount          int64
 	CreatedAt           time.Time
+	UpdatedAt           time.Time
 	ExpiresAt           time.Time
 }
 
@@ -94,6 +96,7 @@ type ContentMediaSummary struct {
 	EventID       int64
 	MediaType     string
 	VisualPending bool
+	UpdatedAt     time.Time
 }
 
 type ComfyOutputOwnership struct {

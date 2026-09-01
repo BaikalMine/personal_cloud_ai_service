@@ -205,7 +205,7 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	}
 	assertGenerationMediaLibraryLifecycle(t, ctx, db, repository, registeredUserID, adminID, generatedImages[0].ID)
 	retentionStats, err := repository.ContentRetentionStats(ctx)
-	if err != nil || retentionStats.EventCount != 1 || retentionStats.MediaCount != 1 || retentionStats.MediaBytes != 3 || retentionStats.NextEventExpiry == nil || retentionStats.NextMediaExpiry == nil {
+	if err != nil || retentionStats.EventCount != 2 || retentionStats.MediaCount != 1 || retentionStats.MediaBytes != 3 || retentionStats.NextEventExpiry == nil || retentionStats.NextMediaExpiry == nil {
 		t.Fatalf("content retention stats: stats=%+v err=%v", retentionStats, err)
 	}
 	media, err := repository.ListContentMediaSummaries(ctx, []int64{eventID})
@@ -233,9 +233,9 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM content_media WHERE event_id=$1`, eventID).Scan(&retainedMedia); err != nil || retainedMedia != 1 {
 		t.Fatalf("retained media after user deletion: count=%d err=%v", retainedMedia, err)
 	}
-	retained, err := repository.ListContentEvents(ctx, 10, "Удалённый пользователь", "comfyui")
-	if err != nil || len(retained) != 1 || retained[0].ID != eventID || retained[0].Username != "Удалённый пользователь" {
-		t.Fatalf("anonymized content listing: events=%v err=%v", retained, err)
+	retained, err := repository.ListContentEvents(ctx, 10, user.Username, "comfyui")
+	if err != nil || len(retained) != 1 || retained[0].ID != eventID || retained[0].Username != user.Username || !retained[0].AuthorDeleted {
+		t.Fatalf("retained content author snapshot: events=%v err=%v", retained, err)
 	}
 	var futureTemporaryID int64
 	if err := db.QueryRowContext(ctx, `
@@ -692,6 +692,21 @@ func assertGenerationJobLifecycle(t *testing.T, ctx context.Context, db *sql.DB,
 	}
 	if err := repository.LinkGenerationJobVariant(ctx, job.ID, promptID); err != nil {
 		t.Fatal(err)
+	}
+	assistantEventID, err := repository.InsertContentEvent(ctx, domain.ContentEventRecord{
+		UserID: userID, CorrelationID: job.CorrelationID, Service: "ollama", Kind: "prompt_assistant",
+		ExternalID: "assistant-" + promptID, Model: "qwen3-vl", GenerationState: "completed",
+		PromptCipher: []byte{1}, ResponseCipher: []byte{2}, MetadataCipher: []byte{3}, ExpiresAt: time.Now().Add(24 * time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if linked, err := repository.LinkGenerationJobAssistantEvents(ctx, job.ID, userID, job.CorrelationID); err != nil || linked != 1 {
+		t.Fatalf("link assistant audit to generation job=%d err=%v", linked, err)
+	}
+	var assistantJobID int64
+	if err := db.QueryRowContext(ctx, `SELECT generation_job_id FROM content_events WHERE id=$1`, assistantEventID).Scan(&assistantJobID); err != nil || assistantJobID != job.ID {
+		t.Fatalf("assistant generation job link=%d want=%d err=%v", assistantJobID, job.ID, err)
 	}
 	eventID, err := repository.InsertContentEvent(ctx, domain.ContentEventRecord{
 		UserID: userID, Service: "comfyui", Kind: "comfyui_prompt", ExternalID: promptID,

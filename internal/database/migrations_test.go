@@ -208,6 +208,28 @@ func TestGenerationMediaLibraryMigration(t *testing.T) {
 	}
 }
 
+func TestUnifiedContentTasksMigration(t *testing.T) {
+	var taskMigration *migration
+	for index := range migrationCatalog {
+		if migrationCatalog[index].version == 45 {
+			taskMigration = &migrationCatalog[index]
+			break
+		}
+	}
+	if taskMigration == nil || taskMigration.name != "unified_content_tasks" {
+		t.Fatal("unified content tasks migration is missing")
+	}
+	sql := strings.Join(taskMigration.statements, "\n")
+	for _, expected := range []string{
+		"username_snapshot", "updated_at", "touch_content_event_updated_at",
+		"generation_jobs_content_revision", "generation_job_transitions_content_revision",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("unified content tasks migration does not contain %q: %s", expected, sql)
+		}
+	}
+}
+
 func TestQuickGenerationRequestTelemetryMigration(t *testing.T) {
 	var telemetryMigration *migration
 	for index := range migrationCatalog {

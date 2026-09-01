@@ -365,6 +365,9 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusAccepted, response)
 		return
 	}
+	if _, linkErr := a.store.LinkGenerationJobAssistantEvents(jobCtx, job.ID, user.ID, job.CorrelationID); linkErr != nil {
+		log.Printf("link generation job %s assistant audit: %v", job.PublicID, linkErr)
+	}
 	job, _, err = a.store.TransitionGenerationJob(jobCtx, job.ID, domain.GenerationJobTransitionParams{
 		State: domain.GenerationJobPreparing, Message: "Проверяем параметры и workflow",
 	})

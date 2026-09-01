@@ -112,6 +112,72 @@ test("media library is shared by Krea2, Flux2 and MiniMax", async ({ page }, tes
   }
 });
 
+test("AI content keeps one live card for the whole generation task", async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+
+  await open(page, "/preview/content");
+  await expect(page.locator("[data-content-task-key]")).toHaveCount(4);
+  await expect(page.getByText("Учётная запись удалена")).toBeVisible();
+  await expect(page.locator("[data-content-live-label]")).toContainText("задания обновляются сразу");
+
+  const taskTrigger = page.locator('[data-content-task-key="job-preview-krea"] [data-content-task-open]');
+  await taskTrigger.click();
+  await expect(page.locator("#content-detail-dialog")).toBeVisible();
+  await expectFocusInside(page, "#content-detail-dialog");
+  await page.keyboard.press("Tab");
+  await expectFocusInside(page, "#content-detail-dialog");
+  await expect(page.getByRole("heading", { name: "Стадии задания" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Запрос пользователя" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Ответ ассистента" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Применённый итоговый промт" })).toBeVisible();
+  await expect(page).toHaveScreenshot("ai-content-task-detail.png", { stylePath: visualStyle });
+  await page.keyboard.press("Escape");
+  await expect(taskTrigger).toBeFocused();
+
+  await page.locator('[data-content-task-key="job-preview-error"] [data-content-task-open]').click();
+  await expect(page.locator("#content-detail-dialog")).toContainText("Выбранная модель больше не доступна в ComfyUI");
+});
+
+test("AI content updates only the changed task after an SSE revision", async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+
+  await page.addInitScript(() => {
+    class PreviewEventSource {
+      constructor() {
+        this.listeners = new Map();
+        window.__previewContentEvents = this;
+      }
+      addEventListener(type, listener) {
+        const listeners = this.listeners.get(type) || [];
+        listeners.push(listener);
+        this.listeners.set(type, listeners);
+      }
+      emit(type, data) {
+        (this.listeners.get(type) || []).forEach((listener) => listener({ data }));
+      }
+      close() {}
+    }
+    window.EventSource = PreviewEventSource;
+  });
+  await page.route("**/preview/content?live=1", async (route) => {
+    const response = await route.fetch();
+    const updated = (await response.text())
+      .replace('data-content-revision="45"', 'data-content-revision="46"')
+      .replace(/(data-content-task-key="job-preview-krea" data-content-version=")[^"]+/, "$1live-46")
+      .replace("Krea2 / Raw INT8 Mixed", "Krea2 / Live update");
+    await route.fulfill({ response, body: updated });
+  });
+
+  await open(page, "/preview/content");
+  const unchangedTask = page.locator("[data-content-task-key]").nth(1);
+  await unchangedTask.evaluate((element) => { element.dataset.domSentinel = "preserved"; });
+  await page.evaluate(() => window.__previewContentEvents.emit("content", "46"));
+
+  await expect(page.locator('[data-content-task-key="job-preview-krea"] .content-gallery-model')).toHaveText("Krea2 / Live update");
+  await expect(unchangedTask).toHaveAttribute("data-dom-sentinel", "preserved");
+  await expect(page.locator("[data-content-task-key]")).toHaveCount(4);
+});
+
 test("wizard, image picker and lightbox work from the keyboard", async ({ page }, testInfo) => {
   desktopOnly(testInfo);
 
@@ -170,7 +236,7 @@ test("preview exposes loading, empty, error, sensitive, offline, queued and comp
 
 test("critical product surfaces have no serious axe violations", async ({ page }, testInfo) => {
   desktopOnly(testInfo);
-  const routes = ["/preview/components", "/preview/generate", "/preview/gallery", "/preview/invites", "/preview/users"];
+  const routes = ["/preview/components", "/preview/generate", "/preview/gallery", "/preview/invites", "/preview/users", "/preview/content"];
   const routeViolations = [];
 
   for (const route of routes) {

@@ -490,15 +490,28 @@ func main() {
 		"Profile": profile, "Stats": domain.UserStats{TotalRequests: 302, TotalBytesOut: 4200000000, LastService: "ComfyUI", Chart: chart, ByService: []domain.ServiceUsage{{Service: "comfyui", Requests: 210, Bytes: 4100000000, Errors: 1}, {Service: "openwebui", Requests: 92, Bytes: 8700000}}}, "Activities": activities,
 		"PasswordStatus": "", "AccessStatus": "", "SecurityStatus": "", "AccountLocked": false,
 	}))
+	mux.HandleFunc("/admin/content/events", func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unavailable", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		_, _ = w.Write([]byte("retry: 2000\nevent: ready\ndata: 45\n\n"))
+		flusher.Flush()
+		<-r.Context().Done()
+	})
 	mux.HandleFunc("/preview/content", render("admin_content", "AI-контент", map[string]any{
 		"Username": "", "Service": "", "Query": "",
-		"Overview":       gateway.ContentOverview{Total: 28, ComfyUI: 11, OpenWebUI: 17, WithMedia: 6},
-		"RetentionStats": domain.ContentRetentionStats{EventCount: 28, MediaCount: 6, MediaBytes: 2480000 * 6, NextMediaExpiry: timePointer(now.Add(18 * time.Hour)), NextEventExpiry: timePointer(now.Add(6 * 24 * time.Hour))},
+		"ContentRevision": int64(45),
+		"Overview":        gateway.ContentOverview{Total: 28, ComfyUI: 11, OpenWebUI: 17, WithMedia: 6},
+		"RetentionStats":  domain.ContentRetentionStats{EventCount: 28, MediaCount: 6, MediaBytes: 2480000 * 6, NextMediaExpiry: timePointer(now.Add(18 * time.Hour)), NextEventExpiry: timePointer(now.Add(6 * 24 * time.Hour))},
 		"Events": []gateway.ContentEventView{
-			{ID: 3, UserID: 2, Username: "rayka", Service: "comfyui", Kind: "generation", Model: "Krea2 / Raw INT8 Mixed", Prompt: "Editorial portrait of a woman holding a perfume bottle in a bright studio.", Metadata: `{"seed":284797972294826,"megapixels":1.9}`, Assistant: &gateway.ContentAssistantView{Applied: true, Template: "photographic", OriginalPrompt: "Девушка показывает флакон духов", Suggestion: "Create an editorial portrait of a woman naturally presenting a premium perfume bottle."}, GenerationState: "completed", MediaCount: 1, Media: []domain.ContentMediaSummary{{ID: 42, EventID: 3, MediaType: "image"}}, CreatedAt: now.Add(-5 * time.Minute), ExpiresAt: now.Add(7 * 24 * time.Hour)},
-			{ID: 2, UserID: 2, Username: "rayka", Service: "comfyui", Kind: "generation", Model: "Flux 2 / Klein 9B", Prompt: "Adult editorial portrait used to verify sensitive-content masking.", Metadata: `{"seed":1019794942414480}`, GenerationState: "completed", Sensitive: true, MediaCount: 1, Media: []domain.ContentMediaSummary{{ID: 43, EventID: 2, MediaType: "image"}}, CreatedAt: now.Add(-7 * time.Minute), ExpiresAt: now.Add(7 * 24 * time.Hour)},
-			{ID: 1, UserID: 2, Username: "rayka", Service: "comfyui", Kind: "generation", Model: "Krea2 / Raw INT8 Mixed", Prompt: "A detailed fashion portrait with dramatic lighting.", Metadata: `{"seed":45876641139403}`, GenerationState: "error", CreatedAt: now.Add(-9 * time.Minute), ExpiresAt: now.Add(7 * 24 * time.Hour)},
-			{ID: 4, UserID: 2, Username: "rayka", Service: "comfyui", Kind: "generation", Model: "Krea2 / Raw INT8 Mixed", Prompt: "Archived generation with parameters retained for review.", Metadata: `{"seed":8675309}`, GenerationState: "completed", GeneratedMediaCount: 1, MediaExpired: true, MediaExpiresAt: now.Add(-2 * time.Hour), CreatedAt: now.Add(-26 * time.Hour), ExpiresAt: now.Add(6 * 24 * time.Hour)},
+			{ID: 3, Key: "job-preview-krea", Version: "45-krea", UserID: 2, Username: "rayka", GenerationJobID: int64Pointer(303), JobID: "job-preview-krea", RequestID: "request-preview-krea", CorrelationID: "trace_preview_krea_1234", Service: "comfyui", Kind: "generation_task", Model: "Krea2 / Raw INT8 Mixed", Prompt: "Editorial portrait of a woman holding a perfume bottle in a bright studio.", Metadata: `{"seed":284797972294826,"megapixels":1.9}`, Assistant: &gateway.ContentAssistantView{Applied: true, Template: "photographic", Model: "qwen3-vl-e4b", OriginalPrompt: "Девушка показывает флакон духов", Suggestion: "Create an editorial portrait of a woman naturally presenting a premium perfume bottle."}, GenerationState: "completed", JobState: "completed", StateLabel: "Готово", StateClass: "is-complete", StatusMessage: "Задание завершено", Stages: previewContentStages(now.Add(-6*time.Minute), false), MediaCount: 1, Media: []domain.ContentMediaSummary{{ID: 42, EventID: 3, MediaType: "image", UpdatedAt: now.Add(-5 * time.Minute)}}, CreatedAt: now.Add(-6 * time.Minute), UpdatedAt: now.Add(-5 * time.Minute), ExpiresAt: now.Add(7 * 24 * time.Hour)},
+			{ID: 2, Key: "job-preview-flux", Version: "45-flux", UserID: 2, Username: "rayka", GenerationJobID: int64Pointer(302), JobID: "job-preview-flux", Service: "comfyui", Kind: "generation_task", Model: "Flux 2 / Klein 9B", Prompt: "Adult editorial portrait used to verify sensitive-content masking.", Metadata: `{"seed":1019794942414480}`, GenerationState: "completed", JobState: "completed", StateLabel: "Готово", StateClass: "is-complete", Sensitive: true, MediaCount: 1, Media: []domain.ContentMediaSummary{{ID: 43, EventID: 2, MediaType: "image", UpdatedAt: now.Add(-7 * time.Minute)}}, CreatedAt: now.Add(-8 * time.Minute), UpdatedAt: now.Add(-7 * time.Minute), ExpiresAt: now.Add(7 * 24 * time.Hour)},
+			{ID: 1, Key: "job-preview-error", Version: "45-error", UserID: 2, Username: "rayka", GenerationJobID: int64Pointer(301), JobID: "job-preview-error", Service: "comfyui", Kind: "generation_task", Model: "Krea2 / Raw INT8 Mixed", Prompt: "A detailed fashion portrait with dramatic lighting.", Metadata: `{"seed":45876641139403}`, GenerationState: "error", JobState: "failed", StateLabel: "Ошибка", StateClass: "is-error", StatusMessage: "ComfyUI отклонил workflow", ErrorCode: "comfy_submission_failed", ErrorMessage: "Выбранная модель больше не доступна в ComfyUI", Stages: previewContentStages(now.Add(-10*time.Minute), true), CreatedAt: now.Add(-10 * time.Minute), UpdatedAt: now.Add(-9 * time.Minute), ExpiresAt: now.Add(7 * 24 * time.Hour)},
+			{ID: 4, Key: "event-4", Version: "45-archived", Username: "old-user", AuthorDeleted: true, Service: "comfyui", Kind: "comfyui_prompt", Model: "Krea2 / Raw INT8 Mixed", Prompt: "Archived generation with parameters retained for review.", Metadata: `{"seed":8675309}`, GenerationState: "completed", StateLabel: "Готово", StateClass: "is-complete", GeneratedMediaCount: 1, MediaExpired: true, MediaExpiresAt: now.Add(-2 * time.Hour), CreatedAt: now.Add(-26 * time.Hour), UpdatedAt: now.Add(-2 * time.Hour), ExpiresAt: now.Add(6 * 24 * time.Hour)},
 		},
 	}))
 	mux.HandleFunc("/preview/media", render("admin_media_viewer", "Просмотр результата", map[string]any{"Filename": "AI-Gateway-preview-result.png", "MediaID": int64(42), "MediaType": "image"}))
@@ -519,4 +532,23 @@ func main() {
 
 func timePointer(value time.Time) *time.Time {
 	return &value
+}
+
+func int64Pointer(value int64) *int64 {
+	return &value
+}
+
+func previewContentStages(started time.Time, failed bool) []gateway.ContentStageView {
+	items := []gateway.ContentStageView{
+		{State: "draft", Label: "Создано", Message: "Задание зарегистрировано", Tone: "is-pending", CreatedAt: started},
+		{State: "preparing", Label: "Подготовка", Message: "Параметры и workflow проверены", Tone: "is-pending", DurationMS: 840, CreatedAt: started.Add(840 * time.Millisecond)},
+		{State: "queued", Label: "В очереди", Message: "ComfyUI принял workflow", Tone: "is-pending", DurationMS: 1210, CreatedAt: started.Add(2050 * time.Millisecond)},
+	}
+	if failed {
+		return append(items, gateway.ContentStageView{State: "failed", Label: "Ошибка", ErrorMessage: "Выбранная модель больше не доступна в ComfyUI", Tone: "is-error", DurationMS: 540, CreatedAt: started.Add(2590 * time.Millisecond)})
+	}
+	return append(items,
+		gateway.ContentStageView{State: "running", Label: "Генерация", Message: "ComfyUI выполняет workflow", Tone: "is-pending", DurationMS: 42000, CreatedAt: started.Add(44 * time.Second)},
+		gateway.ContentStageView{State: "completed", Label: "Готово", Message: "Результат сохранён", Tone: "is-complete", DurationMS: 2300, CreatedAt: started.Add(46*time.Second + 300*time.Millisecond)},
+	)
 }

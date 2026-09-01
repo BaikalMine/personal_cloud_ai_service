@@ -307,10 +307,18 @@ func (a *App) handleAdminContent(w http.ResponseWriter, r *http.Request) {
 	if query != "" {
 		rowLimit = 500
 	}
-	rows, err := a.store.ListContentEvents(r.Context(), rowLimit, username, service)
+	rows, err := a.store.ListContentEvents(r.Context(), rowLimit, username, "")
 	if err != nil {
 		http.Error(w, "ошибка базы данных", http.StatusInternalServerError)
 		return
+	}
+	jobs := []domain.GenerationJob{}
+	if service == "" || service == "comfyui" {
+		jobs, err = a.store.ListAdminGenerationJobs(r.Context(), rowLimit, username, time.Now().Add(-a.retentionPolicy().AIContent))
+		if err != nil {
+			http.Error(w, "ошибка загрузки заданий", http.StatusInternalServerError)
+			return
+		}
 	}
 	eventIDs := make([]int64, 0, len(rows))
 	for _, row := range rows {
@@ -326,52 +334,23 @@ func (a *App) handleAdminContent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ошибка отчёта хранения", http.StatusInternalServerError)
 		return
 	}
-	events := make([]ContentEventView, 0, min(len(rows), 200))
-	overview := ContentOverview{}
-	queryLower := strings.ToLower(query)
-	for _, row := range rows {
-		prompt, promptErr := a.contentCipher.Decrypt(row.PromptCipher)
-		response, responseErr := a.contentCipher.Decrypt(row.ResponseCipher)
-		metadata, metadataErr := a.contentCipher.Decrypt(row.MetadataCipher)
-		if promptErr != nil || responseErr != nil || metadataErr != nil {
-			prompt, response, metadata = "[ошибка расшифровки]", "", ""
+	events, overview := a.buildContentTaskViews(rows, jobs, mediaByEvent, service, query, 200)
+	jobIDs := make([]int64, 0, len(events))
+	for _, event := range events {
+		if event.GenerationJobID != nil {
+			jobIDs = append(jobIDs, *event.GenerationJobID)
 		}
-		if queryLower != "" {
-			haystack := strings.ToLower(strings.Join([]string{prompt, response, metadata, row.Model, row.ExternalID}, "\n"))
-			if !strings.Contains(haystack, queryLower) {
-				continue
-			}
+	}
+	transitions, err := a.store.GenerationJobTransitionsForAdmin(r.Context(), jobIDs)
+	if err != nil {
+		http.Error(w, "ошибка загрузки этапов заданий", http.StatusInternalServerError)
+		return
+	}
+	for index := range events {
+		if events[index].GenerationJobID == nil {
+			continue
 		}
-		visualPending := false
-		for _, media := range mediaByEvent[row.ID] {
-			if media.VisualPending {
-				visualPending = true
-				break
-			}
-		}
-		events = append(events, ContentEventView{
-			ID: row.ID, UserID: row.UserID, Username: row.Username, Service: row.Service,
-			Kind: row.Kind, ExternalID: row.ExternalID, Model: row.Model, Prompt: prompt,
-			Response: response, Metadata: prettyContentMetadata(metadata), Assistant: contentAssistantFromMetadata(metadata), GenerationState: row.GenerationState,
-			Sensitive: row.Sensitive || visualPending, VisualPending: visualPending,
-			GeneratedMediaCount: row.GeneratedMediaCount, MediaExpiresAt: row.MediaExpiresAt,
-			MediaExpired: row.GeneratedMediaCount > 0 && row.MediaCount == 0 && !row.MediaExpiresAt.IsZero() && row.MediaExpiresAt.Before(time.Now()),
-			MediaCount:   row.MediaCount, Media: mediaByEvent[row.ID],
-			CreatedAt: row.CreatedAt, ExpiresAt: row.ExpiresAt,
-		})
-		overview.Total++
-		switch row.Service {
-		case "comfyui":
-			overview.ComfyUI++
-		case "openwebui":
-			overview.OpenWebUI++
-		}
-		if row.MediaCount > 0 {
-			overview.WithMedia++
-		}
-		if len(events) == 200 {
-			break
-		}
+		events[index].Stages = contentStageViews(transitions[*events[index].GenerationJobID])
 	}
 	a.render(w, r, "admin_content", map[string]any{
 		"Title": "AI-контент пользователей", "Events": events,

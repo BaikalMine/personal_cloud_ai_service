@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"ai-access-gateway/internal/domain"
 	"ai-access-gateway/internal/promptassistant"
 )
 
@@ -132,7 +134,9 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 		writeGenerationError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	response := map[string]any{"prompt": result, "model": a.cfg.PromptAssistantModel, "correlation_id": correlationID(r)}
+	correlation := correlationID(r)
+	a.recordPromptAssistantEvent(r.Context(), user.ID, correlation, mode, profile, prompt, result, think, len(references))
+	response := map[string]any{"prompt": result, "model": a.cfg.PromptAssistantModel, "correlation_id": correlation}
 	if miningWarning != "" {
 		response["mining_warning"] = miningWarning
 	}
@@ -140,6 +144,35 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 		response["mining_paused"] = true
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (a *App) recordPromptAssistantEvent(ctx context.Context, userID int64, correlation string, mode promptassistant.Mode, profile promptassistant.Profile, prompt, result string, think bool, referenceCount int) {
+	if a.contentCipher == nil || a.store == nil {
+		return
+	}
+	metadata, err := json.Marshal(map[string]any{
+		"prompt_assistant": map[string]any{
+			"requested": true, "applied": false, "template": profile, "think": think,
+			"original_prompt": prompt, "suggestion": result, "mode": mode, "reference_count": referenceCount,
+		},
+	})
+	if err != nil {
+		return
+	}
+	promptCipher, promptErr := a.contentCipher.Encrypt(prompt)
+	responseCipher, responseErr := a.contentCipher.Encrypt(result)
+	metadataCipher, metadataErr := a.contentCipher.Encrypt(string(metadata))
+	if promptErr != nil || responseErr != nil || metadataErr != nil {
+		logGateway(ctx, slog.LevelError, "prompt_assistant_audit_encrypt_failed", "Prompt assistant audit encryption failed")
+		return
+	}
+	if _, err := a.store.InsertContentEvent(ctx, domain.ContentEventRecord{
+		UserID: userID, CorrelationID: correlation, Service: "ollama", Kind: "prompt_assistant", ExternalID: newRequestID(),
+		Model: a.cfg.PromptAssistantModel, GenerationState: "completed", PromptCipher: promptCipher,
+		ResponseCipher: responseCipher, MetadataCipher: metadataCipher, ExpiresAt: time.Now().Add(a.retentionPolicy().AIContent),
+	}); err != nil {
+		logGateway(ctx, slog.LevelError, "prompt_assistant_audit_store_failed", "Prompt assistant audit storage failed", "error", err)
+	}
 }
 
 func releasePromptAssistantImages(references []promptassistant.ImageReference) {

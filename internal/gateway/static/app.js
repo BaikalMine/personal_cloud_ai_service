@@ -163,20 +163,22 @@
   const contentDialogBody = document.getElementById("content-detail-body");
   if (contentGallery && contentDialog && contentDialogBody) {
     let contentDialogTrigger = null;
-    let contentDialogEventID = "";
+    let contentDialogTaskKey = "";
+    const contentDialogFocusTrap = window.AIGatewayDialogFocus?.createFocusTrap({ root: contentDialog, documentRef: document }) || null;
     const closeContentDialog = () => {
       if (contentDialog.hidden) return;
+      contentDialogFocusTrap?.deactivate();
       contentDialog.hidden = true;
       contentDialogBody.replaceChildren();
       document.body.classList.remove("content-detail-open");
-      contentDialogTrigger?.focus({ preventScroll: true });
+      if (!contentDialogFocusTrap) contentDialogTrigger?.focus({ preventScroll: true });
       contentDialogTrigger = null;
-      contentDialogEventID = "";
+      contentDialogTaskKey = "";
     };
     const renderContentDialog = (trigger, preserveScroll = false) => {
       if (!(trigger instanceof HTMLElement)) return false;
-      const eventID = trigger.dataset.contentEventOpen || "";
-      const detail = document.getElementById(`content-event-detail-${eventID}`);
+      const taskKey = trigger.dataset.contentTaskOpen || "";
+      const detail = document.getElementById(`content-task-detail-${taskKey}`);
       if (!(detail instanceof HTMLTemplateElement)) return false;
       const scrollTop = preserveScroll ? contentDialogBody.scrollTop : 0;
       contentDialogBody.replaceChildren(detail.content.cloneNode(true));
@@ -186,19 +188,25 @@
       bindContentImageRetries(contentDialogBody);
       contentDialogBody.scrollTop = scrollTop;
       contentDialogTrigger = trigger;
-      contentDialogEventID = eventID;
+      contentDialogTaskKey = taskKey;
       contentDialog.hidden = false;
       document.body.classList.add("content-detail-open");
+      const closeButton = contentDialog.querySelector("[data-content-detail-close]");
+      if (contentDialogFocusTrap) {
+        contentDialogFocusTrap.activate({ trigger, initialFocus: closeButton, onEscape: closeContentDialog });
+      } else {
+        closeButton?.focus();
+      }
       return true;
     };
     contentGallery.addEventListener("click", (event) => {
-      const trigger = event.target.closest("[data-content-event-open]");
+      const trigger = event.target.closest("[data-content-task-open]");
       if (!trigger) return;
       if (revealSensitiveMedia(trigger)) return;
-      if (renderContentDialog(trigger)) contentDialog.querySelector("[data-content-detail-close]")?.focus();
+      renderContentDialog(trigger);
     });
     contentDialog.querySelectorAll("[data-content-detail-close]").forEach((button) => button.addEventListener("click", closeContentDialog));
-    document.addEventListener("keydown", (event) => {
+    if (!contentDialogFocusTrap) document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") closeContentDialog();
     });
 
@@ -217,6 +225,46 @@
       const replaceChildrenFrom = (current, next) => {
         if (!current || !next) return;
         current.replaceChildren(...[...next.childNodes].map((node) => document.importNode(node, true)));
+      };
+      const contentTaskCard = (root, taskKey) => [...root.querySelectorAll("[data-content-task-key]")].find((card) => card.dataset.contentTaskKey === taskKey) || null;
+      const contentTaskDetail = (root, taskKey) => [...root.querySelectorAll("template[data-content-task-detail-key]")].find((detail) => detail.dataset.contentTaskDetailKey === taskKey) || null;
+      const reconcileContentGallery = (nextGallery) => {
+        const currentCards = new Map([...contentGallery.querySelectorAll("[data-content-task-key]")].map((card) => [card.dataset.contentTaskKey, card]));
+        const currentDetails = new Map([...contentGallery.querySelectorAll("template[data-content-task-detail-key]")].map((detail) => [detail.dataset.contentTaskDetailKey, detail]));
+        const revealed = new Set([...currentCards].filter(([, card]) => card.classList.contains("is-revealed")).map(([key]) => key));
+        const kept = new Set();
+        const changed = new Set();
+        const nextCards = [...nextGallery.querySelectorAll("[data-content-task-key]")];
+
+        if (nextCards.length === 0) {
+          const empty = nextGallery.querySelector("[data-content-empty]");
+          contentGallery.replaceChildren(empty ? document.importNode(empty, true) : document.createTextNode(""));
+          return changed;
+        }
+
+        nextCards.forEach((nextCard) => {
+          const taskKey = nextCard.dataset.contentTaskKey || "";
+          const nextDetail = contentTaskDetail(nextGallery, taskKey);
+          if (!taskKey || !nextDetail) return;
+          const currentCard = currentCards.get(taskKey);
+          const currentDetail = currentDetails.get(taskKey);
+          const unchanged = currentCard && currentDetail && currentCard.dataset.contentVersion === nextCard.dataset.contentVersion && currentDetail.dataset.contentVersion === nextDetail.dataset.contentVersion;
+          const card = unchanged ? currentCard : document.importNode(nextCard, true);
+          const detail = unchanged ? currentDetail : document.importNode(nextDetail, true);
+          if (!unchanged) changed.add(taskKey);
+          if (!currentCard) {
+            card.classList.add("is-new");
+            window.setTimeout(() => card.classList.remove("is-new"), 450);
+          }
+          if (revealed.has(taskKey)) card.classList.add("is-revealed");
+          contentGallery.append(card, detail);
+          kept.add(card);
+          kept.add(detail);
+        });
+        [...contentGallery.children].forEach((node) => {
+          if (!kept.has(node)) node.remove();
+        });
+        return changed;
       };
       const refreshContent = async () => {
         if (refreshInFlight) {
@@ -238,38 +286,29 @@
           const nextHeading = nextDocument.querySelector("[data-content-list-heading]");
           if (!nextPage || !nextGallery || !nextOverview || !nextHeading) throw new Error("content refresh payload is incomplete");
 
-          const oldIDs = new Set([...contentGallery.querySelectorAll("[data-content-event-id]")].map((card) => card.dataset.contentEventId));
-          const revealedIDs = new Set([...contentGallery.querySelectorAll(".sensitive-media.is-revealed [data-content-event-open]")].map((trigger) => trigger.dataset.contentEventOpen));
           const preserveAnchor = window.scrollY > 220 && contentDialog.hidden;
-          const anchor = preserveAnchor ? [...contentGallery.querySelectorAll("[data-content-event-id]")].find((card) => card.getBoundingClientRect().bottom > 0) : null;
-          const anchorID = anchor?.dataset.contentEventId || "";
+          const anchor = preserveAnchor ? [...contentGallery.querySelectorAll("[data-content-task-key]")].find((card) => card.getBoundingClientRect().bottom > 0) : null;
+          const anchorKey = anchor?.dataset.contentTaskKey || "";
           const anchorTop = anchor?.getBoundingClientRect().top || 0;
 
           replaceChildrenFrom(document.querySelector("[data-content-overview]"), nextOverview);
           replaceChildrenFrom(document.querySelector("[data-content-list-heading]"), nextHeading);
-          replaceChildrenFrom(contentGallery, nextGallery);
+          const changedTasks = reconcileContentGallery(nextGallery);
           contentRevision = Number(nextPage.dataset.contentRevision) || contentRevision;
           adminContentPage.dataset.contentRevision = String(contentRevision);
-
-          revealedIDs.forEach((eventID) => contentGallery.querySelector(`[data-content-event-open="${eventID}"]`)?.closest(".sensitive-media")?.classList.add("is-revealed"));
-          contentGallery.querySelectorAll("[data-content-event-id]").forEach((card) => {
-            if (!oldIDs.has(card.dataset.contentEventId)) {
-              card.classList.add("is-new");
-              window.setTimeout(() => card.classList.remove("is-new"), 450);
-            }
-          });
           bindContentImageRetries(contentGallery);
 
-          if (anchorID) {
-            const nextAnchor = contentGallery.querySelector(`[data-content-event-id="${anchorID}"]`);
+          if (anchorKey) {
+            const nextAnchor = contentTaskCard(contentGallery, anchorKey);
             if (nextAnchor) window.scrollBy(0, nextAnchor.getBoundingClientRect().top - anchorTop);
           }
-          if (!contentDialog.hidden && contentDialogEventID) {
-            const nextTrigger = contentGallery.querySelector(`[data-content-event-open="${contentDialogEventID}"]`);
-            if (nextTrigger) renderContentDialog(nextTrigger, true); else closeContentDialog();
+          if (!contentDialog.hidden && contentDialogTaskKey) {
+            const nextTrigger = contentTaskCard(contentGallery, contentDialogTaskKey)?.querySelector("[data-content-task-open]");
+            if (!nextTrigger) closeContentDialog();
+            else if (changedTasks.has(contentDialogTaskKey)) renderContentDialog(nextTrigger, true);
           }
           succeeded = true;
-          setLiveState("online", "Онлайн · новые записи появляются сразу");
+          setLiveState("online", "Онлайн · задания обновляются сразу");
         } catch (_) {
           setLiveState("offline", "Не удалось обновить · повторяем подключение");
         } finally {
@@ -286,11 +325,11 @@
       const eventsURL = new URL("/admin/content/events", window.location.origin);
       eventsURL.searchParams.set("since", String(contentRevision));
       const contentEvents = new EventSource(eventsURL, { withCredentials: true });
-      contentEvents.addEventListener("open", () => setLiveState("online", "Онлайн · новые записи появляются сразу"));
+      contentEvents.addEventListener("open", () => setLiveState("online", "Онлайн · задания обновляются сразу"));
       contentEvents.addEventListener("ready", (event) => {
         const revision = Number(event.data);
         if (Number.isFinite(revision)) contentRevision = Math.max(contentRevision, revision);
-        setLiveState("online", "Онлайн · новые записи появляются сразу");
+        setLiveState("online", "Онлайн · задания обновляются сразу");
       });
       contentEvents.addEventListener("content", (event) => {
         const revision = Number(event.data);
