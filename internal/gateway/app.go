@@ -48,6 +48,7 @@ var staticJavaScriptAssetPaths = []string{
 	"static/generation-summary.js",
 	"static/generation-video.js",
 	"static/generation-wizard.js",
+	"static/notifications.js",
 }
 
 var staticJavaScriptAssets = func() map[string]string {
@@ -58,7 +59,12 @@ var staticJavaScriptAssets = func() map[string]string {
 	return assets
 }()
 
-var frontendAssetPaths = append([]string{"static/style.css"}, staticJavaScriptAssetPaths...)
+var staticCSSAssets = map[string]string{
+	"/static/style.css":         "static/style.css",
+	"/static/notifications.css": "static/notifications.css",
+}
+
+var frontendAssetPaths = append([]string{"static/style.css", "static/notifications.css"}, staticJavaScriptAssetPaths...)
 
 type Templates struct {
 	*template.Template
@@ -286,6 +292,7 @@ func (a *App) publicMux() http.Handler {
 	mux.Handle("/account/sessions", a.requireAuth(http.HandlerFunc(a.handleAccountSessions)))
 	mux.Handle("/mining/toggle", a.requireAuth(http.HandlerFunc(a.handleMiningToggle)))
 	mux.Handle("/mining/icon/", a.requireAuth(http.HandlerFunc(a.handleMinerIcon)))
+	a.registerNotificationRoutes(mux)
 	a.registerGenerationRoutes(mux)
 	a.registerServiceRoutes(mux)
 	return mux
@@ -317,6 +324,7 @@ func (a *App) adminMux() http.Handler {
 	mux.Handle("/account/sessions", a.requireAuth(http.HandlerFunc(a.handleAccountSessions)))
 	mux.Handle("/mining/toggle", a.requireAuth(http.HandlerFunc(a.handleMiningToggle)))
 	mux.Handle("/mining/icon/", a.requireAuth(http.HandlerFunc(a.handleMinerIcon)))
+	a.registerNotificationRoutes(mux)
 	mux.Handle("/metrics", a.adminLANOnly(http.HandlerFunc(a.handlePrometheusMetrics)))
 	a.registerPprofRoutes(mux)
 	mux.Handle("/admin", a.requireLANAdmin(http.HandlerFunc(a.handleAdminDashboard)))
@@ -328,7 +336,9 @@ func (a *App) adminMux() http.Handler {
 }
 
 func (a *App) registerStaticRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/static/style.css", a.handleStaticCSS)
+	for path := range staticCSSAssets {
+		mux.HandleFunc(path, a.handleStaticCSS)
+	}
 	for path := range staticJavaScriptAssets {
 		mux.HandleFunc(path, a.handleStaticJS)
 	}
@@ -389,7 +399,12 @@ func (a *App) handleStaticCSS(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/css; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	body, err := embeddedFS.ReadFile("static/style.css")
+	assetPath, ok := staticCSSAssets[r.URL.Path]
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	body, err := embeddedFS.ReadFile(assetPath)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -519,7 +534,13 @@ func (a *App) renderStatus(w http.ResponseWriter, r *http.Request, status int, n
 	if _, ok := data["Title"]; !ok {
 		data["Title"] = "AI Access Gateway"
 	}
-	data["CurrentUser"] = a.currentUser(r)
+	currentUser := a.currentUser(r)
+	data["CurrentUser"] = currentUser
+	if _, provided := data["NotificationSummary"]; !provided && currentUser != nil && a.store != nil {
+		if summary, err := a.store.UserNotificationSummary(r.Context(), currentUser.ID); err == nil {
+			data["NotificationSummary"] = summary
+		}
+	}
 	data["CSRF"] = a.csrfToken(r)
 	data["PublicBaseURL"] = a.cfg.PublicBaseURL
 	data["AdminBaseURL"] = a.cfg.AdminBaseURL

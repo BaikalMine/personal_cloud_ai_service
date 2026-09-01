@@ -250,8 +250,10 @@
   const requestedLibraryWorkflowID = requestedQuery.get("workflow") || "";
   const requestedLibrarySlot = requestedQuery.get("slot") || "1";
   const requestedLibraryRole = requestedQuery.get("role") || "base_scene";
+  const requestedJobID = requestedQuery.get("job") || "";
   let requestedVariantHandled = false;
   let requestedLibraryMediaHandled = false;
+  let requestedJobHandled = false;
   const activeGenerationStorageKey = "ai-gateway.active-generation";
   const generationHistoryCollapsedStorageKey = "ai-gateway.generation-history-collapsed";
 
@@ -3004,22 +3006,36 @@
       stateFilter: variantStateFilter?.value || "",
       templateFilter: variantTemplateFilter?.value || "",
     }, (state) => ({ ...state, stateFilter: variantStateFilter?.value || "", templateFilter: variantTemplateFilter?.value || "" }));
-    const filteredJobs = generationModules.history?.filterJobs?.(items, filters) || items.filter((job) => (
+    let filteredJobs = generationModules.history?.filterJobs?.(items, filters) || items.filter((job) => (
       (!filters.stateFilter || job.state === filters.stateFilter)
       && (!filters.templateFilter || job.template_id === filters.templateFilter)
     ));
+    const requestedJob = requestedJobID && !requestedJobHandled
+      ? items.find((job) => job.job_id === requestedJobID)
+      : null;
+    if (requestedJob && !filteredJobs.some((job) => job.job_id === requestedJobID)) {
+      if (variantStateFilter) variantStateFilter.value = "";
+      if (variantTemplateFilter) variantTemplateFilter.value = "";
+      historySlice.dispatch({ type: "SET_FILTERS", stateFilter: "", templateFilter: "" }, (state) => ({ ...state, stateFilter: "", templateFilter: "" }));
+      filteredJobs = items;
+    }
     renderJobCount(filteredJobs.length);
     if (filteredJobs.length === 0) {
       const empty = document.createElement("p");
       empty.className = "generation-variant-empty ui-empty-state";
       empty.textContent = items.length ? "По этим фильтрам заданий нет." : "Заданий пока нет. Первый запуск появится здесь автоматически.";
       variantList.replaceChildren(empty);
+      if (requestedJobID && !requestedJobHandled) {
+        requestedJobHandled = true;
+        showRepeatNotice("Задача больше не хранится", `История запусков доступна ${generationRetentionLabel}. Сохранённые результаты можно проверить в галерее.`, true);
+      }
       return;
     }
     variantList.replaceChildren(...filteredJobs.map((job) => {
       const card = document.createElement("article");
       card.className = "generation-job ui-media-card";
       card.dataset.state = job.state || "submitting";
+      card.dataset.jobId = job.job_id || "";
       if (["submitting", "preparing", "uploading", "queued", "waiting_resources", "running", "postprocessing", "archiving"].includes(job.state)) {
         card.setAttribute("aria-busy", "true");
       } else if (job.state === "completed") {
@@ -3092,6 +3108,26 @@
       return card;
     }));
     refreshExpiryLabels();
+    if (requestedJobID && !requestedJobHandled) {
+      const target = variantList.querySelector(`[data-job-id="${CSS.escape(requestedJobID)}"]`);
+      requestedJobHandled = true;
+      if (target) {
+        if (historySlice.get().collapsed) {
+          historySlice.dispatch({ type: "SET_COLLAPSED", collapsed: false }, (state) => ({ ...state, collapsed: false }));
+          syncGenerationHistoryVisibility({ persist: true });
+        }
+        target.classList.add("is-notification-target");
+        const details = target.querySelector(".generation-job-details");
+        if (details) details.open = true;
+        window.requestAnimationFrame(() => {
+          const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+          target.scrollIntoView({ block: "center", behavior: reduceMotion ? "auto" : "smooth" });
+          target.querySelector("summary")?.focus({ preventScroll: true });
+        });
+      } else {
+        showRepeatNotice("Задача больше не хранится", `История запусков доступна ${generationRetentionLabel}. Сохранённые результаты можно проверить в галерее.`, true);
+      }
+    }
   };
 
   const refreshJobs = async () => {

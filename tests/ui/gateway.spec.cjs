@@ -7,6 +7,7 @@ const visualStyle = path.join(__dirname, "visual-stability.css");
 const responsiveRoutes = [
   { route: "/preview/generate", snapshot: "generation-step-1.png" },
   { route: "/preview/gallery", snapshot: "gallery.png" },
+  { route: "/preview/profile", snapshot: "profile.png" },
   { route: "/preview/invites", snapshot: "invitations.png" },
   { route: "/preview/users", snapshot: "users.png" },
   { route: "/preview/admin", snapshot: "admin-dashboard.png" },
@@ -110,6 +111,67 @@ test("media library is shared by Krea2, Flux2 and MiniMax", async ({ page }, tes
     await expect(page.locator(`.generation-workflow-choice.is-selected[data-preset-id="${target.workflow}"]`)).toBeVisible();
     await expect(page.locator(`[data-image-slot="${target.slot}"] [data-image-name]`)).toHaveText("AI-Gateway-Krea2-portrait.png");
   }
+});
+
+test("notification center fits every viewport", async ({ page }, testInfo) => {
+  await open(page, "/preview/generate");
+  const trigger = page.getByRole("button", { name: /Задачи: активных 2, непрочитанных 2/ });
+  await trigger.click();
+  const panel = page.getByRole("dialog", { name: "Задачи и уведомления" });
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText("Результат Krea2 сохранён");
+  await expect(panel).toContainText("Flux2 не удалось подготовить");
+  const box = await panel.boundingBox();
+  const viewport = page.viewportSize();
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+  if (viewport.width === 390) {
+    const topbar = await page.locator(".user-topbar").boundingBox();
+    expect(topbar.height, "the task trigger must not push the mobile menu onto a second row").toBeLessThanOrEqual(70);
+  }
+  await assertNoViewportOverflow(page, `${testInfo.project.name} notification center`);
+  await expect(page).toHaveScreenshot("notification-center.png", { stylePath: visualStyle });
+});
+
+test("notification actions open the exact generation", async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+  await open(page, "/preview/generate");
+  const trigger = page.getByRole("button", { name: /Задачи: активных 2, непрочитанных 2/ });
+  await trigger.click();
+  await expect(page.getByRole("button", { name: "Закрыть уведомления" })).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(page.getByRole("link", { name: "Настроить" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "Закрыть уведомления" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Задачи и уведомления" })).toBeHidden();
+  await expect(trigger).toBeFocused();
+
+  await trigger.click();
+  const readRequest = page.waitForRequest((request) => request.url().endsWith("/notifications/read") && request.method() === "POST");
+  await page.getByRole("button", { name: "Прочитать все" }).click();
+  await readRequest;
+
+  await page.getByRole("link", { name: /Генерация готова/ }).click();
+  await expect(page).toHaveURL(/job=job-image-completed/);
+  const target = page.locator('[data-job-id="job-image-completed"]');
+  await expect(target).toHaveClass(/is-notification-target/);
+  await expect(target.locator(".generation-job-details")).toHaveAttribute("open", "");
+  await expect(target.locator(".generation-job-timeline li")).toHaveCount(8);
+});
+
+test("notification settings disable browser delivery with in-app notifications", async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+  await open(page, "/preview/profile");
+  const inApp = page.locator('[name="in_app_enabled"]');
+  const browser = page.locator('[name="browser_enabled"]');
+  await expect(inApp).toBeChecked();
+  await inApp.uncheck();
+  await expect(browser).not.toBeChecked();
+  await expect(browser).toBeDisabled();
+  await expect(page.locator("[data-browser-notification-status]")).toContainText(/Разрешение|Заблокированы|не поддерживает/);
 });
 
 test("AI content keeps one live card for the whole generation task", async ({ page }, testInfo) => {
@@ -255,7 +317,7 @@ test("operations center puts live work and failures before analytics", async ({ 
 
 test("critical product surfaces have no serious axe violations", async ({ page }, testInfo) => {
   desktopOnly(testInfo);
-  const routes = ["/preview/components", "/preview/generate", "/preview/gallery", "/preview/invites", "/preview/users", "/preview/content", "/preview/admin"];
+  const routes = ["/preview/components", "/preview/generate", "/preview/gallery", "/preview/profile", "/preview/invites", "/preview/users", "/preview/content", "/preview/admin"];
   const routeViolations = [];
 
   for (const route of routes) {

@@ -19,6 +19,27 @@
       <button type="submit">Сохранить профиль</button>
     </form>
   </section>
+  <section class="panel narrow form-panel notification-settings" id="notification-settings">
+    <div class="panel-heading"><div><p class="section-kicker">Задачи</p><h2>Уведомления</h2><p class="panel-intro">Получайте статус любой генерации: Krea2, Flux2 и MiniMax H3.</p></div></div>
+    <form method="post" action="/account/notifications" data-notification-settings>
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <div class="notification-settings-list">
+        <label class="notification-setting-row">
+          <input name="in_app_enabled" type="checkbox" {{if .NotificationPreferences.InAppEnabled}}checked{{end}}>
+          <span><strong>В интерфейсе</strong><small>Показывать завершения и ошибки в общей шапке.</small></span>
+        </label>
+        <label class="notification-setting-row">
+          <input name="success_enabled" type="checkbox" {{if .NotificationPreferences.SuccessEnabled}}checked{{end}}>
+          <span><strong>Успешные генерации</strong><small>Если выключить, останутся только сообщения об ошибках.</small></span>
+        </label>
+        <label class="notification-setting-row">
+          <input name="browser_enabled" type="checkbox" {{if .NotificationPreferences.BrowserEnabled}}checked{{end}} data-browser-notification-toggle>
+          <span><strong>В браузере</strong><small data-browser-notification-status>Разрешение запрашивается только после включения.</small></span>
+        </label>
+      </div>
+      <button type="submit">Сохранить уведомления</button>
+    </form>
+  </section>
 </main>
 </body></html>
 {{end}}

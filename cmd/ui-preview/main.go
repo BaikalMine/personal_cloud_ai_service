@@ -27,6 +27,10 @@ func main() {
 		"CurrentUser":   admin,
 		"PublicBaseURL": "http://127.0.0.1:8090",
 		"AdminBaseURL":  "http://127.0.0.1:8091",
+		"NotificationSummary": domain.UserNotificationSummary{
+			Revision: 17, UnreadCount: 2, ActiveCount: 2,
+			Preferences: domain.UserNotificationPreferences{InAppEnabled: true, SuccessEnabled: true, BrowserEnabled: false},
+		},
 		"Retention": map[string]any{
 			"GenerationHistoryLabel": "24 часа",
 			"GenerationMediaLabel":   "24 часа",
@@ -161,6 +165,41 @@ func main() {
 		flusher.Flush()
 		<-r.Context().Done()
 	})
+	mux.HandleFunc("/notifications", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"summary":     map[string]any{"revision": 17, "unread_count": 2, "active_count": 2},
+			"preferences": map[string]any{"in_app_enabled": true, "success_enabled": true, "browser_enabled": false},
+			"notifications": []map[string]any{
+				{"id": 1, "generation_job_id": "job-image-completed", "kind": "generation_completed", "title": "Генерация готова", "message": "Результат Krea2 сохранён и готов к просмотру.", "href": "/preview/generate?job=job-image-completed", "read": false, "created_at": now.Add(-90 * time.Second)},
+				{"id": 2, "generation_job_id": "job-image-failed", "kind": "generation_failed", "title": "Генерация завершилась с ошибкой", "message": "Flux2 не удалось подготовить обязательный вход модели.", "href": "/preview/generate?job=job-image-failed", "read": false, "created_at": now.Add(-12 * time.Minute)},
+			},
+		})
+	})
+	mux.HandleFunc("/notifications/read", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = w.Write([]byte(`{"changed":2}`))
+	})
+	mux.HandleFunc("/notifications/events", func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unavailable", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		_, _ = w.Write([]byte("retry: 2000\nevent: ready\ndata: {\"revision\":17}\n\n"))
+		flusher.Flush()
+		<-r.Context().Done()
+	})
+	mux.HandleFunc("/account/notifications", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Accept") == "application/json" {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_, _ = w.Write([]byte(`{"in_app_enabled":true,"success_enabled":true,"browser_enabled":false}`))
+			return
+		}
+		http.Redirect(w, r, "/preview/profile?notifications_updated=1#notification-settings", http.StatusSeeOther)
+	})
 	mux.HandleFunc("/generate/jobs/cancel", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = w.Write([]byte(`{"cancelled":false,"job":{"message":"Отмена отправлена в ComfyUI"}}`))
@@ -272,7 +311,11 @@ func main() {
 	mux.HandleFunc("/preview/login", render("login", "Вход", map[string]any{"CurrentUser": nil, "Next": ""}))
 	mux.HandleFunc("/preview/profile", render("account_profile", "Профиль", map[string]any{
 		"ProfileUsername": "admin", "ProfileEmail": "admin@example.local", "CanChangeUsername": true,
+		"NotificationPreferences": domain.UserNotificationPreferences{InAppEnabled: true, SuccessEnabled: true, BrowserEnabled: false},
 	}))
+	mux.HandleFunc("/account/profile", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/preview/profile", http.StatusFound)
+	})
 	mux.HandleFunc("/preview/password", render("account_password", "Смена пароля", map[string]any{}))
 	accountSessions := []domain.AccountSession{
 		{ID: 71, Current: true, IP: "192.168.1.86", UserAgent: "Chrome 139 · Windows 11", CreatedAt: now.Add(-8 * time.Hour), LastSeenAt: now.Add(-time.Minute), ExpiresAt: now.Add(22 * time.Hour)},

@@ -63,7 +63,7 @@ func TestDatabaseCleanupViewSortsErrorsFirst(t *testing.T) {
 
 func TestGenerationJobTablesHaveLifecyclePolicies(t *testing.T) {
 	policies := databaseTablePolicies()
-	for _, table := range []string{"generation_jobs", "generation_job_transitions", "generation_job_revision", "service_observations", "gateway_observations", "content_media_chunks"} {
+	for _, table := range []string{"generation_jobs", "generation_job_transitions", "generation_job_revision", "user_notifications", "user_notification_preferences", "user_notification_revision", "service_observations", "gateway_observations", "content_media_chunks"} {
 		policy, ok := policies[table]
 		if !ok || policy.Owner == "" || policy.Retention == nil {
 			t.Fatalf("generation job table %q has no lifecycle policy: %+v", table, policy)

@@ -8,8 +8,10 @@
   <link rel="preload" href="/static/fonts/manrope-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/static/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/static/style.css?v={{.AssetVersion}}">
+  <link rel="stylesheet" href="/static/notifications.css?v={{.AssetVersion}}">
   <script src="/static/dialog-focus.js?v={{.AssetVersion}}" defer></script>
   <script src="/static/app.js?v={{.AssetVersion}}" defer></script>
+  <script src="/static/notifications.js?v={{.AssetVersion}}" defer></script>
 </head>
 <body>
 <a class="skip-link" href="#main-content">К содержимому</a>
@@ -28,6 +30,32 @@
   </form>
   {{end}}{{end}}
   <label class="header-sensitive-toggle" title="По умолчанию чувствительные результаты скрыты блюром. Включите, чтобы показывать их в галереях."><input type="checkbox" data-sensitive-toggle><span class="header-sensitive-switch" aria-hidden="true"></span><span>18+</span></label>
+  {{with .NotificationSummary}}
+  <div class="notification-center" data-notification-center data-notification-revision="{{.Revision}}" data-notification-csrf="{{$.CSRF}}">
+    <button class="notification-trigger{{if gt .UnreadCount 0}} has-unread{{end}}" type="button" aria-expanded="false" aria-controls="notification-panel" aria-label="Задачи: активных {{.ActiveCount}}, непрочитанных {{.UnreadCount}}">
+      <span class="notification-trigger-label">Задачи</span>
+      <span class="notification-count is-active" data-notification-active-count {{if eq .ActiveCount 0}}hidden{{end}}>{{.ActiveCount}}</span>
+      <span class="notification-count is-unread" data-notification-unread-count {{if eq .UnreadCount 0}}hidden{{end}}>{{.UnreadCount}}</span>
+    </button>
+    <section class="notification-panel" id="notification-panel" role="dialog" aria-modal="true" aria-label="Задачи и уведомления" hidden>
+      <header class="notification-panel-header">
+        <div><strong>Задачи и уведомления</strong><span data-notification-connection>Подключаем обновления...</span></div>
+        <button class="notification-close" type="button" data-notification-close aria-label="Закрыть уведомления">×</button>
+      </header>
+      <dl class="notification-overview">
+        <div><dt>В работе</dt><dd data-notification-active-total>{{.ActiveCount}}</dd></div>
+        <div><dt>Новые</dt><dd data-notification-unread-total>{{.UnreadCount}}</dd></div>
+      </dl>
+      <div class="notification-list" data-notification-list aria-live="polite">
+        <p class="notification-empty">Загружаем последние события...</p>
+      </div>
+      <footer class="notification-panel-footer">
+        <button class="button ghost" type="button" data-notification-read-all {{if eq .UnreadCount 0}}disabled{{end}}>Прочитать все</button>
+        <a href="/account/profile#notification-settings">Настроить</a>
+      </footer>
+    </section>
+  </div>
+  {{end}}
   <button class="menu-toggle" type="button" aria-label="Открыть меню" aria-controls="user-navigation" aria-expanded="false"><i></i><i></i><i></i></button>
   <div class="topbar-menu" id="user-navigation">
     <nav class="primary-nav" aria-label="Основная навигация">

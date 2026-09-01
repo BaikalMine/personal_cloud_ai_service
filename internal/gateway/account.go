@@ -7,6 +7,7 @@ import (
 	"net/mail"
 	"strings"
 
+	"ai-access-gateway/internal/domain"
 	"ai-access-gateway/internal/security"
 	"ai-access-gateway/internal/store"
 )
@@ -18,9 +19,16 @@ func (a *App) handleAccountProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	render := func(errorMessage string, successMessage string, username string, email string) {
+		notificationSummary := domain.UserNotificationSummary{
+			Preferences: domain.UserNotificationPreferences{InAppEnabled: true, SuccessEnabled: true},
+		}
+		if summary, err := a.store.UserNotificationSummary(r.Context(), user.ID); err == nil {
+			notificationSummary = summary
+		}
 		a.render(w, r, "account_profile", map[string]any{
 			"Title": "Профиль", "ProfileUsername": username, "ProfileEmail": email,
 			"CanChangeUsername": user.Role == "admin", "Error": errorMessage, "Success": successMessage,
+			"NotificationSummary": notificationSummary, "NotificationPreferences": notificationSummary.Preferences,
 		})
 	}
 
@@ -32,6 +40,8 @@ func (a *App) handleAccountProfile(w http.ResponseWriter, r *http.Request) {
 		success := ""
 		if r.URL.Query().Get("updated") == "1" {
 			success = "Профиль обновлён."
+		} else if r.URL.Query().Get("notifications_updated") == "1" {
+			success = "Настройки уведомлений обновлены."
 		}
 		render("", success, user.Username, currentEmail)
 		return
@@ -76,6 +86,37 @@ func (a *App) handleAccountProfile(w http.ResponseWriter, r *http.Request) {
 		"email_changed":    email != currentEmail,
 	})
 	http.Redirect(w, r, "/account/profile?updated=1", http.StatusSeeOther)
+}
+
+func (a *App) handleAccountNotifications(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if !a.validCSRF(r) {
+		http.Error(w, "неверный защитный токен", http.StatusForbidden)
+		return
+	}
+	user := a.currentUser(r)
+	preferences, _, err := a.store.SetUserNotificationPreferences(r.Context(), user.ID, domain.UserNotificationPreferences{
+		InAppEnabled:   r.Form.Get("in_app_enabled") == "on",
+		SuccessEnabled: r.Form.Get("success_enabled") == "on",
+		BrowserEnabled: r.Form.Get("browser_enabled") == "on",
+	})
+	if err != nil {
+		writeGenerationError(w, http.StatusInternalServerError, "не удалось сохранить настройки уведомлений")
+		return
+	}
+	a.audit(r.Context(), &user.ID, "user_notification_preferences_updated", "user", &user.ID, a.clientIP(r), r.UserAgent(), map[string]any{
+		"in_app_enabled": preferences.InAppEnabled, "success_enabled": preferences.SuccessEnabled, "browser_enabled": preferences.BrowserEnabled,
+	})
+	if strings.Contains(r.Header.Get("Accept"), "application/json") {
+		writeJSON(w, http.StatusOK, notificationPreferencesFromSummary(domain.UserNotificationSummary{Preferences: preferences}))
+		return
+	}
+	http.Redirect(w, r, "/account/profile?notifications_updated=1#notification-settings", http.StatusSeeOther)
 }
 
 func validateProfileUsername(username string) string {

@@ -142,6 +142,9 @@ func (s *Store) CreateGenerationJob(ctx context.Context, params domain.CreateGen
 			VALUES($1,$2,'','draft',$3,1)`, job.ID, job.CorrelationID, job.StatusMessage); err != nil {
 			return domain.GenerationJob{}, false, err
 		}
+		if err := incrementUserNotificationRevision(ctx, tx, params.UserID); err != nil {
+			return domain.GenerationJob{}, false, err
+		}
 		if err := incrementGenerationJobRevision(ctx, tx); err != nil {
 			return domain.GenerationJob{}, false, err
 		}
@@ -236,6 +239,9 @@ func (s *Store) ClaimGenerationJob(ctx context.Context, params domain.CreateGene
 	if created {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO generation_job_transitions(job_id,correlation_id,from_state,to_state,message,attempt)
 			VALUES($1,$2,'',$3,$4,1)`, job.ID, job.CorrelationID, job.State, job.StatusMessage); err != nil {
+			return domain.GenerationJob{}, false, err
+		}
+		if err := incrementUserNotificationRevision(ctx, tx, params.UserID); err != nil {
 			return domain.GenerationJob{}, false, err
 		}
 		if err := incrementGenerationJobRevision(ctx, tx); err != nil {
@@ -421,6 +427,14 @@ func (s *Store) TransitionGenerationJob(ctx context.Context, jobID int64, params
 		(job_id,correlation_id,from_state,to_state,message,error_code,error_message,attempt,duration_ms)
 		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, job.ID, job.CorrelationID, current.State, job.State, job.StatusMessage, job.ErrorCode, job.ErrorMessage, job.Attempt, durationMS); err != nil {
 		return domain.GenerationJob{}, false, err
+	}
+	if err := createGenerationJobNotification(ctx, tx, job); err != nil {
+		return domain.GenerationJob{}, false, err
+	}
+	if job.UserID != nil {
+		if err := incrementUserNotificationRevision(ctx, tx, *job.UserID); err != nil {
+			return domain.GenerationJob{}, false, err
+		}
 	}
 	if err := incrementGenerationJobRevision(ctx, tx); err != nil {
 		return domain.GenerationJob{}, false, err

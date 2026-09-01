@@ -230,6 +230,28 @@ func TestUnifiedContentTasksMigration(t *testing.T) {
 	}
 }
 
+func TestGenerationNotificationsMigration(t *testing.T) {
+	var notificationMigration *migration
+	for index := range migrationCatalog {
+		if migrationCatalog[index].version == 46 {
+			notificationMigration = &migrationCatalog[index]
+			break
+		}
+	}
+	if notificationMigration == nil || notificationMigration.name != "generation_notifications" {
+		t.Fatal("generation notifications migration is missing")
+	}
+	sql := strings.Join(notificationMigration.statements, "\n")
+	for _, expected := range []string{
+		"user_notification_preferences", "user_notifications", "user_notification_revision",
+		"generation_completed", "generation_failed", "UNIQUE(generation_job_id)", "ON DELETE CASCADE",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("generation notifications migration does not contain %q: %s", expected, sql)
+		}
+	}
+}
+
 func TestQuickGenerationRequestTelemetryMigration(t *testing.T) {
 	var telemetryMigration *migration
 	for index := range migrationCatalog {

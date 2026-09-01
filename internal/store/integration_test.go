@@ -789,10 +789,42 @@ func assertGenerationJobLifecycle(t *testing.T, ctx context.Context, db *sql.DB,
 	if err != nil || !changed || job.State != domain.GenerationJobCompleted || job.FinishedAt == nil {
 		t.Fatalf("complete generation job: job=%+v changed=%v err=%v", job, changed, err)
 	}
+	notificationSummary, err := repository.UserNotificationSummary(ctx, userID)
+	if err != nil || notificationSummary.UnreadCount != 1 || !notificationSummary.Preferences.InAppEnabled || !notificationSummary.Preferences.SuccessEnabled {
+		t.Fatalf("generation notification summary=%+v err=%v", notificationSummary, err)
+	}
+	notifications, err := repository.ListUserNotifications(ctx, userID, 20)
+	if err != nil || len(notifications) != 1 || notifications[0].GenerationJobID != job.ID || notifications[0].Kind != domain.NotificationGenerationCompleted {
+		t.Fatalf("completed generation notifications=%+v err=%v", notifications, err)
+	}
 	if _, changed, err := repository.TransitionGenerationJob(ctx, job.ID, domain.GenerationJobTransitionParams{
 		State: domain.GenerationJobCompleted, Message: "Готово",
 	}); err != nil || changed {
 		t.Fatalf("idempotent terminal observation changed=%v err=%v", changed, err)
+	}
+	notifications, err = repository.ListUserNotifications(ctx, userID, 20)
+	if err != nil || len(notifications) != 1 {
+		t.Fatalf("idempotent terminal notification count=%d err=%v", len(notifications), err)
+	}
+	read, err := repository.MarkUserNotificationRead(ctx, userID, notifications[0].ID)
+	if err != nil || !read {
+		t.Fatalf("mark generation notification read=%v err=%v", read, err)
+	}
+	if read, err := repository.MarkUserNotificationRead(ctx, userID, notifications[0].ID); err != nil || read {
+		t.Fatalf("repeat generation notification read=%v err=%v", read, err)
+	}
+	notificationSummary, err = repository.UserNotificationSummary(ctx, userID)
+	if err != nil || notificationSummary.UnreadCount != 0 {
+		t.Fatalf("read generation notification summary=%+v err=%v", notificationSummary, err)
+	}
+	preferences, changedPreferences, err := repository.SetUserNotificationPreferences(ctx, userID, domain.UserNotificationPreferences{
+		InAppEnabled: true, SuccessEnabled: false, BrowserEnabled: true,
+	})
+	if err != nil || !changedPreferences || preferences.SuccessEnabled || !preferences.BrowserEnabled {
+		t.Fatalf("set generation notification preferences=%+v changed=%v err=%v", preferences, changedPreferences, err)
+	}
+	if _, changedPreferences, err := repository.SetUserNotificationPreferences(ctx, userID, preferences); err != nil || changedPreferences {
+		t.Fatalf("idempotent generation notification preferences changed=%v err=%v", changedPreferences, err)
 	}
 	if _, _, err := repository.TransitionGenerationJob(ctx, job.ID, domain.GenerationJobTransitionParams{
 		State: domain.GenerationJobCompleted, Message: "Перезаписанное состояние",
@@ -851,6 +883,24 @@ func assertGenerationJobLifecycle(t *testing.T, ctx context.Context, db *sql.DB,
 	})
 	if err != nil || !changed || retry.State != domain.GenerationJobFailed || retry.ErrorCode != "integration_retry_failed" {
 		t.Fatalf("fail retry generation job: job=%+v changed=%v err=%v", retry, changed, err)
+	}
+	notifications, err = repository.ListUserNotifications(ctx, userID, 20)
+	if err != nil || len(notifications) != 2 || notifications[0].GenerationJobID != retry.ID || notifications[0].Kind != domain.NotificationGenerationFailed {
+		t.Fatalf("failed generation notifications=%+v err=%v", notifications, err)
+	}
+	preferences, changedPreferences, err = repository.SetUserNotificationPreferences(ctx, userID, domain.UserNotificationPreferences{
+		InAppEnabled: false, SuccessEnabled: false, BrowserEnabled: true,
+	})
+	if err != nil || !changedPreferences || preferences.InAppEnabled || preferences.BrowserEnabled {
+		t.Fatalf("disable generation notifications=%+v changed=%v err=%v", preferences, changedPreferences, err)
+	}
+	notificationSummary, err = repository.UserNotificationSummary(ctx, userID)
+	if err != nil || notificationSummary.UnreadCount != 0 {
+		t.Fatalf("disabled generation notification summary=%+v err=%v", notificationSummary, err)
+	}
+	marked, err := repository.MarkAllUserNotificationsRead(ctx, userID)
+	if err != nil || marked != 0 {
+		t.Fatalf("mark all generation notifications read=%d err=%v", marked, err)
 	}
 }
 

@@ -1045,6 +1045,38 @@ var migrationCatalog = []migration{
 			`CREATE TRIGGER generation_job_transitions_content_revision AFTER INSERT OR UPDATE OR DELETE ON generation_job_transitions FOR EACH STATEMENT EXECUTE FUNCTION bump_content_change_revision()`,
 		},
 	},
+	{
+		version: 46,
+		name:    "generation_notifications",
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS user_notification_preferences (
+				user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+				in_app_enabled BOOLEAN NOT NULL DEFAULT true,
+				success_enabled BOOLEAN NOT NULL DEFAULT true,
+				browser_enabled BOOLEAN NOT NULL DEFAULT false,
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`CREATE TABLE IF NOT EXISTS user_notifications (
+				id BIGSERIAL PRIMARY KEY,
+				user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				generation_job_id BIGINT NOT NULL REFERENCES generation_jobs(id) ON DELETE CASCADE,
+				kind TEXT NOT NULL CHECK (kind IN ('generation_completed','generation_failed')),
+				title TEXT NOT NULL CHECK (char_length(title) BETWEEN 1 AND 120),
+				message TEXT NOT NULL DEFAULT '' CHECK (char_length(message) <= 500),
+				href TEXT NOT NULL CHECK (char_length(href) BETWEEN 1 AND 512),
+				read_at TIMESTAMPTZ NULL,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				UNIQUE(generation_job_id)
+			)`,
+			`CREATE INDEX IF NOT EXISTS user_notifications_user_created_idx ON user_notifications(user_id,created_at DESC,id DESC)`,
+			`CREATE INDEX IF NOT EXISTS user_notifications_user_unread_idx ON user_notifications(user_id,created_at DESC,id DESC) WHERE read_at IS NULL`,
+			`CREATE TABLE IF NOT EXISTS user_notification_revision (
+				user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+				revision BIGINT NOT NULL DEFAULT 1 CHECK (revision >= 1),
+				changed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
