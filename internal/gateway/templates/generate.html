@@ -73,7 +73,7 @@
       <p class="generation-model-note" id="generation-workflow-note" hidden>Для выбранного сценария пока нет готовой схемы генерации.</p>
       <section class="minimax-video-mode" id="minimax-video-mode" hidden>
         <div class="minimax-mode-heading"><div><span>Способ создания</span><strong>Как использовать загруженные материалы?</strong></div><small id="minimax-video-mode-hint" aria-live="polite">Выбрано: ролик строится по промту; Фото 1 и Фото 2 при наличии фиксируют точные начало и финал.</small></div>
-        <div class="minimax-mode-segments" role="radiogroup" aria-label="Способ создания видео MiniMax H3">
+        <div class="minimax-mode-segments ui-segmented" role="radiogroup" aria-label="Способ создания видео MiniMax H3">
           <label>
             <input type="radio" name="video_mode" value="frames" aria-describedby="minimax-video-mode-hint" checked>
             <span class="minimax-mode-option">
@@ -113,7 +113,7 @@
               <div class="minimax-video-reference-options">
                 <label>Начало фрагмента, сек<input name="video_reference_start" type="number" min="0" max="600" step="0.1" value="0"></label>
                 <label>Длина фрагмента, сек<input name="video_reference_duration" type="number" min="1" max="15" step="1" value="5"></label>
-                <label class="minimax-inline-toggle"><input name="video_reference_audio" type="checkbox" value="true" checked><span>Использовать звук видео</span></label>
+                <label class="minimax-inline-toggle ui-choice ui-choice--compact"><input name="video_reference_audio" type="checkbox" value="true" checked><span>Использовать звук видео</span></label>
               </div>
             </section>
           </div>
@@ -198,10 +198,10 @@
       <section class="generation-workbench" aria-label="Быстрые настройки">
         <div class="generation-profile-picker">
           <div><strong>Профиль запуска</strong><small>Меняет только параметры выбранной схемы. Промт, модель и референсы остаются вашими.</small></div>
-          <div class="generation-profile-actions" role="group" aria-label="Профиль качества">
-            <button type="button" class="generation-profile-button" data-generation-profile="draft"><strong>Черновик</strong><small>Быстро проверить идею</small></button>
-            <button type="button" class="generation-profile-button is-active" data-generation-profile="balanced"><strong>Сбалансировано</strong><small>Качество и скорость</small></button>
-            <button type="button" class="generation-profile-button" data-generation-profile="maximum"><strong>Максимум качества</strong><small>Финальный результат</small></button>
+          <div class="generation-profile-actions ui-segmented ui-segmented--cards" role="group" aria-label="Профиль качества">
+            <button type="button" class="generation-profile-button ui-segment" data-generation-profile="draft"><strong>Черновик</strong><small>Быстро проверить идею</small></button>
+            <button type="button" class="generation-profile-button ui-segment is-active" data-generation-profile="balanced"><strong>Сбалансировано</strong><small>Качество и скорость</small></button>
+            <button type="button" class="generation-profile-button ui-segment" data-generation-profile="maximum"><strong>Максимум качества</strong><small>Финальный результат</small></button>
           </div>
         </div>
         <div class="generation-recipe-bar" id="generation-recipe-bar">
@@ -219,7 +219,7 @@
       </div>
       <section class="generation-reference-map" id="generation-reference-map" hidden aria-live="polite"><div><strong>Карта референсов</strong><small>Ассистент использует эти номера в промте: выберите, что именно брать из каждого изображения.</small></div><div class="generation-reference-map-list" id="generation-reference-map-list"></div></section>
       <section class="prompt-assistant" id="prompt-assistant" aria-live="polite">
-        <label class="prompt-assistant-toggle"><input type="checkbox" id="prompt-assistant-enabled"><span><strong>Промт-ассистент</strong><small>Локальная модель подготовит вариант, но генерация начнётся только после вашего подтверждения.</small></span></label>
+        <label class="prompt-assistant-toggle ui-choice"><input type="checkbox" id="prompt-assistant-enabled"><span><strong>Промт-ассистент</strong><small>Локальная модель подготовит вариант, но генерация начнётся только после вашего подтверждения.</small></span></label>
         <div class="prompt-assistant-controls" id="prompt-assistant-controls" hidden>
           <label>Шаблон ассистента<select id="prompt-assistant-template"><option value="workflow-default">Универсальный</option><option value="photographic">Редакционная фотография</option><option value="realistic">Естественный реализм</option><option value="anime">Иллюстрация и аниме</option><option value="nsfw">NSFW (Контент для взрослых)</option><option value="flux-edit" data-image-only>Перенос внешности и редактирование</option><option value="minimax-h3" data-video-only>MiniMax H3: видео и звук</option></select></label>
           <label class="prompt-assistant-think"><input type="checkbox" id="prompt-assistant-think"><span>Режим рассуждений</span></label>
@@ -252,13 +252,13 @@
           <label><span class="field-label">Длительность <span class="field-help" tabindex="0" data-tooltip="5–15 секунд — основной диапазон MiniMax H3. Значения до 60 секунд доступны для экспериментов и требуют заметно больше времени и памяти.">?</span></span><input name="video_duration_seconds" id="minimax-video-duration" type="number" min="5" max="60" step="1" value="5"><small class="field-hint">5–60 секунд</small></label>
           <label><span class="field-label">Шаги <span class="field-help" tabindex="0" data-tooltip="FL2VA без Turbo использует 20–25 шагов, внешний Turbo — 4–8. Eros Max содержит Turbo внутри и работает на 6–8 шагах.">?</span></span><input name="video_steps" id="minimax-video-steps" type="number" min="20" max="25" value="25"></label>
           <label><span class="field-label">Имя файла</span><input name="video_filename" type="text" maxlength="80" value="AI-Gateway-MiniMaxH3"><small class="field-hint">Без расширения</small></label>
-          <label class="setting-toggle" id="minimax-video-turbo-control"><input name="video_turbo" id="minimax-video-turbo" type="checkbox" value="true"><span><strong id="minimax-video-turbo-title">Turbo MiniMax H3</strong><small id="minimax-video-turbo-description">Опциональная официальная LoRA v4: 4–8 шагов для быстрых проб.</small></span></label>
+          <label class="setting-toggle ui-choice" id="minimax-video-turbo-control"><input name="video_turbo" id="minimax-video-turbo" type="checkbox" value="true"><span><strong id="minimax-video-turbo-title">Turbo MiniMax H3</strong><small id="minimax-video-turbo-description">Опциональная официальная LoRA v4: 4–8 шагов для быстрых проб.</small></span></label>
           <label class="minimax-reference-field"><span class="field-label">Размер референсов <span class="field-help" tabindex="0" data-tooltip="По размеру кадра экономит память. Максимальная детализация лучше сохраняет черты, текст и аксессуары, но для 1440p/2160p может требовать существенно больше VRAM.">?</span></span><select name="video_reference_size" id="minimax-video-reference-size"><option value="match">По размеру кадра · рекомендуем</option><option value="max">Максимальная детализация</option></select></label>
         </div>
         <div class="minimax-aspect-controls">
           <div class="setting-toggle minimax-source-aspect-note" id="minimax-source-aspect-control"><input name="video_use_source_aspect" id="minimax-use-source-aspect" type="hidden" value="true"><span><strong>Пропорции Фото 1 · автоматически</strong><small>Если фото добавлено, MiniMax всегда использует его исходное соотношение сторон.</small></span></div>
           <label>Формат без Фото 1<select name="video_aspect" id="minimax-video-aspect"><option value="9:16" selected>9:16 · вертикальное</option><option value="16:9">16:9 · широкое</option><option value="4:5">4:5 · портрет</option><option value="1:1">1:1 · квадрат</option><option value="2:3">2:3 · фото</option><option value="3:2">3:2 · альбом</option><option value="3:4">3:4 · портрет</option><option value="4:3">4:3 · альбом</option><option value="21:9">21:9 · ультраширокое</option><option value="4:1">4:1 · обложка</option></select></label>
-          <label class="minimax-inline-toggle"><input name="video_swap_dimensions" id="minimax-video-swap" type="checkbox" value="true"><span>Поменять ширину и высоту</span></label>
+          <label class="minimax-inline-toggle ui-choice ui-choice--compact"><input name="video_swap_dimensions" id="minimax-video-swap" type="checkbox" value="true"><span>Поменять ширину и высоту</span></label>
         </div>
       </section>
       <section class="workflow-settings-section minimax-video-settings minimax-v4-settings" hidden>
@@ -283,8 +283,8 @@
             <label class="minimax-field">Audio Sigma<input name="video_shift_audio" id="minimax-video-shift-audio" type="number" min="1" max="32" step="1" value="3"><small>3 для FL2VA, 7 для Eros Max.</small></label>
           </div>
           <div class="minimax-utility-grid">
-            <label class="minimax-utility-toggle"><input name="video_sage_attention" type="checkbox" value="true" checked><span><strong>SageAttention</strong><small>Экономит VRAM на слоях внимания H3.</small></span></label>
-            <label class="minimax-utility-toggle"><input name="video_clear_vram" type="checkbox" value="true" checked><span><strong>Поэтапно освобождать VRAM</strong><small>Очистка выполняется до sampler, перед VAE и после декодирования.</small></span></label>
+            <label class="minimax-utility-toggle ui-choice"><input name="video_sage_attention" type="checkbox" value="true" checked><span><strong>SageAttention</strong><small>Экономит VRAM на слоях внимания H3.</small></span></label>
+            <label class="minimax-utility-toggle ui-choice"><input name="video_clear_vram" type="checkbox" value="true" checked><span><strong>Поэтапно освобождать VRAM</strong><small>Очистка выполняется до sampler, перед VAE и после декодирования.</small></span></label>
           </div>
         </section>
         <section class="workflow-settings-section minimax-video-settings minimax-v4-settings" hidden>
@@ -300,7 +300,7 @@
           <div class="workflow-settings-heading minimax-settings-heading"><div><span>H3 v4</span><strong>Память и ускорение внимания</strong><small>Параметры соответствуют H3-Optimizations 0.2.35. При артефактах сначала отключайте Sparse Attention; при OOM уменьшайте блок, резидентность или выбирайте Lower VRAM.</small></div></div>
           <div class="video-enhancements minimax-optimizations">
             <section class="video-enhancement">
-              <label class="video-enhancement-toggle"><input name="video_memory_optimize" type="checkbox" value="true" checked><span><strong>H3 Memory Optimization</strong><small>Ограничивает пиковые активации и управляет точностью вычислений.</small></span><b>VRAM</b></label>
+              <label class="video-enhancement-toggle ui-choice"><input name="video_memory_optimize" type="checkbox" value="true" checked><span><strong>H3 Memory Optimization</strong><small>Ограничивает пиковые активации и управляет точностью вычислений.</small></span><b>VRAM</b></label>
               <div class="video-enhancement-settings">
                 <div class="minimax-optimization-fields">
                   <label>MLP память<select name="video_memory_mlp"><option value="auto" selected>Auto · рекомендуем</option><option value="off">Off</option></select></label>
@@ -312,7 +312,7 @@
               </div>
             </section>
             <section class="video-enhancement">
-              <label class="video-enhancement-toggle"><input name="video_aimdo_enabled" type="checkbox" value="true" checked><span><strong>AIMDO Residency Limiter</strong><small>Оставляет больше VRAM кадрам, звуку и временным данным H3.</small></span><b>MODEL</b></label>
+              <label class="video-enhancement-toggle ui-choice"><input name="video_aimdo_enabled" type="checkbox" value="true" checked><span><strong>AIMDO Residency Limiter</strong><small>Оставляет больше VRAM кадрам, звуку и временным данным H3.</small></span><b>MODEL</b></label>
               <div class="video-enhancement-settings video-enhancement-settings--compact">
                 <div class="video-enhancement-fields">
                   <label>Резидентность модели<select name="video_aimdo_residency"><option value="0 blocks" selected>0 блоков · минимум VRAM</option><option value="1 block">1 блок</option><option value="2 blocks">2 блока · баланс</option><option value="4 blocks">4 блока · быстрее</option><option value="stock">Stock · без ограничения</option></select><small class="field-hint">Меньше блоков экономит VRAM, но усиливает перенос весов между RAM и GPU.</small></label>
@@ -320,7 +320,7 @@
               </div>
             </section>
             <section class="video-enhancement">
-              <label class="video-enhancement-toggle"><input name="video_sparse_attention" type="checkbox" value="true" checked><span><strong>H3 Sparse Attention</strong><small>Ускоряет внимание, сохраняя больше связей в начале и конце денойзинга.</small></span><b>SPARSE</b></label>
+              <label class="video-enhancement-toggle ui-choice"><input name="video_sparse_attention" type="checkbox" value="true" checked><span><strong>H3 Sparse Attention</strong><small>Ускоряет внимание, сохраняя больше связей в начале и конце денойзинга.</small></span><b>SPARSE</b></label>
               <div class="video-enhancement-settings">
                 <div class="minimax-optimization-fields minimax-sparse-fields">
                   <label>Бюджет видео<input name="video_sparse_budget" type="number" min="0.01" max="1" step="0.01" value="0.30"><small class="field-hint">0,30 — значение v4; 1,0 = плотное внимание.</small></label>
@@ -339,7 +339,7 @@
           <div class="workflow-settings-heading minimax-settings-heading"><div><span>УЛУЧШЕНИЯ</span><strong>Обработка готового ролика</strong><small>Подключайте этапы только для финального результата. Выключенные этапы не потребляют ресурсы.</small></div></div>
           <div class="video-enhancements">
             <section class="video-enhancement">
-              <label class="video-enhancement-toggle"><input name="video_rife_enabled" type="checkbox" value="true"><span><strong>Плавность движения</strong><small>Добавляет промежуточные кадры и повышает FPS.</small></span><b>RIFE</b></label>
+              <label class="video-enhancement-toggle ui-choice"><input name="video_rife_enabled" type="checkbox" value="true"><span><strong>Плавность движения</strong><small>Добавляет промежуточные кадры и повышает FPS.</small></span><b>RIFE</b></label>
               <div class="video-enhancement-settings video-enhancement-settings--rife">
                 <div class="video-enhancement-fields">
                   <label>Модель RIFE<select name="video_rife_checkpoint"><option value="rife49.pth" selected>rife49 · исходный workflow</option><option value="rife47.pth">rife47</option><option value="rife417.pth">rife417</option><option value="rife426.pth">rife426</option><option value="sudo_rife4_269.662_testV1_scale1.pth">sudo_rife4_269</option></select></label>
@@ -348,14 +348,14 @@
                   <label>Размер пакета<input name="video_rife_batch_size" type="number" min="1" max="4" step="1" value="1"><small class="field-hint">1 безопаснее для VRAM.</small></label>
                 </div>
                 <div class="video-enhancement-flags">
-                  <label class="minimax-utility-toggle"><input name="video_rife_fast_mode" type="checkbox" value="true" checked><span><strong>Быстрый режим</strong><small>Приоритет скорости.</small></span></label>
-                  <label class="minimax-utility-toggle"><input name="video_rife_ensemble" type="checkbox" value="true" checked><span><strong>Ensemble</strong><small>Стабильнее движение.</small></span></label>
-                  <label class="minimax-utility-toggle"><input name="video_rife_compile" type="checkbox" value="true" checked><span><strong>Компиляция</strong><small>Значение исходного v4; первый запуск дольше.</small></span></label>
+                  <label class="minimax-utility-toggle ui-choice"><input name="video_rife_fast_mode" type="checkbox" value="true" checked><span><strong>Быстрый режим</strong><small>Приоритет скорости.</small></span></label>
+                  <label class="minimax-utility-toggle ui-choice"><input name="video_rife_ensemble" type="checkbox" value="true" checked><span><strong>Ensemble</strong><small>Стабильнее движение.</small></span></label>
+                  <label class="minimax-utility-toggle ui-choice"><input name="video_rife_compile" type="checkbox" value="true" checked><span><strong>Компиляция</strong><small>Значение исходного v4; первый запуск дольше.</small></span></label>
                 </div>
               </div>
             </section>
             <section class="video-enhancement">
-              <label class="video-enhancement-toggle"><input name="video_rtx_enabled" type="checkbox" value="true"><span><strong>Финальный апскейл</strong><small>Увеличивает детализацию ролика средствами NVIDIA.</small></span><b>RTX</b></label>
+              <label class="video-enhancement-toggle ui-choice"><input name="video_rtx_enabled" type="checkbox" value="true"><span><strong>Финальный апскейл</strong><small>Увеличивает детализацию ролика средствами NVIDIA.</small></span><b>RTX</b></label>
               <div class="video-enhancement-settings video-enhancement-settings--compact">
                 <div class="video-enhancement-fields">
                   <label>Масштаб<input name="video_rtx_scale" type="number" min="1" max="4" step="0.1" value="2"></label>
@@ -364,7 +364,7 @@
               </div>
             </section>
             <section class="video-enhancement">
-              <label class="video-enhancement-toggle"><input name="video_color_match" type="checkbox" value="true"><span><strong>Палитра референса</strong><small>Дополнительный этап Gateway перед RIFE; требует Фото 1.</small></span><b>COLOR</b></label>
+              <label class="video-enhancement-toggle ui-choice"><input name="video_color_match" type="checkbox" value="true"><span><strong>Палитра референса</strong><small>Дополнительный этап Gateway перед RIFE; требует Фото 1.</small></span><b>COLOR</b></label>
               <div class="video-enhancement-settings video-enhancement-settings--compact">
                 <div class="video-enhancement-fields">
                   <label>Метод<select name="video_color_method"><option value="adain" selected>AdaIN · рекомендуем</option><option value="mean_std">Mean / Std</option></select></label>
@@ -373,7 +373,7 @@
               </div>
             </section>
             <section class="video-enhancement">
-              <label class="video-enhancement-toggle"><input name="video_sharpen_enabled" type="checkbox" value="true"><span><strong>Финальная резкость</strong><small>ImageSharpenKJ подчёркивает детали после RIFE и RTX.</small></span><b>SHARPEN</b></label>
+              <label class="video-enhancement-toggle ui-choice"><input name="video_sharpen_enabled" type="checkbox" value="true"><span><strong>Финальная резкость</strong><small>ImageSharpenKJ подчёркивает детали после RIFE и RTX.</small></span><b>SHARPEN</b></label>
               <div class="video-enhancement-settings">
                 <div class="video-enhancement-fields video-sharpen-fields">
                   <label>Метод<select name="video_sharpen_method" id="minimax-video-sharpen-method"><option value="rcas" selected>RCAS · workflow v4</option><option value="adaptive_usm">Adaptive USM</option><option value="high_pass">High Pass</option><option value="deconvolution">Deconvolution</option></select></label>
@@ -400,7 +400,7 @@
             <label class="krea-edit-field">Сохранение исходника <span class="field-help" tabindex="0" data-tooltip="Чем выше значение, тем строже Krea2 держится за исходное фото. Для обычного редактирования оставьте 4.">?</span><input name="reference_boost" type="number" min="0" max="8" step="0.1" value="4"></label>
             <label class="krea-edit-field">Анализ фото<input name="grounding_pixels" type="number" min="256" max="2048" step="64" value="768"><small class="field-hint">Больше значение полезно для лиц, текста и мелких объектов.</small></label>
             <input type="hidden" name="edit_use_custom_size" value="true">
-            <label class="edit-size-toggle"><input name="preserve_original_size" id="generation-preserve-original-size" type="checkbox" value="true" checked><span id="generation-preserve-original-label">Сохранить размер исходного фото</span></label>
+            <label class="edit-size-toggle ui-choice ui-choice--compact"><input name="preserve_original_size" id="generation-preserve-original-size" type="checkbox" value="true" checked><span id="generation-preserve-original-label">Сохранить размер исходного фото</span></label>
             <output class="original-resolution-note" id="generation-original-resolution">Выберите основное фото: его размер будет подставлен автоматически.</output>
           </div>
         </section>
@@ -465,7 +465,7 @@
             <label>Подгонка<select name="edit_proportion"><option value="crop" selected>Crop</option><option value="resize">Resize</option><option value="pad">Pad</option><option value="stretch">Stretch</option><option value="total_pixels">Total pixels</option></select></label>
             <label>Якорь crop<select name="edit_crop_location"><option value="center" selected>Center</option><option value="top">Top</option><option value="bottom">Bottom</option><option value="left">Left</option><option value="right">Right</option></select></label>
             <label>Цвет полей<input name="edit_pad_color" maxlength="32" value="0, 0, 0"></label>
-            <label class="setting-toggle"><input name="edit_swap_dimensions" type="checkbox" value="true"><span>Поменять ширину и высоту</span></label>
+            <label class="setting-toggle ui-choice ui-choice--compact"><input name="edit_swap_dimensions" type="checkbox" value="true"><span>Поменять ширину и высоту</span></label>
           </div>
         </section>
         <section class="workflow-settings-section krea-edit-settings" data-workflow-panel="krea2">
@@ -506,7 +506,7 @@
           <div class="lut-control">
             <div class="lut-control-heading">
               <div><strong>LUT: финальная цветокоррекция <span class="field-help" tabindex="0" data-tooltip="LUT (Look-Up Table) - готовая карта цвета. Она применяется к уже готовому кадру: меняет оттенки, свет, тени и контраст, но не перерисовывает лицо, позу, предметы или композицию.">?</span></strong><small>Доступна в Krea2 и Flux2. Подходит, когда нужен единый визуальный стиль серии. Для точной передачи цвета одежды, товара или исходного фото оставьте выключенной.</small></div>
-              <label class="setting-toggle"><input name="lut_enabled" type="checkbox" value="true" data-lut-enabled><span>Применять LUT</span></label>
+              <label class="setting-toggle ui-choice ui-choice--compact"><input name="lut_enabled" type="checkbox" value="true" data-lut-enabled><span>Применять LUT</span></label>
             </div>
             <p class="lut-explanation" data-lut-explanation>Выключено: финальный кадр сохранит цвета, полученные после генерации и обработки, без общей тонировки.</p>
             <div class="lut-options" data-lut-options hidden>
@@ -553,7 +553,7 @@
           </div>
         </section>
         <section class="workflow-settings-section krea-workflow-field">
-          <div class="workflow-settings-heading"><div><strong>Апскейл <span class="field-help" tabindex="0" data-tooltip="Увеличивает картинку до итогового разрешения и добавляет детали. Автоматическая сила перерисовки подбирает мягкое значение по размеру кадра.">?</span></strong><small>Второй проход после масштабирования изображения.</small></div><label class="setting-toggle krea-text-workflow-field"><input name="upscale_auto_denoise" id="generation-auto-denoise" type="checkbox" value="true" checked><span>Автонастройка перерисовки</span></label></div>
+          <div class="workflow-settings-heading"><div><strong>Апскейл <span class="field-help" tabindex="0" data-tooltip="Увеличивает картинку до итогового разрешения и добавляет детали. Автоматическая сила перерисовки подбирает мягкое значение по размеру кадра.">?</span></strong><small>Второй проход после масштабирования изображения.</small></div><label class="setting-toggle krea-text-workflow-field ui-choice ui-choice--compact"><input name="upscale_auto_denoise" id="generation-auto-denoise" type="checkbox" value="true" checked><span>Автонастройка перерисовки</span></label></div>
           <div class="generation-fields"><label>Шаги<input name="upscale_steps" id="generation-upscale-steps" type="number" min="1" max="12" value="5"></label><label>Сэмплер<select name="upscale_sampler" id="generation-upscale-sampler"><option value="euler_ancestral" selected>Euler Ancestral</option><option value="euler">Euler</option><option value="dpmpp_2m">DPM++ 2M</option><option value="dpmpp_2m_sde">DPM++ 2M SDE</option></select></label><label>Denoise <span class="field-help" tabindex="0" data-tooltip="Насколько апскейл может изменить исходный результат. Низкое значение сохраняет композицию, высокое сильнее перерисовывает её.">?</span><input name="upscale_denoise" id="generation-upscale-denoise" type="number" min="0.01" max="0.5" step="0.01" value="0.18"></label></div>
         </section>
         <section class="workflow-settings-section krea-text-workflow-field">
@@ -561,7 +561,7 @@
           <div class="generation-fields"><label>Шаги<input name="detail_steps" id="generation-detail-steps" type="number" min="1" max="8" value="2"></label><label>CFG<input name="detail_cfg" id="generation-detail-cfg" type="number" min="0" max="30" step="0.1" value="1"></label><label>Сэмплер<select name="detail_sampler" id="generation-detail-sampler"><option value="euler" selected>Euler</option><option value="euler_ancestral">Euler Ancestral</option><option value="dpmpp_2m">DPM++ 2M</option><option value="dpmpp_2m_sde">DPM++ 2M SDE</option></select></label><label>Планировщик<select name="detail_scheduler" id="generation-detail-scheduler"><option value="simple" selected>Simple</option><option value="normal">Normal</option><option value="karras">Karras</option><option value="sgm_uniform">SGM Uniform</option></select></label><label>Denoise<input name="detail_denoise" id="generation-detail-denoise" type="number" min="0.01" max="0.2" step="0.005" value="0.03"></label></div>
         </section>
         <section class="workflow-settings-section krea-text-workflow-field">
-          <div class="workflow-settings-heading"><div><strong>Перенос цвета <span class="field-help" tabindex="0" data-tooltip="Сохраняет цветовую атмосферу первого прохода после апскейла и детализации.">?</span></strong><small>Возвращает цветовую статистику основного прохода после детализации.</small></div><label class="setting-toggle"><input name="color_transfer" type="checkbox" value="true" checked><span>Включён</span></label></div>
+          <div class="workflow-settings-heading"><div><strong>Перенос цвета <span class="field-help" tabindex="0" data-tooltip="Сохраняет цветовую атмосферу первого прохода после апскейла и детализации.">?</span></strong><small>Возвращает цветовую статистику основного прохода после детализации.</small></div><label class="setting-toggle ui-choice ui-choice--compact"><input name="color_transfer" type="checkbox" value="true" checked><span>Включён</span></label></div>
           <div class="generation-fields"><label>Метод<select name="color_method"><option value="reinhard_lab" selected>Reinhard LAB</option><option value="mkl_lab">MKL LAB</option><option value="histogram">Histogram</option></select></label><label>Статистика<select name="color_mode"><option value="per_frame" selected>Для каждого кадра</option><option value="uniform">Общая</option></select></label><label>Сила<input name="color_strength" type="number" min="0" max="10" step="0.1" value="1"></label></div>
         </section>
       </div></details>
@@ -584,7 +584,7 @@
     </div>
   </section>
   <section class="generation-variants generation-jobs panel" id="generation-variants" aria-live="polite">
-    <div class="generation-history-toolbar">
+    <div class="generation-history-toolbar ui-toolbar ui-toolbar--plain">
       <div class="generation-history-title"><p class="section-kicker">Быстрая генерация</p><h2>Задания генерации</h2><small id="generation-variant-count">Подключаем обновления...</small></div>
       <div class="generation-variant-filters">
         <label><span>Статус</span><select id="generation-variant-state"><option value="">Все</option><option value="submitting">Подготовка</option><option value="queued">В очереди</option><option value="running">В работе</option><option value="cancelling">Отменяется</option><option value="completed">Готово</option><option value="error">С ошибкой</option><option value="cancelled">Отменено</option><option value="expired">Истекло</option></select></label>
@@ -610,8 +610,8 @@
 
   <div class="generation-lightbox" id="generation-lightbox" hidden role="dialog" aria-modal="true" aria-label="Просмотр результата">
     <button class="generation-lightbox-backdrop" type="button" data-lightbox-close aria-label="Закрыть просмотр"></button>
-    <div class="generation-lightbox-window">
-      <div class="generation-lightbox-toolbar"><span id="generation-lightbox-name"></span><a class="button generation-lightbox-download" id="generation-lightbox-download" download>Скачать оригинал</a><button class="generation-lightbox-close" type="button" data-lightbox-close aria-label="Закрыть">&#10005;</button></div>
+    <div class="generation-lightbox-window ui-dialog">
+      <div class="generation-lightbox-toolbar ui-dialog__toolbar"><span id="generation-lightbox-name"></span><a class="button generation-lightbox-download" id="generation-lightbox-download" download>Скачать оригинал</a><button class="generation-lightbox-close" type="button" data-lightbox-close aria-label="Закрыть">&#10005;</button></div>
       <img id="generation-lightbox-image" alt="Результат генерации в полном размере">
       <video id="generation-lightbox-video" controls playsinline hidden></video>
     </div>

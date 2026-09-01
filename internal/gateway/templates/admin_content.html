@@ -30,7 +30,7 @@
   <section class="content-gallery" data-admin-content-gallery>
     {{range .Events}}
     {{$event := .}}
-    <article class="content-gallery-card{{if .Sensitive}} sensitive-media{{end}}{{if eq .GenerationState "error"}} content-gallery-card-error{{end}}" data-content-event-id="{{.ID}}">
+    <article class="content-gallery-card ui-media-card{{if .Sensitive}} sensitive-media{{end}}{{if eq .GenerationState "error"}} content-gallery-card-error is-error{{end}}" data-content-event-id="{{.ID}}">
       <button class="content-gallery-preview" type="button" data-content-event-open="{{.ID}}" {{if .Sensitive}}data-sensitive-media{{end}} aria-label="Открыть запись пользователя {{.Username}}">
         {{if .Media}}
           {{$preview := index .Media 0}}
@@ -71,6 +71,6 @@
     {{end}}
   </section>
 </main>
-<div class="content-detail-dialog" id="content-detail-dialog" hidden role="dialog" aria-modal="true" aria-label="Полная запись AI-контента"><button class="content-detail-backdrop" type="button" data-content-detail-close aria-label="Закрыть просмотр"></button><div class="content-detail-window"><div class="content-detail-toolbar"><span>AI-контент</span><button class="content-detail-close" type="button" data-content-detail-close aria-label="Закрыть просмотр">&#10005;</button></div><div class="content-detail-body" id="content-detail-body"></div></div></div>
+<div class="content-detail-dialog" id="content-detail-dialog" hidden role="dialog" aria-modal="true" aria-label="Полная запись AI-контента"><button class="content-detail-backdrop" type="button" data-content-detail-close aria-label="Закрыть просмотр"></button><div class="content-detail-window ui-dialog"><div class="content-detail-toolbar ui-dialog__toolbar"><span>AI-контент</span><button class="content-detail-close" type="button" data-content-detail-close aria-label="Закрыть просмотр">&#10005;</button></div><div class="content-detail-body" id="content-detail-body"></div></div></div>
 </body></html>
 {{end}}

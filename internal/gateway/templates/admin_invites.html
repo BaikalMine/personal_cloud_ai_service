@@ -7,7 +7,7 @@
   </section>
 
   {{if .InviteLink}}
-  <section class="panel success invite-result" aria-live="polite">
+  <section class="panel success invite-result ui-status-banner is-success" aria-live="polite">
     <div class="panel-heading"><div><p class="section-kicker">Готово</p><h2>Ссылка-приглашение создана</h2></div></div>
     <div class="copyrow"><p class="copyline" id="invite-link">{{.InviteLink}}</p><button class="ghost" type="button" data-copy-target="#invite-link">Копировать ссылку</button></div>
   </section>
@@ -15,23 +15,23 @@
 
   <section class="panel invite-composer">
     <div class="panel-heading"><div><p class="section-kicker">Новый доступ</p><h2>Создать приглашение</h2></div></div>
-    {{if .Error}}<p class="alert">{{.Error}}</p>{{end}}
+    {{if .Error}}<p class="alert ui-status-banner is-error">{{.Error}}</p>{{end}}
     <form method="post" class="invite-form" data-invite-composer>
       <input type="hidden" name="csrf" value="{{.CSRF}}">
 
       <fieldset class="invite-account-type">
         <legend>Тип учётной записи</legend>
-        <label class="invite-type-option is-selected"><input type="radio" name="account_type" value="permanent" checked><span><b>Постоянная</b><small>Доступ действует, пока администратор не изменит или не удалит учётную запись.</small></span></label>
-        <label class="invite-type-option"><input type="radio" name="account_type" value="temporary"><span><b>Временная</b><small>Учётная запись удаляется по сроку; история и медиа сохраняются по штатному сроку хранения.</small></span></label>
+        <label class="invite-type-option ui-choice is-selected"><input type="radio" name="account_type" value="permanent" checked><span><b>Постоянная</b><small>Доступ действует, пока администратор не изменит или не удалит учётную запись.</small></span></label>
+        <label class="invite-type-option ui-choice"><input type="radio" name="account_type" value="temporary"><span><b>Временная</b><small>Учётная запись удаляется по сроку; история и медиа сохраняются по штатному сроку хранения.</small></span></label>
       </fieldset>
 
       <div class="invite-builder-grid">
         <section class="invite-builder-section">
           <div class="invite-section-heading"><p class="section-kicker">01</p><h3>Доступ</h3><p>Выберите только те интерфейсы и сценарии, которые нужны человеку.</p></div>
           <div class="invite-access-grid">
-            <label class="invite-access-card invite-access-card--primary"><input name="grant_quick_generation" type="checkbox" checked data-quick-generation-access><span><b>Быстрая генерация</b><small>Готовые сценарии без входа в ComfyUI.</small></span></label>
-            <label class="invite-access-card"><input name="grant_comfyui" type="checkbox"><span><b>ComfyUI</b><small>Полный рабочий интерфейс.</small></span></label>
-            <label class="invite-access-card"><input name="grant_openwebui" type="checkbox"><span><b>OpenWebUI</b><small>Чаты и локальные модели.</small></span></label>
+            <label class="invite-access-card invite-access-card--primary ui-choice"><input name="grant_quick_generation" type="checkbox" checked data-quick-generation-access><span><b>Быстрая генерация</b><small>Готовые сценарии без входа в ComfyUI.</small></span></label>
+            <label class="invite-access-card ui-choice"><input name="grant_comfyui" type="checkbox"><span><b>ComfyUI</b><small>Полный рабочий интерфейс.</small></span></label>
+            <label class="invite-access-card ui-choice"><input name="grant_openwebui" type="checkbox"><span><b>OpenWebUI</b><small>Чаты и локальные модели.</small></span></label>
           </div>
           <fieldset class="invite-scenarios" data-quick-scenarios>
             <legend>Сценарии быстрой генерации</legend>
@@ -47,7 +47,7 @@
             <label>Ссылка действует<select name="invite_ttl_hours"><option value="1">1 час</option><option value="24" selected>24 часа</option><option value="72">3 дня</option><option value="168">7 дней</option><option value="720">30 дней</option></select></label>
             <label>Количество активаций<input name="max_uses" type="number" value="1" min="1" max="10000" inputmode="numeric"></label>
           </div>
-          <label class="invite-temporary-lifetime" data-temporary-lifetime hidden>Срок доступа после регистрации<select name="temporary_account_hours" disabled><option value="1">1 час</option><option value="6">6 часов</option><option value="12">12 часов</option><option value="24">1 день</option><option value="72">3 дня</option><option value="168" selected>7 дней</option><option value="336">14 дней</option><option value="720">30 дней</option><option value="2160">90 дней</option></select><small class="field-hint">По окончании срока учётная запись удаляется, а история и медиа остаются до штатного срока хранения с пометкой об удалённом пользователе.</small></label>
+          <label class="invite-temporary-lifetime ui-field" data-temporary-lifetime hidden>Срок доступа после регистрации<select name="temporary_account_hours" disabled><option value="1">1 час</option><option value="6">6 часов</option><option value="12">12 часов</option><option value="24">1 день</option><option value="72">3 дня</option><option value="168" selected>7 дней</option><option value="336">14 дней</option><option value="720">30 дней</option><option value="2160">90 дней</option></select><small class="field-hint">По окончании срока учётная запись удаляется, а история и медиа остаются до штатного срока хранения с пометкой об удалённом пользователе.</small></label>
           <details class="invite-advanced-limits">
             <summary>Дополнительные ограничения</summary>
             <div class="invite-limit-grid">
@@ -83,7 +83,7 @@
     {{end}}
     </tbody></table></div>
     {{else}}
-    <div class="invite-history-empty"><span aria-hidden="true">+</span><div><h3>Приглашений пока нет</h3><p>Созданные ссылки появятся здесь вместе со статусом, сроком действия и доступами.</p></div></div>
+    <div class="invite-history-empty ui-empty-state"><span aria-hidden="true">+</span><div><h3>Приглашений пока нет</h3><p>Созданные ссылки появятся здесь вместе со статусом, сроком действия и доступами.</p></div></div>
     {{end}}
   </section>
 </main>

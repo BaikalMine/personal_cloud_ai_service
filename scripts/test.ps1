@@ -76,7 +76,7 @@ try {
     }
 
     docker run --rm -v "${projectRoot}:/src:ro" -w /src $nodeImage `
-        node --test internal/gateway/testdata/js/generation_modules.test.cjs
+        node --test internal/gateway/testdata/js/generation_modules.test.cjs internal/gateway/testdata/js/frontend_contract.test.cjs
     if ($LASTEXITCODE -ne 0) {
         throw 'JavaScript unit checks failed.'
     }

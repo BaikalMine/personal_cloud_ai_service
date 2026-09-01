@@ -685,7 +685,7 @@
 
   const approvedSubmissions = new WeakSet();
   const confirmDialog = document.createElement("dialog");
-  confirmDialog.className = "confirm-dialog";
+  confirmDialog.className = "confirm-dialog ui-dialog";
   confirmDialog.setAttribute("aria-labelledby", "confirm-dialog-title");
 
   const confirmBody = document.createElement("div");

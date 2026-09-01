@@ -201,6 +201,7 @@ func main() {
 		"Mining":       miningOverview,
 		"MiningStatus": "",
 	}))
+	mux.HandleFunc("/preview/components", render("ui_components", "Компоненты интерфейса", map[string]any{}))
 	mux.HandleFunc("/preview/generate", render("generate", "Быстрая генерация", map[string]any{
 		"Workflows": []map[string]any{
 			{"ID": "text-to-image", "Name": "Текст в изображение", "Description": "Создаёт изображение по вашему описанию.", "RequiresImage": false},

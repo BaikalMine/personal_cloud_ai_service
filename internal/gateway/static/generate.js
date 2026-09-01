@@ -2776,15 +2776,22 @@
     renderJobCount(filteredJobs.length);
     if (filteredJobs.length === 0) {
       const empty = document.createElement("p");
-      empty.className = "generation-variant-empty";
+      empty.className = "generation-variant-empty ui-empty-state";
       empty.textContent = items.length ? "По этим фильтрам заданий нет." : "Заданий пока нет. Первый запуск появится здесь автоматически.";
       variantList.replaceChildren(empty);
       return;
     }
     variantList.replaceChildren(...filteredJobs.map((job) => {
       const card = document.createElement("article");
-      card.className = "generation-job";
+      card.className = "generation-job ui-media-card";
       card.dataset.state = job.state || "submitting";
+      if (["submitting", "preparing", "uploading", "queued", "waiting_resources", "running", "postprocessing", "archiving"].includes(job.state)) {
+        card.setAttribute("aria-busy", "true");
+      } else if (job.state === "completed") {
+        card.classList.add("is-success");
+      } else if (job.state === "failed" || job.state === "error") {
+        card.classList.add("is-error");
+      }
       card.append(renderJobMedia(job));
       const body = document.createElement("div");
       body.className = "generation-job-body";
@@ -2872,7 +2879,7 @@
       jobSlice.dispatch({ type: "LOAD_ERROR", error: error.message }, (state) => ({ ...state, loading: false, error: error.message || "Load failed" }));
       if (!jobSlice.get().items.length && variantList) {
         const empty = document.createElement("p");
-        empty.className = "generation-variant-empty generation-job-load-error";
+        empty.className = "generation-variant-empty generation-job-load-error ui-empty-state";
         empty.textContent = error.message || "Не удалось загрузить задания";
         variantList.replaceChildren(empty);
       }
