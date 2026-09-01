@@ -39,7 +39,7 @@ func TestMiningPriorityDegradationWarningExplainsRetry(t *testing.T) {
 	warning := miningPriorityDegradationWarning(MiningOverview{Agent: DependencyStatus{
 		Detail: "Windows-agent не отвечает.", RetryInSeconds: 8,
 	}})
-	if !strings.Contains(warning, "продолжена в обычном режиме") || !strings.Contains(warning, "через 8 сек") || !strings.Contains(warning, "Windows-agent не отвечает") {
+	if !strings.Contains(warning, "автоматический запуск майнинга") || !strings.Contains(warning, "через 8 сек") || !strings.Contains(warning, "Windows-agent не отвечает") {
 		t.Fatalf("warning = %q", warning)
 	}
 }

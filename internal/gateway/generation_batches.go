@@ -623,8 +623,10 @@ func (a *App) handleGenerationBatchCancel(w http.ResponseWriter, r *http.Request
 		return
 	}
 	user := a.currentUser(r)
+	cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 45*time.Second)
+	defer cancel()
 	publicID := strings.TrimSpace(r.Form.Get("batch_id"))
-	batch, jobs, changed, err := a.store.RequestGenerationBatchCancellation(r.Context(), user.ID, publicID)
+	batch, jobs, changed, err := a.store.RequestGenerationBatchCancellation(cancelCtx, user.ID, publicID)
 	if errors.Is(err, sql.ErrNoRows) {
 		http.NotFound(w, r)
 		return
@@ -638,16 +640,16 @@ func (a *App) handleGenerationBatchCancel(w http.ResponseWriter, r *http.Request
 		if job.CancellationRequestedAt == nil || job.State.Terminal() {
 			continue
 		}
-		if _, _, cancelErr := a.continueGenerationJobCancellation(r.Context(), job); cancelErr != nil {
+		if _, _, cancelErr := a.continueGenerationJobCancellation(cancelCtx, job); cancelErr != nil {
 			cancelErrors = append(cancelErrors, cancelErr)
 		}
 	}
-	view, viewErr := a.generationBatchViewByID(r.Context(), user.ID, batch.PublicID)
+	view, viewErr := a.generationBatchViewByID(cancelCtx, user.ID, batch.PublicID)
 	if viewErr != nil {
 		writeGenerationError(w, http.StatusInternalServerError, "отмена принята, но состояние пакета пока недоступно")
 		return
 	}
-	a.audit(r.Context(), &user.ID, "quick_generation_batch_cancelled", "generation_batch", &batch.ID, a.clientIP(r), r.UserAgent(), map[string]any{"batch_id": batch.PublicID, "changed": changed})
+	a.audit(cancelCtx, &user.ID, "quick_generation_batch_cancelled", "generation_batch", &batch.ID, a.clientIP(r), r.UserAgent(), map[string]any{"batch_id": batch.PublicID, "changed": changed})
 	response := map[string]any{"batch": view, "cancelled": len(cancelErrors) == 0}
 	if len(cancelErrors) > 0 {
 		response["message"] = "Отмена принята. Активный вариант будет остановлен после подтверждения ComfyUI."
@@ -758,10 +760,13 @@ func (a *App) dispatchGenerationBatchJobs(ctx context.Context) (int64, error) {
 		_, _, _ = a.continueGenerationJobCancellation(jobCtx, current)
 		return 1, nil
 	}
-	miningLease, _, err := a.pauseMiningForQuickGeneration(jobCtx, &user, job.ID)
+	miningLease, miningWarning, err := a.pauseMiningForQuickGeneration(jobCtx, &user, job.ID)
 	if err != nil {
 		a.failGenerationJob(jobCtx, job, "mining_pause_failed", "Не удалось освободить ресурсы для варианта", err)
 		return 1, nil
+	}
+	if miningWarning != "" {
+		log.Printf("batch generation %s mining priority: %s", job.PublicID, miningWarning)
 	}
 	promptID, err := a.submitComfyPrompt(jobCtx, user.ID, job.PublicID, prompt)
 	if err != nil {

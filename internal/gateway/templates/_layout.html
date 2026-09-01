@@ -24,7 +24,7 @@
     <a class="brand" href="/app"><b>AI Gateway</b><span>Рабочее пространство</span></a>
   </div>
   {{if .CurrentUser}}{{if eq .CurrentUser.Role "admin"}}
-  <form method="post" action="/account/quick-generation-priority" class="header-priority-form" data-quick-generation-priority title="При включении быстрая генерация временно приостанавливает майнинг для вашей учётной записи.">
+  <form method="post" action="/account/quick-generation-priority" class="header-priority-form" data-quick-generation-priority title="При включении быстрая генерация освобождает ресурсы и автоматически запускает майнинг после завершения или отмены.">
 	<input type="hidden" name="csrf" value="{{.CSRF}}">
 	<label class="header-priority-toggle"><input name="enabled" type="checkbox" value="on" {{if .CurrentUser.PauseMiningForQuickGeneration}}checked{{end}}><span class="header-priority-switch" aria-hidden="true"></span><span>Приоритет</span></label>
   </form>

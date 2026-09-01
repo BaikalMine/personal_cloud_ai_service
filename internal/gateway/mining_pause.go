@@ -26,13 +26,7 @@ func (a *App) pauseMiningForQuickGeneration(ctx context.Context, user *User, job
 	existing, err := a.store.ActiveQuickGenerationMiningLease(ctx)
 	if err == nil {
 		overview := a.miningOverview(ctx, true, false)
-		if len(overview.Miners) == 0 {
-			return nil, "", nil
-		}
-		if !overview.Available {
-			return nil, miningPriorityDegradationWarning(overview), nil
-		}
-		wasRunning := overview.Running
+		wasRunning := overview.Available && overview.Running && overview.Active != nil
 		if wasRunning && overview.Active != nil {
 			state, stopErr := a.mining.Stop(ctx, mining.Request{ScriptPath: overview.Active.ScriptPath, ProcessName: overview.Active.ProcessName})
 			if stopErr != nil {
@@ -49,6 +43,9 @@ func (a *App) pauseMiningForQuickGeneration(ctx context.Context, user *User, job
 		if err := a.store.CreateQuickGenerationMiningLease(ctx, lease); err != nil {
 			return nil, "", fmt.Errorf("создать резервирование майнинга: %w", err)
 		}
+		if !overview.Available {
+			return &lease, miningPriorityDegradationWarning(overview), nil
+		}
 		return &lease, "", nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -56,16 +53,14 @@ func (a *App) pauseMiningForQuickGeneration(ctx context.Context, user *User, job
 	}
 
 	overview := a.miningOverview(ctx, true, false)
-	if len(overview.Miners) == 0 {
-		return nil, "", nil
-	}
-	if !overview.Available {
-		return nil, miningPriorityDegradationWarning(overview), nil
-	}
-	if !overview.Running || overview.Active == nil {
-		return nil, "", nil
-	}
 	target := overview.Active
+	if target == nil {
+		target = overview.Default
+	}
+	if target == nil || (!target.Enabled && !target.State.Running) {
+		return nil, "", nil
+	}
+	wasRunning := overview.Available && overview.Running && overview.Active != nil
 	lease := domain.QuickGenerationMiningLease{
 		ID: newRequestID(), CorrelationID: correlationIDFromContext(ctx), GenerationJobID: jobID, UserID: user.ID, MinerID: target.ID,
 		ScriptPath: target.ScriptPath, ProcessName: target.ProcessName, ResumeMining: true,
@@ -73,20 +68,32 @@ func (a *App) pauseMiningForQuickGeneration(ctx context.Context, user *User, job
 	if err := a.store.CreateQuickGenerationMiningLease(ctx, lease); err != nil {
 		return nil, "", fmt.Errorf("создать резервирование майнинга: %w", err)
 	}
-	state, stopErr := a.mining.Stop(ctx, mining.Request{ScriptPath: target.ScriptPath, ProcessName: target.ProcessName})
-	if stopErr != nil || state.Running {
-		_, _, deleteErr := a.store.DeleteQuickGenerationMiningLease(ctx, lease.ID)
-		if deleteErr != nil {
-			log.Printf("remove failed mining-pause lease %s: %v", lease.ID, deleteErr)
+	if wasRunning {
+		state, stopErr := a.mining.Stop(ctx, mining.Request{ScriptPath: target.ScriptPath, ProcessName: target.ProcessName})
+		if stopErr != nil || state.Running {
+			_, _, deleteErr := a.store.DeleteQuickGenerationMiningLease(ctx, lease.ID)
+			if deleteErr != nil {
+				log.Printf("remove failed mining-pause lease %s: %v", lease.ID, deleteErr)
+			}
+			if stopErr != nil {
+				return nil, "", fmt.Errorf("остановить майнинг: %w", stopErr)
+			}
+			return nil, "", errors.New("майнинг не остановился")
 		}
-		if stopErr != nil {
-			return nil, "", fmt.Errorf("остановить майнинг: %w", stopErr)
-		}
-		return nil, "", errors.New("майнинг не остановился")
 	}
-	a.audit(ctx, &user.ID, "mining_paused_for_quick_generation", "miner", &target.ID, "", "", map[string]any{
-		"lease_id": lease.ID, "username": user.Username, "process_name": target.ProcessName,
+	action := "mining_resume_reserved_for_quick_generation"
+	if wasRunning {
+		action = "mining_paused_for_quick_generation"
+	}
+	a.audit(ctx, &user.ID, action, "miner", &target.ID, "", "", map[string]any{
+		"lease_id": lease.ID, "username": user.Username, "process_name": target.ProcessName, "was_running": wasRunning,
 	})
+	if !overview.Available {
+		return &lease, miningPriorityDegradationWarning(overview), nil
+	}
+	if !wasRunning {
+		return &lease, "Майнинг уже был остановлен. После завершения или отмены генерации он будет запущен автоматически.", nil
+	}
 	return &lease, "", nil
 }
 
@@ -98,7 +105,7 @@ func miningPriorityDegradationWarning(overview MiningOverview) string {
 	if detail == "" {
 		detail = "Windows-agent не отвечает"
 	}
-	warning := "Приоритет включён, но остановка майнинга не подтверждена. Генерация продолжена в обычном режиме. Причина: " + detail
+	warning := "Приоритет включён, но остановка майнинга не подтверждена. Генерация продолжена, а автоматический запуск майнинга после завершения или отмены сохранён. Причина: " + detail
 	if overview.Agent.RetryInSeconds > 0 {
 		warning += fmt.Sprintf(" Следующая проверка через %d сек.", overview.Agent.RetryInSeconds)
 	}
@@ -206,8 +213,21 @@ func (a *App) refreshQuickGenerationMiningLeases(ctx context.Context) (int64, er
 		}
 		processed++
 		if lease.GenerationJobID > 0 {
-			// Durable jobs own their quota and mining release as one transaction-like
-			// lifecycle. The job reconciler is the only component allowed to finish it.
+			job, jobErr := a.store.GenerationJobByID(ctx, lease.GenerationJobID)
+			if jobErr != nil {
+				if !errors.Is(jobErr, sql.ErrNoRows) {
+					refreshErrors = append(refreshErrors, fmt.Errorf("lease %s job: %w", lease.ID, jobErr))
+				}
+				continue
+			}
+			if job.State.Terminal() {
+				_, complete, releaseErr := a.releaseGenerationJobResources(ctx, job)
+				if releaseErr != nil {
+					refreshErrors = append(refreshErrors, fmt.Errorf("lease %s terminal job release: %w", lease.ID, releaseErr))
+				} else if !complete {
+					refreshErrors = append(refreshErrors, fmt.Errorf("lease %s terminal job resources are still reserved", lease.ID))
+				}
+			}
 			continue
 		}
 		if lease.PromptID == "" {

@@ -275,6 +275,11 @@ func (s *Store) GenerationJobByPromptID(ctx context.Context, promptID string) (d
 		FROM generation_jobs WHERE prompt_id=$1`, strings.TrimSpace(promptID)))
 }
 
+func (s *Store) GenerationJobByID(ctx context.Context, jobID int64) (domain.GenerationJob, error) {
+	return scanGenerationJob(s.db.QueryRowContext(ctx, `SELECT `+generationJobColumns+`
+		FROM generation_jobs WHERE id=$1`, jobID))
+}
+
 func (s *Store) PrepareGenerationJob(ctx context.Context, jobID int64, prepared domain.PreparedGenerationJob) (domain.GenerationJob, error) {
 	dependencies, err := json.Marshal(uniqueStrings(prepared.Dependencies))
 	if err != nil {

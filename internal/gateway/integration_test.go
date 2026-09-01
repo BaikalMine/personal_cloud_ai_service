@@ -6,17 +6,20 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	contentcrypto "ai-access-gateway/internal/content"
 	"ai-access-gateway/internal/database"
 	"ai-access-gateway/internal/domain"
+	"ai-access-gateway/internal/mining"
 	"ai-access-gateway/internal/store"
 )
 
@@ -110,6 +113,65 @@ func TestGatewayIntegrationComfyOwnership(t *testing.T) {
 	assertComfyMediaAccess(t, app, user, "/view?filename=legacy-input.png&type=input", false)
 
 	assertChunkedMediaRoundTrip(t, ctx, db, app, eventID, userID, spoolDir)
+	assertPriorityMiningResume(t, ctx, repository, userID)
+}
+
+func assertPriorityMiningResume(t *testing.T, ctx context.Context, repository *store.Store, userID int64) {
+	t.Helper()
+	_, err := repository.CreateMiner(ctx, store.CreateMinerParams{
+		Name: "Integration miner", ScriptPath: `C:\Mining\start.bat`, ProcessName: "miner.exe",
+		Enabled: true, Default: true, CreatedByUserID: userID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var running atomic.Bool
+	var startCalls atomic.Int64
+	var stopCalls atomic.Int64
+	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/state":
+			_ = json.NewEncoder(w).Encode(mining.State{Running: running.Load(), ProcessName: "miner.exe"})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/start":
+			var request mining.Request
+			if decodeErr := json.NewDecoder(r.Body).Decode(&request); decodeErr != nil || request.ScriptPath != `C:\Mining\start.bat` || request.ProcessName != "miner.exe" {
+				http.Error(w, "invalid start request", http.StatusBadRequest)
+				return
+			}
+			startCalls.Add(1)
+			running.Store(true)
+			_ = json.NewEncoder(w).Encode(mining.State{Running: true, ProcessName: "miner.exe"})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/stop":
+			stopCalls.Add(1)
+			running.Store(false)
+			_ = json.NewEncoder(w).Encode(mining.State{Running: false, ProcessName: "miner.exe"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer agent.Close()
+	agentURL, err := url.Parse(agent.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := &App{store: repository, mining: mining.NewClient(agentURL, "integration-mining-token")}
+	user := &User{ID: userID, Username: "gateway-user", PauseMiningForQuickGeneration: true}
+	lease, status, err := app.pauseMiningForQuickGeneration(ctx, user, 0)
+	if err != nil || lease == nil || !lease.ResumeMining {
+		t.Fatalf("priority lease=%+v status=%q err=%v", lease, status, err)
+	}
+	if status == "" || stopCalls.Load() != 0 {
+		t.Fatalf("stopped miner reservation status=%q stop_calls=%d", status, stopCalls.Load())
+	}
+	if !app.releaseMiningPause(ctx, lease.ID) {
+		t.Fatal("priority lease was not released")
+	}
+	if !running.Load() || startCalls.Load() != 1 {
+		t.Fatalf("miner running=%v start_calls=%d", running.Load(), startCalls.Load())
+	}
+	if _, err := repository.ActiveQuickGenerationMiningLease(ctx); err != sql.ErrNoRows {
+		t.Fatalf("active priority lease after release: %v", err)
+	}
 }
 
 func assertChunkedMediaRoundTrip(t *testing.T, ctx context.Context, db *sql.DB, app *App, eventID, userID int64, spoolDir string) {
@@ -175,7 +237,7 @@ func assertComfyMediaAccess(t *testing.T, app *App, user *User, target string, w
 func resetGatewayIntegrationDatabase(t *testing.T, db *sql.DB) {
 	t.Helper()
 	if _, err := db.Exec(`
-		TRUNCATE comfy_output_cleanup_tombstones, comfy_input_assets, comfy_userdata, comfy_settings, comfy_output_ownership, content_media, prompt_assistant_runs, content_events,
+		TRUNCATE quick_generation_mining_leases, miners, comfy_output_cleanup_tombstones, comfy_input_assets, comfy_userdata, comfy_settings, comfy_output_ownership, content_media, prompt_assistant_runs, content_events,
 			websocket_sessions, proxy_requests, audit_log, invite_uses, invites, sessions, users RESTART IDENTITY CASCADE
 	`); err != nil {
 		t.Fatal(err)

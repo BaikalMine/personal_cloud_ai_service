@@ -109,7 +109,7 @@
         if (!response.ok || typeof payload.enabled !== "boolean") throw new Error(payload.error || "Не удалось сохранить приоритет");
         toggle.checked = payload.enabled;
         form.title = payload.enabled
-          ? "Приоритет включён: быстрая генерация будет временно приостанавливать майнинг."
+          ? "Приоритет включён: майнинг автоматически запустится после завершения или отмены генерации."
           : "Приоритет выключен: майнинг не будет останавливаться для быстрой генерации.";
       } catch (_) {
         toggle.checked = previous;

@@ -182,7 +182,7 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 	if miningWarning != "" {
 		response["mining_warning"] = miningWarning
 	}
-	if miningLease != nil && miningLease.ResumeMining {
+	if miningLease != nil && miningLease.ResumeMining && miningWarning == "" {
 		response["mining_paused"] = true
 	}
 	writeJSON(w, http.StatusOK, response)

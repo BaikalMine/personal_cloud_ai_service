@@ -556,7 +556,7 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 	} else {
 		response["quota"] = quota
 	}
-	if miningLease != nil && miningLease.ResumeMining {
+	if miningLease != nil && miningLease.ResumeMining && miningWarning == "" {
 		response["mining_paused"] = true
 	}
 	if miningWarning != "" {
