@@ -127,12 +127,15 @@ func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt
 	if !ValidProfile(mode, profile) {
 		return Result{}, errors.New("неизвестный шаблон промт-ассистента")
 	}
+	if mode == ModeTextToVideo && IsMiniMaxH3Profile(profile) && !MiniMaxH3ProfileMatchesMode(profile, video.Mode) {
+		return Result{}, errors.New("шаблон промт-ассистента не соответствует ветке MiniMax H3")
+	}
 	target := *c.baseURL
 	target.Path = joinPath(target.Path, "/api/chat")
 	target.RawQuery = ""
 	target.Fragment = ""
 	systemPrompt := SystemPromptWithReferences(mode, profile, references)
-	if mode == ModeTextToVideo && profile == ProfileMiniMaxH3 {
+	if mode == ModeTextToVideo && IsMiniMaxH3Profile(profile) {
 		systemPrompt = SystemPromptWithVideoContextAndReferences(mode, profile, references, video)
 	}
 	systemPrompt += structuredResponseInstruction(mode, references, video)
@@ -165,7 +168,7 @@ func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt
 	payload.Options.Temperature = 0.35
 	payload.Options.TopP = 0.9
 	payload.Options.NumPredict = requestPolicy.NumPredict
-	if mode == ModeTextToVideo && profile == ProfileMiniMaxH3 {
+	if mode == ModeTextToVideo && IsMiniMaxH3Profile(profile) {
 		payload.Options.Temperature = 0.3
 	}
 	body, err := json.Marshal(payload)

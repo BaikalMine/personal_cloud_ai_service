@@ -140,11 +140,20 @@ func TestWorkflowProfilesAreLimitedToCompatibleGenerationModes(t *testing.T) {
 	if !ValidProfile(ModeImageToImage, ProfileFluxEdit) {
 		t.Fatal("identity-transfer profile must be available for image-to-image")
 	}
-	if !ValidProfile(ModeTextToVideo, ProfileMiniMaxH3) {
-		t.Fatal("MiniMax H3 profile must be available for video")
+	for _, profile := range []Profile{ProfileMiniMaxH3, ProfileMiniMaxH3FL2VA, ProfileMiniMaxH3REF2VA} {
+		if !ValidProfile(ModeTextToVideo, profile) {
+			t.Fatalf("MiniMax H3 profile %q must be available for video", profile)
+		}
+		if ValidProfile(ModeTextToImage, profile) || ValidProfile(ModeImageToImage, profile) {
+			t.Fatalf("MiniMax H3 profile %q must be limited to video", profile)
+		}
 	}
-	if ValidProfile(ModeTextToImage, ProfileMiniMaxH3) || ValidProfile(ModeImageToImage, ProfileMiniMaxH3) {
-		t.Fatal("MiniMax H3 profile must be limited to video")
+	if !MiniMaxH3ProfileMatchesMode(ProfileMiniMaxH3FL2VA, VideoModeFL2VA) || MiniMaxH3ProfileMatchesMode(ProfileMiniMaxH3FL2VA, VideoModeREF2VA) ||
+		!MiniMaxH3ProfileMatchesMode(ProfileMiniMaxH3REF2VA, VideoModeREF2VA) || MiniMaxH3ProfileMatchesMode(ProfileMiniMaxH3REF2VA, VideoModeFL2VA) {
+		t.Fatal("branch-specific MiniMax H3 profiles must stay bound to their workflow modes")
+	}
+	if MiniMaxH3ProfileMatchesMode(ProfileMiniMaxH3FL2VA, "unknown") || MiniMaxH3ProfileMatchesMode(ProfileMiniMaxH3, "unknown") {
+		t.Fatal("MiniMax H3 profiles must reject unknown workflow modes")
 	}
 }
 
@@ -155,13 +164,14 @@ func TestEnhanceVideoUsesMiniMaxContextForReferenceAudio(t *testing.T) {
 			t.Fatal(err)
 		}
 		system := body.Messages[0].Content
-		if !strings.Contains(system, "prompt-driven Ref2VA with 2 attached image reference") ||
+		if !strings.Contains(system, "dedicated MiniMax H3 REF2VA prompt assistant") ||
+			!strings.Contains(system, "prompt-driven Ref2VA with 2 attached image reference") ||
 			!strings.Contains(system, "<Audio 1> reference is attached") ||
 			!strings.Contains(system, "<Video 1> reference is attached") ||
 			!strings.Contains(system, "<Picture 1> (attached image 1): the base scene") ||
 			!strings.Contains(system, "<Picture 2> (attached image 2): the person or character's identity") ||
 			!strings.Contains(system, "at least three concrete visible attributes") ||
-			!strings.Contains(system, "define a human as <Subject 1>") ||
+			!strings.Contains(system, "<Subject 1>") ||
 			body.Format != "json" || body.Options.NumPredict != DefaultVideoNumPredict || len(body.Messages[1].Images) != 2 || body.Messages[1].Images[0] != "aW1hZ2UtMQ==" || body.Messages[1].Images[1] != "aW1hZ2UtMg==" {
 			t.Fatalf("wrong MiniMax context: %#v", body)
 		}
@@ -173,7 +183,7 @@ func TestEnhanceVideoUsesMiniMaxContextForReferenceAudio(t *testing.T) {
 		t.Fatal(err)
 	}
 	references := []ImageReference{{Number: 1, Role: ImageReferenceBaseScene, MIMEType: "image/png", Image: []byte("image-1")}, {Number: 2, Role: ImageReferenceIdentity, MIMEType: "image/webp", Image: []byte("image-2")}}
-	result, err := NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3, "a dancer turns", references, VideoContext{Mode: "references", DurationSeconds: 10, ImageCount: 2, AudioReference: true, VideoReference: true}, false)
+	result, err := NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3REF2VA, "a dancer turns", references, VideoContext{Mode: "references", DurationSeconds: 10, ImageCount: 2, AudioReference: true, VideoReference: true}, false)
 	if err != nil || result != "summary: a concise video." {
 		t.Fatalf("result = %q, err = %v", result, err)
 	}
@@ -186,7 +196,8 @@ func TestEnhanceVideoUsesPromptOnlyRef2VAStructure(t *testing.T) {
 			t.Fatal(err)
 		}
 		system := body.Messages[0].Content
-		if !strings.Contains(system, "prompt-driven Ref2VA with 0 attached image reference") ||
+		if !strings.Contains(system, "dedicated MiniMax H3 REF2VA prompt assistant") ||
+			!strings.Contains(system, "prompt-driven Ref2VA with 0 attached image reference") ||
 			!strings.Contains(system, "Reference files are optional") ||
 			!strings.Contains(system, "N/A - no reference media supplied") ||
 			strings.Contains(system, "<Picture 1> (attached image") || len(body.Messages[1].Images) != 0 {
@@ -199,7 +210,7 @@ func TestEnhanceVideoUsesPromptOnlyRef2VAStructure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3, "a quiet city at dawn", nil, VideoContext{Mode: "references", DurationSeconds: 5}, false)
+	result, err := NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3REF2VA, "a quiet city at dawn", nil, VideoContext{Mode: "references", DurationSeconds: 5}, false)
 	if err != nil || result != "summary: prompt-only Ref2VA." {
 		t.Fatalf("result = %q, err = %v", result, err)
 	}
@@ -212,7 +223,8 @@ func TestEnhanceVideoGroundsExactFrameImages(t *testing.T) {
 			t.Fatal(err)
 		}
 		system := body.Messages[0].Content
-		if !strings.Contains(system, "The attached keyframes are") ||
+		if !strings.Contains(system, "dedicated MiniMax H3 FL2VA prompt assistant") ||
+			!strings.Contains(system, "The attached keyframes are") ||
 			!strings.Contains(system, "<Picture 1> (attached image 1): the exact opening frame") ||
 			!strings.Contains(system, "<Picture 2> (attached image 2): the exact final frame") ||
 			!strings.Contains(system, "Do not treat either keyframe as a loose style reference") || len(body.Messages[1].Images) != 2 {
@@ -229,7 +241,7 @@ func TestEnhanceVideoGroundsExactFrameImages(t *testing.T) {
 		{Number: 1, Role: ImageReferenceBaseScene, MIMEType: "image/png", Image: []byte("first")},
 		{Number: 2, Role: ImageReferenceIdentity, MIMEType: "image/png", Image: []byte("last")},
 	}
-	result, err := NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3, "move from the first frame to the last", references, VideoContext{Mode: "frames", DurationSeconds: 10, ImageCount: 2}, false)
+	result, err := NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3FL2VA, "move from the first frame to the last", references, VideoContext{Mode: "frames", DurationSeconds: 10, ImageCount: 2}, false)
 	if err != nil || result != "A grounded first-to-last-frame prompt." {
 		t.Fatalf("result = %q, err = %v", result, err)
 	}
@@ -242,7 +254,8 @@ func TestEnhanceVideoUsesT2VAStructureWithoutImages(t *testing.T) {
 			t.Fatal(err)
 		}
 		system := body.Messages[0].Content
-		if !strings.Contains(system, "selected mode is T2VA") ||
+		if !strings.Contains(system, "dedicated MiniMax H3 FL2VA prompt assistant") ||
+			!strings.Contains(system, "selected mode is T2VA") ||
 			!strings.Contains(system, "There is no opening or closing picture") ||
 			!strings.Contains(system, "60-second video") {
 			t.Fatalf("wrong T2VA context: %s", system)
@@ -254,7 +267,7 @@ func TestEnhanceVideoUsesT2VAStructureWithoutImages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3, "a distant storm approaches", nil, VideoContext{Mode: "frames", DurationSeconds: 60, ImageCount: 0}, false)
+	result, err := NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3FL2VA, "a distant storm approaches", nil, VideoContext{Mode: "frames", DurationSeconds: 60, ImageCount: 0}, false)
 	if err != nil || result != "A complete text-to-video prompt." {
 		t.Fatalf("result = %q, err = %v", result, err)
 	}
@@ -276,8 +289,19 @@ func TestEnhanceVideoThinkUsesExtendedTokenBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3, "a dancer turns", nil, VideoContext{Mode: "frames", DurationSeconds: 15, ImageCount: 2}, true); err != nil {
+	if _, err := NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3FL2VA, "a dancer turns", nil, VideoContext{Mode: "frames", DurationSeconds: 15, ImageCount: 2}, true); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestEnhanceVideoRejectsAssistantFromTheOtherBranch(t *testing.T) {
+	base, err := url.Parse("http://127.0.0.1:11434")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3FL2VA, "a dancer turns", nil, VideoContext{Mode: VideoModeREF2VA, DurationSeconds: 5}, false)
+	if err == nil || !strings.Contains(err.Error(), "не соответствует ветке") {
+		t.Fatalf("expected branch mismatch error, got %v", err)
 	}
 }
 

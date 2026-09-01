@@ -46,7 +46,7 @@
     if (family === "minimax_h3") {
       if (videoMode === "references") {
         return {
-          eyebrow: "Свободные референсы",
+          eyebrow: "REF2VA · свободные референсы",
           title: "Видео по промту и выбранным ориентирам",
           description: "Промт задаёт действие, а фото, видео и аудио помогают сохранить конкретные признаки. Все файлы необязательны.",
           facts: [
@@ -61,7 +61,7 @@
       }
       if (count >= 2) {
         return {
-          eyebrow: "Первый и последний кадры",
+          eyebrow: "FL2VA · первый и последний кадры",
           title: "Переход между двумя точными кадрами",
           description: "Первое фото задаёт начало ролика, второе — финал. Модель строит достижимое движение между ними.",
           facts: [
@@ -74,7 +74,7 @@
       }
       if (count === 1) {
         return {
-          eyebrow: "Первый кадр",
+          eyebrow: "FL2VA · первый кадр",
           title: "Видео начинается с выбранного фото",
           description: "Фото фиксирует композицию первого кадра. Дальнейшее движение, камера и звук задаются промтом.",
           facts: [
@@ -86,7 +86,7 @@
         };
       }
       return {
-        eyebrow: "Текст в видео",
+        eyebrow: "FL2VA · текст в видео",
         title: "Видео полностью по вашему описанию",
         description: "Исходные файлы не нужны. Модель сама определит композицию, поэтому промт должен описывать сцену целиком.",
         facts: [
@@ -132,10 +132,10 @@
 
   const modeLabel = ({ family = "", templateID = "", videoMode = "frames", references = [] } = {}) => {
     if (family === "minimax_h3") {
-      if (videoMode === "references") return "Свободные референсы";
-      if (references.length >= 2) return "Первый и последний кадры";
-      if (references.length === 1) return "Первый кадр";
-      return "Текст в видео";
+      if (videoMode === "references") return "REF2VA · свободные референсы";
+      if (references.length >= 2) return "FL2VA · первый и последний кадры";
+      if (references.length === 1) return "FL2VA · первый кадр";
+      return "FL2VA · текст в видео";
     }
     if (templateID === "image-to-image") return family === "flux2" ? "Точное редактирование" : "Фото и промт";
     return "Текст в изображение";

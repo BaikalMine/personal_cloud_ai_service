@@ -146,7 +146,7 @@ func FixedEvaluationCases() []EvaluationCase {
 		},
 		{
 			ID: "minimax-first-last-frame", Family: "minimax_h3", Dimensions: []string{"first_frame", "last_frame"},
-			Mode: ModeTextToVideo, Profile: ProfileMiniMaxH3,
+			Mode: ModeTextToVideo, Profile: ProfileMiniMaxH3FL2VA,
 			Prompt: "Create a smooth ten-second transition from the exact first frame in Picture 1 to Picture 2. The adult subject walks from the left side of the blue studio to the window and turns toward camera in the final frame.",
 			References: []ImageReference{
 				evaluationReference(1, ImageReferenceBaseScene, "blue-studio-first", "EXACT FIRST FRAME", "SUBJECT LEFT / BLUE STUDIO", color.RGBA{28, 57, 91, 255}, color.RGBA{83, 157, 205, 255}),
@@ -158,14 +158,14 @@ func FixedEvaluationCases() []EvaluationCase {
 		},
 		{
 			ID: "minimax-sound", Family: "minimax_h3", Dimensions: []string{"sound"},
-			Mode: ModeTextToVideo, Profile: ProfileMiniMaxH3,
+			Mode: ModeTextToVideo, Profile: ProfileMiniMaxH3REF2VA,
 			Prompt: "An adult presenter delivers one calm whispered sentence. Use Audio 1 as the voice reference and keep lip movement synchronized with the spoken line.",
 			Video:  VideoContext{Mode: "references", DurationSeconds: 10, AudioReference: true}, ExpectedReferenceIDs: []string{"Audio 1"},
 			RequiredPromptTerms: [][]string{{"Audio 1", "<Audio 1>"}, {"whisper", "whispered"}, {"synchron", "lip-sync", "lip sync"}},
 		},
 		{
 			ID: "minimax-motion", Family: "minimax_h3", Dimensions: []string{"motion"},
-			Mode: ModeTextToVideo, Profile: ProfileMiniMaxH3,
+			Mode: ModeTextToVideo, Profile: ProfileMiniMaxH3REF2VA,
 			Prompt: "Use Picture 1 for the adult subject and Video 1 only for motion timing. The subject performs the same measured turn and camera-relative movement while keeping the appearance from Picture 1.",
 			References: []ImageReference{
 				evaluationReference(1, ImageReferenceIdentity, "motion-subject", "IDENTITY REFERENCE", "ADULT SUBJECT / SILVER JACKET", color.RGBA{44, 48, 56, 255}, color.RGBA{174, 186, 194, 255}),

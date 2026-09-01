@@ -20,7 +20,12 @@ const (
 	ProfileAnime           Profile = "anime"
 	ProfileNSFW            Profile = "nsfw"
 	ProfileFluxEdit        Profile = "flux-edit"
-	ProfileMiniMaxH3       Profile = "minimax-h3"
+	ProfileMiniMaxH3       Profile = "minimax-h3" // Legacy profile; infer the branch from VideoContext.
+	ProfileMiniMaxH3FL2VA  Profile = "minimax-h3-fl2va"
+	ProfileMiniMaxH3REF2VA Profile = "minimax-h3-ref2va"
+
+	VideoModeFL2VA  = "frames"
+	VideoModeREF2VA = "references"
 )
 
 // Profile selects a user-facing assistant template.
@@ -115,22 +120,60 @@ Preserve the user's exact intent, requested duration, camera restrictions, degre
 
 Write the video in playback order: initial anchor, action onset, continuous development, result or reaction, then a stable final hold. Keep one main subject, one coherent idea, physically plausible weight transfer and hand paths, restrained secondary motion, and one camera behavior per shot. If a fixed camera is requested, explicitly state that it remains locked with no pan, tilt, zoom, push, pull, orbit, reframing, cuts, angle changes, or camera switching.
 
-Use the exact identifiers required by the selected structure. In Ref2VA, define a human as <Subject 1>; never replace it with an alias such as <Adult Woman>. In detailed_description, include explicit chronological time ranges that cover the requested duration and reserve the final interval for a stable hold.
+Use only the exact identifiers required by the selected structure. Include explicit chronological time ranges that cover the requested duration and reserve the final interval for a stable hold.
 
 Use exact dialogue syntax when speech is requested: The clearly adult [subject] with [voice description] (S1) says: <d>[Russian] exact words.</d> Keep the voice description outside <d> and do not repeat dialogue in overall_soundscape. State when speech ends and that no further speech, whispering, narration, or lip-synced dialogue occurs when applicable. Include only plausible diegetic ambience and synchronized physical sounds; use non_diegetic_music: N/A unless music was explicitly requested.
 
 You receive uploaded visual references in their exact numbered order, together with their declared roles. Inspect them carefully and use only visible details that are relevant to the user's request. Keep references distinct: never silently blend identities, outfits, scenes, or visual styles from different pictures.`
 
+const miniMaxH3FL2VAInstruction = `You are the dedicated MiniMax H3 FL2VA prompt assistant for prompt-to-video, first-frame-to-video, and first/last-frame-to-video.
+
+Treat supplied pictures as exact temporal anchors, never as loose identity, outfit, style, or background references. With one picture, <Picture 1> is the exact opening frame. With two pictures, <Picture 1> is the exact opening frame and <Picture 2> is the exact final frame; describe one physically reachable continuous path between them. With no pictures, write a complete text-to-video scene and do not invent picture identifiers. Audio and video references do not belong to this branch.
+
+Preserve the visible subject, clothing, pose, framing, setting, lighting, and composition at every supplied anchor. Do not make the motion begin before the opening frame, overshoot the final frame, introduce a cut to reach it, or reinterpret either anchor as optional inspiration.`
+
+const miniMaxH3REF2VAInstruction = `You are the dedicated MiniMax H3 REF2VA prompt assistant for prompt-driven video with optional free references.
+
+The workflow may receive zero to four pictures plus optional <Video 1> and <Audio 1>. These are semantic references, not exact opening or final frames. Define the first human as <Subject 1>; never replace that identifier with an alias such as <Adult Woman>. Inspect every attached picture first, keep each source distinct, and bind only its declared visible role to the matching <Picture N>. Never silently transfer a face, garment, pose, object, background, or style from the wrong picture.
+
+Use <Video 1> only for the user-declared motion, scene, camera, or timing role, and use <Audio 1> only for the declared voice, music, or ambience role. Do not claim to inspect or transcribe video or audio content unavailable to vision. When no reference media is supplied, write a complete prompt-driven REF2VA scene without inventing identifiers.`
+
+func IsMiniMaxH3Profile(profile Profile) bool {
+	switch profile {
+	case ProfileMiniMaxH3, ProfileMiniMaxH3FL2VA, ProfileMiniMaxH3REF2VA:
+		return true
+	default:
+		return false
+	}
+}
+
+func MiniMaxH3ProfileForMode(mode string) Profile {
+	if mode == VideoModeREF2VA {
+		return ProfileMiniMaxH3REF2VA
+	}
+	return ProfileMiniMaxH3FL2VA
+}
+
+func MiniMaxH3ProfileMatchesMode(profile Profile, mode string) bool {
+	if mode != VideoModeFL2VA && mode != VideoModeREF2VA {
+		return false
+	}
+	if profile == ProfileMiniMaxH3 {
+		return true
+	}
+	return profile == MiniMaxH3ProfileForMode(mode)
+}
+
 func ValidProfile(mode Mode, profile Profile) bool {
 	if mode == ModeTextToVideo {
-		return profile == ProfileMiniMaxH3
+		return IsMiniMaxH3Profile(profile)
 	}
 	switch profile {
 	case ProfileWorkflowDefault, ProfilePhotographic, ProfileRealistic, ProfileAnime, ProfileNSFW:
 		return true
 	case ProfileFluxEdit:
 		return mode == ModeImageToImage
-	case ProfileMiniMaxH3:
+	case ProfileMiniMaxH3, ProfileMiniMaxH3FL2VA, ProfileMiniMaxH3REF2VA:
 		return mode == ModeTextToVideo
 	default:
 		return false
@@ -211,8 +254,12 @@ func SystemPromptWithVideoContextAndReferences(mode Mode, profile Profile, refer
 }
 
 func systemPrompt(mode Mode, profile Profile, references []ImageReference, video VideoContext) string {
-	if mode == ModeTextToVideo && profile == ProfileMiniMaxH3 {
-		prompt := miniMaxH3Instruction + "\n\n" + miniMaxH3FormatInstruction(video)
+	if mode == ModeTextToVideo && IsMiniMaxH3Profile(profile) {
+		branchInstruction := miniMaxH3FL2VAInstruction
+		if MiniMaxH3ProfileForMode(video.Mode) == ProfileMiniMaxH3REF2VA {
+			branchInstruction = miniMaxH3REF2VAInstruction
+		}
+		prompt := miniMaxH3Instruction + "\n\n" + branchInstruction + "\n\n" + miniMaxH3FormatInstruction(video)
 		prompt += miniMaxH3ReferenceMapInstruction(references, video)
 		prompt += minorSafetyInstruction
 		return strings.TrimSpace(prompt)
@@ -289,7 +336,7 @@ func miniMaxH3FormatInstruction(context VideoContext) string {
 	if imageCount < 0 {
 		imageCount = 0
 	}
-	if context.Mode == "references" {
+	if context.Mode == VideoModeREF2VA {
 		audioReference := "No standalone audio reference is attached; do not use an <Audio N> identifier."
 		if context.AudioReference {
 			audioReference = "One standalone <Audio 1> reference is attached and will be passed to MiniMax. When the user assigns it as a voice, music, or ambience reference, bind that exact role to <Audio 1> in the prompt. Never claim to hear, identify, or transcribe details that the user did not provide."

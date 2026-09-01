@@ -137,10 +137,12 @@ type workflowProfileParameterManifest struct {
 
 type workflowAssistantManifest struct {
 	Profile              string              `json:"profile"`
+	ModeProfiles         map[string]string   `json:"mode_profiles,omitempty"`
 	Allowed              bool                `json:"allowed"`
 	VisionReferences     bool                `json:"vision_references"`
 	ReferenceIdentifiers map[string][]string `json:"reference_identifiers"`
 	Rules                []string            `json:"rules"`
+	ModeRules            map[string][]string `json:"mode_rules,omitempty"`
 }
 
 type workflowOutputManifest struct {
@@ -209,14 +211,14 @@ func miniMaxH3WorkflowManifest() workflowManifest {
 		},
 		Modes: []workflowModeManifest{
 			{
-				ID: "frames", Name: "Промт и точные кадры", Default: true,
+				ID: "frames", Name: "FL2VA · промт и точные кадры", Default: true,
 				Description:     "Текст создаёт ролик; одно фото фиксирует первый кадр, два фото фиксируют начало и финал.",
 				InputLimits:     map[string]workflowLimit{"image": {Minimum: 0, Maximum: 2}, "audio": {Minimum: 0, Maximum: 0}, "video": {Minimum: 0, Maximum: 0}},
 				RequiredClasses: []string{"MiniMaxH3ImageToVideo", "LCImageMaskResize"},
 				ModelConditions: []workflowCondition{{Field: "video_reference_only", Operator: "equals", Value: false}},
 			},
 			{
-				ID: "references", Name: "Промт и свободные референсы",
+				ID: "references", Name: "REF2VA · промт и свободные референсы",
 				Description:     "До четырёх фото, одно видео и одно аудио помогают задать внешность, объекты, движение и звук.",
 				InputLimits:     map[string]workflowLimit{"image": {Minimum: 0, Maximum: 4}, "audio": {Minimum: 0, Maximum: 1}, "video": {Minimum: 0, Maximum: 1}},
 				RequiredClasses: []string{"MiniMaxH3ReferenceToVideo", "LCImageMaskResize"},
@@ -254,13 +256,21 @@ func miniMaxH3WorkflowManifest() workflowManifest {
 			{ID: "integrated_turbo", Name: "Eros Max", Description: "REF2VA-модель со встроенным Turbo.", Conditions: []workflowCondition{{Field: "video_integrated_turbo", Operator: "equals", Value: true}}, Parameters: map[string]workflowProfileParameterManifest{"video_mode": profileLockedValue("references"), "video_steps": profileParameter(8, 6, 8, false), "video_sampler": profileLockedValue("euler"), "video_scheduler": profileValue("simple"), "video_shift_video": profileValue(12), "video_shift_audio": profileValue(7)}},
 		},
 		PromptAssistant: workflowAssistantManifest{
-			Profile: "minimax-h3", Allowed: true, VisionReferences: true,
+			Profile: "minimax-h3-fl2va", ModeProfiles: map[string]string{"frames": "minimax-h3-fl2va", "references": "minimax-h3-ref2va"}, Allowed: true, VisionReferences: true,
 			ReferenceIdentifiers: map[string][]string{"frames": {"<Picture 1>", "<Picture 2>"}, "references": {"<Picture 1>", "<Picture 2>", "<Picture 3>", "<Picture 4>", "<Audio 1>", "<Video 1>"}},
 			Rules: []string{
 				"Сначала проанализировать все переданные изображения и сохранить назначенный порядок.",
-				"В режиме frames описывать Picture 1 как точный первый кадр, а Picture 2 как точный последний кадр.",
-				"В режиме references явно связывать внешность, одежду, предметы, движение и звук с соответствующими идентификаторами.",
 				"Вернуть один готовый к запуску английский Context-IR без отдельного negative prompt.",
+			},
+			ModeRules: map[string][]string{
+				"frames": {
+					"Picture 1 — точный первый кадр, Picture 2 — точный последний кадр; это не свободные референсы.",
+					"Описать один непрерывный и физически достижимый путь между переданными кадрами.",
+				},
+				"references": {
+					"Каждый Picture N — отдельный свободный референс с назначенной ролью, а не ключевой кадр.",
+					"Явно связать внешность, одежду, предметы, движение и звук с соответствующими Picture, Video и Audio.",
+				},
 			},
 		},
 		Output: workflowOutputManifest{Kinds: []string{"video", "audio"}, Container: "mp4", VideoCodec: "h264", PixelFormat: "yuv420p", FrameRate: miniMaxH3VideoFPS, GeneratedAudio: true, Postprocessing: []string{"color_match", "rife", "rtx", "sharpen"}},
@@ -269,7 +279,7 @@ func miniMaxH3WorkflowManifest() workflowManifest {
 
 func miniMaxH3WorkflowParameters() []workflowParameterManifest {
 	return []workflowParameterManifest{
-		enumWorkflowParameter("video_mode", "VideoMode", "Режим", "source", "frames", option("frames", "Промт и точные кадры"), option("references", "Промт и свободные референсы")),
+		enumWorkflowParameter("video_mode", "VideoMode", "Режим", "source", "frames", option("frames", "FL2VA · промт и точные кадры"), option("references", "REF2VA · промт и свободные референсы")),
 		enumWorkflowParameter("video_quality", "VideoQuality", "Качество", "source", 720, option(480, "480p"), option(720, "720p"), option(1080, "1080p"), option(1440, "1440p")),
 		integerWorkflowParameter("video_duration_seconds", "VideoDurationSeconds", "Длительность", "source", 5, 5, 60, 1),
 		stringWorkflowParameter("video_filename", "VideoFilename", "Имя файла", "source", "AI-Gateway-MiniMaxH3", 80),

@@ -131,12 +131,16 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 	}
 	video := promptassistant.VideoContext{}
 	operation := "enhance_image"
-	if profile == promptassistant.ProfileMiniMaxH3 {
+	if promptassistant.IsMiniMaxH3Profile(profile) {
 		operation = "enhance_video"
 		var contextErr error
 		video, contextErr = promptAssistantVideoContext(r, mode, len(references))
 		if contextErr != nil {
 			writeGenerationError(w, http.StatusBadRequest, contextErr.Error())
+			return
+		}
+		if !promptassistant.MiniMaxH3ProfileMatchesMode(profile, video.Mode) {
+			writeGenerationError(w, http.StatusBadRequest, "выбранный промт-ассистент не соответствует режиму MiniMax H3")
 			return
 		}
 	}
@@ -146,7 +150,7 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 	correlation := correlationID(r)
 	assistantStarted := time.Now()
 	result := promptassistant.Result{Policy: policy}
-	if profile == promptassistant.ProfileMiniMaxH3 {
+	if promptassistant.IsMiniMaxH3Profile(profile) {
 		result, err = a.promptAssistant.EnhanceVideoResult(ctx, mode, profile, prompt, references, video, think)
 	} else {
 		result, err = a.promptAssistant.EnhanceResult(ctx, mode, profile, prompt, references, think)

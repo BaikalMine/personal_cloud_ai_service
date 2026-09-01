@@ -49,7 +49,7 @@ func TestModelPolicySeparatesImageAndVideoBudgets(t *testing.T) {
 		ImageTimeout: 80 * time.Second, VideoTimeout: 5 * time.Minute, KeepAlive: "20s",
 	}
 	image := policy.request(ModeTextToImage, ProfilePhotographic, true)
-	video := policy.request(ModeTextToVideo, ProfileMiniMaxH3, false)
+	video := policy.request(ModeTextToVideo, ProfileMiniMaxH3REF2VA, false)
 	if image.NumPredict != 1300 || image.Timeout != 80*time.Second || image.KeepAlive != "20s" {
 		t.Fatalf("unexpected image policy: %+v", image)
 	}

@@ -118,6 +118,7 @@
   const generationPromptFields = root.querySelector(".generation-prompt-fields");
   const promptAssistant = document.getElementById("prompt-assistant");
   const promptAssistantEnabled = document.getElementById("prompt-assistant-enabled");
+  const promptAssistantDescription = document.getElementById("prompt-assistant-description");
   const promptAssistantControls = document.getElementById("prompt-assistant-controls");
   const promptAssistantTemplate = document.getElementById("prompt-assistant-template");
   const promptAssistantThink = document.getElementById("prompt-assistant-think");
@@ -372,6 +373,26 @@
     const fallback = primaryImageSize ? [primaryImageSize.width, primaryImageSize.height] : [1080, 1920];
     return miniMaxVideoSwap?.checked ? [fallback[1], fallback[0]] : fallback;
   };
+  const syncMiniMaxBranchCopy = () => {
+    const option = model?.selectedOptions?.[0];
+    const integratedTurbo = option?.dataset.videoIntegratedTurbo === "true";
+    const referenceOnly = option?.dataset.videoReferenceOnly === "true";
+    const referenceMode = referenceOnly || miniMaxMode() === "references";
+    if (miniMaxVideoModeHint) {
+      miniMaxVideoModeHint.textContent = referenceMode
+        ? integratedTurbo
+          ? "Ветка REF2VA (Eros Max): ролик строится по промту; фото, видео и аудио при наличии используются как свободные референсы."
+          : "Ветка REF2VA: ролик строится по промту; фото, видео и аудио при наличии используются как свободные референсы."
+        : "Ветка FL2VA: ролик строится по промту; Фото 1 и Фото 2 при наличии фиксируют точные начало и финал.";
+    }
+    if (miniMaxVideoModelProfile) {
+      miniMaxVideoModelProfile.textContent = referenceMode
+        ? integratedTurbo
+          ? "Активная ветка: REF2VA · H3 Eros Max beta4. Модель работает только со свободными референсами и уже содержит Turbo."
+          : "Активная ветка: REF2VA · MiniMax_H3_Ref2VA. Она принимает до четырёх фото, аудио и видео как свободные референсы."
+        : "Активная ветка: FL2VA · MiniMax_H3_FL2VA. Она создаёт видео по промту и принимает опциональные точные первый и последний кадры.";
+    }
+  };
   const syncMiniMaxVideoProfile = ({ applyModelDefaults = false } = {}) => {
     const option = model?.selectedOptions?.[0];
     const integratedTurbo = option?.dataset.videoIntegratedTurbo === "true";
@@ -417,9 +438,7 @@
     if (miniMaxVideoTurboDescription) miniMaxVideoTurboDescription.textContent = integratedTurbo
       ? "Дополнительная Turbo LoRA не применяется: модель уже содержит её слияние."
       : "Опциональная официальная LoRA v4: 4–8 шагов для быстрых проб.";
-    if (miniMaxVideoModelProfile) miniMaxVideoModelProfile.textContent = integratedTurbo
-      ? "Eros Max работает только со свободными референсами и уже содержит Turbo. Gateway применит подходящие параметры автоматически."
-      : "MiniMax H3 v4 поддерживает текст, точные кадры и свободные референсы. Turbo остаётся опциональным.";
+    syncMiniMaxBranchCopy();
     if (miniMaxVideoSteps) {
       miniMaxVideoSteps.min = String(profileRule("video_steps")?.minimum ?? (integratedTurbo ? 6 : turbo ? 4 : 20));
       miniMaxVideoSteps.max = String(profileRule("video_steps")?.maximum ?? (integratedTurbo || turbo ? 8 : 25));
@@ -432,9 +451,6 @@
       const samplerLocked = profileRule("video_sampler")?.locked ?? (integratedTurbo || turbo);
       if (samplerLocked) miniMaxVideoSampler.value = String(profileValue("video_sampler", "euler"));
       miniMaxVideoSampler.disabled = samplerLocked;
-    }
-    if (miniMaxVideoModeHint && referenceOnly) {
-      miniMaxVideoModeHint.textContent = "Выбрано: Eros Max работает со свободными референсами. Фото, видео и аудио необязательны.";
     }
     if (!miniMaxVideoResolutionPreview) return;
     const quality = Number(miniMaxVideoQuality?.value);
@@ -1807,29 +1823,37 @@
     if (!promptAssistant || !promptAssistantEnabled || !promptAssistantControls || !promptAssistantTemplate) return;
     const isEdit = templateID.value === "image-to-image";
     const isVideo = templateID.value === "minimax-h3-video";
+    const videoProfile = miniMaxMode() === "references" ? "minimax-h3-ref2va" : "minimax-h3-fl2va";
     promptAssistant.hidden = !templateID.value;
     promptAssistantControls.hidden = !promptAssistantEnabled.checked;
-	  promptAssistantTemplate.disabled = isVideo;
+    promptAssistantTemplate.disabled = isVideo;
     [...promptAssistantTemplate.options].forEach((option) => {
       const imageOnly = option.dataset.imageOnly !== undefined;
       const videoOnly = option.dataset.videoOnly !== undefined;
-      const miniMaxOnly = option.value === "minimax-h3";
-      option.hidden = isVideo ? !miniMaxOnly : (imageOnly && !isEdit) || videoOnly;
-      option.disabled = isVideo ? !miniMaxOnly : (imageOnly && !isEdit) || videoOnly;
+      const selectedVideoProfile = option.value === videoProfile;
+      option.hidden = isVideo ? !selectedVideoProfile : (imageOnly && !isEdit) || videoOnly;
+      option.disabled = isVideo ? !selectedVideoProfile : (imageOnly && !isEdit) || videoOnly;
     });
     const selectedAssistantTemplate = promptAssistantTemplate.selectedOptions[0];
-    if ((isVideo && selectedAssistantTemplate?.value !== "minimax-h3") || (!isEdit && selectedAssistantTemplate?.dataset.imageOnly !== undefined) || (!isVideo && selectedAssistantTemplate?.dataset.videoOnly !== undefined)) {
-      promptAssistantTemplate.value = isVideo ? "minimax-h3" : "workflow-default";
+    if ((isVideo && selectedAssistantTemplate?.value !== videoProfile) || (!isEdit && selectedAssistantTemplate?.dataset.imageOnly !== undefined) || (!isVideo && selectedAssistantTemplate?.dataset.videoOnly !== undefined)) {
+      promptAssistantTemplate.value = isVideo ? videoProfile : "workflow-default";
       resetPromptAssistantReview();
     }
+    if (promptAssistantDescription) promptAssistantDescription.textContent = isVideo
+      ? miniMaxMode() === "references"
+        ? "REF2VA-ассистент сначала разберёт каждый свободный референс и свяжет его роль с Picture, Video или Audio."
+        : "FL2VA-ассистент построит хронологию от точного первого кадра к опциональному точному финалу."
+      : "Локальная модель подготовит вариант, но генерация начнётся только после вашего подтверждения.";
     if (!promptAssistantEnabled.checked) {
       resetPromptAssistantReview();
       setPromptAssistantState("Ассистент выключен. Используется ваш исходный промт.");
     } else if (!promptAssistantReview?.hidden) {
       setPromptAssistantState("Проверьте вариант и примените его либо оставьте свой промт.", "review");
     } else {
-      setPromptAssistantState(isVideo && promptAssistantTemplate.value === "minimax-h3"
-        ? "Ассистент подготовит один структурированный MiniMax H3 Context-IR для прямого запуска."
+      setPromptAssistantState(isVideo
+        ? miniMaxMode() === "references"
+          ? "REF2VA-ассистент подготовит Context-IR со строгой картой свободных референсов."
+          : "FL2VA-ассистент подготовит Context-IR с точными временными якорями кадров."
         : "Вариант будет создан локальной моделью e4b и затем выгружен из видеопамяти.");
     }
   };
@@ -2213,11 +2237,7 @@
     const referenceOnly = model?.selectedOptions?.[0]?.dataset.videoReferenceOnly === "true";
     if (referenceOnly && miniMaxMode() !== "references") setMiniMaxMode("references");
     videoSlice.dispatch({ type: "SET_MODE", mode: miniMaxMode() }, (state) => ({ ...state, mode: miniMaxMode() }));
-    if (miniMaxVideoModeHint) miniMaxVideoModeHint.textContent = miniMaxMode() === "references"
-      ? referenceOnly
-        ? "Выбрано: Eros Max работает в режиме свободных референсов. Ролик строится по промту; фото, видео и аудио необязательны."
-        : "Выбрано: ролик строится по промту; фото, видео и аудио при наличии используются как свободные референсы."
-      : "Выбрано: ролик строится по промту; Фото 1 и Фото 2 при наличии фиксируют точные начало и финал.";
+    syncMiniMaxBranchCopy();
     syncImageSlots();
     syncMiniMaxAudioReference();
     updateWorkflowNext();

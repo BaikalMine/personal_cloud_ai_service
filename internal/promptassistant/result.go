@@ -112,7 +112,7 @@ func (policy ModelPolicy) normalized() ModelPolicy {
 
 func (policy ModelPolicy) request(mode Mode, profile Profile, think bool) RequestPolicy {
 	policy = policy.normalized()
-	video := mode == ModeTextToVideo && profile == ProfileMiniMaxH3
+	video := mode == ModeTextToVideo && IsMiniMaxH3Profile(profile)
 	result := RequestPolicy{NumPredict: policy.ImageNumPredict, Timeout: policy.ImageTimeout, KeepAlive: policy.KeepAlive}
 	if think {
 		result.NumPredict = policy.ImageThinkNumPredict

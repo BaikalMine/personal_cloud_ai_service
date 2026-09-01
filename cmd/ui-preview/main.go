@@ -379,7 +379,7 @@ func main() {
 		"QuickModels": []map[string]any{
 			{"ID": "krea2:test", "DisplayName": "Krea2 / Raw INT8 Mixed", "Family": "krea2", "Available": true, "DefaultSteps": 8, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "LoraStrength": 0.8},
 			{"ID": "flux2:test", "DisplayName": "Flux 2 / Klein 9B", "Family": "flux2", "Available": true, "DefaultSteps": 20, "DefaultCFG": 5, "DefaultSampler": "euler", "DefaultScheduler": "flux2"},
-			{"ID": "minimax:h3", "DisplayName": "MiniMax H3 FL2VA", "Family": "minimax_h3", "Available": true, "DefaultSteps": 25, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "DefaultVideoShift": 11, "DefaultAudioShift": 3},
+			{"ID": "minimax:h3", "DisplayName": "MiniMax H3 v4 · FL2VA + REF2VA", "Family": "minimax_h3", "Available": true, "DefaultSteps": 25, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "DefaultVideoShift": 11, "DefaultAudioShift": 3},
 			{"ID": "minimax:eros", "DisplayName": "H3 Eros Max beta4 · встроенный Turbo", "Family": "minimax_h3", "Available": true, "VideoIntegratedTurbo": true, "VideoReferenceOnly": true, "DefaultSteps": 8, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "DefaultVideoShift": 12, "DefaultAudioShift": 7},
 		},
 		"LoraGroups": []map[string]any{

@@ -89,6 +89,10 @@ test("generation wizard covers Krea2, Flux2 and MiniMax", async ({ page }, testI
 
   await open(page, "/preview/generate");
   await page.getByRole("button", { name: /Видео Создаёт/ }).click();
+  await expect(page.locator("#generation-model option:checked")).toContainText("FL2VA + REF2VA");
+  await expect(page.locator("#prompt-assistant-template")).toHaveValue("minimax-h3-fl2va");
+  await expect(page.locator("#prompt-assistant-description")).toContainText("FL2VA-ассистент");
+  await expect(page.locator("#generation-mode-guide-eyebrow")).toHaveText("FL2VA · текст в видео");
   await expect(page.locator("#generation-mode-guide-title")).toHaveText("Видео полностью по вашему описанию");
   await page.locator('[data-image-slot="1"] [data-gallery-image-picker-open]').click();
   await page.getByRole("button", { name: "Выбрать AI-Gateway-Krea2-portrait.png" }).click();
@@ -97,15 +101,22 @@ test("generation wizard covers Krea2, Flux2 and MiniMax", async ({ page }, testI
   await page.getByRole("button", { name: "Выбрать AI-Gateway-Krea2-product.png" }).click();
   await expect(page.locator("#generation-mode-guide-title")).toHaveText("Переход между двумя точными кадрами");
   await page.locator("#minimax-video-mode label").filter({ hasText: "Промт + свободные референсы" }).click();
+  await expect(page.locator("#prompt-assistant-template")).toHaveValue("minimax-h3-ref2va");
+  await expect(page.locator("#prompt-assistant-description")).toContainText("REF2VA-ассистент");
+  await expect(page.locator("#generation-mode-guide-eyebrow")).toHaveText("REF2VA · свободные референсы");
   await expect(page.locator("#generation-mode-guide-title")).toHaveText("Видео по промту и выбранным ориентирам");
   await expect(page.locator(".source-image-card:visible")).toHaveCount(4);
   await expect(page.locator("#minimax-audio-reference")).toBeVisible();
   await expect(page.locator("#minimax-video-reference")).toBeVisible();
+  await page.locator("#workflow-next").click();
+  await expect(page.locator("#minimax-video-model-profile")).toContainText("REF2VA · MiniMax_H3_Ref2VA");
+  await expect(page.locator("#generation-summary")).toContainText("REF2VA · свободные референсы");
 });
 
 test("video reference sources use equal tiles at every viewport", async ({ page }) => {
   await open(page, "/preview/generate");
   await page.getByRole("button", { name: /Видео Создаёт/ }).click();
+  await expect(page.locator("#minimax-video-mode")).toHaveScreenshot("generation-video-modes.png", { stylePath: visualStyle });
 
   const visibleSlots = page.locator(".source-image-card:visible");
   await expect(visibleSlots).toHaveCount(2);

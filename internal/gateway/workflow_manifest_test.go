@@ -292,3 +292,16 @@ func TestWorkflowManifestRuntimeValidationUsesModeAndProfile(t *testing.T) {
 		t.Fatal("integrated reference-only model accepted frames mode")
 	}
 }
+
+func TestMiniMaxH3ManifestSeparatesAssistantProfilesByMode(t *testing.T) {
+	assistant := miniMaxH3WorkflowManifest().PromptAssistant
+	if got, want := assistant.ModeProfiles[miniMaxH3FrameMode], "minimax-h3-fl2va"; got != want {
+		t.Fatalf("FL2VA assistant profile = %q, want %q", got, want)
+	}
+	if got, want := assistant.ModeProfiles[miniMaxH3ReferenceMode], "minimax-h3-ref2va"; got != want {
+		t.Fatalf("REF2VA assistant profile = %q, want %q", got, want)
+	}
+	if len(assistant.ModeRules[miniMaxH3FrameMode]) < 2 || len(assistant.ModeRules[miniMaxH3ReferenceMode]) < 2 {
+		t.Fatalf("branch-specific assistant rules are incomplete: %#v", assistant.ModeRules)
+	}
+}
