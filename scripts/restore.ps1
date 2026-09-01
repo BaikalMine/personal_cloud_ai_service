@@ -241,8 +241,14 @@ try {
     if ($metricsResponse.StatusCode -ne 200 -or -not $metricsResponse.Content.Contains('gateway_media_inflight_capacity_bytes')) {
         throw 'Gateway metrics smoke-test failed.'
     }
-    docker exec $appContainer sh -c 'test -w /var/lib/gateway-spool && test -z "$(find /var/lib/gateway-spool -mindepth 1 -maxdepth 1 -type f -print -quit)"'
-    Assert-NativeSuccess 'Gateway restore spool is not writable or was not cleaned.'
+    docker exec $appContainer test -w /var/lib/gateway-spool
+    Assert-NativeSuccess 'Gateway restore spool is not writable.'
+    $spoolFiles = @(& docker exec $appContainer find /var/lib/gateway-spool `
+        -mindepth 1 -maxdepth 1 -type f -print -quit)
+    Assert-NativeSuccess 'Cannot inspect the Gateway restore spool.'
+    if (-not [string]::IsNullOrWhiteSpace(($spoolFiles -join "`n"))) {
+        throw 'Gateway restore spool was not cleaned.'
+    }
 
     $readyAt = (Get-Date).ToUniversalTime()
     $createdAtValue = $manifestDocument.CreatedAt
