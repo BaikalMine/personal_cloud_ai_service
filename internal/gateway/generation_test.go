@@ -84,6 +84,47 @@ func TestQuickGenerationTelemetryPathUsesClientRequestID(t *testing.T) {
 	}
 }
 
+func TestGenerationImageSourcesAreAvailableToEveryImageInputScenario(t *testing.T) {
+	app := &App{}
+	handler := app.requireQuickGenerationTypes(quickGenerationImageInputTemplateIDs(), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	tests := []struct {
+		name       string
+		user       *User
+		wantStatus int
+	}{
+		{
+			name:       "Krea2 and Flux2 image edit",
+			user:       &User{CanUseQuickGeneration: true, CanGenerateImageToImage: true},
+			wantStatus: http.StatusNoContent,
+		},
+		{
+			name:       "MiniMax video",
+			user:       &User{CanUseQuickGeneration: true, CanGenerateVideo: true},
+			wantStatus: http.StatusNoContent,
+		},
+		{
+			name:       "text only",
+			user:       &User{CanUseQuickGeneration: true, CanGenerateTextToImage: true},
+			wantStatus: http.StatusForbidden,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/generate/library/images", nil)
+			request = request.WithContext(context.WithValue(request.Context(), userCtxKey, test.user))
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d: %s", response.Code, test.wantStatus, response.Body.String())
+			}
+		})
+	}
+}
+
 func TestGenerationClientStopsRecoveryAfterConfirmedRunFailure(t *testing.T) {
 	script, err := embeddedFS.ReadFile("static/generate.js")
 	if err != nil {

@@ -110,10 +110,10 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 	output := quick(http.HandlerFunc(a.handleGenerationOutput))
 	library := quick(http.HandlerFunc(a.handleGenerationLibraryMedia))
 	recentLibrary := quick(http.HandlerFunc(a.handleRecentGenerationLibrary))
-	libraryImages := quick(a.requireQuickGenerationTypes([]string{"minimax-h3-video"}, http.HandlerFunc(a.handleGenerationLibraryImages)))
+	libraryImages := quick(a.requireQuickGenerationTypes(quickGenerationImageInputTemplateIDs(), http.HandlerFunc(a.handleGenerationLibraryImages)))
 	hideLibrary := quick(http.HandlerFunc(a.handleHideGenerationLibraryMedia))
-	reuseLibraryImage := quick(a.requireQuickGenerationTypes([]string{"minimax-h3-video"}, http.HandlerFunc(a.handleReuseGenerationLibraryImage)))
-	upload := quick(a.requireQuickGenerationTypes([]string{"image-to-image", "minimax-h3-video"}, a.quickGenerationUploadHandler()))
+	reuseLibraryImage := quick(a.requireQuickGenerationTypes(quickGenerationImageInputTemplateIDs(), http.HandlerFunc(a.handleReuseGenerationLibraryImage)))
+	upload := quick(a.requireQuickGenerationTypes(quickGenerationImageInputTemplateIDs(), a.quickGenerationUploadHandler()))
 	uploadAudio := quick(a.requireQuickGenerationTypes([]string{"minimax-h3-video"}, a.quickGenerationAudioUploadHandler()))
 	uploadVideo := quick(a.requireQuickGenerationTypes([]string{"minimax-h3-video"}, a.quickGenerationVideoUploadHandler()))
 	mux.Handle("/generate", page)
@@ -142,6 +142,10 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 	mux.Handle("/generate/library/recent", recentLibrary)
 	mux.Handle("/generate/library/", library)
 	a.registerGenerationCompanionRoutes(mux, quick)
+}
+
+func quickGenerationImageInputTemplateIDs() []string {
+	return []string{"image-to-image", "minimax-h3-video"}
 }
 
 func (a *App) requireQuickGenerationTypes(templateIDs []string, next http.Handler) http.Handler {
