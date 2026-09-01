@@ -711,7 +711,10 @@ button.is-loading::after, .button.is-loading::after {
 .invite-history-empty p { max-width: 440px; margin: 0; font-size: 12px; font-weight: 600; line-height: 1.5; }
 .invite-history-panel .table-note { display: block; margin-top: 4px; white-space: nowrap; }
 .invite-history-panel .table-note b { color: var(--text-soft); }
-.invite-history-panel .badge { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.invite-history-panel .badge { max-width: none; white-space: nowrap; overflow-wrap: normal; word-break: normal; }
+.invite-badge-list { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.invite-cell-stack { min-width: 0; display: grid; justify-items: start; gap: 4px; }
+.invite-cell-stack .table-note { margin-top: 0; }
 .narrow { max-width: 580px; }
 .copyline { margin: 0; padding: 12px; border: 1px dashed var(--cyan); border-radius: 6px; background: var(--surface-input); overflow-wrap: anywhere; }
 .copyrow { display: flex; align-items: center; gap: 10px; }
