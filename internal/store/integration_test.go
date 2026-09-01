@@ -963,6 +963,10 @@ func assertObservabilityLifecycle(t *testing.T, ctx context.Context, repository 
 	if err != nil || len(failures) == 0 || failures[0].JobPublicID != job.PublicID {
 		t.Fatalf("generation failures=%+v err=%v", failures, err)
 	}
+	markers, err := repository.GenerationJobMarkers(ctx, job.CreatedAt.Add(-time.Minute), 10)
+	if err != nil || len(markers) == 0 || markers[len(markers)-1].PublicID != job.PublicID || markers[len(markers)-1].State != domain.GenerationJobFailed {
+		t.Fatalf("generation markers=%+v err=%v", markers, err)
+	}
 	trace, err := repository.AdminGenerationJobTrace(ctx, job.PublicID)
 	if err != nil || trace.Job.PublicID == "" || trace.Job.FinishedAt == nil || len(trace.Transitions) == 0 ||
 		len(trace.ServiceObservations) < 2 || len(trace.ProxyRequests) == 0 || len(trace.AuditEvents) == 0 || len(trace.ContentEvents) == 0 {

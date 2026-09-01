@@ -44,10 +44,16 @@ func (a *App) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ошибка системной статистики", http.StatusInternalServerError)
 		return
 	}
+	operations, err := a.loadAdminOperations(r.Context(), system)
+	if err != nil {
+		http.Error(w, "ошибка операционной сводки", http.StatusInternalServerError)
+		return
+	}
 	a.render(w, r, "admin_dashboard", map[string]any{
-		"Title":  "Администрирование",
-		"Stats":  stats,
-		"System": system,
+		"Title":      "Операционный центр",
+		"Stats":      stats,
+		"System":     system,
+		"Operations": operations,
 	})
 }
 

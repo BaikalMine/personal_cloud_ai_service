@@ -82,6 +82,16 @@ type GenerationFailureSummary struct {
 	FailedAt      time.Time
 }
 
+type GenerationJobMarker struct {
+	PublicID   string             `json:"public_id"`
+	WorkflowID string             `json:"workflow_id"`
+	ModelName  string             `json:"model_name"`
+	State      GenerationJobState `json:"state"`
+	CreatedAt  time.Time          `json:"created_at"`
+	StartedAt  *time.Time         `json:"started_at,omitempty"`
+	FinishedAt *time.Time         `json:"finished_at,omitempty"`
+}
+
 type TraceProxyRequest struct {
 	ID            int64
 	RequestID     string

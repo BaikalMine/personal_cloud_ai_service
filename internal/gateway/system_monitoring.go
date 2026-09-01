@@ -50,6 +50,9 @@ func (a *App) systemOverview(ctx context.Context) (SystemOverview, error) {
 	if overview.History, err = a.store.HostMetrics(ctx, time.Now().Add(-24*time.Hour)); err != nil {
 		return SystemOverview{}, err
 	}
+	if overview.GenerationMarkers, err = a.store.GenerationJobMarkers(ctx, time.Now().Add(-24*time.Hour), 500); err != nil {
+		return SystemOverview{}, err
+	}
 	if len(overview.History) > 0 {
 		overview.Host = &overview.History[len(overview.History)-1]
 	} else if a.systemMonitor != nil && a.systemMonitor.Configured() {

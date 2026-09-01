@@ -242,6 +242,36 @@ func (s *Store) GenerationFailureSummaries(ctx context.Context, since time.Time,
 	return items, rows.Err()
 }
 
+func (s *Store) GenerationJobMarkers(ctx context.Context, since time.Time, limit int) ([]domain.GenerationJobMarker, error) {
+	limit = boundedLimit(limit, 1, 500)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT public_id,workflow_id,model_name,state,created_at,started_at,finished_at
+		FROM (
+			SELECT public_id,workflow_id,model_name,state,created_at,started_at,finished_at,id
+			FROM generation_jobs
+			WHERE created_at >= $1
+			ORDER BY created_at DESC,id DESC
+			LIMIT $2
+		) recent
+		ORDER BY created_at,id
+	`, since.UTC(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.GenerationJobMarker, 0)
+	for rows.Next() {
+		var item domain.GenerationJobMarker
+		var state string
+		if err := rows.Scan(&item.PublicID, &item.WorkflowID, &item.ModelName, &state, &item.CreatedAt, &item.StartedAt, &item.FinishedAt); err != nil {
+			return nil, err
+		}
+		item.State = domain.GenerationJobState(state)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (s *Store) AdminGenerationJobTrace(ctx context.Context, publicID string) (domain.GenerationJobTrace, error) {
 	job, err := scanGenerationJob(s.db.QueryRowContext(ctx, `SELECT `+generationJobColumns+`
 		FROM generation_jobs WHERE public_id=$1`, strings.TrimSpace(publicID)))

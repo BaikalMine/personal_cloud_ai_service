@@ -234,9 +234,28 @@ test("preview exposes loading, empty, error, sensitive, offline, queued and comp
   await expect(page.locator("#generation-variant-list")).toContainText("Ошибка");
 });
 
+test("operations center puts live work and failures before analytics", async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+
+  await open(page, "/preview/admin");
+  await expect(page.getByRole("heading", { name: "Операционный центр" })).toBeVisible();
+  await expect(page.locator("[data-ops-attention] .operations-attention-row")).toHaveCount(5);
+  await expect(page.locator("[data-active-job]")).toHaveCount(2);
+  await expect(page.locator(".operations-queue")).toContainText("ComfyUI выполняет текущую задачу");
+  await expect(page.locator(".operations-job-row.is-overdue")).toContainText("Без изменений");
+  await expect(page.locator(".system-history-summary > div")).toHaveCount(4);
+  await expect(page.locator(".system-history-markers line")).toHaveCount(3);
+
+  const workers = page.locator(".operations-worker-details");
+  await workers.locator("summary").focus();
+  await page.keyboard.press("Enter");
+  await expect(workers).toHaveAttribute("open", "");
+  await expect(workers.locator("[data-worker-key]").first()).toBeVisible();
+});
+
 test("critical product surfaces have no serious axe violations", async ({ page }, testInfo) => {
   desktopOnly(testInfo);
-  const routes = ["/preview/components", "/preview/generate", "/preview/gallery", "/preview/invites", "/preview/users", "/preview/content"];
+  const routes = ["/preview/components", "/preview/generate", "/preview/gallery", "/preview/invites", "/preview/users", "/preview/content", "/preview/admin"];
   const routeViolations = [];
 
   for (const route of routes) {

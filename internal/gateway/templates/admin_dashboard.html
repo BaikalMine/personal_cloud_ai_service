@@ -1,116 +1,157 @@
 {{define "admin_dashboard"}}
 {{template "head" .}}
 {{template "admin_nav" .}}
-<main class="page" id="main-content">
-  <section class="hero admin-hero">
-    <div><p class="eyebrow">Центр управления</p><h1>Обзор системы</h1></div>
-    <div class="service-health">
-      {{range .System.Dependencies}}<span class="health-item {{.State}}" data-dependency-summary="{{.Key}}"><i></i>{{.Name}} <b>{{.StateLabel}}</b></span>{{end}}
+<main class="page operations-page" id="main-content" data-system-monitoring>
+  <header class="page-heading operations-heading">
+    <div>
+      <p class="eyebrow">Управление системой</p>
+      <h1>Операционный центр</h1>
+      <p>Текущие задания, очередь, зависимости и процессы обслуживания в одной сводке.</p>
+    </div>
+    <div class="operations-overall is-{{.Operations.OverallState}}" role="status">
+      <i aria-hidden="true"></i>
+      <span><strong>{{.Operations.OverallLabel}}</strong><small>{{.Operations.OverallDetail}}</small></span>
+      <time datetime="{{.Operations.GeneratedAt.Format "2006-01-02T15:04:05Z07:00"}}">Снимок {{formatTime .Operations.GeneratedAt}}</time>
+    </div>
+  </header>
+
+  <section class="operations-attention is-{{.Operations.OverallState}}" aria-labelledby="operations-attention-title" data-ops-attention>
+    <header>
+      <span><p class="section-kicker">Приоритет</p><h2 id="operations-attention-title">Требует внимания</h2></span>
+      {{if .Operations.Attention}}<b>{{len .Operations.Attention}}</b>{{else}}<b class="is-clear">0</b>{{end}}
+    </header>
+    <div class="operations-attention-list">
+      {{range .Operations.Attention}}
+      <a class="operations-attention-row is-{{.Severity}}" href="{{.Href}}" data-attention-key="{{.Key}}">
+        <i aria-hidden="true"></i>
+        <span><strong>{{.Title}}</strong><small>{{.Detail}}</small></span>
+        {{if gt .Count 0}}<b>{{formatNumber .Count}}</b>{{end}}
+        <em>{{.Action}} <span aria-hidden="true">›</span></em>
+      </a>
+      {{else}}
+      <div class="operations-attention-empty"><i aria-hidden="true"></i><span><strong>Отклонений нет</strong><small>Все контролируемые компоненты отвечают штатно.</small></span></div>
+      {{end}}
     </div>
   </section>
-  <section class="metric-grid">
-    <article class="metric-card tone-green"><span>Сейчас активны</span><strong>{{formatNumber .Stats.ActiveUsers}}</strong><small>пользователей за 5 минут</small></article>
-    <article class="metric-card tone-blue"><span>Запросы сегодня</span><strong>{{formatNumber .Stats.RequestsToday}}</strong><small>с начала суток</small></article>
-    <article class="metric-card tone-cyan"><span>Запросы за 7 дней</span><strong>{{formatNumber .Stats.Requests7Days}}</strong><small>все сервисы</small></article>
-    <article class="metric-card tone-red"><span>Доля ошибок</span><strong>{{.Stats.ErrorRate}}</strong><small>за 7 дней</small></article>
-    <article class="metric-card tone-amber"><span>Среднее время ответа</span><strong>{{formatDuration .Stats.AverageDuration}}</strong><small>за 7 дней</small></article>
-    <article class="metric-card tone-indigo"><span>Активные WebSocket-соединения</span><strong>{{formatNumber .Stats.ActiveWebSockets}}</strong><small>прямо сейчас</small></article>
+
+  <section class="operations-status-strip" aria-label="Текущее состояние Gateway">
+    <div><span>Durable jobs</span><strong>{{formatNumber .Operations.Generation.ActiveJobs}}</strong><small>{{if gt .Operations.Generation.OverdueJobs 0}}{{formatNumber .Operations.Generation.OverdueJobs}} без движения{{else}}без зависших{{end}}</small></div>
+    <div><span>Очередь ComfyUI</span><strong>{{if .Operations.Queue.Available}}{{.Operations.Queue.Running}} / {{.Operations.Queue.Pending}}{{else}}-{{end}}</strong><small>{{if .Operations.Queue.Available}}выполняется / ожидает{{else}}{{.Operations.Queue.StateLabel}}{{end}}</small></div>
+    <div><span>Ресурсы майнинга</span><strong>{{formatNumber (len .Operations.Leases)}}</strong><small>активных аренд</small></div>
+    <div><span>Успешность за 24 ч.</span><strong>{{.Operations.Generation.SuccessRate}}%</strong><small>{{formatNumber .Operations.Generation.Completed}} готово · {{formatNumber .Operations.Generation.Failed}} ошибок</small></div>
+    <div><span>Пользователи онлайн</span><strong data-online-count>{{formatNumber .Stats.ActiveUsers}}</strong><small>за последние 5 минут</small></div>
   </section>
-  <section class="system-monitoring" data-system-monitoring aria-live="polite">
-    <div class="panel system-monitoring-head">
-      <div class="panel-heading"><div><p class="section-kicker">Windows-хост</p><h2>Ресурсы сервера</h2><p class="muted">История хранится 7 дней и остаётся видимой при потере связи. <span data-system-last-data>{{with .System.Agent.LastDataAt}}Последние данные: {{formatTime .}}{{else}}Свежих данных пока нет{{end}}</span></p></div><span class="system-status {{.System.Agent.State}}" data-system-status>{{.System.Agent.StateLabel}}</span></div>
-      <div class="system-gauges" data-system-gauges>
-        <article class="system-gauge-card"><div class="system-gauge tone-cyan" data-gauge="cpu" style="--value:{{if .System.Host}}{{printf "%.1f" .System.Host.CPUPercent}}{{else}}0{{end}}"><div><strong data-gauge-value="cpu">{{if .System.Host}}{{printf "%.0f" .System.Host.CPUPercent}}{{else}}-{{end}}%</strong><small>ЦП</small></div></div><p>Нагрузка процессора</p></article>
-        <article class="system-gauge-card"><div class="system-gauge tone-mint" data-gauge="memory" style="--value:{{if and .System.Host (gt .System.Host.MemoryTotalBytes 0)}}{{printf "%.1f" (divFloat .System.Host.MemoryUsedBytes .System.Host.MemoryTotalBytes)}}{{else}}0{{end}}"><div><strong data-gauge-value="memory">{{if .System.Host}}{{formatBytes .System.Host.MemoryUsedBytes}}{{else}}-{{end}}</strong><small data-gauge-detail="memory">{{if .System.Host}}из {{formatBytes .System.Host.MemoryTotalBytes}}{{end}}</small></div></div><p>Оперативная память</p></article>
-        <article class="system-gauge-card"><div class="system-gauge tone-amber" data-gauge="gpu" style="--value:{{if and .System.Host .System.Host.GPUAvailable}}{{printf "%.1f" .System.Host.GPUPercent}}{{else}}0{{end}}"><div><strong data-gauge-value="gpu">{{if and .System.Host .System.Host.GPUAvailable}}{{printf "%.0f" .System.Host.GPUPercent}}{{else}}-{{end}}%</strong><small>GPU</small></div></div><p data-gpu-name>{{if and .System.Host .System.Host.GPUAvailable}}{{.System.Host.GPUName}}{{else}}Вычисления GPU{{end}}</p></article>
-        <article class="system-gauge-card"><div class="system-gauge tone-violet" data-gauge="gpu_memory" style="--value:{{if and .System.Host (gt .System.Host.GPUMemoryTotalBytes 0)}}{{printf "%.1f" (divFloat .System.Host.GPUMemoryUsedBytes .System.Host.GPUMemoryTotalBytes)}}{{else}}0{{end}}"><div><strong data-gauge-value="gpu_memory">{{if and .System.Host .System.Host.GPUAvailable}}{{formatBytes .System.Host.GPUMemoryUsedBytes}}{{else}}-{{end}}</strong><small data-gauge-detail="gpu_memory">{{if and .System.Host .System.Host.GPUAvailable}}из {{formatBytes .System.Host.GPUMemoryTotalBytes}}{{end}}</small></div></div><p>Видеопамять</p></article>
+
+  <div class="operations-workbench-grid">
+    <div class="operations-workbench-column">
+    <section class="panel operations-jobs" id="active-jobs" aria-labelledby="active-jobs-title">
+      <div class="panel-heading operations-section-heading">
+        <div><p class="section-kicker">Сейчас</p><h2 id="active-jobs-title">Активные задания</h2><p class="panel-intro">Состояние хранится в Gateway и не теряется при перезапуске страницы.</p></div>
+        <span class="operations-count">{{formatNumber (len .Operations.ActiveJobs)}} из {{formatNumber .Operations.Generation.ActiveJobs}}</span>
       </div>
-    </div>
-    <section class="panel dependency-health" data-dependency-health>
-      <div class="panel-heading"><div><p class="section-kicker">Текущая связь</p><h2>Зависимости Gateway</h2><p class="muted">Heartbeat и свежесть рабочих данных проверяются отдельно.</p></div></div>
-      <div class="dependency-list" data-dependency-list>
-        {{range .System.Dependencies}}
-        <article class="dependency-row" data-dependency-key="{{.Key}}">
-          <div class="dependency-identity"><span><strong>{{.Name}}</strong><small data-dependency-detail>{{.Detail}}</small></span><b class="dependency-state {{.State}}" data-dependency-state>{{.StateLabel}}</b></div>
-          <dl class="dependency-facts">
-            <div><dt>Последний ответ</dt><dd data-dependency-success>{{with .LastSuccessAt}}{{formatTime .}}{{else}}-{{end}}</dd></div>
-            <div><dt>Последние данные</dt><dd data-dependency-data>{{with .LastDataAt}}{{formatTime .}}{{else}}-{{end}}</dd></div>
-            <div><dt>Последняя ошибка</dt><dd data-dependency-error>{{if .LastError}}{{.LastError}}{{else}}Нет{{end}}</dd></div>
-            <div><dt>Следующая проверка</dt><dd data-dependency-next {{with .NextCheckAt}}data-next-check="{{.Format "2006-01-02T15:04:05.000Z07:00"}}"{{end}}>{{if gt .RetryInSeconds 0}}через {{.RetryInSeconds}} сек.{{else}}сейчас{{end}}</dd></div>
-          </dl>
-        </article>
-        {{end}}
+      <div class="operations-queue is-{{.Operations.Queue.State}}">
+        <span><i aria-hidden="true"></i><strong>{{.Operations.Queue.StateLabel}}</strong><small>{{.Operations.Queue.Detail}}</small></span>
+        {{if .Operations.Queue.Available}}
+        <dl><div><dt>Выполняется</dt><dd>{{.Operations.Queue.Running}}</dd></div><div><dt>Ожидает</dt><dd>{{.Operations.Queue.Pending}}</dd></div>{{if gt .Operations.Queue.EstimatedWaitSeconds 0}}<div><dt>Оценка ожидания</dt><dd>{{formatAgeSeconds .Operations.Queue.EstimatedWaitSeconds}}</dd></div>{{end}}</dl>
+        {{else if .Operations.Queue.Error}}<code>{{.Operations.Queue.Error}}</code>{{end}}
       </div>
-    </section>
-    <section class="panel maintenance-health" data-maintenance-workers aria-labelledby="maintenance-workers-title">
-      <div class="panel-heading maintenance-heading">
-        <div><p class="section-kicker">Фоновые процессы</p><h2 id="maintenance-workers-title">Обслуживание Gateway</h2><p class="muted">Каждая задача работает независимо и повторяется со своим таймаутом.</p></div>
-        <span class="maintenance-summary" data-worker-summary>{{len .System.Workers}} процессов</span>
-      </div>
-      <div class="maintenance-worker-list">
-        {{range .System.Workers}}
-        <article class="maintenance-worker-row is-{{.Status}}" data-worker-key="{{.Key}}">
-          <div class="maintenance-worker-identity">
-            <span><strong>{{.Name}}</strong><small>Каждые {{.IntervalText}} · таймаут {{.TimeoutText}}</small></span>
-            <b class="maintenance-worker-status is-{{.Status}}" data-worker-status>{{.StatusLabel}}</b>
-          </div>
-          <dl class="maintenance-worker-facts">
-            <div><dt>Последний успех</dt><dd data-worker-success>{{with .LastSuccessAt}}{{formatTime .}}{{else}}-{{end}}</dd></div>
-            <div><dt>Длительность</dt><dd data-worker-duration>{{if gt .LastDurationMillis 0}}{{.LastDurationMillis}} мс{{else}}-{{end}}</dd></div>
-            <div><dt>Обработано</dt><dd data-worker-items>{{formatNumber .LastItems}}</dd></div>
-            <div><dt>Следующий запуск</dt><dd data-worker-next {{with .NextRunAt}}data-next-run="{{.Format "2006-01-02T15:04:05.000Z07:00"}}"{{end}}>{{with .NextRunAt}}{{formatTime .}}{{else}}-{{end}}</dd></div>
-          </dl>
-          <p class="maintenance-worker-error" data-worker-error {{if not .LastError}}hidden{{end}}>{{.LastError}}</p>
-        </article>
+      <div class="operations-job-list">
+        {{range .Operations.ActiveJobs}}
+        <a class="operations-job-row is-{{.StateClass}}" href="/admin/jobs/{{.PublicID}}" data-active-job="{{.PublicID}}">
+          <i class="operations-job-state" aria-hidden="true"></i>
+          <span class="operations-job-main"><strong>{{.Workflow}}</strong><small>{{.Model}}</small><em>{{.Username}}{{if .DeletedUser}} · учётная запись удалена{{end}}{{if .HasLease}} · ресурсы майнинга закреплены{{end}}</em></span>
+          <span class="operations-job-progress"><b>{{.StateLabel}}</b><small>{{if .Overdue}}Без изменений {{formatDurationLong .StateAge}}{{else}}{{.StatusMessage}}{{end}}</small></span>
+          <time datetime="{{.CreatedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{formatDurationLong .Age}}</time>
+          <span class="operations-row-open" aria-hidden="true">›</span>
+        </a>
         {{else}}
-        <p class="muted maintenance-worker-empty">Workers запускаются вместе с Gateway.</p>
+        <div class="ui-empty-state operations-empty"><strong>Активных заданий нет</strong><span>Очередь готова к следующему запуску.</span></div>
         {{end}}
       </div>
     </section>
-    <div class="dashboard-grid system-detail-grid">
-      <div class="panel span-two">
-        <div class="panel-heading"><div><p class="section-kicker">Последние 24 часа</p><h2>Динамика нагрузки</h2></div><span class="muted" data-system-history-caption>Накопление данных...</span></div>
-        <div class="system-history-toolbar" role="group" aria-label="Показатели на графике нагрузки">
-          <button class="system-history-toggle cpu is-active" type="button" data-history-series="cpu" aria-pressed="true"><i></i>ЦП</button>
-          <button class="system-history-toggle memory is-active" type="button" data-history-series="memory" aria-pressed="true"><i></i>ОЗУ</button>
-          <button class="system-history-toggle gpu is-active" type="button" data-history-series="gpu" aria-pressed="true"><i></i>GPU</button>
-          <button class="system-history-toggle gpu-memory is-active" type="button" data-history-series="gpu-memory" aria-pressed="true"><i></i>VRAM</button>
-        </div>
-        <div class="system-history" data-system-history aria-label="График использования ресурсов"></div>
+
+    <section class="panel operations-dependencies" id="dependencies" aria-labelledby="dependencies-title">
+      <div class="panel-heading operations-section-heading">
+        <div><p class="section-kicker">Связь</p><h2 id="dependencies-title">Зависимости</h2><p class="panel-intro">Ответ сервиса и свежесть рабочих данных проверяются отдельно.</p></div>
+        <a class="text-link" href="/readyz">Readiness</a>
       </div>
-      <div class="panel">
-        <div class="panel-heading"><div><p class="section-kicker">Онлайн сейчас</p><h2><span data-online-count>{{formatNumber .Stats.ActiveUsers}}</span> пользователей</h2></div></div>
-        <div class="online-users" data-online-users>{{range .System.OnlineUsers}}<div class="online-user"><i></i><div><strong>{{.Username}}</strong><small>{{roleLabel .Role}} · активен {{formatTime .LastSeenAt}}</small></div></div>{{else}}<p class="muted">Нет активных сессий за последние 5 минут.</p>{{end}}</div>
+      <div class="operations-dependency-list" data-dependency-list>
+        {{range .System.Dependencies}}
+        <article class="operations-dependency-row" data-dependency-key="{{.Key}}">
+          <div class="operations-dependency-head"><span><strong>{{.Name}}</strong><small data-dependency-detail>{{.Detail}}</small></span><b class="dependency-state {{.State}}" data-dependency-state>{{.StateLabel}}</b></div>
+          <div class="operations-dependency-meta"><span>Ответ <b data-dependency-success>{{with .LastSuccessAt}}{{formatTime .}}{{else}}-{{end}}</b></span><span>Данные <b data-dependency-data>{{with .LastDataAt}}{{formatTime .}}{{else}}-{{end}}</b></span><span>Проверка <b data-dependency-next {{with .NextCheckAt}}data-next-check="{{.Format "2006-01-02T15:04:05.000Z07:00"}}"{{end}}>{{if gt .RetryInSeconds 0}}через {{.RetryInSeconds}} сек.{{else}}сейчас{{end}}</b></span></div>
+          <p class="operations-inline-error" data-dependency-error {{if not .LastError}}hidden{{end}}>{{.LastError}}</p>
+        </article>
+        {{end}}
       </div>
+    </section>
     </div>
-    <div class="metric-grid metrics-four system-storage-grid">
-      <article class="metric-card tone-blue"><span>Размер базы данных</span><strong data-database-size>{{formatBytes .System.DatabaseBytes}}</strong><small>PostgreSQL Gateway</small></article>
-      <article class="metric-card tone-green"><span>Пользователи онлайн</span><strong data-online-count>{{formatNumber .Stats.ActiveUsers}}</strong><small>за последние 5 минут</small></article>
-      <article class="metric-card tone-cyan"><span>Записей мониторинга</span><strong data-history-count>{{formatNumber (len .System.History)}}</strong><small>за последние 24 часа</small></article>
-      <article class="metric-card tone-amber"><span>Мониторинг Windows</span><strong data-agent-state>{{.System.Agent.StateLabel}}</strong><small data-agent-message>{{.System.Agent.Detail}}</small></article>
+
+    <div class="operations-workbench-column">
+    <section class="panel operations-compatibility" aria-labelledby="compatibility-title">
+      <div class="panel-heading operations-section-heading"><div><p class="section-kicker">Готовность запуска</p><h2 id="compatibility-title">Workflow</h2></div><span class="operations-state is-{{.Operations.Compatibility.State}}"><i></i>{{.Operations.Compatibility.StateLabel}}</span></div>
+      <p class="operations-section-copy">{{.Operations.Compatibility.Detail}}</p>
+      <dl class="operations-mini-facts"><div><dt>Совместимо</dt><dd>{{formatNumber .Operations.Compatibility.Compatible}}</dd></div><div><dt>Ошибки</dt><dd class="{{if gt .Operations.Compatibility.Failed 0}}is-negative{{end}}">{{formatNumber .Operations.Compatibility.Failed}}</dd></div><div><dt>Недоступно</dt><dd>{{formatNumber .Operations.Compatibility.Unavailable}}</dd></div></dl>
+      <a class="operations-panel-link" href="/admin/workflows">Открыть матрицу совместимости <span aria-hidden="true">›</span></a>
+    </section>
+
+    <section class="panel operations-maintenance" id="maintenance" aria-labelledby="maintenance-title" data-maintenance-workers>
+      <div class="panel-heading operations-section-heading"><div><p class="section-kicker">Фоновые процессы</p><h2 id="maintenance-title">Обслуживание</h2></div><span class="maintenance-summary" data-worker-summary>{{len .System.Workers}} процессов</span></div>
+      <div class="operations-worker-list">
+        {{range .Operations.ProblemWorkers}}
+        <article class="operations-worker-row is-{{.Status}}" data-worker-key="{{.Key}}">
+          <span><strong>{{.Name}}</strong><small>Каждые {{.IntervalText}} · таймаут {{.TimeoutText}}</small></span><b class="maintenance-worker-status is-{{.Status}}" data-worker-status>{{.StatusLabel}}</b>
+          <dl><div><dt>Успех</dt><dd data-worker-success>{{with .LastSuccessAt}}{{formatTime .}}{{else}}-{{end}}</dd></div><div><dt>Следующий запуск</dt><dd data-worker-next {{with .NextRunAt}}data-next-run="{{.Format "2006-01-02T15:04:05.000Z07:00"}}"{{end}}>{{with .NextRunAt}}{{formatTime .}}{{else}}-{{end}}</dd></div><div hidden><dt>Длительность</dt><dd data-worker-duration>{{.LastDurationMillis}} мс</dd></div><div hidden><dt>Обработано</dt><dd data-worker-items>{{.LastItems}}</dd></div></dl>
+          <p data-worker-error {{if not .LastError}}hidden{{end}}>{{.LastError}}</p>
+        </article>
+        {{else}}<div class="operations-worker-clear"><i aria-hidden="true"></i><span><strong>Ошибок нет</strong><small>Все фоновые процессы выполняются по расписанию.</small></span></div>{{end}}
+      </div>
+      {{if .Operations.BackgroundWorkers}}
+      <details class="operations-worker-details">
+        <summary><span>Остальные процессы</span><b>{{len .Operations.BackgroundWorkers}}</b></summary>
+        <div>
+          {{range .Operations.BackgroundWorkers}}
+          <article class="operations-worker-row is-{{.Status}}" data-worker-key="{{.Key}}">
+            <span><strong>{{.Name}}</strong><small>Каждые {{.IntervalText}} · таймаут {{.TimeoutText}}</small></span><b class="maintenance-worker-status is-{{.Status}}" data-worker-status>{{.StatusLabel}}</b>
+            <dl><div><dt>Успех</dt><dd data-worker-success>{{with .LastSuccessAt}}{{formatTime .}}{{else}}-{{end}}</dd></div><div><dt>Следующий запуск</dt><dd data-worker-next {{with .NextRunAt}}data-next-run="{{.Format "2006-01-02T15:04:05.000Z07:00"}}"{{end}}>{{with .NextRunAt}}{{formatTime .}}{{else}}-{{end}}</dd></div><div hidden><dt>Длительность</dt><dd data-worker-duration>{{.LastDurationMillis}} мс</dd></div><div hidden><dt>Обработано</dt><dd data-worker-items>{{.LastItems}}</dd></div></dl>
+            <p data-worker-error {{if not .LastError}}hidden{{end}}>{{.LastError}}</p>
+          </article>
+          {{end}}
+        </div>
+      </details>
+      {{end}}
+    </section>
+
+    <section class="panel operations-storage" aria-labelledby="storage-title">
+      <div class="panel-heading operations-section-heading"><div><p class="section-kicker">Рост данных</p><h2 id="storage-title">Хранилище</h2></div><span class="storage-cleanup-status is-{{.Operations.Storage.Cleanup.Status}}"><i></i>{{.Operations.Storage.Cleanup.StatusLabel}}</span></div>
+      <dl class="operations-storage-summary"><div><dt>База данных</dt><dd>{{formatBytes .Operations.Storage.DatabaseBytes}}<small>{{formatSignedBytes .Operations.Storage.DatabaseGrowth}} за 24 ч.</small></dd></div><div><dt>Медиа и входы</dt><dd>{{formatBytes .Operations.Storage.MediaBytes}}<small>в таблицах Gateway</small></dd></div></dl>
+      <div class="operations-table-sizes">{{range .Operations.Storage.TopTables}}<div><span><strong>{{.Label}}</strong><small>{{formatNumber .EstimatedRows}} строк</small></span><b>{{formatBytes .TotalBytes}}</b></div>{{else}}<p class="muted">Статистика таблиц пока недоступна.</p>{{end}}</div>
+      <a class="operations-panel-link" href="/admin/storage">Политики хранения и cleanup <span aria-hidden="true">›</span></a>
+    </section>
+    </div>
+  </div>
+
+  <section class="panel operations-failures" aria-labelledby="recent-failures-title">
+    <div class="panel-heading operations-section-heading"><div><p class="section-kicker">Последние 24 часа</p><h2 id="recent-failures-title">Ошибки генерации</h2><p class="panel-intro">Каждая строка ведёт к полной трассе задания.</p></div><a class="text-link" href="/admin/metrics">Все метрики</a></div>
+    <div class="failure-list">
+      {{range .Operations.Failures}}<a class="failure-row" href="/admin/jobs/{{.JobPublicID}}"><span class="failure-time">{{formatTime .FailedAt}}</span><span class="failure-main"><strong>{{if .ErrorCode}}{{.ErrorCode}}{{else}}Ошибка выполнения{{end}}</strong><small>{{if .ErrorMessage}}{{.ErrorMessage}}{{else}}Подробности сохранены в трассе задания{{end}}</small></span><span class="failure-context"><b>{{if .Username}}{{.Username}}{{else}}Пользователь удалён{{end}}</b><small>{{if .ModelName}}{{.ModelName}}{{else}}{{.WorkflowID}}{{end}}</small></span><span class="failure-open" aria-hidden="true">›</span></a>{{else}}<div class="ui-empty-state operations-empty"><strong>Ошибок нет</strong><span>За последние 24 часа задания не завершались с ошибкой.</span></div>{{end}}
     </div>
   </section>
-  <section class="dashboard-grid">
-    <div class="panel span-two">
-      <div class="panel-heading"><div><p class="section-kicker">Последние 14 дней</p><h2>Нагрузка по дням</h2></div><a class="text-link" href="/admin/metrics">Открыть метрики</a></div>
-      {{template "chart" .Stats.Trend}}
+
+  <section class="panel operations-host" aria-labelledby="host-title">
+    <div class="panel-heading operations-section-heading"><div><p class="section-kicker">Windows-хост · 24 часа</p><h2 id="host-title">Нагрузка и генерации</h2><p class="panel-intro"><span data-system-last-data>{{with .System.Agent.LastDataAt}}Последние данные: {{formatTime .}}{{else}}Свежих данных пока нет{{end}}</span>. Метки под графиком показывают запуск заданий.</p></div><span class="system-status {{.System.Agent.State}}" data-system-status>{{.System.Agent.StateLabel}}</span></div>
+    <div class="system-gauges operations-gauges" data-system-gauges>
+      <article class="system-gauge-card"><div class="system-gauge tone-cyan" data-gauge="cpu" style="--value:{{if .System.Host}}{{printf "%.1f" .System.Host.CPUPercent}}{{else}}0{{end}}"><div><strong data-gauge-value="cpu">{{if .System.Host}}{{printf "%.0f" .System.Host.CPUPercent}}{{else}}-{{end}}%</strong><small>ЦП</small></div></div><p>Процессор</p></article>
+      <article class="system-gauge-card"><div class="system-gauge tone-mint" data-gauge="memory" style="--value:{{if and .System.Host (gt .System.Host.MemoryTotalBytes 0)}}{{printf "%.1f" (divFloat .System.Host.MemoryUsedBytes .System.Host.MemoryTotalBytes)}}{{else}}0{{end}}"><div><strong data-gauge-value="memory">{{if .System.Host}}{{formatBytes .System.Host.MemoryUsedBytes}}{{else}}-{{end}}</strong><small data-gauge-detail="memory">{{if .System.Host}}из {{formatBytes .System.Host.MemoryTotalBytes}}{{end}}</small></div></div><p>Оперативная память</p></article>
+      <article class="system-gauge-card"><div class="system-gauge tone-amber" data-gauge="gpu" style="--value:{{if and .System.Host .System.Host.GPUAvailable}}{{printf "%.1f" .System.Host.GPUPercent}}{{else}}0{{end}}"><div><strong data-gauge-value="gpu">{{if and .System.Host .System.Host.GPUAvailable}}{{printf "%.0f" .System.Host.GPUPercent}}{{else}}-{{end}}%</strong><small>GPU</small></div></div><p data-gpu-name>{{if and .System.Host .System.Host.GPUAvailable}}{{.System.Host.GPUName}}{{else}}Вычисления GPU{{end}}</p></article>
+      <article class="system-gauge-card"><div class="system-gauge tone-violet" data-gauge="gpu_memory" style="--value:{{if and .System.Host (gt .System.Host.GPUMemoryTotalBytes 0)}}{{printf "%.1f" (divFloat .System.Host.GPUMemoryUsedBytes .System.Host.GPUMemoryTotalBytes)}}{{else}}0{{end}}"><div><strong data-gauge-value="gpu_memory">{{if and .System.Host .System.Host.GPUAvailable}}{{formatBytes .System.Host.GPUMemoryUsedBytes}}{{else}}-{{end}}</strong><small data-gauge-detail="gpu_memory">{{if and .System.Host .System.Host.GPUAvailable}}из {{formatBytes .System.Host.GPUMemoryTotalBytes}}{{end}}</small></div></div><p>Видеопамять</p></article>
     </div>
-    <div class="panel">
-      <div class="panel-heading"><div><p class="section-kicker">7 дней</p><h2>По запросам</h2></div></div>
-      <table class="compact-table"><tbody>{{range .Stats.TopUsersRequests}}<tr><td><span class="user-dot">{{.Username}}</span></td><td class="numeric">{{formatNumber .Value}}</td></tr>{{else}}<tr><td class="muted">Нет данных</td><td></td></tr>{{end}}</tbody></table>
-    </div>
-    <div class="panel span-two">
-      <div class="panel-heading"><div><p class="section-kicker">30 дней</p><h2>Использование сервисов</h2></div></div>
-      <div class="table-scroll">
-      <table><thead><tr><th>Сервис</th><th>Запросы</th><th>Пользователи</th><th>Передано</th><th>Ошибки</th></tr></thead><tbody>
-      {{range .Stats.UsageByService}}<tr><td data-label="Сервис"><a class="service-link" href="/admin/services/{{.Service}}"><i class="service-icon {{.Service}}"></i>{{.Service}}</a></td><td data-label="Запросы" class="numeric">{{formatNumber .Requests}}</td><td data-label="Пользователи" class="numeric">{{formatNumber .Users}}</td><td data-label="Передано">{{formatBytes .Bytes}}</td><td data-label="Ошибки"><span class="error-count {{if gt .Errors 0}}has-errors{{end}}">{{formatNumber .Errors}}</span></td></tr>{{else}}<tr><td class="muted" colspan="5">Нет данных</td></tr>{{end}}
-      </tbody></table>
-      </div>
-    </div>
-    <div class="panel">
-      <div class="panel-heading"><div><p class="section-kicker">7 дней</p><h2>По трафику</h2></div></div>
-      <table class="compact-table"><tbody>{{range .Stats.TopUsersTraffic}}<tr><td><span class="user-dot">{{.Username}}</span></td><td class="numeric">{{formatBytes .Value}}</td></tr>{{else}}<tr><td class="muted">Нет данных</td><td></td></tr>{{end}}</tbody></table>
-    </div>
+    <div class="operations-history-head"><div class="system-history-toolbar" role="group" aria-label="Показатели на графике нагрузки"><button class="system-history-toggle cpu is-active" type="button" data-history-series="cpu" aria-pressed="true"><i></i>ЦП</button><button class="system-history-toggle memory is-active" type="button" data-history-series="memory" aria-pressed="true"><i></i>ОЗУ</button><button class="system-history-toggle gpu is-active" type="button" data-history-series="gpu" aria-pressed="true"><i></i>GPU</button><button class="system-history-toggle gpu-memory is-active" type="button" data-history-series="gpu-memory" aria-pressed="true"><i></i>VRAM</button></div><span class="muted" data-system-history-caption>Собираем шкалу...</span></div>
+    <div class="system-history-summary" data-system-history-summary aria-label="Минимум, максимум и последнее значение"></div>
+    <div data-system-history-points hidden>{{range .System.History}}<i data-history-point data-recorded-at="{{.RecordedAt.Format "2006-01-02T15:04:05.000Z07:00"}}" data-cpu="{{printf "%.3f" .CPUPercent}}" data-memory-used="{{.MemoryUsedBytes}}" data-memory-total="{{.MemoryTotalBytes}}" data-gpu-available="{{.GPUAvailable}}" data-gpu="{{printf "%.3f" .GPUPercent}}" data-gpu-memory-used="{{.GPUMemoryUsedBytes}}" data-gpu-memory-total="{{.GPUMemoryTotalBytes}}"></i>{{end}}</div>
+    <div data-generation-markers hidden>{{range .System.GenerationMarkers}}<i data-generation-marker data-created-at="{{.CreatedAt.Format "2006-01-02T15:04:05.000Z07:00"}}" data-public-id="{{.PublicID}}" data-state="{{.State}}" data-model="{{.ModelName}}" data-workflow="{{.WorkflowID}}"></i>{{end}}</div>
+    <div class="system-history" data-system-history aria-label="График использования ресурсов за 24 часа"></div>
+    <div class="operations-history-legend"><span><i></i>Запуск генерации</span><a href="/admin/metrics">Подробная наблюдаемость <b aria-hidden="true">›</b></a></div>
   </section>
 </main>
 </body></html>

@@ -71,6 +71,15 @@ redefine the shared focus, disabled, loading or semantic state language.
 - SSE reconciliation is keyed by stable task ID and version. Reuse unchanged DOM nodes and preserve scroll, revealed sensitive content and the currently open task dialog.
 - The detail dialog exposes the full prompt flow and diagnostics, traps keyboard focus, closes with Escape and restores focus to the originating card.
 
+## Admin Operations Contract
+
+- `/admin` is an operations workbench, not a traffic dashboard. The first viewport prioritizes actionable problems, durable jobs, the ComfyUI queue and dependency freshness; aggregate traffic remains in `/admin/metrics`.
+- Every attention row names the condition, affected count and next diagnostic action. Derived queue or workflow warnings must not duplicate the primary dependency outage that caused them.
+- Desktop uses two independent content columns so a long dependency list cannot stretch unrelated cards or create empty grid rows. At 1180 px and below, the columns become one ordered flow: jobs, dependencies, workflow, maintenance and storage.
+- Healthy workers stay collapsed; failures, stale data and retries remain visible. Links lead to the specific job, service, workflow matrix, content queue or storage policy rather than a generic dashboard.
+- Resource history uses real timestamps and states its period, sample count, min, max and current values. Generation starts appear as markers; gauges are reserved for current CPU, RAM, GPU and VRAM values.
+- The canonical operations preview must include running and overdue jobs, a mixed dependency state, a worker retry, storage growth and generation failures so visual regression cannot pass on an unrealistically empty page.
+
 ## Verification
 
 `/preview/components` in `cmd/ui-preview` renders the canonical states. The

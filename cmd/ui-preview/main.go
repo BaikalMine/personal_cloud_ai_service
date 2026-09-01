@@ -293,6 +293,12 @@ func main() {
 		},
 	}))
 	hostHistory := []domain.HostMetric{
+		{RecordedAt: now.Add(-23 * time.Hour), CPUPercent: 24, MemoryUsedBytes: 23 << 30, MemoryTotalBytes: 64 << 30, GPUAvailable: true, GPUName: "NVIDIA GeForce RTX", GPUPercent: 8, GPUMemoryUsedBytes: 5 << 30, GPUMemoryTotalBytes: 24 << 30},
+		{RecordedAt: now.Add(-18 * time.Hour), CPUPercent: 32, MemoryUsedBytes: 25 << 30, MemoryTotalBytes: 64 << 30, GPUAvailable: true, GPUName: "NVIDIA GeForce RTX", GPUPercent: 27, GPUMemoryUsedBytes: 9 << 30, GPUMemoryTotalBytes: 24 << 30},
+		{RecordedAt: now.Add(-12 * time.Hour), CPUPercent: 45, MemoryUsedBytes: 29 << 30, MemoryTotalBytes: 64 << 30, GPUAvailable: true, GPUName: "NVIDIA GeForce RTX", GPUPercent: 68, GPUMemoryUsedBytes: 16 << 30, GPUMemoryTotalBytes: 24 << 30},
+		{RecordedAt: now.Add(-6 * time.Hour), CPUPercent: 29, MemoryUsedBytes: 26 << 30, MemoryTotalBytes: 64 << 30, GPUAvailable: true, GPUName: "NVIDIA GeForce RTX", GPUPercent: 22, GPUMemoryUsedBytes: 10 << 30, GPUMemoryTotalBytes: 24 << 30},
+		{RecordedAt: now.Add(-4 * time.Hour), CPUPercent: 51, MemoryUsedBytes: 31 << 30, MemoryTotalBytes: 64 << 30, GPUAvailable: true, GPUName: "NVIDIA GeForce RTX", GPUPercent: 79, GPUMemoryUsedBytes: 18 << 30, GPUMemoryTotalBytes: 24 << 30},
+		{RecordedAt: now.Add(-90 * time.Minute), CPUPercent: 36, MemoryUsedBytes: 28 << 30, MemoryTotalBytes: 64 << 30, GPUAvailable: true, GPUName: "NVIDIA GeForce RTX", GPUPercent: 48, GPUMemoryUsedBytes: 14 << 30, GPUMemoryTotalBytes: 24 << 30},
 		{RecordedAt: now.Add(-18 * time.Minute), CPUPercent: 34, MemoryUsedBytes: 24 << 30, MemoryTotalBytes: 64 << 30, GPUAvailable: true, GPUName: "NVIDIA GeForce RTX", GPUPercent: 62, GPUMemoryUsedBytes: 13 << 30, GPUMemoryTotalBytes: 24 << 30},
 		{RecordedAt: now.Add(-12 * time.Minute), CPUPercent: 51, MemoryUsedBytes: 27 << 30, MemoryTotalBytes: 64 << 30, GPUAvailable: true, GPUName: "NVIDIA GeForce RTX", GPUPercent: 84, GPUMemoryUsedBytes: 18 << 30, GPUMemoryTotalBytes: 24 << 30},
 		{RecordedAt: now.Add(-7 * time.Minute), CPUPercent: 28, MemoryUsedBytes: 26 << 30, MemoryTotalBytes: 64 << 30, GPUAvailable: true, GPUName: "NVIDIA GeForce RTX", GPUPercent: 46, GPUMemoryUsedBytes: 12 << 30, GPUMemoryTotalBytes: 24 << 30},
@@ -331,6 +337,38 @@ func main() {
 		{Key: "temporary_users", Name: "Удаление временных аккаунтов", Status: "healthy", StatusLabel: "Работает", Interval: 15 * time.Minute, Timeout: 15 * time.Second, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 48, LastItems: 1},
 		{Key: "content_cleanup", Name: "Очистка AI-контента", Status: "healthy", StatusLabel: "Работает", Interval: 15 * time.Minute, Timeout: 15 * time.Second, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 177, LastItems: 5},
 	}
+	operationsLeases := []domain.QuickGenerationMiningLease{{ID: "lease-preview-001", CorrelationID: "correlation-preview-minimax-000001", GenerationJobID: 41, UserID: 2, MinerID: 1, ResumeMining: true, CreatedAt: now.Add(-4 * time.Minute)}}
+	operationsFailures := []domain.GenerationFailureSummary{
+		{JobPublicID: "job-preview-minimax-000001", CorrelationID: "correlation-preview-minimax-000001", Username: "rayka", WorkflowID: "minimax-h3-video-v4", ModelName: "MiniMax H3 FL2VA INT8 ConvRot", ErrorCode: "comfy_execution_failed", ErrorMessage: "RTXVideoSuperResolution: отсутствует обязательный параметр resize_type", FailedAt: now.Add(-37 * time.Minute)},
+		{JobPublicID: "job-preview-flux2-0000002", CorrelationID: "correlation-preview-flux2-0000002", Username: "demo4518", WorkflowID: "flux2-image-edit", ModelName: "Flux2 dev", ErrorCode: "workflow_validation_failed", ErrorMessage: "Выбранная модель не поддерживает этот вход", FailedAt: now.Add(-3 * time.Hour)},
+	}
+	backgroundWorkers := append([]gateway.MaintenanceWorkerState{}, workers[:2]...)
+	backgroundWorkers = append(backgroundWorkers, workers[3:]...)
+	operations := map[string]any{
+		"GeneratedAt": now, "OverallState": "critical", "OverallLabel": "Нужно вмешательство", "OverallDetail": "Критичных состояний: 2; предупреждений: 3",
+		"Attention": []map[string]any{
+			{"Key": "overdue-jobs", "Severity": "critical", "Title": "Задания не меняют состояние", "Detail": "Откройте трассу и проверьте последний завершённый этап.", "Count": 1, "Href": "#active-jobs", "Action": "К заданиям"},
+			{"Key": "dependencies", "Severity": "critical", "Title": "Нет связи с зависимостями", "Detail": "Промт-ассистент", "Count": 1, "Href": "#dependencies", "Action": "Проверить связь"},
+			{"Key": "stale-dependencies", "Severity": "warning", "Title": "Данные зависимостей устарели", "Detail": "Мониторинг Windows", "Count": 1, "Href": "#dependencies", "Action": "Посмотреть"},
+			{"Key": "workers", "Severity": "warning", "Title": "Фоновые задачи повторяются после ошибки", "Detail": "Метрики Windows: Windows-agent временно недоступен", "Count": 1, "Href": "#maintenance", "Action": "К процессам"},
+			{"Key": "moderation", "Severity": "warning", "Title": "Контент ожидает проверки", "Detail": "Текст: 0; медиа: 3", "Count": 3, "Href": "/admin/content", "Action": "Открыть контент"},
+		},
+		"Generation":    domain.GenerationObservabilitySummary{ActiveJobs: 2, OverdueJobs: 1, Completed: 18, Failed: 2, Cancelled: 1, SuccessRate: 90, QueueP50MS: 13800, QueueP95MS: 64200, ExecutionP50MS: 186000, ExecutionP95MS: 1274000, ObservationHours: 24},
+		"Gateway":       domain.GatewayObservationSummary{Latest: domain.GatewayObservation{DatabaseBytes: 238 << 20, ActiveJobs: 2, OverdueJobs: 1, ActiveLeases: 1, MediaModerationBacklog: 3, CleanupStatus: "ok", CleanupAgeSeconds: 682, RecordedAt: now.Add(-18 * time.Second)}, DatabaseGrowth24Hours: 18 << 20},
+		"Queue":         map[string]any{"Available": true, "State": "running", "StateLabel": "Выполняется", "Detail": "ComfyUI выполняет текущую задачу", "Running": 1, "Pending": 2, "EstimatedWaitSeconds": int64(1260), "AverageTaskSeconds": int64(420)},
+		"Leases":        operationsLeases,
+		"Compatibility": map[string]any{"State": "critical", "StateLabel": "Есть несовместимые сценарии", "Detail": "Ошибок: 1; совместимо: 7", "Compatible": 7, "Failed": 1, "Unavailable": 1},
+		"Storage": map[string]any{
+			"DatabaseBytes": int64(238 << 20), "DatabaseGrowth": int64(18 << 20), "MediaBytes": int64(214 << 20), "EstimatedRows": int64(16492), "UnmappedCount": 0,
+			"Cleanup":   map[string]any{"Status": "ok", "StatusLabel": "Очистка завершена"},
+			"TopTables": []map[string]any{{"Label": "Медиа генераций", "EstimatedRows": int64(9), "TotalBytes": int64(176 << 20)}, {"Label": "Зашифрованные блоки медиа", "EstimatedRows": int64(144), "TotalBytes": int64(38 << 20)}, {"Label": "Запросы к сервисам", "EstimatedRows": int64(14820), "TotalBytes": int64(15 << 20)}},
+		},
+		"ActiveJobs": []map[string]any{
+			{"PublicID": "job-preview-minimax-active", "Username": "rayka", "Workflow": "MiniMax H3 v4", "Model": "MiniMax H3 FL2VA INT8 ConvRot", "StateLabel": "Выполняется", "StateClass": "running", "StatusMessage": "ComfyUI выполняет workflow", "CreatedAt": now.Add(-18 * time.Minute), "Age": 18 * time.Minute, "StateAge": 12 * time.Minute, "HasLease": true},
+			{"PublicID": "job-preview-krea-overdue", "Username": "demo4518", "Workflow": "Krea2 · Текст в изображение", "Model": "Krea2 v4.0", "StateLabel": "Ожидание ресурсов", "StateClass": "overdue", "StatusMessage": "Ожидаем освобождения GPU", "CreatedAt": now.Add(-71 * time.Minute), "Age": 71 * time.Minute, "StateAge": 56 * time.Minute, "Overdue": true},
+		},
+		"Failures": operationsFailures, "ProblemWorkers": []gateway.MaintenanceWorkerState{workers[2]}, "BackgroundWorkers": backgroundWorkers,
+	}
 	mux.HandleFunc("/preview/admin", render("admin_dashboard", "Обзор системы", map[string]any{
 		"System": gateway.SystemOverview{
 			DatabaseBytes: 184 << 20,
@@ -338,8 +376,14 @@ func main() {
 				{Username: "rayka", Role: "user", LastSeenAt: now.Add(-time.Minute)},
 				{Username: "admin", Role: "admin", LastSeenAt: now.Add(-2 * time.Minute)},
 			},
-			Host: &lastHost, History: hostHistory, AgentAvailable: false,
-			AgentMessage: dependencies[len(dependencies)-1].Detail, Agent: dependencies[len(dependencies)-1], Dependencies: dependencies, Workers: workers,
+			Host: &lastHost, History: hostHistory,
+			GenerationMarkers: []domain.GenerationJobMarker{
+				{PublicID: "job-preview-krea-overdue", WorkflowID: "krea2-text-to-image", ModelName: "Krea2 v4.0", State: domain.GenerationJobQueued, CreatedAt: now.Add(-71 * time.Minute)},
+				{PublicID: "job-preview-minimax-active", WorkflowID: "minimax-h3-video-v4", ModelName: "MiniMax H3 FL2VA INT8 ConvRot", State: domain.GenerationJobRunning, CreatedAt: now.Add(-18 * time.Minute)},
+				{PublicID: "job-preview-completed", WorkflowID: "flux2-image-edit", ModelName: "Flux2 dev", State: domain.GenerationJobCompleted, CreatedAt: now.Add(-4 * time.Hour), FinishedAt: timePointer(now.Add(-3*time.Hour - 42*time.Minute))},
+			},
+			AgentAvailable: false,
+			AgentMessage:   dependencies[len(dependencies)-1].Detail, Agent: dependencies[len(dependencies)-1], Dependencies: dependencies, Workers: workers,
 		},
 		"Stats": domain.AdminStats{
 			ActiveUsers: 3, RequestsToday: 147, Requests7Days: 824, ActiveWebSockets: 2, AverageDuration: 1160, ErrorRate: "0,8%",
@@ -348,6 +392,7 @@ func main() {
 			UsageByService:   []domain.ServiceUsage{{Service: "comfyui", Requests: 516, Users: 3, Bytes: 6400000000, Errors: 2}, {Service: "openwebui", Requests: 308, Users: 3, Bytes: 18400000, Errors: 1}},
 			Trend:            chart,
 		},
+		"Operations": operations,
 	}))
 	serviceStats := []domain.ServiceUsage{{Service: "comfyui", Requests: 516, Users: 3, Bytes: 6400000000, Errors: 2}, {Service: "openwebui", Requests: 308, Users: 3, Bytes: 18400000, Errors: 1}}
 	observability := map[string]any{

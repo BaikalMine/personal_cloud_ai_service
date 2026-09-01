@@ -408,6 +408,23 @@
       { key: "gpu-memory", label: "VRAM", color: "#a78bfa", value: (metric) => metric.gpu_memory_total_bytes ? metric.gpu_memory_used_bytes * 100 / metric.gpu_memory_total_bytes : null },
     ];
     const activeHistorySeries = new Set(historySeries.map(({ key }) => key));
+    const initialHistory = [...systemMonitoring.querySelectorAll("[data-history-point]")].map((node) => ({
+      recorded_at: node.dataset.recordedAt,
+      cpu_percent: Number(node.dataset.cpu),
+      memory_used_bytes: Number(node.dataset.memoryUsed),
+      memory_total_bytes: Number(node.dataset.memoryTotal),
+      gpu_available: node.dataset.gpuAvailable === "true",
+      gpu_percent: Number(node.dataset.gpu),
+      gpu_memory_used_bytes: Number(node.dataset.gpuMemoryUsed),
+      gpu_memory_total_bytes: Number(node.dataset.gpuMemoryTotal),
+    }));
+    const initialMarkers = [...systemMonitoring.querySelectorAll("[data-generation-marker]")].map((node) => ({
+      created_at: node.dataset.createdAt,
+      public_id: node.dataset.publicId,
+      state: node.dataset.state,
+      model_name: node.dataset.model,
+      workflow_id: node.dataset.workflow,
+    }));
     const chartWidth = 960;
     const chartHeight = 248;
     const chartInset = { top: 14, right: 18, bottom: 30, left: 42 };
@@ -431,9 +448,12 @@
       const chart = systemMonitoring.querySelector("[data-system-history]");
       const caption = systemMonitoring.querySelector("[data-system-history-caption]");
       const count = systemMonitoring.querySelector("[data-history-count]");
+      const summary = systemMonitoring.querySelector("[data-system-history-summary]");
+      const markers = systemMonitoring._markers || [];
       if (count) count.textContent = String(history.length);
       if (!chart) return;
       chart.replaceChildren();
+      if (summary) summary.replaceChildren();
       if (history.length < 2) {
         const empty = document.createElement("p");
         empty.className = "muted";
@@ -445,7 +465,14 @@
       const visible = compactHistory(history);
       const plotWidth = chartWidth - chartInset.left - chartInset.right;
       const plotHeight = chartHeight - chartInset.top - chartInset.bottom;
-      const xFor = (index) => chartInset.left + (visible.length > 1 ? index * plotWidth / (visible.length - 1) : 0);
+      const firstTimestamp = Date.parse(visible[0].recorded_at);
+      const lastTimestamp = Date.parse(visible[visible.length - 1].recorded_at);
+      const timeSpan = Math.max(1, lastTimestamp - firstTimestamp);
+      const xForTime = (value) => chartInset.left + Math.max(0, Math.min(1, (Date.parse(value) - firstTimestamp) / timeSpan)) * plotWidth;
+      const visibleMarkers = markers.filter((marker) => {
+        const timestamp = Date.parse(marker.created_at);
+        return Number.isFinite(timestamp) && timestamp >= firstTimestamp && timestamp <= lastTimestamp;
+      });
       const yFor = (value) => chartInset.top + (100 - value) * plotHeight / 100;
       const svg = svgNode("svg", { viewBox: `0 0 ${chartWidth} ${chartHeight}`, preserveAspectRatio: "none", role: "img", "aria-label": "Линейный график нагрузки сервера" });
       const grid = svgNode("g", { class: "system-history-grid" });
@@ -469,17 +496,30 @@
           if (segment.length > 1) lines.append(svgNode("polyline", { points: segment.join(" "), stroke: series.color }));
           segment = [];
         };
-        visible.forEach((metric, index) => {
+        visible.forEach((metric) => {
           const value = historyValue(metric, series);
           if (value === null) {
             appendSegment();
             return;
           }
-          segment.push(`${xFor(index).toFixed(2)},${yFor(value).toFixed(2)}`);
+          segment.push(`${xForTime(metric.recorded_at).toFixed(2)},${yFor(value).toFixed(2)}`);
         });
         appendSegment();
       });
       svg.append(lines);
+      const markerGroup = svgNode("g", { class: "system-history-markers", "aria-label": "Запуски генераций" });
+      visibleMarkers.forEach((marker) => {
+        const line = svgNode("line", {
+          class: `is-${marker.state || "unknown"}`,
+          x1: xForTime(marker.created_at), x2: xForTime(marker.created_at),
+          y1: chartHeight - chartInset.bottom - 13, y2: chartHeight - chartInset.bottom,
+        });
+        const title = svgNode("title");
+        title.textContent = `${historyDateTime(marker.created_at)} · ${marker.model_name || marker.workflow_id || "Генерация"}`;
+        line.append(title);
+        markerGroup.append(line);
+      });
+      svg.append(markerGroup);
       const cursor = svgNode("g", { class: "system-history-cursor", hidden: "hidden" });
       const cursorLine = svgNode("line", { x1: 0, x2: 0, y1: chartInset.top, y2: chartHeight - chartInset.bottom });
       cursor.append(cursorLine);
@@ -492,9 +532,12 @@
       const showPoint = (event) => {
         const bounds = svg.getBoundingClientRect();
         const relative = Math.max(chartInset.left / chartWidth, Math.min(1 - chartInset.right / chartWidth, (event.clientX - bounds.left) / bounds.width));
-        const index = Math.round((relative * chartWidth - chartInset.left) * (visible.length - 1) / plotWidth);
-        const metric = visible[Math.max(0, Math.min(visible.length - 1, index))];
-        const x = xFor(index);
+        const targetTimestamp = firstTimestamp + ((relative * chartWidth - chartInset.left) / plotWidth) * timeSpan;
+        let metric = visible[0];
+        visible.forEach((candidate) => {
+          if (Math.abs(Date.parse(candidate.recorded_at) - targetTimestamp) < Math.abs(Date.parse(metric.recorded_at) - targetTimestamp)) metric = candidate;
+        });
+        const x = xForTime(metric.recorded_at);
         cursor.removeAttribute("hidden");
         cursorLine.setAttribute("x1", x);
         cursorLine.setAttribute("x2", x);
@@ -509,6 +552,12 @@
           row.innerHTML = `<i style="--series-color:${series.color}"></i>${series.label}<b>${Math.round(value)}%</b>`;
           tooltip.append(row);
         });
+        const nearbyMarkers = visibleMarkers.filter((marker) => Math.abs(Date.parse(marker.created_at) - Date.parse(metric.recorded_at)) <= 90000);
+        if (nearbyMarkers.length) {
+          const row = document.createElement("span");
+          row.innerHTML = `<i style="--series-color:#69dfb9"></i>Запуски<b>${nearbyMarkers.length}</b>`;
+          tooltip.append(row);
+        }
         tooltip.hidden = false;
         tooltip.style.left = `${Math.max(8, Math.min(chart.clientWidth - tooltip.offsetWidth - 8, (x / chartWidth) * chart.clientWidth + 12))}px`;
         tooltip.style.top = "18px";
@@ -518,7 +567,24 @@
       interaction.addEventListener("pointerdown", showPoint);
       interaction.addEventListener("pointerleave", () => { cursor.setAttribute("hidden", "hidden"); tooltip.hidden = true; });
       chart.append(svg, tooltip);
-      if (caption) caption.textContent = `${historyDateTime(visible[0].recorded_at)} - ${historyDateTime(visible[visible.length - 1].recorded_at)} · ${history.length} замеров`;
+      if (summary) {
+        historySeries.forEach((series) => {
+          const values = visible.map((metric) => historyValue(metric, series)).filter((value) => value !== null);
+          if (!values.length) return;
+          const item = document.createElement("div");
+          item.style.setProperty("--series-color", series.color);
+          const label = document.createElement("span");
+          label.innerHTML = "<i></i>";
+          label.append(series.label);
+          const current = document.createElement("strong");
+          current.textContent = `${Math.round(values[values.length - 1])}% сейчас`;
+          const range = document.createElement("small");
+          range.textContent = `мин. ${Math.round(Math.min(...values))}% · макс. ${Math.round(Math.max(...values))}%`;
+          item.append(label, current, range);
+          summary.append(item);
+        });
+      }
+      if (caption) caption.textContent = `${historyDateTime(visible[0].recorded_at)} - ${historyDateTime(visible[visible.length - 1].recorded_at)} · ${history.length} замеров · ${visibleMarkers.length} запусков`;
     };
     systemMonitoring.querySelectorAll("[data-history-series]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -632,7 +698,10 @@
           const data = row.querySelector("[data-dependency-data]");
           if (data) data.textContent = dependencyTime(dependency.last_data_at);
           const error = row.querySelector("[data-dependency-error]");
-          if (error) error.textContent = dependency.last_error || "Нет";
+          if (error) {
+            error.textContent = dependency.last_error || "";
+            error.hidden = !dependency.last_error;
+          }
           const next = row.querySelector("[data-dependency-next]");
           if (next) {
             if (dependency.next_check_at) next.dataset.nextCheck = dependency.next_check_at;
@@ -679,6 +748,7 @@
       renderDependencies(overview.dependencies || []);
       renderWorkers(overview.workers || []);
       systemMonitoring._history = overview.history || [];
+      systemMonitoring._markers = overview.generation_markers || [];
       renderHistory(systemMonitoring._history);
     };
     const refreshSystem = async () => {
@@ -690,6 +760,9 @@
         // The last valid dashboard state remains visible while the host agent restarts.
       }
     };
+    systemMonitoring._history = initialHistory;
+    systemMonitoring._markers = initialMarkers;
+    renderHistory(initialHistory);
     refreshSystem();
     window.setInterval(refreshSystem, 10000);
     refreshDependencyCountdowns();
