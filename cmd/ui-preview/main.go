@@ -3,8 +3,10 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"ai-access-gateway/internal/domain"
@@ -115,6 +117,54 @@ func main() {
 	mux.HandleFunc("/generate/upload/", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = w.Write([]byte(`{"name":"preview-input.png","subfolder":"preview"}`))
+	})
+	mux.HandleFunc("/generate/prompt-assistant", func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		references := make([]map[string]any, 0, 6)
+		for number := 1; number <= 4; number++ {
+			field := "input_image"
+			if number > 1 {
+				field = fmt.Sprintf("input_image_%d", number)
+			}
+			if strings.TrimSpace(r.Form.Get(field)) == "" {
+				continue
+			}
+			role := strings.TrimSpace(r.Form.Get(fmt.Sprintf("image_role_%d", number)))
+			if role == "" {
+				role = "base_scene"
+			}
+			references = append(references, map[string]any{
+				"id": fmt.Sprintf("Picture %d", len(references)+1), "kind": "image", "role": role,
+				"summary": "Женщина с короткими тёмными волосами в мягком студийном свете; нейтральный фон и поясной портрет.",
+				"use":     "Сохранить узнаваемую внешность, направление света и исходную композицию.", "inspected": true,
+			})
+		}
+		if r.Form.Get("video_has_video") == "true" {
+			references = append(references, map[string]any{
+				"id": "Video 1", "kind": "video", "role": "motion_timing",
+				"summary": "Видеореференс подключён к workflow; его содержимое ассистент не анализировал.",
+				"use":     "Ориентир для движения, темпа и временной структуры.", "inspected": false,
+			})
+		}
+		if r.Form.Get("video_has_audio") == "true" {
+			references = append(references, map[string]any{
+				"id": "Audio 1", "kind": "audio", "role": "voice_sound",
+				"summary": "Аудиореференс подключён к workflow; его содержимое ассистент не анализировал.",
+				"use":     "Ориентир для голоса, звучания и синхронизации.", "inspected": false,
+			})
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"prompt":     "Preserve the subject's recognizable facial features and natural skin texture. Replace the jacket with a structured deep-red leather jacket with silver hardware, retain the original waist-up composition, soft directional studio light, neutral background, and realistic editorial photography.",
+			"references": references, "model": "Gemma 4 e4b", "correlation_id": "preview-assistant-01",
+			"usage": map[string]any{"prompt_tokens": 286, "completion_tokens": 174},
+		})
+	})
+	mux.HandleFunc("/generate/prompt-assistant/decision", func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		decision := r.Form.Get("decision")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(map[string]any{"decision": decision})
 	})
 	mux.HandleFunc("/generate/library/reuse-image", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")

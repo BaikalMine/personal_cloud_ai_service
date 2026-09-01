@@ -114,6 +114,7 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 	run := quick(http.HandlerFunc(a.handleGenerateRun))
 	recover := quick(http.HandlerFunc(a.handleRecoverGeneration))
 	promptAssistant := quick(http.HandlerFunc(a.handlePromptAssistant))
+	promptAssistantDecision := quick(http.HandlerFunc(a.handlePromptAssistantDecision))
 	status := quick(http.HandlerFunc(a.handleGenerateStatus))
 	cancel := quick(http.HandlerFunc(a.handleCancelGeneration))
 	queue := quick(http.HandlerFunc(a.handleGenerationQueue))
@@ -149,6 +150,7 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 	mux.Handle("/generate/jobs/cancel", quick(http.HandlerFunc(a.handleGenerationJobCancel)))
 	mux.Handle("/generate/jobs/retry", quick(http.HandlerFunc(a.handleGenerationJobRetry)))
 	mux.Handle("/generate/prompt-assistant", promptAssistant)
+	mux.Handle("/generate/prompt-assistant/decision", promptAssistantDecision)
 	mux.Handle("/generate/status", status)
 	mux.Handle("/generate/cancel", cancel)
 	mux.Handle("/generate/queue", queue)
@@ -2362,7 +2364,7 @@ func generationAuditMetadata(definition workflowDefinition, input generationForm
 	}
 	if input.AssistantRequested {
 		metadata["prompt_assistant"] = map[string]any{
-			"requested": true, "applied": input.AssistantApplied, "template": input.AssistantTemplate,
+			"requested": true, "applied": input.AssistantApplied, "decision": input.AssistantAction, "template": input.AssistantTemplate,
 			"think": input.AssistantThink, "original_prompt": input.AssistantOriginal, "suggestion": input.AssistantSuggestion,
 		}
 	}

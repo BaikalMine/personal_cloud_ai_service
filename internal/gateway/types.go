@@ -219,6 +219,7 @@ type ContentEventView struct {
 
 type ContentAssistantView struct {
 	Applied        bool
+	Decision       string
 	Template       string
 	Think          bool
 	Model          string

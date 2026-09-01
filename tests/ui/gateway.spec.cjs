@@ -74,6 +74,34 @@ test("generation wizard covers Krea2, Flux2 and MiniMax", async ({ page }, testI
   await expect(page.locator("#minimax-video-reference")).toBeVisible();
 });
 
+test("prompt assistant review stays readable at every viewport", async ({ page }, testInfo) => {
+  await open(page, "/preview/generate?template=image-to-image&workflow=photoflow-flux2-edit&media=1&slot=1&role=identity");
+  await expect(page.locator('.generation-workflow-choice.is-selected[data-preset-id="photoflow-flux2-edit"]')).toBeVisible();
+  await expect(page.locator('[data-image-slot="1"] [data-image-name]')).toHaveText("AI-Gateway-Krea2-portrait.png");
+  await page.locator("#workflow-next").click();
+  await page.locator("#positive-prompt").fill("Сохранить внешность и композицию, заменить куртку на красную кожаную.");
+  await page.locator("#prompt-assistant-enabled").check();
+  await page.locator("#prompt-assistant-improve").click();
+
+  const review = page.locator("#prompt-assistant-review");
+  await expect(review).toBeVisible();
+  await expect(page.locator("#prompt-assistant-reference-list li")).toHaveCount(1);
+  await expect(page.locator("#prompt-assistant-reference-count")).toHaveText("1 источник");
+  await expect(page.locator("#prompt-assistant-review-meta")).toContainText("460 токенов");
+  await expect(page.locator("#prompt-assistant-diff-suggestion ins").first()).toBeVisible();
+  await expect(page.locator("#prompt-assistant-draft")).toHaveValue(/Preserve the subject/);
+  await assertNoViewportOverflow(page, `${testInfo.project.name} prompt assistant review`);
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    window.scrollTo(0, 0);
+  });
+  await expect(page).toHaveScreenshot("prompt-assistant-review.png", { fullPage: true, stylePath: visualStyle });
+
+  await page.locator("#prompt-assistant-apply").click();
+  await expect(review).toBeHidden();
+  await expect(page.locator("#prompt-assistant-state")).toContainText("Вариант ассистента применён");
+});
+
 test("media library is shared by Krea2, Flux2 and MiniMax", async ({ page }, testInfo) => {
   desktopOnly(testInfo);
 

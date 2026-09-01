@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -44,6 +45,13 @@ func TestLoadValidConfiguration(t *testing.T) {
 	t.Setenv("OPENWEBUI_UPSTREAM", "http://host.docker.internal:8089")
 	t.Setenv("OLLAMA_UPSTREAM", "http://host.docker.internal:11434")
 	t.Setenv("PROMPT_ASSISTANT_MODEL", "huihui_ai/gemma-4-abliterated:e4b")
+	t.Setenv("PROMPT_ASSISTANT_IMAGE_NUM_PREDICT", "1024")
+	t.Setenv("PROMPT_ASSISTANT_IMAGE_THINK_NUM_PREDICT", "1792")
+	t.Setenv("PROMPT_ASSISTANT_VIDEO_NUM_PREDICT", "3072")
+	t.Setenv("PROMPT_ASSISTANT_VIDEO_THINK_NUM_PREDICT", "5120")
+	t.Setenv("PROMPT_ASSISTANT_IMAGE_TIMEOUT", "90s")
+	t.Setenv("PROMPT_ASSISTANT_VIDEO_TIMEOUT", "6m")
+	t.Setenv("PROMPT_ASSISTANT_KEEP_ALIVE", "30s")
 
 	cfg, err := Load()
 	if err != nil {
@@ -81,6 +89,28 @@ func TestLoadValidConfiguration(t *testing.T) {
 	}
 	if cfg.OllamaUpstream == nil || cfg.OllamaUpstream.Host != "host.docker.internal:11434" || cfg.PromptAssistantModel != "huihui_ai/gemma-4-abliterated:e4b" {
 		t.Fatalf("prompt assistant config was not parsed: %+v", cfg)
+	}
+	if cfg.PromptAssistantImageNumPredict != 1024 || cfg.PromptAssistantImageThinkNumPredict != 1792 ||
+		cfg.PromptAssistantVideoNumPredict != 3072 || cfg.PromptAssistantVideoThinkNumPredict != 5120 ||
+		cfg.PromptAssistantImageTimeout != 90*time.Second || cfg.PromptAssistantVideoTimeout != 6*time.Minute ||
+		cfg.PromptAssistantKeepAlive != "30s" {
+		t.Fatalf("prompt assistant model policy was not parsed: %+v", cfg)
+	}
+}
+
+func TestRejectsInvalidPromptAssistantPolicy(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://gateway:test@postgres:5432/gateway?sslmode=disable")
+	t.Setenv("ADMIN_PASSWORD", "strong-admin-password")
+	t.Setenv("SESSION_SECRET", "01234567890123456789012345678901")
+	t.Setenv("PROMPT_ASSISTANT_VIDEO_NUM_PREDICT", "64")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "PROMPT_ASSISTANT_VIDEO_NUM_PREDICT") {
+		t.Fatalf("expected video token budget validation error, got %v", err)
+	}
+
+	t.Setenv("PROMPT_ASSISTANT_VIDEO_NUM_PREDICT", "2400")
+	t.Setenv("PROMPT_ASSISTANT_KEEP_ALIVE", "90m")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "PROMPT_ASSISTANT_KEEP_ALIVE") {
+		t.Fatalf("expected keep-alive validation error, got %v", err)
 	}
 }
 

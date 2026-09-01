@@ -42,6 +42,27 @@ type ContentEventRow struct {
 	ExpiresAt           time.Time
 }
 
+type PromptAssistantRunRecord struct {
+	ContentEventID   int64
+	UserID           int64
+	CorrelationID    string
+	Mode             string
+	Profile          string
+	Model            string
+	Status           string
+	LatencyMS        int64
+	PromptTokens     int
+	CompletionTokens int
+	TotalDurationMS  int64
+	LoadDurationMS   int64
+	EvalDurationMS   int64
+	NumPredict       int
+	TimeoutMS        int64
+	KeepAlive        string
+	ReferenceCount   int
+	ErrorCode        string
+}
+
 type ContentMediaRecord struct {
 	EventID       int64
 	MediaType     string

@@ -129,6 +129,7 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	assertComfyInputLifecycle(t, ctx, db, repository, registeredUserID)
 	assertComfyOutputCleanupLifecycle(t, ctx, db, repository, registeredUserID)
 	assertContentMediaChunksLifecycle(t, ctx, db, repository, registeredUserID)
+	assertPromptAssistantQualityLifecycle(t, ctx, db, repository, registeredUserID)
 
 	sessionToken := "integration-session-token"
 	sessionHash := security.HashToken(sessionToken)
@@ -272,6 +273,53 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	}
 	if deleted, err := repository.DeleteUser(ctx, adminID, "admin"); err != nil || deleted {
 		t.Fatalf("admin deletion protection: deleted=%v err=%v", deleted, err)
+	}
+}
+
+func assertPromptAssistantQualityLifecycle(t *testing.T, ctx context.Context, db *sql.DB, repository *store.Store, userID int64) {
+	t.Helper()
+	const correlationID = "integration-prompt-assistant-quality"
+	eventID, err := repository.InsertContentEvent(ctx, domain.ContentEventRecord{
+		UserID: userID, CorrelationID: correlationID, Service: "ollama", Kind: "prompt_assistant",
+		Model: "test:e4b", GenerationState: "completed", PromptCipher: []byte("prompt"),
+		ResponseCipher: []byte("response"), MetadataCipher: []byte("before"), ExpiresAt: time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if _, cleanupErr := db.ExecContext(context.Background(), `DELETE FROM content_events WHERE id=$1`, eventID); cleanupErr != nil {
+			t.Errorf("delete prompt-assistant integration event: %v", cleanupErr)
+		}
+	}()
+	runID, err := repository.InsertPromptAssistantRun(ctx, domain.PromptAssistantRunRecord{
+		ContentEventID: eventID, UserID: userID, CorrelationID: correlationID,
+		Mode: "image-to-image", Profile: "flux-edit", Model: "test:e4b", Status: "completed",
+		LatencyMS: 2450, PromptTokens: 320, CompletionTokens: 410, TotalDurationMS: 2300,
+		LoadDurationMS: 100, EvalDurationMS: 1800, NumPredict: 1600, TimeoutMS: 120000,
+		KeepAlive: "0", ReferenceCount: 2,
+	})
+	if err != nil || runID <= 0 {
+		t.Fatalf("insert prompt-assistant run: id=%d err=%v", runID, err)
+	}
+	readEventID, metadata, err := repository.PromptAssistantEventMetadata(ctx, userID, correlationID)
+	if err != nil || readEventID != eventID || string(metadata) != "before" {
+		t.Fatalf("read prompt-assistant metadata: event=%d metadata=%q err=%v", readEventID, metadata, err)
+	}
+	if err := repository.SetPromptAssistantDecision(ctx, userID, eventID, "edited_after_apply", []byte("after")); err != nil {
+		t.Fatal(err)
+	}
+	var decision string
+	var decidedAt sql.NullTime
+	if err := db.QueryRowContext(ctx, `SELECT decision,decided_at FROM prompt_assistant_runs WHERE id=$1`, runID).Scan(&decision, &decidedAt); err != nil {
+		t.Fatal(err)
+	}
+	if decision != "edited_after_apply" || !decidedAt.Valid {
+		t.Fatalf("prompt-assistant decision was not recorded: decision=%q decided_at=%v", decision, decidedAt)
+	}
+	_, metadata, err = repository.PromptAssistantEventMetadata(ctx, userID, correlationID)
+	if err != nil || string(metadata) != "after" {
+		t.Fatalf("updated prompt-assistant metadata=%q err=%v", metadata, err)
 	}
 }
 
@@ -1027,7 +1075,7 @@ func assertObservabilityLifecycle(t *testing.T, ctx context.Context, repository 
 func resetIntegrationDatabase(t *testing.T, db *sql.DB) {
 	t.Helper()
 	if _, err := db.Exec(`
-		TRUNCATE service_observations, gateway_observations, miners, comfy_output_cleanup_tombstones, comfy_input_assets, comfy_userdata, comfy_settings, comfy_output_ownership, content_media, content_events, websocket_sessions, proxy_requests,
+		TRUNCATE service_observations, gateway_observations, miners, comfy_output_cleanup_tombstones, comfy_input_assets, comfy_userdata, comfy_settings, comfy_output_ownership, content_media, prompt_assistant_runs, content_events, websocket_sessions, proxy_requests,
 			audit_log, invite_uses, invites, sessions, users RESTART IDENTITY CASCADE
 		;
 		INSERT INTO miners (name, script_path, process_name, enabled, is_default)

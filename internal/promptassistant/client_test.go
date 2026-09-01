@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEnhanceSendsFlux2EditInstructionAndUnloadsModel(t *testing.T) {
@@ -20,13 +21,13 @@ func TestEnhanceSendsFlux2EditInstructionAndUnloadsModel(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body.Model != "test:e4b" || body.Stream || body.Think || body.KeepAlive != "0" || len(body.Messages) != 2 {
+		if body.Model != "test:e4b" || body.Stream || body.Think || body.KeepAlive != "0" || body.Format != "json" || len(body.Messages) != 2 {
 			t.Fatalf("unexpected body: %#v", body)
 		}
 		if !strings.Contains(body.Messages[0].Content, "image editing") || !strings.Contains(body.Messages[0].Content, "image 1: the base scene") || !strings.Contains(body.Messages[0].Content, "image 2: the person") || body.Messages[1].Content != "change the jacket" {
 			t.Fatalf("wrong prompt-assistant context: %#v", body.Messages)
 		}
-		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"<think>draft</think> Keep the same person in a red jacket."}}`))
+		writeAssistantResponse(t, w, `{"prompt":"Keep the same person in a red jacket.","references":[{"id":"Picture 1","summary":"A street portrait with a woman in a dark jacket.","use":"Preserve the base scene and composition."},{"id":"Picture 2","summary":"A woman with long blonde hair and pale skin.","use":"Preserve the person's identity."}]}`)
 	}))
 	defer server.Close()
 	base, err := url.Parse(server.URL)
@@ -59,7 +60,7 @@ func TestEnhanceCanEnableThinking(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if !body.Think || body.Options.NumPredict != 1400 || body.KeepAlive != "0" {
+		if !body.Think || body.Options.NumPredict != DefaultImageThinkNumPredict || body.KeepAlive != "0" || body.Format != "json" {
 			t.Fatalf("thinking request was not configured: %#v", body)
 		}
 		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"A deliberate final prompt."}}`))
@@ -161,10 +162,10 @@ func TestEnhanceVideoUsesMiniMaxContextForReferenceAudio(t *testing.T) {
 			!strings.Contains(system, "<Picture 2> (attached image 2): the person or character's identity") ||
 			!strings.Contains(system, "at least three concrete visible attributes") ||
 			!strings.Contains(system, "define a human as <Subject 1>") ||
-			body.Options.NumPredict != miniMaxNumPredict || len(body.Messages[1].Images) != 2 || body.Messages[1].Images[0] != "aW1hZ2UtMQ==" || body.Messages[1].Images[1] != "aW1hZ2UtMg==" {
+			body.Format != "json" || body.Options.NumPredict != DefaultVideoNumPredict || len(body.Messages[1].Images) != 2 || body.Messages[1].Images[0] != "aW1hZ2UtMQ==" || body.Messages[1].Images[1] != "aW1hZ2UtMg==" {
 			t.Fatalf("wrong MiniMax context: %#v", body)
 		}
-		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"summary: a concise video."}}`))
+		writeAssistantResponse(t, w, `{"prompt":"summary: a concise video.","references":[{"id":"Picture 1","summary":"A dancer in a bright studio.","use":"Use as the base scene."},{"id":"Picture 2","summary":"The same dancer's face and costume.","use":"Preserve identity."},{"id":"Video 1","summary":"Attached motion reference.","use":"Use for motion timing."},{"id":"Audio 1","summary":"Attached voice reference.","use":"Use for voice and synchronization."}]}`)
 	}))
 	defer server.Close()
 	base, err := url.Parse(server.URL)
@@ -217,7 +218,7 @@ func TestEnhanceVideoGroundsExactFrameImages(t *testing.T) {
 			!strings.Contains(system, "Do not treat either keyframe as a loose style reference") || len(body.Messages[1].Images) != 2 {
 			t.Fatalf("wrong FL2VA visual context: %#v", body)
 		}
-		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"A grounded first-to-last-frame prompt."}}`))
+		writeAssistantResponse(t, w, `{"prompt":"A grounded first-to-last-frame prompt.","references":[{"id":"Picture 1","summary":"The exact opening frame shows a dancer facing left.","use":"Use as the exact first frame."},{"id":"Picture 2","summary":"The exact final frame shows the dancer facing camera.","use":"Use as the exact final frame."}]}`)
 	}))
 	defer server.Close()
 	base, err := url.Parse(server.URL)
@@ -265,7 +266,7 @@ func TestEnhanceVideoThinkUsesExtendedTokenBudget(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if !body.Think || body.Options.NumPredict != miniMaxThinkNumPredict {
+		if !body.Think || body.Options.NumPredict != DefaultVideoThinkNumPredict {
 			t.Fatalf("wrong MiniMax think budget: %#v", body.Options)
 		}
 		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"A complete video prompt."}}`))
@@ -276,6 +277,58 @@ func TestEnhanceVideoThinkUsesExtendedTokenBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3, "a dancer turns", nil, VideoContext{Mode: "frames", DurationSeconds: 15, ImageCount: 2}, true); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnhanceResultReportsUsageAndCustomPolicy(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body chatRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Options.NumPredict != 1234 || body.KeepAlive != "45s" || body.Format != "json" {
+			t.Fatalf("custom request policy was not applied: %#v", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(chatResponse{
+			Message:            Message{Role: "assistant", Content: `{"prompt":"A measured final prompt.","references":[]}`},
+			TotalDuration:      int64(3 * time.Second),
+			LoadDuration:       int64(250 * time.Millisecond),
+			PromptEvalCount:    81,
+			PromptEvalDuration: int64(900 * time.Millisecond),
+			EvalCount:          144,
+			EvalDuration:       int64(1800 * time.Millisecond),
+			DoneReason:         "stop",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}))
+	defer server.Close()
+	base, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := NewClientWithPolicy(base, "test:e4b", ModelPolicy{
+		ImageNumPredict: 1234, ImageTimeout: 75 * time.Second, KeepAlive: "45s",
+	})
+	result, err := client.EnhanceResult(context.Background(), ModeTextToImage, ProfilePhotographic, "portrait", nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Prompt != "A measured final prompt." || result.Policy.NumPredict != 1234 || result.Policy.TimeoutMS != 75000 || result.Policy.KeepAlive != "45s" {
+		t.Fatalf("unexpected result policy: %+v", result)
+	}
+	if result.Usage.PromptTokens != 81 || result.Usage.CompletionTokens != 144 || result.Usage.TotalDurationMS != 3000 ||
+		result.Usage.LoadDurationMS != 250 || result.Usage.PromptDurationMS != 900 || result.Usage.CompletionTimeMS != 1800 || result.Usage.DoneReason != "stop" {
+		t.Fatalf("unexpected usage metrics: %+v", result.Usage)
+	}
+}
+
+func writeAssistantResponse(t *testing.T, w http.ResponseWriter, content string) {
+	t.Helper()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(chatResponse{Message: Message{Role: "assistant", Content: content}}); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -215,6 +215,7 @@ type generationForm struct {
 	VideoOutputCRF         int
 	AssistantRequested     bool
 	AssistantApplied       bool
+	AssistantAction        string
 	AssistantTemplate      string
 	AssistantThink         bool
 	AssistantOriginal      string
@@ -618,6 +619,16 @@ func (definition workflowDefinition) normalizeAndValidate(input *generationForm)
 	}
 	if len(input.Positive) > 4000 || len(input.Negative) > 4000 {
 		return errors.New("промт слишком длинный")
+	}
+	if input.AssistantRequested {
+		switch input.AssistantAction {
+		case "applied", "edited_after_apply":
+			input.AssistantApplied = true
+		case "kept_original":
+			input.AssistantApplied = false
+		default:
+			return errors.New("подтвердите вариант промт-ассистента")
+		}
 	}
 	minimumDimension := 256
 	if definition.ID == "minimax-h3-video" {
@@ -1531,7 +1542,7 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 		VideoSharpenEnabled: r.Form.Get("video_sharpen_enabled") == "true", VideoSharpenMethod: strings.TrimSpace(r.Form.Get("video_sharpen_method")), VideoSharpenStrength: videoSharpenStrength,
 		VideoSharpenRadius: videoSharpenRadius, VideoSharpenThreshold: videoSharpenThreshold, VideoSharpenIterations: videoSharpenIterations,
 		VideoAudioStart: videoAudioStart, VideoOutputCRF: videoOutputCRF,
-		AssistantRequested: r.Form.Get("assistant_requested") == "true", AssistantApplied: r.Form.Get("assistant_applied") == "true",
+		AssistantRequested: r.Form.Get("assistant_requested") == "true", AssistantApplied: r.Form.Get("assistant_applied") == "true", AssistantAction: strings.TrimSpace(r.Form.Get("assistant_action")),
 		AssistantTemplate: strings.TrimSpace(r.Form.Get("assistant_template_used")), AssistantThink: r.Form.Get("assistant_think_used") == "true",
 		AssistantOriginal: strings.TrimSpace(r.Form.Get("assistant_original_prompt")), AssistantSuggestion: strings.TrimSpace(r.Form.Get("assistant_suggestion")),
 		AspectRatio: strings.TrimSpace(r.Form.Get("aspect_ratio")), OutputMegapixels: outputMegapixels,

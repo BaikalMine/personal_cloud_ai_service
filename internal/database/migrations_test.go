@@ -252,6 +252,28 @@ func TestGenerationNotificationsMigration(t *testing.T) {
 	}
 }
 
+func TestPromptAssistantQualityMigration(t *testing.T) {
+	var qualityMigration *migration
+	for index := range migrationCatalog {
+		if migrationCatalog[index].version == 47 {
+			qualityMigration = &migrationCatalog[index]
+			break
+		}
+	}
+	if qualityMigration == nil || qualityMigration.name != "prompt_assistant_quality" {
+		t.Fatal("prompt assistant quality migration is missing")
+	}
+	sql := strings.Join(qualityMigration.statements, "\n")
+	for _, expected := range []string{
+		"prompt_assistant_runs", "edited_after_apply", "prompt_tokens", "completion_tokens",
+		"latency_ms", "num_predict", "timeout_ms", "keep_alive", "ON DELETE CASCADE",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("prompt assistant quality migration does not contain %q: %s", expected, sql)
+		}
+	}
+}
+
 func TestQuickGenerationRequestTelemetryMigration(t *testing.T) {
 	var telemetryMigration *migration
 	for index := range migrationCatalog {

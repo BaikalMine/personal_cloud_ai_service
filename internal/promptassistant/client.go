@@ -15,13 +15,9 @@ import (
 )
 
 const (
-	maxPromptBytes         = 16 << 10
-	maxResponseBytes       = 32 << 10
-	maxImageBytes          = 32 << 20
-	defaultNumPredict      = 700
-	thinkNumPredict        = 1400
-	miniMaxNumPredict      = 1800
-	miniMaxThinkNumPredict = 2600
+	maxPromptBytes   = 16 << 10
+	maxResponseBytes = 32 << 10
+	maxImageBytes    = 32 << 20
 )
 
 var ErrUnsupportedImage = errors.New("изображение не поддерживается локальной vision-проверкой")
@@ -30,6 +26,7 @@ type Client struct {
 	baseURL *url.URL
 	model   string
 	http    *http.Client
+	policy  ModelPolicy
 }
 
 type Message struct {
@@ -44,6 +41,7 @@ type chatRequest struct {
 	Stream    bool      `json:"stream"`
 	Think     bool      `json:"think"`
 	KeepAlive string    `json:"keep_alive"`
+	Format    string    `json:"format,omitempty"`
 	Options   struct {
 		Temperature float64 `json:"temperature"`
 		TopP        float64 `json:"top_p"`
@@ -52,15 +50,27 @@ type chatRequest struct {
 }
 
 type chatResponse struct {
-	Message Message `json:"message"`
+	Message            Message `json:"message"`
+	TotalDuration      int64   `json:"total_duration"`
+	LoadDuration       int64   `json:"load_duration"`
+	PromptEvalCount    int     `json:"prompt_eval_count"`
+	PromptEvalDuration int64   `json:"prompt_eval_duration"`
+	EvalCount          int     `json:"eval_count"`
+	EvalDuration       int64   `json:"eval_duration"`
+	DoneReason         string  `json:"done_reason"`
 }
 
 func NewClient(baseURL *url.URL, model string) *Client {
+	return NewClientWithPolicy(baseURL, model, DefaultModelPolicy())
+}
+
+func NewClientWithPolicy(baseURL *url.URL, model string, policy ModelPolicy) *Client {
+	policy = policy.normalized()
 	return &Client{
 		baseURL: baseURL,
 		model:   strings.TrimSpace(model),
+		policy:  policy,
 		http: &http.Client{
-			Timeout: 90 * time.Second,
 			Transport: &http.Transport{
 				Proxy:                 http.ProxyFromEnvironment,
 				MaxIdleConns:          4,
@@ -77,28 +87,45 @@ func (c *Client) Configured() bool {
 }
 
 func (c *Client) Enhance(ctx context.Context, mode Mode, profile Profile, prompt string, references []ImageReference, think bool) (string, error) {
-	return c.enhance(ctx, mode, profile, prompt, references, VideoContext{}, think)
+	result, err := c.EnhanceResult(ctx, mode, profile, prompt, references, think)
+	return result.Prompt, err
 }
 
 // EnhanceVideo uses the MiniMax H3 workflow facts and attached image
 // references to select a compatible Context-IR structure.
 func (c *Client) EnhanceVideo(ctx context.Context, mode Mode, profile Profile, prompt string, references []ImageReference, video VideoContext, think bool) (string, error) {
+	result, err := c.EnhanceVideoResult(ctx, mode, profile, prompt, references, video, think)
+	return result.Prompt, err
+}
+
+func (c *Client) EnhanceResult(ctx context.Context, mode Mode, profile Profile, prompt string, references []ImageReference, think bool) (Result, error) {
+	return c.enhance(ctx, mode, profile, prompt, references, VideoContext{}, think)
+}
+
+func (c *Client) EnhanceVideoResult(ctx context.Context, mode Mode, profile Profile, prompt string, references []ImageReference, video VideoContext, think bool) (Result, error) {
 	return c.enhance(ctx, mode, profile, prompt, references, video, think)
 }
 
-func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt string, references []ImageReference, video VideoContext, think bool) (string, error) {
+func (c *Client) PolicyFor(mode Mode, profile Profile, think bool) RequestPolicy {
+	if c == nil {
+		return DefaultModelPolicy().request(mode, profile, think)
+	}
+	return c.policy.request(mode, profile, think)
+}
+
+func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt string, references []ImageReference, video VideoContext, think bool) (Result, error) {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
-		return "", errors.New("введите исходный промт")
+		return Result{}, errors.New("введите исходный промт")
 	}
 	if len(prompt) > maxPromptBytes {
-		return "", errors.New("промт слишком длинный")
+		return Result{}, errors.New("промт слишком длинный")
 	}
 	if !c.Configured() {
-		return "", errors.New("локальный промт-ассистент не настроен")
+		return Result{}, errors.New("локальный промт-ассистент не настроен")
 	}
 	if !ValidProfile(mode, profile) {
-		return "", errors.New("неизвестный шаблон промт-ассистента")
+		return Result{}, errors.New("неизвестный шаблон промт-ассистента")
 	}
 	target := *c.baseURL
 	target.Path = joinPath(target.Path, "/api/chat")
@@ -108,6 +135,8 @@ func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt
 	if mode == ModeTextToVideo && profile == ProfileMiniMaxH3 {
 		systemPrompt = SystemPromptWithVideoContextAndReferences(mode, profile, references, video)
 	}
+	systemPrompt += structuredResponseInstruction(mode, references, video)
+	requestPolicy := c.PolicyFor(mode, profile, think)
 	payload := chatRequest{
 		Model: c.model,
 		Messages: []Message{
@@ -116,83 +145,88 @@ func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt
 		},
 		Stream:    false,
 		Think:     think,
-		KeepAlive: "0",
+		KeepAlive: requestPolicy.KeepAlive,
+		Format:    "json",
 	}
 	for _, reference := range references {
 		if len(reference.Image) == 0 {
 			continue
 		}
 		if len(reference.Image) > maxImageBytes {
-			return "", fmt.Errorf("%w: изображение %d слишком большое", ErrUnsupportedImage, reference.Number)
+			return Result{}, fmt.Errorf("%w: изображение %d слишком большое", ErrUnsupportedImage, reference.Number)
 		}
 		switch strings.ToLower(strings.TrimSpace(reference.MIMEType)) {
 		case "image/jpeg", "image/png", "image/webp":
 		default:
-			return "", fmt.Errorf("%w: формат изображения %d", ErrUnsupportedImage, reference.Number)
+			return Result{}, fmt.Errorf("%w: формат изображения %d", ErrUnsupportedImage, reference.Number)
 		}
 		payload.Messages[1].Images = append(payload.Messages[1].Images, base64.StdEncoding.EncodeToString(reference.Image))
 	}
 	payload.Options.Temperature = 0.35
 	payload.Options.TopP = 0.9
-	payload.Options.NumPredict = defaultNumPredict
+	payload.Options.NumPredict = requestPolicy.NumPredict
 	if mode == ModeTextToVideo && profile == ProfileMiniMaxH3 {
 		payload.Options.Temperature = 0.3
-		payload.Options.NumPredict = miniMaxNumPredict
-	}
-	if think {
-		payload.Options.NumPredict = thinkNumPredict
-		if mode == ModeTextToVideo && profile == ProfileMiniMaxH3 {
-			payload.Options.NumPredict = miniMaxThinkNumPredict
-		}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
-	response, err := c.httpClientFor(mode, profile).Do(request)
+	response, err := c.httpClientFor(requestPolicy).Do(request)
 	if err != nil {
-		return "", fmt.Errorf("локальная модель недоступна: %w", err)
+		return Result{Policy: requestPolicy}, fmt.Errorf("локальная модель недоступна: %w", err)
 	}
 	defer response.Body.Close()
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil {
-		return "", err
+		return Result{Policy: requestPolicy}, err
 	}
 	if len(responseBody) > maxResponseBytes {
-		return "", errors.New("локальная модель вернула слишком большой ответ")
+		return Result{Policy: requestPolicy}, errors.New("локальная модель вернула слишком большой ответ")
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return "", fmt.Errorf("локальная модель ответила HTTP %d", response.StatusCode)
+		return Result{Policy: requestPolicy}, fmt.Errorf("локальная модель ответила HTTP %d", response.StatusCode)
 	}
 	var result chatResponse
 	if err := json.Unmarshal(responseBody, &result); err != nil {
-		return "", fmt.Errorf("некорректный ответ локальной модели: %w", err)
+		return Result{Policy: requestPolicy}, fmt.Errorf("некорректный ответ локальной модели: %w", err)
 	}
-	answer := cleanOutput(result.Message.Content)
-	if answer == "" {
-		return "", errors.New("локальная модель не вернула вариант промта")
+	parsed, err := parseModelResult(result.Message.Content, mode, references, video)
+	if err != nil {
+		return Result{Policy: requestPolicy}, err
 	}
-	return answer, nil
+	parsed.Policy = requestPolicy
+	parsed.Usage = Usage{
+		PromptTokens: result.PromptEvalCount, CompletionTokens: result.EvalCount,
+		TotalDurationMS: durationMilliseconds(result.TotalDuration), LoadDurationMS: durationMilliseconds(result.LoadDuration),
+		PromptDurationMS: durationMilliseconds(result.PromptEvalDuration), CompletionTimeMS: durationMilliseconds(result.EvalDuration),
+		DoneReason: strings.TrimSpace(result.DoneReason),
+	}
+	return parsed, nil
 }
 
-func (c *Client) httpClientFor(mode Mode, profile Profile) *http.Client {
-	if mode != ModeTextToVideo || profile != ProfileMiniMaxH3 {
-		return c.http
-	}
+func (c *Client) httpClientFor(policy RequestPolicy) *http.Client {
 	client := *c.http
-	client.Timeout = 150 * time.Second
+	client.Timeout = policy.Timeout
 	if transport, ok := c.http.Transport.(*http.Transport); ok {
-		videoTransport := transport.Clone()
-		videoTransport.ResponseHeaderTimeout = 140 * time.Second
-		client.Transport = videoTransport
+		requestTransport := transport.Clone()
+		requestTransport.ResponseHeaderTimeout = policy.Timeout
+		client.Transport = requestTransport
 	}
 	return &client
+}
+
+func durationMilliseconds(value int64) int64 {
+	if value <= 0 {
+		return 0
+	}
+	return time.Duration(value).Milliseconds()
 }
 
 // ClassifyImage uses the locally configured vision model to decide whether an

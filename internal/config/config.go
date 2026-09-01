@@ -128,49 +128,56 @@ func (p RetentionPolicy) WithDefaults() RetentionPolicy {
 }
 
 type Config struct {
-	DatabaseURL               string
-	AdminUsername             string
-	AdminPassword             string
-	SessionSecret             string
-	PublicBaseURL             string
-	PublicURL                 *url.URL
-	AdminBaseURL              string
-	AdminURL                  *url.URL
-	CookieSecure              bool
-	PublicAddr                string
-	AdminAddr                 string
-	ComfyUIUpstream           *url.URL
-	OpenWebUIUpstream         *url.URL
-	OllamaUpstream            *url.URL
-	ContentModeratorUpstream  *url.URL
-	PromptAssistantModel      string
-	ComfyUIUpstreamAuthHeader string
-	OpenWebUIUpstreamAuth     string
-	MiningAgentURL            *url.URL
-	MiningAgentToken          string
-	SystemMonitorAgentURL     *url.URL
-	SystemMonitorAgentToken   string
-	UpdateAgentURL            *url.URL
-	UpdateAgentToken          string
-	VirusTotalAPIKey          string
-	FeatureSuggestionsEnabled bool
-	TrustedProxies            []*net.IPNet
-	AdminAllowedNetworks      []*net.IPNet
-	SessionTTL                time.Duration
-	SessionIdleTimeout        time.Duration
-	AccountLockThreshold      int
-	AccountLockDuration       time.Duration
-	DependencyCheckInterval   time.Duration
-	DependencyStaleAfter      time.Duration
-	DependencyOfflineAfter    time.Duration
-	ComfyObjectInfoCacheTTL   time.Duration
-	ComfyObjectInfoMaxStale   time.Duration
-	MediaInFlightLimitBytes   int64
-	MediaSpoolDir             string
-	PprofEnabled              bool
-	Retention                 RetentionPolicy
-	DatabaseCleanupBatchSize  int
-	DatabaseCleanupMaxBatches int
+	DatabaseURL                         string
+	AdminUsername                       string
+	AdminPassword                       string
+	SessionSecret                       string
+	PublicBaseURL                       string
+	PublicURL                           *url.URL
+	AdminBaseURL                        string
+	AdminURL                            *url.URL
+	CookieSecure                        bool
+	PublicAddr                          string
+	AdminAddr                           string
+	ComfyUIUpstream                     *url.URL
+	OpenWebUIUpstream                   *url.URL
+	OllamaUpstream                      *url.URL
+	ContentModeratorUpstream            *url.URL
+	PromptAssistantModel                string
+	PromptAssistantImageNumPredict      int
+	PromptAssistantImageThinkNumPredict int
+	PromptAssistantVideoNumPredict      int
+	PromptAssistantVideoThinkNumPredict int
+	PromptAssistantImageTimeout         time.Duration
+	PromptAssistantVideoTimeout         time.Duration
+	PromptAssistantKeepAlive            string
+	ComfyUIUpstreamAuthHeader           string
+	OpenWebUIUpstreamAuth               string
+	MiningAgentURL                      *url.URL
+	MiningAgentToken                    string
+	SystemMonitorAgentURL               *url.URL
+	SystemMonitorAgentToken             string
+	UpdateAgentURL                      *url.URL
+	UpdateAgentToken                    string
+	VirusTotalAPIKey                    string
+	FeatureSuggestionsEnabled           bool
+	TrustedProxies                      []*net.IPNet
+	AdminAllowedNetworks                []*net.IPNet
+	SessionTTL                          time.Duration
+	SessionIdleTimeout                  time.Duration
+	AccountLockThreshold                int
+	AccountLockDuration                 time.Duration
+	DependencyCheckInterval             time.Duration
+	DependencyStaleAfter                time.Duration
+	DependencyOfflineAfter              time.Duration
+	ComfyObjectInfoCacheTTL             time.Duration
+	ComfyObjectInfoMaxStale             time.Duration
+	MediaInFlightLimitBytes             int64
+	MediaSpoolDir                       string
+	PprofEnabled                        bool
+	Retention                           RetentionPolicy
+	DatabaseCleanupBatchSize            int
+	DatabaseCleanupMaxBatches           int
 }
 
 func Load() (Config, error) {
@@ -201,6 +208,35 @@ func Load() (Config, error) {
 	promptAssistantModel := strings.TrimSpace(env("PROMPT_ASSISTANT_MODEL", "huihui_ai/gemma-4-abliterated:e4b"))
 	if promptAssistantModel == "" || len(promptAssistantModel) > 256 {
 		return Config{}, fmt.Errorf("PROMPT_ASSISTANT_MODEL must contain between 1 and 256 characters")
+	}
+	promptAssistantImageNumPredict, err := integerEnvBetween("PROMPT_ASSISTANT_IMAGE_NUM_PREDICT", 900, 128, 8192)
+	if err != nil {
+		return Config{}, err
+	}
+	promptAssistantImageThinkNumPredict, err := integerEnvBetween("PROMPT_ASSISTANT_IMAGE_THINK_NUM_PREDICT", 1600, 128, 8192)
+	if err != nil {
+		return Config{}, err
+	}
+	promptAssistantVideoNumPredict, err := integerEnvBetween("PROMPT_ASSISTANT_VIDEO_NUM_PREDICT", 2400, 128, 8192)
+	if err != nil {
+		return Config{}, err
+	}
+	promptAssistantVideoThinkNumPredict, err := integerEnvBetween("PROMPT_ASSISTANT_VIDEO_THINK_NUM_PREDICT", 4096, 128, 8192)
+	if err != nil {
+		return Config{}, err
+	}
+	promptAssistantImageTimeout, err := durationEnvBetween("PROMPT_ASSISTANT_IMAGE_TIMEOUT", 120*time.Second, 15*time.Second, 15*time.Minute)
+	if err != nil {
+		return Config{}, err
+	}
+	promptAssistantVideoTimeout, err := durationEnvBetween("PROMPT_ASSISTANT_VIDEO_TIMEOUT", 240*time.Second, 15*time.Second, 15*time.Minute)
+	if err != nil {
+		return Config{}, err
+	}
+	promptAssistantKeepAlive := strings.TrimSpace(env("PROMPT_ASSISTANT_KEEP_ALIVE", "0"))
+	keepAliveDuration, err := time.ParseDuration(promptAssistantKeepAlive)
+	if err != nil || keepAliveDuration < 0 || keepAliveDuration > time.Hour {
+		return Config{}, fmt.Errorf("PROMPT_ASSISTANT_KEEP_ALIVE must be a duration between 0 and 1h")
 	}
 	miningAgentURL, err := parseBaseURL(env("MINING_AGENT_URL", "http://host.docker.internal:8092"))
 	if err != nil {
@@ -368,49 +404,56 @@ func Load() (Config, error) {
 	}
 
 	return Config{
-		DatabaseURL:               databaseURL,
-		AdminUsername:             adminUsername,
-		AdminPassword:             adminPassword,
-		SessionSecret:             sessionSecret,
-		PublicBaseURL:             strings.TrimRight(publicBaseURL.String(), "/"),
-		PublicURL:                 publicBaseURL,
-		AdminBaseURL:              strings.TrimRight(adminBaseURL.String(), "/"),
-		AdminURL:                  adminBaseURL,
-		CookieSecure:              cookieSecure,
-		PublicAddr:                env("PUBLIC_ADDR", ":8090"),
-		AdminAddr:                 env("ADMIN_ADDR", ":8091"),
-		ComfyUIUpstream:           comfy,
-		OpenWebUIUpstream:         openWebUI,
-		OllamaUpstream:            ollama,
-		ContentModeratorUpstream:  contentModerator,
-		PromptAssistantModel:      promptAssistantModel,
-		ComfyUIUpstreamAuthHeader: comfyAuth,
-		OpenWebUIUpstreamAuth:     openWebUIAuth,
-		MiningAgentURL:            miningAgentURL,
-		MiningAgentToken:          miningAgentToken,
-		SystemMonitorAgentURL:     systemMonitorAgentURL,
-		SystemMonitorAgentToken:   systemMonitorAgentToken,
-		UpdateAgentURL:            updateAgentURL,
-		UpdateAgentToken:          updateAgentToken,
-		VirusTotalAPIKey:          virusTotalAPIKey,
-		FeatureSuggestionsEnabled: featureSuggestionsEnabled,
-		TrustedProxies:            trustedProxies,
-		AdminAllowedNetworks:      adminNetworks,
-		SessionTTL:                sessionTTL,
-		SessionIdleTimeout:        sessionIdleTimeout,
-		AccountLockThreshold:      accountLockThreshold,
-		AccountLockDuration:       accountLockDuration,
-		DependencyCheckInterval:   dependencyCheckInterval,
-		DependencyStaleAfter:      dependencyStaleAfter,
-		DependencyOfflineAfter:    dependencyOfflineAfter,
-		ComfyObjectInfoCacheTTL:   comfyObjectInfoCacheTTL,
-		ComfyObjectInfoMaxStale:   comfyObjectInfoMaxStale,
-		MediaInFlightLimitBytes:   int64(mediaInflightMB) << 20,
-		MediaSpoolDir:             mediaSpoolDir,
-		PprofEnabled:              pprofEnabled,
-		Retention:                 retention,
-		DatabaseCleanupBatchSize:  databaseCleanupBatchSize,
-		DatabaseCleanupMaxBatches: databaseCleanupMaxBatches,
+		DatabaseURL:                         databaseURL,
+		AdminUsername:                       adminUsername,
+		AdminPassword:                       adminPassword,
+		SessionSecret:                       sessionSecret,
+		PublicBaseURL:                       strings.TrimRight(publicBaseURL.String(), "/"),
+		PublicURL:                           publicBaseURL,
+		AdminBaseURL:                        strings.TrimRight(adminBaseURL.String(), "/"),
+		AdminURL:                            adminBaseURL,
+		CookieSecure:                        cookieSecure,
+		PublicAddr:                          env("PUBLIC_ADDR", ":8090"),
+		AdminAddr:                           env("ADMIN_ADDR", ":8091"),
+		ComfyUIUpstream:                     comfy,
+		OpenWebUIUpstream:                   openWebUI,
+		OllamaUpstream:                      ollama,
+		ContentModeratorUpstream:            contentModerator,
+		PromptAssistantModel:                promptAssistantModel,
+		PromptAssistantImageNumPredict:      promptAssistantImageNumPredict,
+		PromptAssistantImageThinkNumPredict: promptAssistantImageThinkNumPredict,
+		PromptAssistantVideoNumPredict:      promptAssistantVideoNumPredict,
+		PromptAssistantVideoThinkNumPredict: promptAssistantVideoThinkNumPredict,
+		PromptAssistantImageTimeout:         promptAssistantImageTimeout,
+		PromptAssistantVideoTimeout:         promptAssistantVideoTimeout,
+		PromptAssistantKeepAlive:            promptAssistantKeepAlive,
+		ComfyUIUpstreamAuthHeader:           comfyAuth,
+		OpenWebUIUpstreamAuth:               openWebUIAuth,
+		MiningAgentURL:                      miningAgentURL,
+		MiningAgentToken:                    miningAgentToken,
+		SystemMonitorAgentURL:               systemMonitorAgentURL,
+		SystemMonitorAgentToken:             systemMonitorAgentToken,
+		UpdateAgentURL:                      updateAgentURL,
+		UpdateAgentToken:                    updateAgentToken,
+		VirusTotalAPIKey:                    virusTotalAPIKey,
+		FeatureSuggestionsEnabled:           featureSuggestionsEnabled,
+		TrustedProxies:                      trustedProxies,
+		AdminAllowedNetworks:                adminNetworks,
+		SessionTTL:                          sessionTTL,
+		SessionIdleTimeout:                  sessionIdleTimeout,
+		AccountLockThreshold:                accountLockThreshold,
+		AccountLockDuration:                 accountLockDuration,
+		DependencyCheckInterval:             dependencyCheckInterval,
+		DependencyStaleAfter:                dependencyStaleAfter,
+		DependencyOfflineAfter:              dependencyOfflineAfter,
+		ComfyObjectInfoCacheTTL:             comfyObjectInfoCacheTTL,
+		ComfyObjectInfoMaxStale:             comfyObjectInfoMaxStale,
+		MediaInFlightLimitBytes:             int64(mediaInflightMB) << 20,
+		MediaSpoolDir:                       mediaSpoolDir,
+		PprofEnabled:                        pprofEnabled,
+		Retention:                           retention,
+		DatabaseCleanupBatchSize:            databaseCleanupBatchSize,
+		DatabaseCleanupMaxBatches:           databaseCleanupMaxBatches,
 	}, nil
 }
 
@@ -591,6 +634,17 @@ func integerEnv(key string, fallback int) (int, error) {
 	value, err := strconv.Atoi(raw)
 	if err != nil {
 		return 0, fmt.Errorf("%s: invalid integer %q", key, raw)
+	}
+	return value, nil
+}
+
+func integerEnvBetween(key string, fallback, minimum, maximum int) (int, error) {
+	value, err := integerEnv(key, fallback)
+	if err != nil {
+		return 0, err
+	}
+	if value < minimum || value > maximum {
+		return 0, fmt.Errorf("%s must be between %d and %d", key, minimum, maximum)
 	}
 	return value, nil
 }

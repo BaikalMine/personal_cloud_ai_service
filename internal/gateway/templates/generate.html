@@ -238,7 +238,19 @@
           <button type="button" class="button ghost" id="prompt-assistant-improve">Подготовить вариант</button>
           <p class="prompt-assistant-state" id="prompt-assistant-state">Вариант будет создан локальной моделью e4b и затем выгружен из видеопамяти.</p>
           <div class="prompt-assistant-review" id="prompt-assistant-review" hidden>
-            <label>Вариант ассистента<textarea id="prompt-assistant-draft" rows="7" maxlength="4000"></textarea><small>Проверьте и при необходимости отредактируйте текст перед применением.</small></label>
+            <header class="prompt-assistant-review-heading"><div><span>Проверка варианта</span><strong>Что понял и изменил ассистент</strong></div><small id="prompt-assistant-review-meta"></small></header>
+            <section class="prompt-assistant-reference-review" id="prompt-assistant-reference-review" hidden aria-labelledby="prompt-assistant-reference-title">
+              <div class="prompt-assistant-section-heading"><h3 id="prompt-assistant-reference-title">Референсы</h3><span id="prompt-assistant-reference-count"></span></div>
+              <ol id="prompt-assistant-reference-list"></ol>
+            </section>
+            <section class="prompt-assistant-diff" aria-labelledby="prompt-assistant-diff-title">
+              <div class="prompt-assistant-section-heading"><h3 id="prompt-assistant-diff-title">Сравнение промта</h3><span><i class="is-removed"></i>Убрано <i class="is-added"></i>Добавлено</span></div>
+              <div class="prompt-assistant-diff-grid">
+                <article><h4>Ваш текст</h4><div id="prompt-assistant-diff-original"></div></article>
+                <article><h4>Вариант ассистента</h4><div id="prompt-assistant-diff-suggestion"></div></article>
+              </div>
+            </section>
+            <label class="prompt-assistant-draft">Итоговый вариант<textarea id="prompt-assistant-draft" rows="7" maxlength="4000"></textarea><small>Можно изменить перед применением.</small></label>
             <div class="prompt-assistant-actions"><button type="button" class="button" id="prompt-assistant-apply">Применить в промт</button><button type="button" class="button ghost" id="prompt-assistant-keep">Оставить мой промт</button></div>
           </div>
         </div>

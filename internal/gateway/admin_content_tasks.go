@@ -268,7 +268,7 @@ func contentAssistantFromValues(values map[string]string) *ContentAssistantView 
 		return nil
 	}
 	return &ContentAssistantView{
-		Applied: values["assistant_applied"] == "true", Template: values["assistant_template_used"],
+		Applied: values["assistant_applied"] == "true", Decision: values["assistant_action"], Template: values["assistant_template_used"],
 		Think: values["assistant_think_used"] == "true", OriginalPrompt: values["assistant_original_prompt"],
 		Suggestion: values["assistant_suggestion"],
 	}

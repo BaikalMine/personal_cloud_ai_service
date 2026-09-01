@@ -450,6 +450,7 @@ func contentAssistantFromMetadata(metadata string) *ContentAssistantView {
 		PromptAssistant *struct {
 			Requested      bool   `json:"requested"`
 			Applied        bool   `json:"applied"`
+			Decision       string `json:"decision"`
 			Template       string `json:"template"`
 			Think          bool   `json:"think"`
 			OriginalPrompt string `json:"original_prompt"`
@@ -460,7 +461,7 @@ func contentAssistantFromMetadata(metadata string) *ContentAssistantView {
 		return nil
 	}
 	return &ContentAssistantView{
-		Applied: payload.PromptAssistant.Applied, Template: payload.PromptAssistant.Template, Think: payload.PromptAssistant.Think,
+		Applied: payload.PromptAssistant.Applied, Decision: payload.PromptAssistant.Decision, Template: payload.PromptAssistant.Template, Think: payload.PromptAssistant.Think,
 		OriginalPrompt: payload.PromptAssistant.OriginalPrompt, Suggestion: payload.PromptAssistant.Suggestion,
 	}
 }

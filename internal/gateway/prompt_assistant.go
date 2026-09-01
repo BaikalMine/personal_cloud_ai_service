@@ -2,7 +2,9 @@ package gateway
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -21,6 +23,29 @@ const (
 	promptAssistantMemoryReservation = 192 << 20
 )
 
+type promptAssistantAuditMetadata struct {
+	PromptAssistant promptAssistantAudit `json:"prompt_assistant"`
+}
+
+type promptAssistantAudit struct {
+	Requested      bool                                     `json:"requested"`
+	Applied        bool                                     `json:"applied"`
+	Decision       string                                   `json:"decision,omitempty"`
+	Template       promptassistant.Profile                  `json:"template"`
+	Think          bool                                     `json:"think"`
+	OriginalPrompt string                                   `json:"original_prompt"`
+	Suggestion     string                                   `json:"suggestion"`
+	FinalPrompt    string                                   `json:"final_prompt,omitempty"`
+	Mode           promptassistant.Mode                     `json:"mode"`
+	ReferenceCount int                                      `json:"reference_count"`
+	References     []promptassistant.ReferenceUnderstanding `json:"references"`
+	Usage          promptassistant.Usage                    `json:"usage"`
+	Policy         promptassistant.RequestPolicy            `json:"policy"`
+	LatencyMS      int64                                    `json:"latency_ms"`
+	Status         string                                   `json:"status"`
+	ErrorCode      string                                   `json:"error_code,omitempty"`
+}
+
 func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
@@ -38,6 +63,10 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := a.currentUser(r)
+	if user == nil {
+		writeGenerationError(w, http.StatusUnauthorized, "требуется вход")
+		return
+	}
 	if err := validateGenerationPrompt(prompt); err != nil {
 		a.audit(r.Context(), &user.ID, "generation_safety_blocked", "prompt_assistant", nil, a.clientIP(r), r.UserAgent(), map[string]any{"reason": "minor_sexual_content"})
 		writeGenerationError(w, http.StatusUnprocessableEntity, err.Error())
@@ -48,7 +77,7 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 		writeGenerationError(w, http.StatusBadRequest, "неизвестный режим генерации")
 		return
 	}
-	if user == nil || !user.CanUseQuickGenerationType(promptAssistantTemplateID(mode)) {
+	if !user.CanUseQuickGenerationType(promptAssistantTemplateID(mode)) {
 		writeGenerationError(w, http.StatusForbidden, "этот тип быстрой генерации недоступен")
 		return
 	}
@@ -100,43 +129,52 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 			a.releaseMiningPause(releaseCtx, miningLease.ID)
 		}()
 	}
-	assistantTimeout := 95 * time.Second
-	if profile == promptassistant.ProfileMiniMaxH3 {
-		assistantTimeout = 155 * time.Second
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), assistantTimeout)
-	defer cancel()
-	var result string
+	video := promptassistant.VideoContext{}
 	operation := "enhance_image"
-	assistantStarted := time.Now()
 	if profile == promptassistant.ProfileMiniMaxH3 {
 		operation = "enhance_video"
-		video, contextErr := promptAssistantVideoContext(r, mode, len(references))
+		var contextErr error
+		video, contextErr = promptAssistantVideoContext(r, mode, len(references))
 		if contextErr != nil {
 			writeGenerationError(w, http.StatusBadRequest, contextErr.Error())
 			return
 		}
-		result, err = a.promptAssistant.EnhanceVideo(ctx, mode, profile, prompt, references, video, think)
-	} else {
-		result, err = a.promptAssistant.Enhance(ctx, mode, profile, prompt, references, think)
 	}
+	policy := a.promptAssistant.PolicyFor(mode, profile, think)
+	ctx, cancel := context.WithTimeout(r.Context(), policy.Timeout)
+	defer cancel()
+	correlation := correlationID(r)
+	assistantStarted := time.Now()
+	result := promptassistant.Result{Policy: policy}
+	if profile == promptassistant.ProfileMiniMaxH3 {
+		result, err = a.promptAssistant.EnhanceVideoResult(ctx, mode, profile, prompt, references, video, think)
+	} else {
+		result, err = a.promptAssistant.EnhanceResult(ctx, mode, profile, prompt, references, think)
+	}
+	latency := time.Since(assistantStarted)
 	a.observeServiceCall(r.Context(), dependencyOllama, operation, assistantStarted, err, false, "assistant_request_failed", "")
 	if err != nil {
+		errorCode := promptAssistantFailureCode(err)
+		a.recordPromptAssistantEvent(r.Context(), user.ID, correlation, mode, profile, prompt, result, think, latency, "error", errorCode)
 		logGateway(r.Context(), slog.LevelError, "prompt_assistant_failed", "Prompt assistant request failed",
 			"operation", operation,
+			"error_code", errorCode,
 			"error", err,
 		)
 		writeGenerationError(w, http.StatusBadGateway, "не удалось получить вариант от локальной модели")
 		return
 	}
-	if err := validateGenerationPrompt(result); err != nil {
+	if err := validateGenerationPrompt(result.Prompt); err != nil {
+		a.recordPromptAssistantEvent(r.Context(), user.ID, correlation, mode, profile, prompt, result, think, latency, "blocked", "unsafe_model_output")
 		a.audit(r.Context(), &user.ID, "generation_safety_blocked", "prompt_assistant", nil, a.clientIP(r), r.UserAgent(), map[string]any{"reason": "minor_sexual_content", "source": "assistant_response"})
 		writeGenerationError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	correlation := correlationID(r)
-	a.recordPromptAssistantEvent(r.Context(), user.ID, correlation, mode, profile, prompt, result, think, len(references))
-	response := map[string]any{"prompt": result, "model": a.cfg.PromptAssistantModel, "correlation_id": correlation}
+	a.recordPromptAssistantEvent(r.Context(), user.ID, correlation, mode, profile, prompt, result, think, latency, "completed", "")
+	response := map[string]any{
+		"prompt": result.Prompt, "references": result.References, "model": a.cfg.PromptAssistantModel,
+		"correlation_id": correlation, "usage": result.Usage,
+	}
 	if miningWarning != "" {
 		response["mining_warning"] = miningWarning
 	}
@@ -146,33 +184,147 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-func (a *App) recordPromptAssistantEvent(ctx context.Context, userID int64, correlation string, mode promptassistant.Mode, profile promptassistant.Profile, prompt, result string, think bool, referenceCount int) {
+func (a *App) recordPromptAssistantEvent(ctx context.Context, userID int64, correlation string, mode promptassistant.Mode, profile promptassistant.Profile, prompt string, result promptassistant.Result, think bool, latency time.Duration, status, errorCode string) {
 	if a.contentCipher == nil || a.store == nil {
 		return
 	}
-	metadata, err := json.Marshal(map[string]any{
-		"prompt_assistant": map[string]any{
-			"requested": true, "applied": false, "template": profile, "think": think,
-			"original_prompt": prompt, "suggestion": result, "mode": mode, "reference_count": referenceCount,
-		},
-	})
+	metadata, err := json.Marshal(promptAssistantAuditMetadata{PromptAssistant: promptAssistantAudit{
+		Requested: true, Template: profile, Think: think, OriginalPrompt: prompt, Suggestion: result.Prompt,
+		Mode: mode, ReferenceCount: len(result.References), References: result.References, Usage: result.Usage,
+		Policy: result.Policy, LatencyMS: latency.Milliseconds(), Status: status, ErrorCode: errorCode,
+	}})
 	if err != nil {
 		return
 	}
 	promptCipher, promptErr := a.contentCipher.Encrypt(prompt)
-	responseCipher, responseErr := a.contentCipher.Encrypt(result)
+	responseCipher, responseErr := a.contentCipher.Encrypt(result.Prompt)
 	metadataCipher, metadataErr := a.contentCipher.Encrypt(string(metadata))
 	if promptErr != nil || responseErr != nil || metadataErr != nil {
 		logGateway(ctx, slog.LevelError, "prompt_assistant_audit_encrypt_failed", "Prompt assistant audit encryption failed")
 		return
 	}
-	if _, err := a.store.InsertContentEvent(ctx, domain.ContentEventRecord{
+	eventID, err := a.store.InsertContentEvent(ctx, domain.ContentEventRecord{
 		UserID: userID, CorrelationID: correlation, Service: "ollama", Kind: "prompt_assistant", ExternalID: newRequestID(),
-		Model: a.cfg.PromptAssistantModel, GenerationState: "completed", PromptCipher: promptCipher,
+		Model: a.cfg.PromptAssistantModel, GenerationState: status, PromptCipher: promptCipher,
 		ResponseCipher: responseCipher, MetadataCipher: metadataCipher, ExpiresAt: time.Now().Add(a.retentionPolicy().AIContent),
-	}); err != nil {
+	})
+	if err != nil {
 		logGateway(ctx, slog.LevelError, "prompt_assistant_audit_store_failed", "Prompt assistant audit storage failed", "error", err)
+		return
 	}
+	if _, err := a.store.InsertPromptAssistantRun(ctx, domain.PromptAssistantRunRecord{
+		ContentEventID: eventID, UserID: userID, CorrelationID: correlation, Mode: string(mode), Profile: string(profile),
+		Model: a.cfg.PromptAssistantModel, Status: status, LatencyMS: latency.Milliseconds(),
+		PromptTokens: result.Usage.PromptTokens, CompletionTokens: result.Usage.CompletionTokens,
+		TotalDurationMS: result.Usage.TotalDurationMS, LoadDurationMS: result.Usage.LoadDurationMS,
+		EvalDurationMS: result.Usage.CompletionTimeMS, NumPredict: result.Policy.NumPredict,
+		TimeoutMS: result.Policy.TimeoutMS, KeepAlive: result.Policy.KeepAlive,
+		ReferenceCount: len(result.References), ErrorCode: errorCode,
+	}); err != nil {
+		logGateway(ctx, slog.LevelError, "prompt_assistant_metrics_store_failed", "Prompt assistant metrics storage failed", "error", err)
+	}
+}
+
+func promptAssistantFailureCode(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "структурирован") || strings.Contains(message, "не описала референс"):
+		return "invalid_structure"
+	case strings.Contains(message, "слишком большой"):
+		return "response_too_large"
+	case strings.Contains(message, "http"):
+		return "model_http_error"
+	default:
+		return "model_request_failed"
+	}
+}
+
+func (a *App) handlePromptAssistantDecision(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeGenerationError(w, http.StatusMethodNotAllowed, "метод не поддерживается")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
+	if !a.validCSRF(r) {
+		writeGenerationError(w, http.StatusForbidden, "проверка безопасности не пройдена")
+		return
+	}
+	user := a.currentUser(r)
+	if user == nil {
+		writeGenerationError(w, http.StatusUnauthorized, "требуется вход")
+		return
+	}
+	correlation := strings.TrimSpace(r.Form.Get("correlation_id"))
+	if !validCorrelationID(correlation) {
+		writeGenerationError(w, http.StatusBadRequest, "некорректный идентификатор варианта")
+		return
+	}
+	decision := strings.TrimSpace(r.Form.Get("decision"))
+	if decision != "applied" && decision != "edited_after_apply" && decision != "kept_original" {
+		writeGenerationError(w, http.StatusBadRequest, "некорректное решение по варианту")
+		return
+	}
+	finalPrompt := strings.TrimSpace(r.Form.Get("final_prompt"))
+	if len(finalPrompt) > 4000 {
+		writeGenerationError(w, http.StatusBadRequest, "итоговый промт длиннее 4000 символов")
+		return
+	}
+	if decision != "kept_original" {
+		if finalPrompt == "" {
+			writeGenerationError(w, http.StatusBadRequest, "итоговый промт пуст")
+			return
+		}
+		if err := validateGenerationPrompt(finalPrompt); err != nil {
+			writeGenerationError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+	}
+	eventID, metadataCipher, err := a.store.PromptAssistantEventMetadata(r.Context(), user.ID, correlation)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeGenerationError(w, http.StatusNotFound, "вариант ассистента уже недоступен")
+		return
+	}
+	if err != nil {
+		writeGenerationError(w, http.StatusInternalServerError, "не удалось прочитать вариант ассистента")
+		return
+	}
+	metadataJSON, err := a.contentCipher.Decrypt(metadataCipher)
+	if err != nil {
+		writeGenerationError(w, http.StatusInternalServerError, "не удалось прочитать вариант ассистента")
+		return
+	}
+	var metadata promptAssistantAuditMetadata
+	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil || !metadata.PromptAssistant.Requested {
+		writeGenerationError(w, http.StatusConflict, "данные варианта ассистента повреждены")
+		return
+	}
+	if decision == "kept_original" {
+		finalPrompt = metadata.PromptAssistant.OriginalPrompt
+	} else if finalPrompt != metadata.PromptAssistant.Suggestion {
+		decision = "edited_after_apply"
+	}
+	metadata.PromptAssistant.Decision = decision
+	metadata.PromptAssistant.Applied = decision != "kept_original"
+	metadata.PromptAssistant.FinalPrompt = finalPrompt
+	updatedJSON, err := json.Marshal(metadata)
+	if err != nil {
+		writeGenerationError(w, http.StatusInternalServerError, "не удалось сохранить решение")
+		return
+	}
+	updatedCipher, err := a.contentCipher.Encrypt(string(updatedJSON))
+	if err != nil {
+		writeGenerationError(w, http.StatusInternalServerError, "не удалось сохранить решение")
+		return
+	}
+	if err := a.store.SetPromptAssistantDecision(r.Context(), user.ID, eventID, decision, updatedCipher); err != nil {
+		writeGenerationError(w, http.StatusInternalServerError, "не удалось сохранить решение")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"decision": decision})
 }
 
 func releasePromptAssistantImages(references []promptassistant.ImageReference) {

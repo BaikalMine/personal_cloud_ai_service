@@ -168,8 +168,8 @@ test("assistant state keeps prompt lineage through review and edits", () => {
   assert.equal(state.original, "Draft");
   assert.equal(state.suggestion, "Improved");
   assert.equal(state.correlationID, "corr-1");
-  assert.equal(state.action, "applied_edited");
-  assert.equal(state.approved, false);
+  assert.equal(state.action, "edited_after_apply");
+  assert.equal(state.approved, true);
 });
 
 test("job state never moves its SSE revision backwards", () => {

@@ -1077,6 +1077,39 @@ var migrationCatalog = []migration{
 			)`,
 		},
 	},
+	{
+		version: 47,
+		name:    "prompt_assistant_quality",
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS prompt_assistant_runs (
+				id BIGSERIAL PRIMARY KEY,
+				content_event_id BIGINT NOT NULL UNIQUE REFERENCES content_events(id) ON DELETE CASCADE,
+				user_id BIGINT NULL REFERENCES users(id) ON DELETE SET NULL,
+				correlation_id TEXT NOT NULL UNIQUE CHECK (char_length(correlation_id) BETWEEN 8 AND 128),
+				mode TEXT NOT NULL CHECK (mode IN ('text-to-image','image-to-image','minimax-h3-video')),
+				profile TEXT NOT NULL CHECK (char_length(profile) BETWEEN 1 AND 64),
+				model TEXT NOT NULL CHECK (char_length(model) BETWEEN 1 AND 256),
+				status TEXT NOT NULL CHECK (status IN ('completed','error','blocked')),
+				decision TEXT NULL CHECK (decision IN ('applied','edited_after_apply','kept_original')),
+				latency_ms BIGINT NOT NULL DEFAULT 0 CHECK (latency_ms >= 0),
+				prompt_tokens INT NOT NULL DEFAULT 0 CHECK (prompt_tokens >= 0),
+				completion_tokens INT NOT NULL DEFAULT 0 CHECK (completion_tokens >= 0),
+				total_duration_ms BIGINT NOT NULL DEFAULT 0 CHECK (total_duration_ms >= 0),
+				load_duration_ms BIGINT NOT NULL DEFAULT 0 CHECK (load_duration_ms >= 0),
+				eval_duration_ms BIGINT NOT NULL DEFAULT 0 CHECK (eval_duration_ms >= 0),
+				num_predict INT NOT NULL CHECK (num_predict BETWEEN 1 AND 8192),
+				timeout_ms BIGINT NOT NULL CHECK (timeout_ms BETWEEN 1000 AND 900000),
+				keep_alive TEXT NOT NULL CHECK (char_length(keep_alive) BETWEEN 1 AND 32),
+				reference_count INT NOT NULL DEFAULT 0 CHECK (reference_count BETWEEN 0 AND 6),
+				error_code TEXT NOT NULL DEFAULT '' CHECK (char_length(error_code) <= 64),
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				decided_at TIMESTAMPTZ NULL
+			)`,
+			`CREATE INDEX IF NOT EXISTS prompt_assistant_runs_model_created_idx ON prompt_assistant_runs(model,created_at DESC,id DESC)`,
+			`CREATE INDEX IF NOT EXISTS prompt_assistant_runs_profile_created_idx ON prompt_assistant_runs(profile,created_at DESC,id DESC)`,
+			`CREATE INDEX IF NOT EXISTS prompt_assistant_runs_decision_created_idx ON prompt_assistant_runs(decision,created_at DESC,id DESC) WHERE decision IS NOT NULL`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
