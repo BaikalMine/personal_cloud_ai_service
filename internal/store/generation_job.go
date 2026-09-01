@@ -22,7 +22,8 @@ const generationJobColumns = `
 	template_id,workflow_id,model_name,seed,payload_cipher,state,status_message,
 	error_code,error_message,attempt,dependencies,input_count,state_changed_at,
 	started_at,finished_at,resources_released_at,quota_reserved_on,quota_committed_at,
-	cancellation_requested_at,cancellation_confirmed_at,created_at,updated_at`
+	cancellation_requested_at,cancellation_confirmed_at,created_at,updated_at,
+	batch_id,batch_position,experiment_value`
 
 type generationJobScanner interface {
 	Scan(dest ...any) error
@@ -30,7 +31,7 @@ type generationJobScanner interface {
 
 func scanGenerationJob(scanner generationJobScanner) (domain.GenerationJob, error) {
 	var job domain.GenerationJob
-	var userID, parentJobID sql.NullInt64
+	var userID, parentJobID, batchID sql.NullInt64
 	var promptID sql.NullString
 	var state string
 	var dependencies []byte
@@ -42,6 +43,7 @@ func scanGenerationJob(scanner generationJobScanner) (domain.GenerationJob, erro
 		&job.ErrorCode, &job.ErrorMessage, &job.Attempt, &dependencies, &job.InputCount, &job.StateChangedAt,
 		&startedAt, &finishedAt, &resourcesReleasedAt, &quotaReservedOn, &quotaCommittedAt,
 		&cancellationRequestedAt, &cancellationConfirmedAt, &job.CreatedAt, &job.UpdatedAt,
+		&batchID, &job.BatchPosition, &job.ExperimentValue,
 	)
 	if err != nil {
 		return domain.GenerationJob{}, err
@@ -57,6 +59,10 @@ func scanGenerationJob(scanner generationJobScanner) (domain.GenerationJob, erro
 	if parentJobID.Valid {
 		value := parentJobID.Int64
 		job.ParentJobID = &value
+	}
+	if batchID.Valid {
+		value := batchID.Int64
+		job.BatchID = &value
 	}
 	if promptID.Valid {
 		job.PromptID = promptID.String

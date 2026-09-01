@@ -103,6 +103,46 @@ func main() {
 			"finished_at": now.Add(-84*time.Minute - 31*time.Second), "expires_at": now.Add(22*time.Hour + 35*time.Minute), "duration_seconds": int64(29), "media": []map[string]any{},
 		},
 	}
+	batchJobs := []map[string]any{
+		{
+			"job_id": "job-batch-krea-1", "request_id": "request-batch-krea-1", "prompt_id": "prompt-batch-krea-1",
+			"batch_id": "batch-krea-steps", "batch_position": 1, "experiment_value": "7", "state": "completed", "job_state": "completed",
+			"message": "Вариант готов", "template_id": "text-to-image", "workflow_id": "photoflow-krea2", "model_name": `Krea2\Krea2_gonzalomo_v40.safetensors`, "seed": int64(734192),
+			"attempt": 1, "input_count": 0, "prompt": "Кинематографичный портрет у окна, естественная кожа, мягкий утренний свет и спокойная композиция.",
+			"cancellable": false, "retryable": true, "created_at": now.Add(-19 * time.Minute), "updated_at": now.Add(-18*time.Minute - 45*time.Second),
+			"finished_at": now.Add(-18*time.Minute - 45*time.Second), "expires_at": now.Add(23*time.Hour + 41*time.Minute), "duration_seconds": int64(15),
+			"media": []map[string]any{{"id": int64(321), "url": "/preview/result.svg", "filename": "AI-Gateway-batch-krea-1.png", "media_type": "image", "sensitive": false}},
+		},
+		{
+			"job_id": "job-batch-krea-2", "request_id": "request-batch-krea-2", "prompt_id": "prompt-batch-krea-2",
+			"batch_id": "batch-krea-steps", "batch_position": 2, "experiment_value": "8", "state": "completed", "job_state": "completed",
+			"message": "Вариант готов", "template_id": "text-to-image", "workflow_id": "photoflow-krea2", "model_name": `Krea2\Krea2_gonzalomo_v40.safetensors`, "seed": int64(734192),
+			"attempt": 1, "input_count": 0, "prompt": "Кинематографичный портрет у окна, естественная кожа, мягкий утренний свет и спокойная композиция.",
+			"cancellable": false, "retryable": true, "created_at": now.Add(-17 * time.Minute), "updated_at": now.Add(-16*time.Minute - 44*time.Second),
+			"finished_at": now.Add(-16*time.Minute - 44*time.Second), "expires_at": now.Add(23*time.Hour + 43*time.Minute), "duration_seconds": int64(16),
+			"media": []map[string]any{{"id": int64(322), "url": "/preview/result.svg", "filename": "AI-Gateway-batch-krea-2.png", "media_type": "image", "sensitive": false}},
+		},
+		{
+			"job_id": "job-batch-krea-3", "request_id": "request-batch-krea-3", "prompt_id": "prompt-batch-krea-3",
+			"batch_id": "batch-krea-steps", "batch_position": 3, "experiment_value": "9", "state": "running", "job_state": "running",
+			"message": "Основная генерация: шаг 5 из 9", "template_id": "text-to-image", "workflow_id": "photoflow-krea2", "model_name": `Krea2\Krea2_gonzalomo_v40.safetensors`, "seed": int64(734192),
+			"attempt": 1, "input_count": 0, "prompt": "Кинематографичный портрет у окна, естественная кожа, мягкий утренний свет и спокойная композиция.",
+			"cancellable": true, "retryable": false, "created_at": now.Add(-15 * time.Minute), "updated_at": now.Add(-12 * time.Second), "duration_seconds": int64(104), "media": []map[string]any{},
+		},
+	}
+	generationJobs = append(batchJobs, generationJobs...)
+	generationBatches := []map[string]any{{
+		"batch_id": "batch-krea-steps", "winner_job_id": "job-batch-krea-2", "template_id": "text-to-image", "workflow_id": "photoflow-krea2",
+		"model_name": `Krea2\Krea2_gonzalomo_v40.safetensors`, "mode": "parameter", "parameter_name": "steps", "parameter_label": "Шаги", "seed_locked": true,
+		"state": "running", "total_count": 3, "finished_count": 2, "completed_count": 2, "failed_count": 0, "cancelled_count": 0,
+		"progress_percent": 67, "cancellable": true, "estimated_finish_seconds": 420, "created_at": now.Add(-19 * time.Minute), "updated_at": now.Add(-12 * time.Second),
+		"jobs": batchJobs,
+		"differences": []map[string]any{{"name": "steps", "label": "Шаги", "values": []map[string]any{
+			{"job_id": "job-batch-krea-1", "position": 1, "value": "7"},
+			{"job_id": "job-batch-krea-2", "position": 2, "value": "8"},
+			{"job_id": "job-batch-krea-3", "position": 3, "value": "9"},
+		}}},
+	}}
 
 	mux := http.NewServeMux()
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("internal/gateway/static"))))
@@ -181,6 +221,29 @@ func main() {
 	mux.HandleFunc("/generate/jobs", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(w).Encode(map[string]any{"jobs": generationJobs, "revision": int64(17)})
+	})
+	mux.HandleFunc("/generate/batches", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		if r.Method == http.MethodPost {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"batch": generationBatches[0], "created": true,
+				"quota": map[string]any{"daily_limit": 12, "daily_remaining": 4, "total_limit": 100, "total_remaining": 70},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"batches": generationBatches})
+	})
+	mux.HandleFunc("/generate/batches/cancel", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(map[string]any{"batch": generationBatches[0], "cancelled": true})
+	})
+	mux.HandleFunc("/generate/batches/winner", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(map[string]any{"batch": generationBatches[0]})
+	})
+	mux.HandleFunc("/generate/queue", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(map[string]any{"running": 1, "pending": 2, "estimated_wait_seconds": 1260, "average_task_seconds": 420, "current_task": "ComfyUI выполняет генерацию"})
 	})
 	mux.HandleFunc("/generate/jobs/detail", func(w http.ResponseWriter, r *http.Request) {
 		jobID := r.URL.Query().Get("job_id")
@@ -413,6 +476,7 @@ func main() {
 	workerNext := now.Add(8 * time.Second)
 	workers := []gateway.MaintenanceWorkerState{
 		{Key: "generation_jobs", Name: "Задания генераций", Status: "running", StatusLabel: "Выполняется", Interval: 30 * time.Second, Timeout: 20 * time.Second, Running: true, LastStartedAt: timePointer(now.Add(-2 * time.Second)), LastSuccessAt: timePointer(workerSuccess), LastDurationMillis: 842, LastItems: 3},
+		{Key: "generation_batches", Name: "Пакеты вариантов", Status: "healthy", StatusLabel: "Работает", Interval: 2 * time.Second, Timeout: 20 * time.Second, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 118, LastItems: 1},
 		{Key: "mining_leases", Name: "Аренды майнинга", Status: "healthy", StatusLabel: "Работает", Interval: 30 * time.Second, Timeout: 15 * time.Second, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 74, LastItems: 1},
 		{Key: "host_metrics", Name: "Метрики Windows", Status: "retrying", StatusLabel: "Повтор после ошибки", Interval: 30 * time.Second, Timeout: 8 * time.Second, LastFinishedAt: timePointer(lastError), NextRunAt: timePointer(workerNext), LastDurationMillis: 3012, ConsecutiveFailures: 2, LastError: "Windows-agent временно недоступен"},
 		{Key: "observability_snapshot", Name: "Снимок наблюдаемости", Status: "healthy", StatusLabel: "Работает", Interval: 30 * time.Second, Timeout: 8 * time.Second, LastSuccessAt: timePointer(workerSuccess), NextRunAt: timePointer(workerNext), LastDurationMillis: 28, LastItems: 1},
@@ -435,8 +499,8 @@ func main() {
 		{JobPublicID: "job-preview-minimax-000001", CorrelationID: "correlation-preview-minimax-000001", Username: "rayka", WorkflowID: "minimax-h3-video-v4", ModelName: "MiniMax H3 FL2VA INT8 ConvRot", ErrorCode: "comfy_execution_failed", ErrorMessage: "RTXVideoSuperResolution: отсутствует обязательный параметр resize_type", FailedAt: now.Add(-37 * time.Minute)},
 		{JobPublicID: "job-preview-flux2-0000002", CorrelationID: "correlation-preview-flux2-0000002", Username: "demo4518", WorkflowID: "flux2-image-edit", ModelName: "Flux2 dev", ErrorCode: "workflow_validation_failed", ErrorMessage: "Выбранная модель не поддерживает этот вход", FailedAt: now.Add(-3 * time.Hour)},
 	}
-	backgroundWorkers := append([]gateway.MaintenanceWorkerState{}, workers[:2]...)
-	backgroundWorkers = append(backgroundWorkers, workers[3:]...)
+	backgroundWorkers := append([]gateway.MaintenanceWorkerState{}, workers[:3]...)
+	backgroundWorkers = append(backgroundWorkers, workers[4:]...)
 	operations := map[string]any{
 		"GeneratedAt": now, "OverallState": "critical", "OverallLabel": "Нужно вмешательство", "OverallDetail": "Критичных состояний: 2; предупреждений: 3",
 		"Attention": []map[string]any{
@@ -460,7 +524,7 @@ func main() {
 			{"PublicID": "job-preview-minimax-active", "Username": "rayka", "Workflow": "MiniMax H3 v4", "Model": "MiniMax H3 FL2VA INT8 ConvRot", "StateLabel": "Выполняется", "StateClass": "running", "StatusMessage": "ComfyUI выполняет workflow", "CreatedAt": now.Add(-18 * time.Minute), "Age": 18 * time.Minute, "StateAge": 12 * time.Minute, "HasLease": true},
 			{"PublicID": "job-preview-krea-overdue", "Username": "demo4518", "Workflow": "Krea2 · Текст в изображение", "Model": "Krea2 v4.0", "StateLabel": "Ожидание ресурсов", "StateClass": "overdue", "StatusMessage": "Ожидаем освобождения GPU", "CreatedAt": now.Add(-71 * time.Minute), "Age": 71 * time.Minute, "StateAge": 56 * time.Minute, "Overdue": true},
 		},
-		"Failures": operationsFailures, "ProblemWorkers": []gateway.MaintenanceWorkerState{workers[2]}, "BackgroundWorkers": backgroundWorkers,
+		"Failures": operationsFailures, "ProblemWorkers": []gateway.MaintenanceWorkerState{workers[3]}, "BackgroundWorkers": backgroundWorkers,
 	}
 	mux.HandleFunc("/preview/admin", render("admin_dashboard", "Обзор системы", map[string]any{
 		"System": gateway.SystemOverview{
@@ -513,7 +577,7 @@ func main() {
 		"Leases":         []domain.QuickGenerationMiningLease{{ID: "lease-preview-001", CorrelationID: "correlation-preview-minimax-000001", GenerationJobID: 41, UserID: 2, MinerID: 1, ResumeMining: true, CreatedAt: now.Add(-4 * time.Minute)}},
 		"Dependencies":   dependencies,
 		"Workers":        workers,
-		"WorkerIssues":   []gateway.MaintenanceWorkerState{workers[0], workers[2]},
+		"WorkerIssues":   []gateway.MaintenanceWorkerState{workers[0], workers[3]},
 		"HealthyWorkers": 15,
 		"Host":           &lastHost,
 		"GeneratedAt":    now,
@@ -555,6 +619,7 @@ func main() {
 	}
 	storageLifecycle := []map[string]any{
 		{"Name": "users", "Label": "Учётные записи", "Owner": "Управление доступом", "Retention": "До удаления; временные — до срока", "EstimatedRows": int64(9), "TotalBytes": int64(122880), "OldestAt": timePointer(now.Add(-180 * 24 * time.Hour))},
+		{"Name": "generation_batches", "Label": "Пакеты вариантов", "Owner": "Быстрая генерация", "Retention": "24 часа", "EstimatedRows": int64(3), "TotalBytes": int64(65536), "OldestAt": timePointer(now.Add(-19 * time.Hour))},
 		{"Name": "quick_generation_recipes", "Label": "Сохранённые рецепты", "Owner": "Пользователь", "Retention": "До ручного удаления", "EstimatedRows": int64(1), "TotalBytes": int64(49152), "OldestAt": timePointer(now.Add(-10 * 24 * time.Hour))},
 		{"Name": "database_cleanup_state", "Label": "Состояние очистки БД", "Owner": "Система", "Retention": "Одна служебная запись", "EstimatedRows": int64(1), "TotalBytes": int64(32768), "OldestAt": timePointer(now.Add(-12 * time.Minute))},
 	}

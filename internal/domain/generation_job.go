@@ -90,6 +90,9 @@ type GenerationJob struct {
 	UsernameSnapshot        string
 	RequestID               string
 	ParentJobID             *int64
+	BatchID                 *int64
+	BatchPosition           int
+	ExperimentValue         string
 	PromptID                string
 	TemplateID              string
 	WorkflowID              string

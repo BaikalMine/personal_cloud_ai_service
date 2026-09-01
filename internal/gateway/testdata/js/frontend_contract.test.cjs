@@ -6,11 +6,17 @@ const path = require("node:path");
 const projectRoot = path.resolve(__dirname, "../../../..");
 const stylePath = path.join(projectRoot, "internal/gateway/static/style.css");
 const generatePath = path.join(projectRoot, "internal/gateway/static/generate.js");
+const batchPath = path.join(projectRoot, "internal/gateway/static/generation-batch.js");
+const generateTemplatePath = path.join(projectRoot, "internal/gateway/templates/generate.html");
+const gatewayRoutesPath = path.join(projectRoot, "internal/gateway/generation.go");
 const galleryPath = path.join(projectRoot, "internal/gateway/templates/gallery.html");
 const templateRoot = path.join(projectRoot, "internal/gateway/templates");
 const previewPath = path.join(projectRoot, "cmd/ui-preview/main.go");
 const css = fs.readFileSync(stylePath, "utf8");
 const generateScript = fs.readFileSync(generatePath, "utf8");
+const batchScript = fs.readFileSync(batchPath, "utf8");
+const generateTemplate = fs.readFileSync(generateTemplatePath, "utf8");
+const gatewayRoutes = fs.readFileSync(gatewayRoutesPath, "utf8");
 const galleryTemplate = fs.readFileSync(galleryPath, "utf8");
 const templates = fs.readdirSync(templateRoot)
   .filter((name) => name.endsWith(".html"))
@@ -132,4 +138,22 @@ test("the media library reuses an image across every compatible workflow", () =>
     assert.ok(generateScript.includes(`requestedQuery.get("${parameter}")`), `missing library query ${parameter}`);
   }
   assert.match(generateScript, /selectGalleryImage\(item, entry\)/);
+});
+
+test("controlled generation batches are wired through the form, job center, and API", () => {
+  for (const id of [
+    "generation-batch-builder", "generation-batch-enabled", "generation-batch-count",
+    "generation-batch-parameter", "generation-batch-compare",
+  ]) {
+    assert.ok(generateTemplate.includes(`id="${id}"`), `missing batch control ${id}`);
+  }
+  assert.match(generateTemplate, /generation-batch\.js/);
+  assert.match(generateScript, /fetch\("\/generate\/batches"/);
+  assert.match(generateScript, /renderGenerationBatch/);
+  assert.match(generateScript, /openBatchComparison/);
+  assert.match(batchScript, /MIN_COUNT = 2/);
+  assert.match(batchScript, /MAX_COUNT = 20/);
+  for (const route of ["/generate/batches", "/generate/batches/cancel", "/generate/batches/winner"]) {
+    assert.ok(gatewayRoutes.includes(route), `missing batch route ${route}`);
+  }
 });

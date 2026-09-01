@@ -39,6 +39,7 @@ var staticJavaScriptAssetPaths = []string{
 	"static/gallery.js",
 	"static/generate.js",
 	"static/generation-assistant.js",
+	"static/generation-batch.js",
 	"static/generation-history.js",
 	"static/generation-job.js",
 	"static/generation-lightbox.js",

@@ -21,6 +21,10 @@ func (a *App) maintenanceWorkerSpecs() []maintenanceWorkerSpec {
 	shortRetry := 15 * time.Second
 	return []maintenanceWorkerSpec{
 		{
+			Key: "generation_batches", Name: "Пакеты вариантов", Interval: 2 * time.Second, Timeout: 45 * time.Second,
+			RetryDelay: 5 * time.Second, MaxBackoff: time.Minute, Run: a.dispatchGenerationBatchJobs,
+		},
+		{
 			Key: "generation_jobs", Name: "Задания генераций", Interval: generationRefreshInterval, Timeout: 20 * time.Second,
 			RetryDelay: shortRetry, MaxBackoff: 2 * time.Minute, Run: a.refreshTrackedGenerationStatuses,
 		},

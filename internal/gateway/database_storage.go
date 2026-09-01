@@ -190,6 +190,7 @@ func databaseTablePolicies() map[string]databaseTablePolicy {
 		"websocket_sessions":               {Label: "История WebSocket", Owner: "Телеметрия Gateway", Retention: duration(func(p config.RetentionPolicy) time.Duration { return p.WebSocketSessions }), Configuration: "WEBSOCKET_SESSION_RETENTION", Managed: true},
 		"generation_requests":              {Label: "Восстановление запусков", Owner: "Быстрая генерация", Retention: duration(func(p config.RetentionPolicy) time.Duration { return p.GenerationRequests }), Configuration: "GENERATION_REQUEST_RETENTION", Managed: true},
 		"generation_jobs":                  {Label: "Задания генераций", Owner: "Job Center", Retention: duration(func(p config.RetentionPolicy) time.Duration { return p.GenerationRequests }), Configuration: "GENERATION_REQUEST_RETENTION", Managed: true},
+		"generation_batches":               {Label: "Пакеты вариантов", Owner: "Job Center", Retention: duration(func(p config.RetentionPolicy) time.Duration { return p.GenerationRequests }), Configuration: "GENERATION_REQUEST_RETENTION", Managed: true},
 		"generation_job_transitions":       {Label: "Этапы заданий", Owner: "Job Center", Retention: fixed("Вместе с заданием"), Managed: true},
 		"generation_job_revision":          {Label: "Ревизия Job Center", Owner: "Система", Retention: fixed("Одна служебная запись")},
 		"user_notifications":               {Label: "Уведомления о генерациях", Owner: "Центр уведомлений", Retention: fixed("Вместе с заданием")},

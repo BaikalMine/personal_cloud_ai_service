@@ -5,7 +5,7 @@
 }
 
 #generation-result,
-#generation-variants {
+body:not(.visualize-generation-batches) #generation-variants {
   display: none !important;
 }
 

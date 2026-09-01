@@ -1110,6 +1110,43 @@ var migrationCatalog = []migration{
 			`CREATE INDEX IF NOT EXISTS prompt_assistant_runs_decision_created_idx ON prompt_assistant_runs(decision,created_at DESC,id DESC) WHERE decision IS NOT NULL`,
 		},
 	},
+	{
+		version: 48,
+		name:    "controlled_generation_batches",
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS generation_batches (
+				id BIGSERIAL PRIMARY KEY,
+				public_id TEXT NOT NULL UNIQUE CHECK (char_length(public_id) BETWEEN 16 AND 96 AND public_id ~ '^[A-Za-z0-9_-]+$'),
+				user_id BIGINT NULL REFERENCES users(id) ON DELETE SET NULL,
+				username_snapshot TEXT NOT NULL DEFAULT '' CHECK (char_length(username_snapshot) <= 128),
+				request_id TEXT NOT NULL CHECK (char_length(request_id) BETWEEN 16 AND 96 AND request_id ~ '^[A-Za-z0-9_-]+$'),
+				parent_batch_id BIGINT NULL REFERENCES generation_batches(id) ON DELETE SET NULL,
+				source_job_id BIGINT NULL REFERENCES generation_jobs(id) ON DELETE SET NULL,
+				winner_job_id BIGINT NULL REFERENCES generation_jobs(id) ON DELETE SET NULL,
+				template_id TEXT NOT NULL CHECK (char_length(template_id) BETWEEN 1 AND 256),
+				workflow_id TEXT NOT NULL CHECK (char_length(workflow_id) BETWEEN 1 AND 256),
+				model_name TEXT NOT NULL CHECK (char_length(model_name) BETWEEN 1 AND 512),
+				experiment_mode TEXT NOT NULL CHECK (experiment_mode IN ('seeds','parameter')),
+				parameter_name TEXT NOT NULL DEFAULT '' CHECK (char_length(parameter_name) <= 64),
+				parameter_values JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(parameter_values)='array'),
+				seed_locked BOOLEAN NOT NULL DEFAULT false,
+				total_count INTEGER NOT NULL CHECK (total_count BETWEEN 2 AND 20),
+				max_parallel INTEGER NOT NULL DEFAULT 1 CHECK (max_parallel BETWEEN 1 AND 4),
+				cancellation_requested_at TIMESTAMPTZ NULL,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				CHECK ((experiment_mode='seeds' AND parameter_name='') OR (experiment_mode='parameter' AND char_length(parameter_name) BETWEEN 1 AND 64))
+			)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS generation_batches_user_request_idx ON generation_batches(user_id,request_id) WHERE user_id IS NOT NULL`,
+			`CREATE INDEX IF NOT EXISTS generation_batches_user_created_idx ON generation_batches(user_id,created_at DESC,id DESC)`,
+			`CREATE INDEX IF NOT EXISTS generation_batches_cancellation_idx ON generation_batches(cancellation_requested_at,id) WHERE cancellation_requested_at IS NOT NULL`,
+			`ALTER TABLE generation_jobs ADD COLUMN IF NOT EXISTS batch_id BIGINT NULL REFERENCES generation_batches(id) ON DELETE SET NULL`,
+			`ALTER TABLE generation_jobs ADD COLUMN IF NOT EXISTS batch_position INTEGER NOT NULL DEFAULT 0 CHECK (batch_position BETWEEN 0 AND 20)`,
+			`ALTER TABLE generation_jobs ADD COLUMN IF NOT EXISTS experiment_value TEXT NOT NULL DEFAULT '' CHECK (char_length(experiment_value) <= 128)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS generation_jobs_batch_position_idx ON generation_jobs(batch_id,batch_position) WHERE batch_id IS NOT NULL`,
+			`CREATE INDEX IF NOT EXISTS generation_jobs_batch_state_idx ON generation_jobs(batch_id,state,batch_position) WHERE batch_id IS NOT NULL`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

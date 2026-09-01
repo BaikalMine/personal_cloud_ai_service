@@ -6,13 +6,14 @@
 <script src="/static/generation-video.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-summary.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-assistant.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/generation-batch.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-job.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-recipes.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-history.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-lightbox.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generate.js?v={{.AssetVersion}}" defer></script>
 {{template "nav" .}}
-<main class="page generation-page" id="main-content" data-comfy-generation data-workflow-capabilities-url="/generate/capabilities" data-selected-workflow="{{.SelectedWorkflow}}" data-preview-output="{{.PreviewOutputURL}}" data-generation-retention="{{.Retention.GenerationHistoryLabel}}" data-media-retention="{{.Retention.GenerationMediaLabel}}">
+<main class="page generation-page" id="main-content" data-comfy-generation data-workflow-capabilities-url="/generate/capabilities" data-selected-workflow="{{.SelectedWorkflow}}" data-preview-output="{{.PreviewOutputURL}}" data-generation-retention="{{.Retention.GenerationHistoryLabel}}" data-media-retention="{{.Retention.GenerationMediaLabel}}" data-generation-daily-limit="{{.GenerationQuota.DailyLimit}}" data-generation-daily-remaining="{{.GenerationQuota.DailyRemaining}}" data-generation-total-limit="{{.GenerationQuota.TotalLimit}}" data-generation-total-remaining="{{.GenerationQuota.TotalRemaining}}">
   <section class="hero generation-hero">
     <div>
       <p class="eyebrow">ComfyUI без сложного интерфейса</p>
@@ -582,6 +583,26 @@
         </section>
       </div></details>
       <section class="generation-preflight" id="generation-preflight" hidden aria-live="polite"><div class="generation-preflight-heading"><div><strong>Проверка перед запуском</strong><small id="generation-preflight-summary"></small></div><button type="button" class="button ghost" id="generation-preflight-repeat">Проверить ещё раз</button></div><div class="generation-preflight-checks" id="generation-preflight-checks"></div></section>
+      <section class="generation-batch-builder" id="generation-batch-builder">
+        <label class="generation-batch-switch ui-choice">
+          <input type="checkbox" name="batch_enabled" id="generation-batch-enabled" value="true">
+          <span><strong>Пакет вариантов</strong><small>Несколько запусков с одной контролируемой разницей</small></span>
+        </label>
+        <div class="generation-batch-controls" id="generation-batch-controls" hidden>
+          <fieldset class="generation-batch-mode"><legend>Меняется между вариантами</legend><div class="ui-segmented ui-segmented--compact">
+            <label class="ui-segment"><input type="radio" name="batch_mode" value="seeds" checked><span>Разные seed</span></label>
+            <label class="ui-segment"><input type="radio" name="batch_mode" value="parameter"><span>Один параметр</span></label>
+          </div></fieldset>
+          <div class="generation-batch-fields">
+            <label>Количество<input type="number" name="batch_count" id="generation-batch-count" min="2" max="20" value="4" inputmode="numeric"></label>
+            <label class="generation-batch-parameter-field" hidden>Параметр<select name="batch_parameter" id="generation-batch-parameter"><option value="">Выберите параметр</option></select></label>
+            <label class="generation-batch-range-field" hidden>От<input type="number" name="batch_from" id="generation-batch-from" step="any"></label>
+            <label class="generation-batch-range-field" hidden>До<input type="number" name="batch_to" id="generation-batch-to" step="any"></label>
+          </div>
+          <div class="generation-batch-estimate" id="generation-batch-estimate" aria-live="polite"><strong>4 варианта</strong><span>Будет списано 4 генерации</span></div>
+          <small class="generation-batch-error" id="generation-batch-error" role="alert" hidden></small>
+        </div>
+      </section>
       <div class="generation-run-dock" id="generation-run-dock">
         <section class="generation-summary" id="generation-summary" aria-live="polite">
           <div class="generation-summary-head"><div><span>Готово к запуску</span><strong id="generation-summary-title">Текущая конфигурация</strong></div><button type="button" class="button ghost" id="generation-open-exact">Точные настройки</button></div>
@@ -617,6 +638,10 @@
     </div>
     <div class="generation-history-content" id="generation-history-content"><div class="generation-variant-list generation-job-list" id="generation-variant-list"><p class="generation-variant-empty">Загружаем задания...</p></div></div>
   </section>
+  <dialog class="generation-batch-compare" id="generation-batch-compare" aria-labelledby="generation-batch-compare-title">
+    <header><div><span>Пакет вариантов</span><h2 id="generation-batch-compare-title">Сравнение результатов</h2></div><button type="button" id="generation-batch-compare-close" aria-label="Закрыть сравнение">&#10005;</button></header>
+    <div class="generation-batch-compare-body" id="generation-batch-compare-body"></div>
+  </dialog>
   <div class="generation-image-picker" id="generation-image-picker" hidden role="dialog" aria-modal="true" aria-labelledby="generation-image-picker-title">
     <button class="generation-image-picker-backdrop" type="button" tabindex="-1" data-gallery-image-picker-close aria-label="Закрыть выбор изображения"></button>
     <section class="generation-image-picker-window">

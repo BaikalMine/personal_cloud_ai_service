@@ -274,6 +274,28 @@ func TestPromptAssistantQualityMigration(t *testing.T) {
 	}
 }
 
+func TestControlledGenerationBatchesMigration(t *testing.T) {
+	var batchMigration *migration
+	for index := range migrationCatalog {
+		if migrationCatalog[index].version == 48 {
+			batchMigration = &migrationCatalog[index]
+			break
+		}
+	}
+	if batchMigration == nil || batchMigration.name != "controlled_generation_batches" {
+		t.Fatal("controlled generation batches migration is missing")
+	}
+	sql := strings.Join(batchMigration.statements, "\n")
+	for _, expected := range []string{
+		"generation_batches", "experiment_mode", "parameter_values", "winner_job_id",
+		"batch_id", "batch_position", "experiment_value", "total_count BETWEEN 2 AND 20",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("controlled generation batches migration does not contain %q: %s", expected, sql)
+		}
+	}
+}
+
 func TestQuickGenerationRequestTelemetryMigration(t *testing.T) {
 	var telemetryMigration *migration
 	for index := range migrationCatalog {

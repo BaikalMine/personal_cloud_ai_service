@@ -28,6 +28,9 @@
   const assistantSlice = createStateSlice("assistant", generationModules.assistant, {
     status: "idle", approved: false, original: "", suggestion: "", action: "", correlationID: "", references: [], usage: {}, draftEdited: false, error: "",
   });
+  const batchSlice = createStateSlice("batch", generationModules.batch, {
+    enabled: false, mode: "seeds", count: 4, parameter: "", from: "", to: "", batches: [], selections: {},
+  });
   const jobSlice = createStateSlice("job", generationModules.job, { items: [], revision: 0, live: false, loading: false, activeID: "", error: "" });
   const recipeSlice = createStateSlice("recipes", generationModules.recipes, { items: [], selectedID: "", loading: false, message: "", status: "" });
   const historySlice = createStateSlice("history", generationModules.history, { variants: [], collapsed: false, stateFilter: "", templateFilter: "" });
@@ -179,6 +182,20 @@
   const generationSummaryImpact = document.getElementById("generation-summary-impact");
   const generationOpenExact = document.getElementById("generation-open-exact");
   const generationAdvanced = root.querySelector(".generation-advanced");
+  const batchBuilder = document.getElementById("generation-batch-builder");
+  const batchEnabled = document.getElementById("generation-batch-enabled");
+  const batchControls = document.getElementById("generation-batch-controls");
+  const batchCount = document.getElementById("generation-batch-count");
+  const batchParameter = document.getElementById("generation-batch-parameter");
+  const batchFrom = document.getElementById("generation-batch-from");
+  const batchTo = document.getElementById("generation-batch-to");
+  const batchParameterField = root.querySelector(".generation-batch-parameter-field");
+  const batchRangeFields = [...root.querySelectorAll(".generation-batch-range-field")];
+  const batchEstimate = document.getElementById("generation-batch-estimate");
+  const batchError = document.getElementById("generation-batch-error");
+  const batchCompare = document.getElementById("generation-batch-compare");
+  const batchCompareBody = document.getElementById("generation-batch-compare-body");
+  const batchCompareClose = document.getElementById("generation-batch-compare-close");
   const variantsSection = document.getElementById("generation-variants");
   const variantsContent = document.getElementById("generation-history-content");
   const variantsToggle = document.getElementById("generation-history-toggle");
@@ -193,6 +210,7 @@
   const repeatNoticeDismiss = document.getElementById("generation-repeat-dismiss");
   const outputGrid = document.getElementById("generation-output-grid");
   const resultActions = document.getElementById("generation-result-actions");
+  const generationSubmit = document.getElementById("generation-submit");
   const retryGeneration = document.getElementById("generation-retry");
   const cancelGeneration = document.getElementById("generation-cancel");
   const editorProfile = document.getElementById("generation-editor-profile");
@@ -709,6 +727,8 @@
   };
 
   const renderQueueOverview = (queue) => {
+    root.dataset.generationAverageSeconds = String(Math.max(0, Number(queue?.average_task_seconds) || 0));
+    syncBatchBuilder();
     if (!generationQueue) return;
     const running = Math.max(0, Number(queue?.running) || 0);
     const pending = Math.max(0, Number(queue?.pending) || 0);
@@ -1303,6 +1323,141 @@
     const hasAudio = Boolean(miniMaxAudioIsAvailable() && (uploadedAudio || miniMaxAudioFile?.files?.[0]));
     const hasVideo = Boolean(miniMaxReferencesAreAvailable() && (uploadedVideo || miniMaxVideoFile?.files?.[0]));
     return { preset, selectedModel, family, references, hasAudio, hasVideo };
+  };
+
+  const batchQuotaSnapshot = () => ({
+    dailyLimit: numericValue(root.dataset.generationDailyLimit),
+    dailyRemaining: numericValue(root.dataset.generationDailyRemaining),
+    totalLimit: numericValue(root.dataset.generationTotalLimit),
+    totalRemaining: numericValue(root.dataset.generationTotalRemaining),
+  });
+
+  const activeWorkflowControl = (name) => workflowControls(name).find((control) => (
+    !control.disabled && !control.closest("[hidden]")
+  )) || workflowControls(name)[0] || null;
+
+  const batchContext = () => {
+    const { family } = currentGenerationContext();
+    return {
+      family,
+      templateID: templateID?.value || "",
+      sparseAttention: Boolean(form.elements.video_sparse_attention?.checked),
+      rife: Boolean(form.elements.video_rife_enabled?.checked),
+      rtx: Boolean(form.elements.video_rtx_enabled?.checked),
+      colorMatch: Boolean(form.elements.video_color_match?.checked),
+      sharpen: Boolean(form.elements.video_sharpen_enabled?.checked),
+      sharpenMax: numericValue(form.elements.video_sharpen_strength?.max, 1),
+      loras: [...root.querySelectorAll(".lora-row:not([hidden]) .generation-lora-select")]
+        .filter((control) => !control.disabled)
+        .map((control) => control.value),
+    };
+  };
+
+  const currentBatchConfig = () => ({
+    enabled: Boolean(batchEnabled?.checked),
+    mode: form.elements.batch_mode?.value || "seeds",
+    count: generationModules.batch?.boundedCount?.(batchCount?.value) || clamp(Math.round(numericValue(batchCount?.value, 4)), 2, 20),
+    parameter: batchParameter?.value || "",
+    from: batchFrom?.value || "",
+    to: batchTo?.value || "",
+  });
+
+  const formatBatchNumber = (value, step = 1) => {
+    const precision = Math.min(6, Math.max(0, String(step).split(".")[1]?.length || 0));
+    return Number(value.toFixed(precision)).toString();
+  };
+
+  const batchVariantCountLabel = (count) => {
+    const value = Math.max(0, Math.round(Number(count) || 0));
+    const lastTwo = value % 100;
+    if (lastTwo >= 11 && lastTwo <= 14) return `${value} вариантов`;
+    if (value % 10 === 1) return `${value} вариант`;
+    if (value % 10 >= 2 && value % 10 <= 4) return `${value} варианта`;
+    return `${value} вариантов`;
+  };
+
+  const setDefaultBatchRange = (option, count) => {
+    if (!option || !batchFrom || !batchTo) return;
+    const current = numericValue(activeWorkflowControl(option.name)?.value, option.min);
+    const span = Math.max(option.step, (count - 1) * option.step);
+    let from = current - Math.floor((count - 1) / 2) * option.step;
+    from = clamp(from, option.min, Math.max(option.min, option.max - span));
+    const to = clamp(from + span, option.min, option.max);
+    batchFrom.value = formatBatchNumber(from, option.step);
+    batchTo.value = formatBatchNumber(to, option.step);
+  };
+
+  let batchParameterSignature = "";
+  const syncBatchBuilder = ({ resetRange = false } = {}) => {
+    if (!batchBuilder || !generationModules.batch) return { valid: true, count: 1, error: "" };
+    const enabled = Boolean(batchEnabled?.checked);
+    const mode = form.elements.batch_mode?.value || "seeds";
+    const count = generationModules.batch.boundedCount(batchCount?.value);
+    if (batchCount) batchCount.value = String(count);
+    if (batchControls) batchControls.hidden = !enabled;
+    if (batchParameterField) batchParameterField.hidden = mode !== "parameter";
+    batchRangeFields.forEach((field) => { field.hidden = mode !== "parameter"; });
+
+    const options = generationModules.batch.parameterOptions(batchContext());
+    const signature = options.map((option) => `${option.name}:${option.min}:${option.max}:${option.step}`).join("|");
+    const previousParameter = batchParameter?.value || "";
+    if (batchParameter && (signature !== batchParameterSignature || batchParameter.options.length !== options.length + 1)) {
+      const fragment = document.createDocumentFragment();
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = "Выберите параметр";
+      fragment.append(placeholder);
+      options.forEach((option) => {
+        const item = document.createElement("option");
+        item.value = option.name;
+        item.textContent = option.label;
+        fragment.append(item);
+      });
+      batchParameter.replaceChildren(fragment);
+      batchParameter.value = options.some((option) => option.name === previousParameter) ? previousParameter : "";
+      batchParameterSignature = signature;
+      resetRange = true;
+    }
+
+    const option = options.find((item) => item.name === batchParameter?.value);
+    if (option && batchFrom && batchTo) {
+      [batchFrom, batchTo].forEach((field) => {
+        field.min = String(option.min);
+        field.max = String(option.max);
+        field.step = String(option.step);
+      });
+      if (resetRange || batchFrom.value === "" || batchTo.value === "") setDefaultBatchRange(option, count);
+    }
+
+    const config = currentBatchConfig();
+    batchSlice.dispatch({ type: "SET_CONFIG", config });
+    const validation = generationModules.batch.validate(config, options, batchQuotaSnapshot());
+    const remaining = generationModules.batch.remainingQuota(batchQuotaSnapshot());
+    const averageSeconds = numericValue(root.dataset.generationAverageSeconds);
+    const estimateSeconds = averageSeconds > 0 ? averageSeconds * validation.count : 0;
+    if (batchEstimate) {
+      const title = batchEstimate.querySelector("strong") || document.createElement("strong");
+      const detail = batchEstimate.querySelector("span") || document.createElement("span");
+      title.textContent = batchVariantCountLabel(validation.count);
+      const cost = Number.isFinite(remaining)
+        ? `Будет списано ${validation.count}. После запуска останется ${Math.max(0, remaining - validation.count)}.`
+        : `Будет списано ${validation.count} генерации.`;
+      detail.textContent = estimateSeconds > 0 ? `${cost} Ориентир: ${formatJobDuration(estimateSeconds)}.` : cost;
+      if (!title.parentElement) batchEstimate.append(title, detail);
+      batchEstimate.classList.toggle("has-error", enabled && !validation.valid);
+    }
+    if (batchError) {
+      batchError.hidden = !enabled || validation.valid;
+      batchError.textContent = validation.error || "";
+    }
+    batchBuilder.classList.toggle("is-enabled", enabled);
+    batchBuilder.classList.toggle("has-error", enabled && !validation.valid);
+    if (generationSubmit) {
+      generationSubmit.dataset.batchInvalid = enabled && !validation.valid ? "true" : "false";
+      generationSubmit.textContent = enabled ? `Запустить ${batchVariantCountLabel(validation.count)}` : "Запустить генерацию";
+      if (!generationSubmit.classList.contains("is-loading")) generationSubmit.disabled = enabled && !validation.valid;
+    }
+    return validation;
   };
 
   const syncGenerationModeGuide = () => {
@@ -2994,8 +3149,11 @@
   const renderJobCount = (shown = null) => {
     if (!variantCount) return;
     const jobs = jobSlice.get();
-    const filteredCount = shown === null ? jobs.items.length : shown;
-    const count = filteredCount === jobs.items.length ? jobCountLabel(jobs.items.length) : `Показано ${filteredCount} из ${jobs.items.length}`;
+    const allIDs = new Set(jobs.items.map((job) => String(job.job_id)));
+    (batchSlice.get().batches || []).forEach((batch) => (batch.jobs || []).forEach((job) => allIDs.add(String(job.job_id))));
+    const total = allIDs.size;
+    const filteredCount = shown === null ? total : shown;
+    const count = filteredCount === total ? jobCountLabel(total) : `Показано ${filteredCount} из ${total}`;
     const live = jobs.live ? "обновляются автоматически" : "переподключаем обновления";
     variantCount.textContent = `${count} · ${live} · хранятся ${generationRetentionLabel}`;
   };
@@ -3145,32 +3303,379 @@
     }
   };
 
+  const batchStateLabels = {
+    queued: "Ожидает запуска",
+    running: "Выполняется",
+    cancelling: "Отменяется",
+    completed: "Готов",
+    partial: "Завершён частично",
+    failed: "Ошибка",
+    cancelled: "Отменён",
+  };
+
+  const cancelGenerationBatch = async (batch, button) => {
+    if (!batch?.batch_id || button.disabled) return;
+    button.disabled = true;
+    button.textContent = "Отменяем...";
+    try {
+      const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", batch_id: batch.batch_id });
+      const response = await fetch("/generate/batches/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+        body,
+        credentials: "same-origin",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Не удалось отменить пакет");
+      showRepeatNotice("Отмена пакета принята", payload.message || "Новые варианты не запустятся. Активный вариант будет остановлен безопасно.");
+      await refreshJobs();
+    } catch (error) {
+      showRepeatNotice("Не удалось отменить пакет", error.message || "Gateway временно недоступен.", true);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Отменить пакет";
+    }
+  };
+
+  const selectGenerationBatchWinner = async (batch, job, button) => {
+    if (!batch?.batch_id || !job?.job_id || button.disabled) return;
+    button.disabled = true;
+    button.textContent = "Сохраняем...";
+    try {
+      const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", batch_id: batch.batch_id, job_id: job.job_id });
+      const response = await fetch("/generate/batches/winner", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+        body,
+        credentials: "same-origin",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Не удалось сохранить выбранный вариант");
+      showRepeatNotice("Лучший вариант сохранён", "Его можно открыть, скачать или использовать как основу следующего пакета.");
+      await refreshJobs();
+    } catch (error) {
+      showRepeatNotice("Не удалось выбрать вариант", error.message || "Gateway временно недоступен.", true);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Выбрать лучшим";
+    }
+  };
+
+  const branchFromBatchJob = async (batch, job, button) => {
+    if (!job?.job_id || button.disabled) return;
+    button.disabled = true;
+    button.textContent = "Готовим ветку...";
+    try {
+      const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", job_id: job.job_id });
+      const response = await fetch("/generate/jobs/retry", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+        body,
+        credentials: "same-origin",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Не удалось восстановить параметры победителя");
+      if (!applySavedValues(payload.values)) throw new Error("Workflow этого варианта сейчас недоступен");
+      pendingParentJobID = payload.parent_job_id || job.job_id;
+      if (batchEnabled) batchEnabled.checked = true;
+      const mode = batch.mode === "parameter" ? "parameter" : "seeds";
+      const modeControl = [...(form.elements.batch_mode || [])].find?.((control) => control.value === mode);
+      if (modeControl) modeControl.checked = true;
+      if (batchCount) batchCount.value = String(generationModules.batch.boundedCount(batch.total_count || 4));
+      syncBatchBuilder();
+      if (mode === "parameter" && batchParameter) {
+        batchParameter.value = batch.parameter_name || "";
+        const difference = (batch.differences || []).find((item) => item.name === batch.parameter_name);
+        const values = (difference?.values || []).map((item) => numericValue(item.value, NaN)).filter(Number.isFinite);
+        if (values.length && batchFrom && batchTo) {
+          batchFrom.value = String(Math.min(...values));
+          batchTo.value = String(Math.max(...values));
+        }
+      }
+      syncBatchBuilder();
+      showRepeatNotice(
+        "Ветка подготовлена",
+        payload.requires_inputs
+          ? "Параметры победителя восстановлены. Добавьте исходные файлы заново и настройте следующее различие."
+          : "Параметры победителя восстановлены. Измените диапазон или параметр и запустите следующий пакет.",
+      );
+      window.requestAnimationFrame(() => form.scrollIntoView({ behavior: "smooth", block: "start" }));
+    } catch (error) {
+      showRepeatNotice("Не удалось создать ветку", error.message || "Параметры больше недоступны.", true);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Новая ветка";
+    }
+  };
+
+  const openBatchComparison = (batch) => {
+    if (!batchCompare || !batchCompareBody) return;
+    const selected = generationModules.batch.selectedJobs(batchSlice.get(), batch);
+    if (selected.length !== 2) return;
+    const comparison = document.createElement("div");
+    comparison.className = "generation-batch-comparison";
+    selected.forEach((job) => {
+      const item = document.createElement("article");
+      item.className = "generation-batch-comparison-item";
+      item.append(renderJobMedia(job));
+      const copy = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = `Вариант ${job.batch_position}`;
+      const experiment = document.createElement("span");
+      experiment.textContent = `${batch.parameter_label || "Seed"}: ${job.experiment_value || job.seed}`;
+      const prompt = document.createElement("p");
+      prompt.textContent = job.prompt || "Промт не сохранён";
+      copy.append(title, experiment, prompt);
+      item.append(copy);
+      comparison.append(item);
+    });
+    const differences = generationModules.batch.selectedDifferences(batchSlice.get(), batch);
+    const facts = document.createElement("dl");
+    facts.className = "generation-batch-differences";
+    differences.forEach((difference) => {
+      const row = document.createElement("div");
+      const term = document.createElement("dt");
+      const value = document.createElement("dd");
+      term.textContent = difference.label;
+      value.textContent = difference.values.map((item) => `Вариант ${item.position}: ${item.value}`).join(" · ");
+      row.append(term, value);
+      facts.append(row);
+    });
+    batchCompareBody.replaceChildren(comparison, facts);
+    if (typeof batchCompare.showModal === "function") batchCompare.showModal();
+    else batchCompare.setAttribute("open", "");
+  };
+
+  const renderJobCard = (job, { batch = null } = {}) => {
+    const card = document.createElement("article");
+    card.className = `generation-job ui-media-card${batch ? " generation-job--batch" : ""}`;
+    card.dataset.state = job.state || "submitting";
+    card.dataset.jobId = job.job_id || "";
+    if (batch) card.dataset.batchId = batch.batch_id || "";
+    if (["submitting", "preparing", "uploading", "queued", "waiting_for_resources", "waiting_resources", "running", "postprocessing", "archiving"].includes(job.state)) {
+      card.setAttribute("aria-busy", "true");
+    } else if (job.state === "completed") {
+      card.classList.add("is-success");
+    } else if (job.state === "failed" || job.state === "error") {
+      card.classList.add("is-error");
+    }
+    if (batch?.winner_job_id === job.job_id) card.classList.add("is-winner");
+    card.append(renderJobMedia(job));
+    const body = document.createElement("div");
+    body.className = "generation-job-body";
+    const heading = document.createElement("div");
+    heading.className = "generation-job-heading";
+    const headingCopy = document.createElement("span");
+    const title = document.createElement("strong");
+    title.textContent = batch ? `Вариант ${job.batch_position}` : jobTemplateLabel(job.template_id);
+    const modelName = document.createElement("small");
+    modelName.textContent = batch
+      ? `${batch.parameter_label || "Seed"}: ${job.experiment_value || job.seed} · ${cleanModelName(job.model_name)}`
+      : cleanModelName(job.model_name);
+    headingCopy.append(title, modelName);
+    const state = document.createElement("span");
+    state.className = "generation-job-state";
+    state.textContent = batch?.winner_job_id === job.job_id ? "Лучший" : jobStateLabel(job.state);
+    heading.append(headingCopy, state);
+    const message = document.createElement("p");
+    message.className = "generation-job-message";
+    message.textContent = job.message || "Состояние задания обновляется";
+    const prompt = document.createElement("p");
+    prompt.className = "generation-job-prompt";
+    prompt.textContent = job.prompt || "Промт пока не сохранён";
+    const meta = document.createElement("small");
+    meta.className = "generation-job-meta";
+    const seed = Number(job.seed) >= 0 ? `Seed ${job.seed}` : "Случайный seed";
+    meta.textContent = `${formatJobTime(job.created_at)} · ${seed} · ${formatJobDuration(job.duration_seconds)}`;
+    if (job.expires_at) {
+      const expiry = document.createElement("time");
+      expiry.dataset.generationExpiry = String(new Date(job.expires_at).getTime());
+      expiry.textContent = formatExpiry(Number(expiry.dataset.generationExpiry) - Date.now());
+      meta.append(" · ", expiry);
+    }
+    const actions = document.createElement("div");
+    actions.className = "generation-job-actions";
+    if (batch && job.state === "completed") {
+      const compare = document.createElement("label");
+      compare.className = "generation-batch-compare-toggle ui-choice ui-choice--compact";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = (batchSlice.get().selections?.[String(batch.batch_id)] || []).includes(String(job.job_id));
+      const compareLabel = document.createElement("span");
+      compareLabel.textContent = "Сравнить";
+      compare.append(checkbox, compareLabel);
+      checkbox.addEventListener("change", () => {
+        batchSlice.dispatch({ type: "TOGGLE_COMPARE", batchID: batch.batch_id, jobID: job.job_id });
+        renderJobs();
+      });
+      actions.append(compare);
+      const winner = document.createElement("button");
+      winner.type = "button";
+      winner.className = "button ghost";
+      winner.textContent = batch.winner_job_id === job.job_id ? "Выбран" : "Выбрать лучшим";
+      winner.disabled = batch.winner_job_id === job.job_id;
+      winner.addEventListener("click", () => selectGenerationBatchWinner(batch, job, winner));
+      actions.append(winner);
+    } else if (!batch) {
+      if (job.retryable) {
+        const repeat = document.createElement("button");
+        repeat.type = "button";
+        repeat.className = "button ghost";
+        repeat.textContent = "Повторить";
+        repeat.addEventListener("click", () => retryJob(job, repeat));
+        actions.append(repeat);
+      }
+      if (job.cancellable) {
+        const cancel = document.createElement("button");
+        cancel.type = "button";
+        cancel.className = "button danger ghost";
+        cancel.textContent = "Отменить";
+        cancel.addEventListener("click", () => cancelJob(job, cancel));
+        actions.append(cancel);
+      }
+    }
+    const details = document.createElement("details");
+    details.className = "generation-job-details";
+    const summary = document.createElement("summary");
+    summary.textContent = "Этапы";
+    const detailsContent = document.createElement("div");
+    detailsContent.dataset.jobDetailsContent = "";
+    details.append(summary, detailsContent);
+    details.addEventListener("toggle", () => { if (details.open) loadJobDetails(details, job.job_id); });
+    body.append(heading, message, prompt, meta);
+    const footer = document.createElement("div");
+    footer.className = "generation-job-footer";
+    footer.append(actions);
+    card.append(body, footer, details);
+    return card;
+  };
+
+  const renderGenerationBatch = (batch, filters) => {
+    const group = document.createElement("section");
+    group.className = "generation-batch-group";
+    group.dataset.state = batch.state || "queued";
+    group.dataset.batchId = batch.batch_id || "";
+    const header = document.createElement("header");
+    header.className = "generation-batch-header";
+    const heading = document.createElement("div");
+    heading.className = "generation-batch-heading";
+    const eyebrow = document.createElement("span");
+    eyebrow.textContent = `${jobTemplateLabel(batch.template_id)} · пакет`;
+    const title = document.createElement("h3");
+    title.textContent = batch.mode === "parameter"
+      ? `${batch.total_count} вариантов · меняется ${batch.parameter_label || batch.parameter_name}`
+      : `${batch.total_count} вариантов · разные seed`;
+    const subtitle = document.createElement("small");
+    subtitle.textContent = `${cleanModelName(batch.model_name)} · ${formatJobTime(batch.created_at)}`;
+    heading.append(eyebrow, title, subtitle);
+    const status = document.createElement("span");
+    status.className = "generation-batch-state";
+    status.textContent = batchStateLabels[batch.state] || "Выполняется";
+    header.append(heading, status);
+    const progress = document.createElement("div");
+    progress.className = "generation-batch-progress";
+    const progressCopy = document.createElement("span");
+    const parts = [`${batch.finished_count || 0} из ${batch.total_count || 0}`];
+    if (batch.completed_count) parts.push(`готово: ${batch.completed_count}`);
+    if (batch.failed_count) parts.push(`ошибок: ${batch.failed_count}`);
+    if (batch.cancelled_count) parts.push(`отменено: ${batch.cancelled_count}`);
+    if (batch.estimated_finish_seconds > 0 && !["completed", "partial", "failed", "cancelled"].includes(batch.state)) {
+      parts.push(`до завершения ${formatJobDuration(batch.estimated_finish_seconds)}`);
+    }
+    progressCopy.textContent = parts.join(" · ");
+    const track = document.createElement("span");
+    track.className = "generation-batch-progress-track";
+    track.setAttribute("role", "progressbar");
+    track.setAttribute("aria-label", "Прогресс пакета вариантов");
+    track.setAttribute("aria-valuemin", "0");
+    track.setAttribute("aria-valuemax", "100");
+    track.setAttribute("aria-valuenow", String(batch.progress_percent || 0));
+    const fill = document.createElement("i");
+    fill.style.width = `${clamp(Number(batch.progress_percent) || 0, 0, 100)}%`;
+    track.append(fill);
+    progress.append(progressCopy, track);
+    const actions = document.createElement("div");
+    actions.className = "generation-batch-actions";
+    const selected = generationModules.batch.selectedJobs(batchSlice.get(), batch);
+    const compare = document.createElement("button");
+    compare.type = "button";
+    compare.className = "button ghost";
+    compare.textContent = selected.length === 2 ? "Сравнить 2 варианта" : `Сравнение ${selected.length}/2`;
+    compare.disabled = selected.length !== 2;
+    compare.addEventListener("click", () => openBatchComparison(batch));
+    actions.append(compare);
+    const winner = (batch.jobs || []).find((job) => job.job_id === batch.winner_job_id);
+    if (winner) {
+      const branch = document.createElement("button");
+      branch.type = "button";
+      branch.className = "button ghost";
+      branch.textContent = "Новая ветка";
+      branch.addEventListener("click", () => branchFromBatchJob(batch, winner, branch));
+      actions.append(branch);
+    }
+    if (batch.cancellable) {
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "button danger ghost";
+      cancel.textContent = "Отменить пакет";
+      cancel.addEventListener("click", () => cancelGenerationBatch(batch, cancel));
+      actions.append(cancel);
+    }
+    const children = (batch.jobs || []).filter((job) => (
+      (!filters.stateFilter || job.state === filters.stateFilter)
+      && (!filters.templateFilter || job.template_id === filters.templateFilter)
+    ));
+    const grid = document.createElement("div");
+    grid.className = "generation-batch-jobs";
+    grid.replaceChildren(...children.map((job) => renderJobCard(job, { batch })));
+    group.append(header, progress, actions, grid);
+    return group;
+  };
+
   const renderJobs = () => {
     if (!variantsSection || !variantList) return;
     const items = jobSlice.get().items;
-    const filters = historySlice.dispatch({
+    const batches = batchSlice.get().batches || [];
+    const batchJobIDs = generationModules.batch?.batchJobIDs?.(batches) || new Set();
+    const knownJobs = [...items];
+    const knownJobIDs = new Set(items.map((job) => String(job.job_id)));
+    batches.forEach((batch) => (batch.jobs || []).forEach((job) => {
+      if (!knownJobIDs.has(String(job.job_id))) knownJobs.push(job);
+    }));
+    let filters = historySlice.dispatch({
       type: "SET_FILTERS",
       stateFilter: variantStateFilter?.value || "",
       templateFilter: variantTemplateFilter?.value || "",
     }, (state) => ({ ...state, stateFilter: variantStateFilter?.value || "", templateFilter: variantTemplateFilter?.value || "" }));
-    let filteredJobs = generationModules.history?.filterJobs?.(items, filters) || items.filter((job) => (
+    let filteredJobs = (generationModules.history?.filterJobs?.(items, filters) || items.filter((job) => (
       (!filters.stateFilter || job.state === filters.stateFilter)
       && (!filters.templateFilter || job.template_id === filters.templateFilter)
-    ));
+    ))).filter((job) => !batchJobIDs.has(String(job.job_id)));
+    let filteredBatches = generationModules.batch?.filterBatches?.(batches, filters) || [];
     const requestedJob = requestedJobID && !requestedJobHandled
-      ? items.find((job) => job.job_id === requestedJobID)
+      ? knownJobs.find((job) => job.job_id === requestedJobID)
       : null;
-    if (requestedJob && !filteredJobs.some((job) => job.job_id === requestedJobID)) {
+    const requestedVisible = requestedJob && (
+      filteredJobs.some((job) => job.job_id === requestedJobID)
+      || filteredBatches.some((batch) => (batch.jobs || []).some((job) => job.job_id === requestedJobID))
+    );
+    if (requestedJob && !requestedVisible) {
       if (variantStateFilter) variantStateFilter.value = "";
       if (variantTemplateFilter) variantTemplateFilter.value = "";
-      historySlice.dispatch({ type: "SET_FILTERS", stateFilter: "", templateFilter: "" }, (state) => ({ ...state, stateFilter: "", templateFilter: "" }));
-      filteredJobs = items;
+      filters = historySlice.dispatch({ type: "SET_FILTERS", stateFilter: "", templateFilter: "" }, (state) => ({ ...state, stateFilter: "", templateFilter: "" }));
+      filteredJobs = items.filter((job) => !batchJobIDs.has(String(job.job_id)));
+      filteredBatches = batches;
     }
-    renderJobCount(filteredJobs.length);
-    if (filteredJobs.length === 0) {
+    const filteredBatchJobCount = filteredBatches.reduce((total, batch) => total + (batch.jobs || []).filter((job) => (
+      (!filters.stateFilter || job.state === filters.stateFilter)
+      && (!filters.templateFilter || job.template_id === filters.templateFilter)
+    )).length, 0);
+    const visibleCount = filteredJobs.length + filteredBatchJobCount;
+    renderJobCount(visibleCount);
+    if (visibleCount === 0) {
       const empty = document.createElement("p");
       empty.className = "generation-variant-empty ui-empty-state";
-      empty.textContent = items.length ? "По этим фильтрам заданий нет." : "Заданий пока нет. Первый запуск появится здесь автоматически.";
+      empty.textContent = knownJobs.length ? "По этим фильтрам заданий нет." : "Заданий пока нет. Первый запуск появится здесь автоматически.";
       variantList.replaceChildren(empty);
       if (requestedJobID && !requestedJobHandled) {
         requestedJobHandled = true;
@@ -3178,7 +3683,7 @@
       }
       return;
     }
-    variantList.replaceChildren(...filteredJobs.map((job) => {
+    const standaloneNodes = filteredJobs.map((job) => {
       const card = document.createElement("article");
       card.className = "generation-job ui-media-card";
       card.dataset.state = job.state || "submitting";
@@ -3253,7 +3758,10 @@
       footer.append(actions);
       card.append(body, footer, details);
       return card;
-    }));
+    });
+    const batchNodes = filteredBatches.map((batch) => renderGenerationBatch(batch, filters));
+    variantList.classList.toggle("has-batches", batchNodes.length > 0);
+    variantList.replaceChildren(...batchNodes, ...standaloneNodes);
     refreshExpiryLabels();
     if (requestedJobID && !requestedJobHandled) {
       const target = variantList.querySelector(`[data-job-id="${CSS.escape(requestedJobID)}"]`);
@@ -3281,8 +3789,14 @@
     if (jobSlice.get().loading) return;
     jobSlice.dispatch({ type: "LOAD_START" }, (state) => ({ ...state, loading: true, error: "" }));
     try {
-      const response = await fetch("/generate/jobs", { credentials: "same-origin", cache: "no-store" });
-      const payload = await response.json().catch(() => ({}));
+      const [response, batchResponse] = await Promise.all([
+        fetch("/generate/jobs", { credentials: "same-origin", cache: "no-store" }),
+        fetch("/generate/batches", { credentials: "same-origin", cache: "no-store" }).catch(() => null),
+      ]);
+      const [payload, batchPayload] = await Promise.all([
+        response.json().catch(() => ({})),
+        batchResponse?.json().catch(() => ({})) || Promise.resolve({}),
+      ]);
       if (!response.ok) throw new Error(payload.error || "Не удалось загрузить задания");
       const items = Array.isArray(payload.jobs) ? payload.jobs : [];
       jobSlice.dispatch({ type: "SET_JOBS", items, revision: payload.revision }, (state) => ({
@@ -3292,6 +3806,9 @@
         revision: Math.max(Number(state.revision) || 0, Number(payload.revision) || 0),
         error: "",
       }));
+      if (batchResponse?.ok) {
+        batchSlice.dispatch({ type: "SET_BATCHES", batches: Array.isArray(batchPayload.batches) ? batchPayload.batches : [] });
+      }
       renderJobs();
     } catch (error) {
       jobSlice.dispatch({ type: "LOAD_ERROR", error: error.message }, (state) => ({ ...state, loading: false, error: error.message || "Load failed" }));
@@ -3326,7 +3843,20 @@
   };
 
   const updateGenerationQuota = (quota) => {
-    if (!generationQuota || !quota || typeof quota !== "object") return;
+    if (!quota || typeof quota !== "object") return;
+    const datasetValues = {
+      generationDailyRemaining: quota.daily_remaining,
+      generationDailyLimit: quota.daily_limit,
+      generationTotalRemaining: quota.total_remaining,
+      generationTotalLimit: quota.total_limit,
+    };
+    Object.entries(datasetValues).forEach(([name, value]) => {
+      if (Number.isFinite(Number(value))) root.dataset[name] = String(Math.max(0, Number(value)));
+    });
+    if (!generationQuota) {
+      syncBatchBuilder();
+      return;
+    }
     const assign = (selector, value) => {
       const target = generationQuota.querySelector(selector);
       if (target && Number.isFinite(Number(value))) target.textContent = String(Math.max(0, Number(value)));
@@ -3335,6 +3865,7 @@
     assign("[data-generation-quota-daily-limit]", quota.daily_limit);
     assign("[data-generation-quota-total-remaining]", quota.total_remaining);
     assign("[data-generation-quota-total-limit]", quota.total_limit);
+    syncBatchBuilder();
   };
 
   const poll = async (promptID) => {
@@ -3477,6 +4008,59 @@
     return false;
   };
 
+  const launchGenerationBatch = async () => {
+    const validation = syncBatchBuilder();
+    if (!validation.valid) {
+      batchBuilder?.scrollIntoView({ block: "center", behavior: "smooth" });
+      (batchParameter?.value ? batchFrom : batchParameter)?.focus({ preventScroll: true });
+      return;
+    }
+    if (!generationSubmit) return;
+    generationSubmit.disabled = true;
+    generationSubmit.classList.add("is-loading");
+    result.hidden = false;
+    result.classList.remove("has-error");
+    resultTitle.textContent = "Создаём пакет вариантов";
+    resultStatus.textContent = "Проверяем варианты и резервируем лимит одной транзакцией...";
+    outputGrid.replaceChildren();
+    runProgress.hidden = true;
+    setGenerationActions();
+    try {
+      const body = buildGenerationPayload();
+      body.set("client_request_id", newGenerationRequestID());
+      const headers = { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" };
+      if (assistantSlice.get().correlationID) headers["X-Correlation-ID"] = assistantSlice.get().correlationID;
+      const response = await fetch("/generate/batches", { method: "POST", headers, body, credentials: "same-origin" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Gateway отклонил пакет вариантов");
+      pendingParentJobID = "";
+      updateGenerationQuota(payload.quota);
+      if (payload.batch) {
+        const current = batchSlice.get().batches || [];
+        batchSlice.dispatch({
+          type: "SET_BATCHES",
+          batches: [payload.batch, ...current.filter((batch) => batch.batch_id !== payload.batch.batch_id)],
+        });
+      }
+      if (historySlice.get().collapsed) {
+        historySlice.dispatch({ type: "SET_COLLAPSED", collapsed: false }, (state) => ({ ...state, collapsed: false }));
+        syncGenerationHistoryVisibility({ persist: true });
+      }
+      renderJobs();
+      resultTitle.textContent = "Пакет поставлен в очередь";
+      resultStatus.textContent = `${batchVariantCountLabel(validation.count)} будут выполнены последовательно и появятся ниже без обновления страницы.`;
+      await refreshJobs();
+      window.requestAnimationFrame(() => variantsSection?.scrollIntoView({ block: "start", behavior: "smooth" }));
+    } catch (error) {
+      resultTitle.textContent = "Не удалось создать пакет";
+      resultStatus.textContent = error.message || "Gateway временно недоступен.";
+      result.classList.add("has-error");
+    } finally {
+      generationSubmit.classList.remove("is-loading");
+      syncBatchBuilder();
+    }
+  };
+
   root.querySelectorAll("[data-generation-profile]").forEach((button) => {
     button.addEventListener("click", () => applyGenerationProfile(button.dataset.generationProfile));
   });
@@ -3499,8 +4083,19 @@
       generationAdvanced.querySelector(".minimax-video-settings select, .minimax-video-settings input")?.focus({ preventScroll: true });
     }
   });
-  form.addEventListener("input", syncGenerationSummary);
-  form.addEventListener("change", syncGenerationSummary);
+  form.addEventListener("input", () => {
+    syncGenerationSummary();
+    syncBatchBuilder();
+  });
+  form.addEventListener("change", () => {
+    syncGenerationSummary();
+    syncBatchBuilder();
+  });
+  batchParameter?.addEventListener("change", () => syncBatchBuilder({ resetRange: true }));
+  batchCompareClose?.addEventListener("click", () => batchCompare?.close?.());
+  batchCompare?.addEventListener("click", (event) => {
+    if (event.target === batchCompare) batchCompare.close?.();
+  });
   recipeSelect?.addEventListener("change", () => {
     recipeSlice.dispatch({ type: "SELECT", id: recipeSelect.value }, (state) => ({ ...state, selectedID: recipeSelect.value }));
     if (recipeApply) recipeApply.disabled = !recipeSelect.value;
@@ -3541,7 +4136,8 @@
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!selectedChoice() || !selectedGenerationWorkflow() || !model?.value || !positive.value.trim()) return;
-    if (activeGenerationID || activeGenerationRequestID) {
+    const batchLaunch = Boolean(batchEnabled?.checked);
+    if (!batchLaunch && (activeGenerationID || activeGenerationRequestID)) {
       result.hidden = false;
       resultTitle.textContent = "Генерация уже выполняется";
       resultStatus.textContent = "Сначала дождитесь результата или отмените текущую задачу.";
@@ -3570,7 +4166,11 @@
       preflight?.scrollIntoView({ block: "center", behavior: "smooth" });
       return;
     }
-    const submit = document.getElementById("generation-submit");
+    if (batchLaunch) {
+      await launchGenerationBatch();
+      return;
+    }
+    const submit = generationSubmit;
     submit.disabled = true;
     submit.classList.add("is-loading");
     result.hidden = false;
@@ -3652,6 +4252,7 @@
   calculateResolution();
   syncMiniMaxSharpenFields();
   syncPromptAssistant();
+  syncBatchBuilder();
   refreshQueueOverview();
   refreshRecipes().catch((error) => setRecipeState(error.message || "Не удалось загрузить наборы", "error"));
   refreshJobs().finally(connectGenerationJobEvents);

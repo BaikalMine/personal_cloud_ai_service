@@ -74,6 +74,43 @@ test("generation wizard covers Krea2, Flux2 and MiniMax", async ({ page }, testI
   await expect(page.locator("#minimax-video-reference")).toBeVisible();
 });
 
+test("controlled generation batches stay clear and usable at every viewport", async ({ page }, testInfo) => {
+  await open(page, "/preview/generate");
+  await page.getByRole("button", { name: /Текст в изображение/ }).click();
+  await page.getByRole("button", { name: "Продолжить" }).click();
+
+  await page.locator("#generation-batch-enabled").check();
+  await page.locator(".generation-batch-mode .ui-segment").filter({ hasText: "Один параметр" }).click();
+  await page.locator("#generation-batch-count").fill("3");
+  await page.locator("#generation-batch-parameter").selectOption("steps");
+  await page.locator("#generation-batch-from").fill("7");
+  await page.locator("#generation-batch-to").fill("9");
+  await expect(page.locator("#generation-submit")).toHaveText("Запустить 3 варианта");
+  await expect(page.locator("#generation-batch-error")).toBeHidden();
+  await page.locator("body").evaluate((body) => body.classList.add("visualize-generation-batches"));
+
+  const group = page.locator('section.generation-batch-group[data-batch-id="batch-krea-steps"]');
+  await expect(group).toBeVisible();
+  await expect(group.locator(".generation-job--batch")).toHaveCount(3);
+  await expect(group.locator(".generation-batch-progress")).toContainText("2 из 3");
+  await expect(group.getByRole("button", { name: "Новая ветка" })).toBeVisible();
+  await expect(group).toHaveScreenshot("generation-batch-group.png", { stylePath: visualStyle });
+  await assertNoViewportOverflow(page, `${testInfo.project.name} generation batch workbench`);
+  await expect(page).toHaveScreenshot("generation-batch-workbench.png", { fullPage: true, stylePath: visualStyle });
+
+  const compareChecks = group.locator('.generation-batch-compare-toggle input[type="checkbox"]');
+  await compareChecks.nth(0).check();
+  await compareChecks.nth(1).check();
+  await group.getByRole("button", { name: "Сравнить 2 варианта" }).click();
+  await expect(page.locator("#generation-batch-compare")).toBeVisible();
+  await expect(page.locator(".generation-batch-comparison-item")).toHaveCount(2);
+  await expect(page.locator(".generation-batch-differences")).toContainText("Вариант 1: 7");
+  await assertNoViewportOverflow(page, `${testInfo.project.name} generation batches`);
+  await expect(page).toHaveScreenshot("generation-batches.png", { stylePath: visualStyle });
+  await page.locator("#generation-batch-compare-close").click();
+  await expect(page.locator("#generation-batch-compare")).toBeHidden();
+});
+
 test("prompt assistant review stays readable at every viewport", async ({ page }, testInfo) => {
   await open(page, "/preview/generate?template=image-to-image&workflow=photoflow-flux2-edit&media=1&slot=1&role=identity");
   await expect(page.locator('.generation-workflow-choice.is-selected[data-preset-id="photoflow-flux2-edit"]')).toBeVisible();

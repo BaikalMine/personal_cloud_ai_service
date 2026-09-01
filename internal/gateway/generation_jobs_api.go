@@ -35,6 +35,9 @@ type generationJobView struct {
 	Seed            int64                 `json:"seed"`
 	Attempt         int                   `json:"attempt"`
 	InputCount      int                   `json:"input_count"`
+	BatchID         string                `json:"batch_id,omitempty"`
+	BatchPosition   int                   `json:"batch_position,omitempty"`
+	ExperimentValue string                `json:"experiment_value,omitempty"`
 	Prompt          string                `json:"prompt,omitempty"`
 	Cancellable     bool                  `json:"cancellable"`
 	Retryable       bool                  `json:"retryable"`
@@ -73,6 +76,7 @@ func (a *App) generationJobView(job domain.GenerationJob) generationJobView {
 		State: generationJobClientState(job), JobState: string(job.State), Message: job.StatusMessage,
 		ErrorCode: job.ErrorCode, TemplateID: job.TemplateID, WorkflowID: job.WorkflowID,
 		ModelName: job.ModelName, Seed: job.Seed, Attempt: job.Attempt, InputCount: job.InputCount,
+		BatchPosition: job.BatchPosition, ExperimentValue: job.ExperimentValue,
 		Cancellable: job.State.Cancellable() && job.CancellationRequestedAt == nil,
 		Retryable:   job.State.Terminal() && len(job.PayloadCipher) > 0,
 		CreatedAt:   job.CreatedAt, UpdatedAt: job.UpdatedAt, FinishedAt: job.FinishedAt,
@@ -97,15 +101,21 @@ func (a *App) generationJobView(job domain.GenerationJob) generationJobView {
 }
 
 func (a *App) generationJobViews(ctx context.Context, jobs []domain.GenerationJob, userID int64) ([]generationJobView, error) {
+	promptIDs := make([]string, 0, len(jobs))
+	for _, job := range jobs {
+		if job.PromptID != "" {
+			promptIDs = append(promptIDs, job.PromptID)
+		}
+	}
+	mediaByPrompt, err := a.store.ListGenerationMediaForPrompts(ctx, userID, promptIDs)
+	if err != nil {
+		return nil, err
+	}
 	views := make([]generationJobView, 0, len(jobs))
 	for _, job := range jobs {
 		view := a.generationJobView(job)
 		if job.PromptID != "" {
-			media, err := a.store.ListGenerationVariantMedia(ctx, userID, job.PromptID)
-			if err != nil {
-				return nil, err
-			}
-			for _, item := range media {
+			for _, item := range mediaByPrompt[job.PromptID] {
 				view.Media = append(view.Media, generationMediaView{
 					ID: item.ID, URL: "/generate/library/" + strconv.FormatInt(item.ID, 10),
 					Filename: item.Filename, MediaType: item.MediaType, ExpiresUnix: item.ExpiresAt.UnixMilli(),

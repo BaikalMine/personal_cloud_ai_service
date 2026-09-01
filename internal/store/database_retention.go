@@ -125,6 +125,14 @@ func (s *Store) CleanupDatabaseRetention(ctx context.Context, cutoffs domain.Dat
 				ORDER BY COALESCE(job.finished_at,job.updated_at),job.id LIMIT $2::integer FOR UPDATE SKIP LOCKED
 			)
 			DELETE FROM generation_jobs item USING doomed WHERE item.id=doomed.id`},
+		{name: "generation_batches", before: cutoffs.GenerationJobs, query: `
+			WITH doomed AS (
+				SELECT batch.id FROM generation_batches batch
+				WHERE batch.updated_at < $1
+				  AND NOT EXISTS (SELECT 1 FROM generation_jobs job WHERE job.batch_id=batch.id)
+				ORDER BY batch.updated_at,batch.id LIMIT $2::integer FOR UPDATE SKIP LOCKED
+			)
+			DELETE FROM generation_batches item USING doomed WHERE item.id=doomed.id`},
 		{name: "comfy_output_ownership", before: cutoffs.OutputOwnerships, query: `
 			WITH doomed AS (
 				SELECT item.id FROM comfy_output_ownership item
@@ -309,6 +317,7 @@ func databaseOldestQueries() map[string]string {
 		"gateway_observations":             `SELECT MIN(recorded_at) FROM gateway_observations`,
 		"generation_requests":              `SELECT MIN(created_at) FROM generation_requests`,
 		"generation_jobs":                  `SELECT MIN(created_at) FROM generation_jobs`,
+		"generation_batches":               `SELECT MIN(created_at) FROM generation_batches`,
 		"generation_job_transitions":       `SELECT MIN(created_at) FROM generation_job_transitions`,
 		"generation_job_revision":          `SELECT MIN(changed_at) FROM generation_job_revision`,
 		"quick_generation_recipes":         `SELECT MIN(created_at) FROM quick_generation_recipes`,

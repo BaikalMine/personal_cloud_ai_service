@@ -75,8 +75,18 @@ func TestDurableGenerationJobsMigrationBackfill(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM generation_job_transitions`).Scan(&transitionCount); err != nil || transitionCount != jobCount {
 		t.Fatalf("backfilled generation job transitions=%d want=%d err=%v", transitionCount, jobCount, err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version IN (40,41,42,43,44,45)`).Scan(&migrationCount); err != nil || migrationCount != 6 {
-		t.Fatalf("generation job, media, and content task migration records=%d want=6 err=%v", migrationCount, err)
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version BETWEEN 40 AND 48`).Scan(&migrationCount); err != nil || migrationCount != 9 {
+		t.Fatalf("generation job, media, content task, and batch migration records=%d want=9 err=%v", migrationCount, err)
+	}
+	var batchTablePresent bool
+	var batchJobColumns int
+	if err := db.QueryRowContext(ctx, `SELECT to_regclass('public.generation_batches') IS NOT NULL`).Scan(&batchTablePresent); err != nil || !batchTablePresent {
+		t.Fatalf("generation batches table present=%v err=%v", batchTablePresent, err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM information_schema.columns
+		WHERE table_schema='public' AND table_name='generation_jobs'
+		  AND column_name IN ('batch_id','batch_position','experiment_value')`).Scan(&batchJobColumns); err != nil || batchJobColumns != 3 {
+		t.Fatalf("generation batch job columns=%d want=3 err=%v", batchJobColumns, err)
 	}
 	var storageFormat string
 	var chunkTablePresent bool

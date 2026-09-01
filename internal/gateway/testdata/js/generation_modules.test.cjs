@@ -10,6 +10,7 @@ const media = require("../../static/generation-media.js");
 const summary = require("../../static/generation-summary.js");
 const video = require("../../static/generation-video.js");
 const assistant = require("../../static/generation-assistant.js");
+const batch = require("../../static/generation-batch.js");
 const job = require("../../static/generation-job.js");
 const recipes = require("../../static/generation-recipes.js");
 const history = require("../../static/generation-history.js");
@@ -172,6 +173,51 @@ test("assistant state keeps prompt lineage through review and edits", () => {
   assert.equal(state.approved, true);
 });
 
+test("generation batches expose controlled parameters for every supported family", () => {
+  const krea = batch.parameterOptions({ family: "krea2", templateID: "image-to-image", loras: ["detail.safetensors"] });
+  assert.ok(krea.some((item) => item.name === "reference_boost"));
+  assert.ok(krea.some((item) => item.name === "lora_model_strength_1"));
+  assert.equal(krea.some((item) => item.name === "flux_guidance"), false);
+
+  const flux = batch.parameterOptions({ family: "flux2", templateID: "image-to-image" });
+  assert.equal(flux.find((item) => item.name === "flux_guidance").max, 10);
+  assert.equal(flux.find((item) => item.name === "flux_active_scale").max, 10);
+
+  const minimax = batch.parameterOptions({
+    family: "minimax_h3", templateID: "minimax-h3-video", rife: true, rtx: true,
+    colorMatch: true, sharpen: true, sharpenMax: 3,
+  });
+  assert.ok(minimax.some((item) => item.name === "video_rife_multiplier"));
+  assert.ok(minimax.some((item) => item.name === "video_rtx_scale"));
+  assert.equal(minimax.find((item) => item.name === "video_sharpen_strength").max, 3);
+});
+
+test("generation batches enforce quota, distinct values, and two-result comparison", () => {
+  const options = batch.parameterOptions({ family: "krea2", templateID: "text-to-image" });
+  assert.equal(batch.validate({ enabled: true, mode: "seeds", count: 4 }, options, { totalLimit: 3, totalRemaining: 3 }).valid, false);
+  assert.match(
+    batch.validate({ enabled: true, mode: "parameter", count: 4, parameter: "steps", from: "8", to: "9" }, options).error,
+    /слишком узкий/i,
+  );
+  assert.equal(batch.validate({ enabled: true, mode: "parameter", count: 4, parameter: "steps", from: "8", to: "11" }, options).valid, true);
+
+  const batchItem = {
+    batch_id: "batch-1",
+    jobs: [{ job_id: "a" }, { job_id: "b" }, { job_id: "c" }],
+    differences: [{ name: "steps", label: "Шаги", values: [
+      { job_id: "a", position: 1, value: "8" },
+      { job_id: "b", position: 2, value: "9" },
+      { job_id: "c", position: 3, value: "10" },
+    ] }],
+  };
+  let state = batch.createState({ batches: [batchItem] });
+  state = batch.reduce(state, { type: "TOGGLE_COMPARE", batchID: "batch-1", jobID: "a" });
+  state = batch.reduce(state, { type: "TOGGLE_COMPARE", batchID: "batch-1", jobID: "b" });
+  state = batch.reduce(state, { type: "TOGGLE_COMPARE", batchID: "batch-1", jobID: "c" });
+  assert.deepEqual(state.selections["batch-1"], ["b", "c"]);
+  assert.deepEqual(batch.selectedDifferences(state, batchItem)[0].values.map((item) => item.value), ["9", "10"]);
+});
+
 test("job state never moves its SSE revision backwards", () => {
   let state = job.reduce(undefined, { type: "LOAD_START" });
   state = job.reduce(state, { type: "SET_JOBS", items: [{ job_id: "a" }], revision: 12 });
@@ -294,7 +340,7 @@ class FakeElement {
   getBoundingClientRect() { return { left: 0, width: 24 }; }
 }
 
-const moduleAPIs = { store: storeModule, wizard, media, summary, video, assistant, job, recipes, history, lightbox };
+const moduleAPIs = { store: storeModule, wizard, media, summary, video, assistant, batch, job, recipes, history, lightbox };
 
 const pageContextWithout = (omittedModule) => {
   const elements = new Map();
@@ -325,6 +371,7 @@ const pageContextWithout = (omittedModule) => {
     querySelectorAll: () => [],
     getElementById: (id) => id === "generation-form" ? form : element(id),
     createElement: (tag) => element(`created-${tag}-${elements.size}`),
+    createDocumentFragment: () => ({ append() {} }),
     addEventListener() {},
   };
   const modules = Object.fromEntries(Object.entries(moduleAPIs).filter(([name]) => name !== omittedModule));

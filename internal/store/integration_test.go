@@ -50,6 +50,7 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	assertMiningProfiles(t, ctx, repository, adminID)
 	assertDatabaseRetentionLifecycle(t, ctx, db, repository, adminID)
 	assertGenerationJobLifecycle(t, ctx, db, repository, adminID)
+	assertGenerationBatchLifecycle(t, ctx, db, repository)
 	assertObservabilityLifecycle(t, ctx, repository, adminID)
 
 	inviteHash := security.HashToken("single-use-integration-invite")
@@ -952,6 +953,198 @@ func assertGenerationJobLifecycle(t *testing.T, ctx context.Context, db *sql.DB,
 	}
 }
 
+func assertGenerationBatchLifecycle(t *testing.T, ctx context.Context, db *sql.DB, repository *store.Store) {
+	t.Helper()
+	var ownerID, foreignID int64
+	if err := db.QueryRowContext(ctx, `INSERT INTO users
+		(username,password_hash,role,can_use_quick_generation,generation_daily_limit,generation_total_limit)
+		VALUES ('batch-owner','hash','user',true,4,4) RETURNING id`).Scan(&ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `INSERT INTO users(username,password_hash,role,can_use_quick_generation)
+		VALUES ('batch-foreign','hash','user',true) RETURNING id`).Scan(&foreignID); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := db.ExecContext(cleanupCtx, `DELETE FROM generation_requests WHERE user_id IN ($1,$2)`, ownerID, foreignID); err != nil {
+			t.Errorf("clean generation batch requests: %v", err)
+		}
+		if _, err := db.ExecContext(cleanupCtx, `DELETE FROM generation_jobs WHERE user_id IN ($1,$2)`, ownerID, foreignID); err != nil {
+			t.Errorf("clean generation batch jobs: %v", err)
+		}
+		if _, err := db.ExecContext(cleanupCtx, `DELETE FROM generation_batches WHERE user_id IN ($1,$2)`, ownerID, foreignID); err != nil {
+			t.Errorf("clean generation batches: %v", err)
+		}
+		if _, err := db.ExecContext(cleanupCtx, `DELETE FROM quick_generation_daily_usage WHERE user_id IN ($1,$2)`, ownerID, foreignID); err != nil {
+			t.Errorf("clean generation batch usage: %v", err)
+		}
+		if _, err := db.ExecContext(cleanupCtx, `DELETE FROM users WHERE id IN ($1,$2)`, ownerID, foreignID); err != nil {
+			t.Errorf("clean generation batch users: %v", err)
+		}
+	}()
+
+	jobs := make([]domain.CreateGenerationBatchJobParams, 0, 3)
+	for index := 1; index <= 3; index++ {
+		suffix := strconv.Itoa(index)
+		jobs = append(jobs, domain.CreateGenerationBatchJobParams{
+			PublicID:        "job_batch_integration_000" + suffix,
+			CorrelationID:   "batch-integration-correlation",
+			RequestID:       "integration-batch-primary_v0" + suffix,
+			Position:        index,
+			ExperimentValue: strconv.Itoa(100 + index),
+			Prepared: domain.PreparedGenerationJob{
+				TemplateID: "text-to-image", WorkflowID: "krea2", ModelName: "Krea2", Seed: int64(100 + index),
+				PayloadCipher: []byte{byte(index)}, Dependencies: []string{"comfyui"},
+			},
+		})
+	}
+	params := domain.CreateGenerationBatchParams{
+		PublicID: "batch_integration_primary_0001", UserID: ownerID, UsernameSnapshot: "batch-owner",
+		RequestID: "integration-batch-primary", TemplateID: "text-to-image", WorkflowID: "krea2", ModelName: "Krea2",
+		Mode: domain.GenerationBatchSeeds, SeedLocked: false, MaxParallel: 1, Jobs: jobs,
+	}
+	quotaBefore, err := repository.QuickGenerationQuota(ctx, ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, created, err := repository.CreateGenerationBatch(ctx, params)
+	if err != nil || !created || batch.TotalCount != 3 || batch.DraftCount != 3 {
+		t.Fatalf("create generation batch: batch=%+v created=%v err=%v", batch, created, err)
+	}
+	quotaReserved, err := repository.QuickGenerationQuota(ctx, ownerID)
+	if err != nil || quotaReserved.DailyUsed != quotaBefore.DailyUsed+3 || quotaReserved.TotalUsed != quotaBefore.TotalUsed+3 {
+		t.Fatalf("batch quota reservation: before=%+v after=%+v err=%v", quotaBefore, quotaReserved, err)
+	}
+
+	repeated := params
+	repeated.PublicID = "batch_integration_retry_0001"
+	recovered, created, err := repository.CreateGenerationBatch(ctx, repeated)
+	if err != nil || created || recovered.ID != batch.ID || recovered.PublicID != batch.PublicID {
+		t.Fatalf("idempotent generation batch: batch=%+v created=%v err=%v", recovered, created, err)
+	}
+	quotaRepeated, err := repository.QuickGenerationQuota(ctx, ownerID)
+	if err != nil || quotaRepeated.DailyUsed != quotaReserved.DailyUsed || quotaRepeated.TotalUsed != quotaReserved.TotalUsed {
+		t.Fatalf("repeated batch changed quota: before=%+v after=%+v err=%v", quotaReserved, quotaRepeated, err)
+	}
+
+	overLimit := params
+	overLimit.PublicID = "batch_integration_over_limit_0001"
+	overLimit.RequestID = "integration-batch-over-limit"
+	overLimit.Jobs = append([]domain.CreateGenerationBatchJobParams(nil), jobs[:2]...)
+	for index := range overLimit.Jobs {
+		overLimit.Jobs[index].PublicID = "job_batch_over_limit_000" + strconv.Itoa(index+1)
+		overLimit.Jobs[index].RequestID = "integration-batch-over-limit_v0" + strconv.Itoa(index+1)
+	}
+	if _, _, err := repository.CreateGenerationBatch(ctx, overLimit); !errors.Is(err, store.ErrQuickGenerationTotalLimit) {
+		t.Fatalf("over-limit generation batch error=%v, want ErrQuickGenerationTotalLimit", err)
+	}
+	var batchRows, childRows int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM generation_batches WHERE user_id=$1`, ownerID).Scan(&batchRows); err != nil || batchRows != 1 {
+		t.Fatalf("atomic batch rows=%d want=1 err=%v", batchRows, err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM generation_jobs WHERE user_id=$1 AND batch_id=$2`, ownerID, batch.ID).Scan(&childRows); err != nil || childRows != 3 {
+		t.Fatalf("atomic batch children=%d want=3 err=%v", childRows, err)
+	}
+
+	first, err := repository.ClaimNextGenerationBatchJob(ctx, 2)
+	if err != nil || first.BatchID == nil || *first.BatchID != batch.ID || first.BatchPosition != 1 || first.State != domain.GenerationJobPreparing {
+		t.Fatalf("claim first batch job: job=%+v err=%v", first, err)
+	}
+	if _, err := repository.ClaimNextGenerationBatchJob(ctx, 2); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("active sibling did not block next claim: %v", err)
+	}
+	first, _, err = repository.TransitionGenerationJob(ctx, first.ID, domain.GenerationJobTransitionParams{State: domain.GenerationJobWaitingForResources, Message: "Ожидаем ресурсы"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err = repository.BindGenerationJobPrompt(ctx, first.ID, "integration-batch-prompt-0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if committed, err := repository.CommitQuickGenerationForJob(ctx, first.ID); err != nil || !committed {
+		t.Fatalf("commit batch child quota: committed=%v err=%v", committed, err)
+	}
+	for _, state := range []domain.GenerationJobState{domain.GenerationJobQueued, domain.GenerationJobPostprocessing, domain.GenerationJobArchiving} {
+		first, _, err = repository.TransitionGenerationJob(ctx, first.ID, domain.GenerationJobTransitionParams{State: state, Message: string(state)})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err = repository.MarkGenerationJobResourcesReleased(ctx, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _, err = repository.TransitionGenerationJob(ctx, first.ID, domain.GenerationJobTransitionParams{State: domain.GenerationJobCompleted, Message: "Готово"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	winnerBatch, err := repository.SetGenerationBatchWinner(ctx, ownerID, batch.PublicID, first.PublicID)
+	if err != nil || winnerBatch.WinnerJobID == nil || *winnerBatch.WinnerJobID != first.ID {
+		t.Fatalf("set generation batch winner: batch=%+v err=%v", winnerBatch, err)
+	}
+	standalone, _, err := repository.CreateGenerationJob(ctx, domain.CreateGenerationJobParams{
+		PublicID: "job_batch_standalone_0001", UserID: ownerID, UsernameSnapshot: "batch-owner",
+		RequestID: "integration-batch-standalone-request",
+	})
+	if err != nil {
+		t.Fatalf("create standalone generation job: %v", err)
+	}
+	if _, err := repository.SetGenerationBatchWinner(ctx, ownerID, batch.PublicID, standalone.PublicID); !errors.Is(err, store.ErrGenerationBatchWinnerConflict) {
+		t.Fatalf("standalone batch winner error=%v, want ErrGenerationBatchWinnerConflict", err)
+	}
+	if _, err := repository.SetGenerationBatchWinner(ctx, foreignID, batch.PublicID, first.PublicID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("foreign batch winner error=%v, want sql.ErrNoRows", err)
+	}
+
+	second, err := repository.ClaimNextGenerationBatchJob(ctx, 2)
+	if err != nil || second.BatchPosition != 2 {
+		t.Fatalf("claim second batch job: job=%+v err=%v", second, err)
+	}
+	if _, _, _, err := repository.RequestGenerationBatchCancellation(ctx, foreignID, batch.PublicID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("foreign batch cancellation error=%v, want sql.ErrNoRows", err)
+	}
+	cancelledBatch, pending, changed, err := repository.RequestGenerationBatchCancellation(ctx, ownerID, batch.PublicID)
+	if err != nil || !changed || cancelledBatch.CancellationRequestedAt == nil || len(pending) != 3 {
+		t.Fatalf("request generation batch cancellation: batch=%+v jobs=%d changed=%v err=%v", cancelledBatch, len(pending), changed, err)
+	}
+	for _, job := range pending {
+		if job.State.Terminal() {
+			continue
+		}
+		confirmed, _, confirmErr := repository.ConfirmGenerationJobCancellation(ctx, job.ID)
+		if confirmErr != nil {
+			t.Fatal(confirmErr)
+		}
+		if _, releaseErr := repository.ReleaseQuickGenerationForJob(ctx, job.ID); releaseErr != nil {
+			t.Fatal(releaseErr)
+		}
+		confirmed, releaseErr := repository.MarkGenerationJobResourcesReleased(ctx, job.ID)
+		if releaseErr != nil {
+			t.Fatal(releaseErr)
+		}
+		if _, _, transitionErr := repository.TransitionGenerationJob(ctx, confirmed.ID, domain.GenerationJobTransitionParams{State: domain.GenerationJobCancelled, Message: "Отменено"}); transitionErr != nil {
+			t.Fatal(transitionErr)
+		}
+	}
+	finalBatch, err := repository.GenerationBatchByPublicID(ctx, ownerID, batch.PublicID)
+	if err != nil || finalBatch.CompletedCount != 1 || finalBatch.CancelledCount != 2 || finalBatch.ActiveCount != 0 || finalBatch.DraftCount != 0 {
+		t.Fatalf("final generation batch state: batch=%+v err=%v", finalBatch, err)
+	}
+	quotaFinal, err := repository.QuickGenerationQuota(ctx, ownerID)
+	if err != nil || quotaFinal.DailyUsed != quotaBefore.DailyUsed+1 || quotaFinal.TotalUsed != quotaBefore.TotalUsed+1 {
+		t.Fatalf("batch cancellation quota: before=%+v after=%+v err=%v", quotaBefore, quotaFinal, err)
+	}
+	if _, err := repository.SetGenerationBatchWinner(ctx, ownerID, batch.PublicID, second.PublicID); !errors.Is(err, store.ErrGenerationBatchWinnerConflict) {
+		t.Fatalf("cancelled batch child became winner: %v", err)
+	}
+	if _, err := repository.ClaimNextGenerationBatchJob(ctx, 2); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("cancelled batch still dispatched work: %v", err)
+	}
+}
+
 func assertObservabilityLifecycle(t *testing.T, ctx context.Context, repository *store.Store, userID int64) {
 	t.Helper()
 	now := time.Now().UTC()
@@ -1127,6 +1320,9 @@ func assertDatabaseRetentionLifecycle(t *testing.T, ctx context.Context, db *sql
 		 VALUES ('job_retention_old_0001',$1,'admin','retention-job-old','completed','Готово',now() - interval '71 hours',now() - interval '71 hours',now() - interval '71 hours',now() - interval '72 hours',now() - interval '71 hours'),
 		        ('job_retention_current_0001',$1,'admin','retention-job-current','completed','Готово',now(),now(),now(),now(),now()),
 		        ('job_retention_active_0001',$1,'admin','retention-job-active','running','Выполняем workflow',now(),NULL,NULL,now() - interval '72 hours',now())`,
+		`INSERT INTO generation_batches(public_id,user_id,username_snapshot,request_id,template_id,workflow_id,model_name,experiment_mode,total_count,created_at,updated_at)
+		 VALUES ('batch_retention_old_0001',$1,'admin','retention-batch-old','text-to-image','krea2','Krea2','seeds',2,now() - interval '72 hours',now() - interval '71 hours'),
+		        ('batch_retention_current_0001',$1,'admin','retention-batch-current','text-to-image','krea2','Krea2','seeds',2,now(),now())`,
 		`WITH event AS (
 			INSERT INTO content_events(user_id,service,kind,external_id,prompt_cipher,response_cipher,metadata_cipher,expires_at)
 			VALUES ($1,'comfyui','comfyui_prompt','retention-ownership-event',decode('00','hex'),decode('00','hex'),decode('00','hex'),now() + interval '7 days')
@@ -1169,7 +1365,7 @@ func assertDatabaseRetentionLifecycle(t *testing.T, ctx context.Context, db *sql
 		"quick_generation_daily_usage": 1, "invites": 1, "audit_log": 1,
 		"host_metrics": 1, "service_observations": 1, "gateway_observations": 1,
 		"quick_generation_variants": 1, "comfy_output_ownership": 1,
-		"generation_jobs": 1,
+		"generation_jobs": 1, "generation_batches": 1,
 	} {
 		if first.DeletedRows[table] != expected {
 			t.Fatalf("first cleanup deleted %s=%d, want %d", table, first.DeletedRows[table], expected)
@@ -1208,6 +1404,7 @@ func assertDatabaseRetentionLifecycle(t *testing.T, ctx context.Context, db *sql
 		`SELECT count(*) FROM gateway_observations WHERE database_bytes=200`:                                                                1,
 		`SELECT count(*) FROM quick_generation_variants WHERE prompt_id IN ('retention-current-variant','retention-active-variant')`:        2,
 		`SELECT count(*) FROM generation_jobs WHERE request_id IN ('retention-job-current','retention-job-active')`:                         2,
+		`SELECT count(*) FROM generation_batches WHERE request_id='retention-batch-current'`:                                                1,
 		`SELECT count(*) FROM comfy_output_ownership WHERE filename='current.png'`:                                                          1,
 	} {
 		var count int
@@ -1257,6 +1454,7 @@ func cleanupDatabaseRetentionFixtures(t *testing.T, db *sql.DB, userID int64) {
 		{`DELETE FROM gateway_observations WHERE database_bytes IN (100,200)`, nil},
 		{`DELETE FROM quick_generation_variants WHERE prompt_id IN ('retention-old-variant','retention-current-variant','retention-active-variant')`, nil},
 		{`DELETE FROM generation_jobs WHERE request_id IN ('retention-job-old','retention-job-current','retention-job-active')`, nil},
+		{`DELETE FROM generation_batches WHERE request_id IN ('retention-batch-old','retention-batch-current')`, nil},
 		{`DELETE FROM comfy_output_ownership WHERE prompt_id='retention-ownership-event'`, nil},
 		{`DELETE FROM content_events WHERE external_id='retention-ownership-event'`, nil},
 	}

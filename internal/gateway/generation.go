@@ -149,6 +149,9 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 	mux.Handle("/generate/jobs/events", quick(http.HandlerFunc(a.handleGenerationJobEvents)))
 	mux.Handle("/generate/jobs/cancel", quick(http.HandlerFunc(a.handleGenerationJobCancel)))
 	mux.Handle("/generate/jobs/retry", quick(http.HandlerFunc(a.handleGenerationJobRetry)))
+	mux.Handle("/generate/batches", quick(http.HandlerFunc(a.handleGenerationBatches)))
+	mux.Handle("/generate/batches/cancel", quick(http.HandlerFunc(a.handleGenerationBatchCancel)))
+	mux.Handle("/generate/batches/winner", quick(http.HandlerFunc(a.handleGenerationBatchWinner)))
 	mux.Handle("/generate/prompt-assistant", promptAssistant)
 	mux.Handle("/generate/prompt-assistant/decision", promptAssistantDecision)
 	mux.Handle("/generate/status", status)
@@ -2088,6 +2091,9 @@ func (a *App) refreshTrackedGenerationStatuses(ctx context.Context) (int64, erro
 		}
 		processed++
 		jobCtx := generationJobTraceContext(ctx, job)
+		if job.BatchID != nil && job.State == domain.GenerationJobDraft && job.CancellationRequestedAt == nil {
+			continue
+		}
 		if job.UserID == nil {
 			a.failGenerationJob(jobCtx, job, "generation_owner_deleted", "Владелец задания удалён", errors.New("generation owner was deleted"))
 			continue
