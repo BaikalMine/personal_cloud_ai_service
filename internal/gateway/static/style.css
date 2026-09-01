@@ -1257,11 +1257,34 @@ textarea:focus { outline: 2px solid rgba(85,199,216,.22); border-color: var(--cy
 .workflow-settings-heading small { margin-top: 3px; color: var(--muted); font-size: var(--font-size-utility); font-weight: 600; }
 .workflow-load-note { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; font-style: normal; }
 .workflow-load-note b, .video-enhancement-toggle .workflow-load-note b { padding: 2px 6px; border: 1px solid #68583c; border-radius: 4px; background: rgba(229, 183, 93, .07); color: #e8cc92; font-size: var(--font-size-utility); font-weight: 800; line-height: 1.3; }
+.krea-processing > .workflow-settings-heading { margin-bottom: 15px; }
+.krea-module-list { overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: #101615; }
+.krea-module { background: #101615; transition: background-color var(--transition-fast); }
+.krea-module + .krea-module { border-top: 1px solid var(--line); }
+.krea-module.is-enabled { background: #121c19; }
+.krea-module-header { min-height: 82px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 18px; padding: 14px 16px; }
+.krea-module-copy { min-width: 0; display: grid; gap: 3px; }
+.krea-module-copy > strong { color: var(--text); font-size: 14px; line-height: 1.35; }
+.krea-module-copy > small { max-width: 760px; color: var(--muted); font-size: var(--font-size-utility); font-weight: 600; line-height: 1.45; }
+.krea-module-node { color: var(--cyan); font-size: var(--font-size-utility); font-weight: 850; line-height: 1.3; text-transform: uppercase; }
+.krea-module-header > .setting-toggle { min-width: 118px; justify-content: center; }
+.krea-module.is-enabled .krea-module-header > .setting-toggle { border-color: #3f927c; background: #122720; }
+.krea-module-options { padding: 15px 16px 17px; border-top: 1px solid var(--line); background: #0e1414; }
+.krea-module-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; }
+.krea-module-grid > label:not(.setting-toggle) { min-width: 0; display: grid !important; grid-template-rows: auto 42px; align-content: end; gap: 6px; color: var(--text-soft); font-size: var(--font-size-utility); font-weight: 750; }
+.krea-module-grid > label:not(.setting-toggle) > input, .krea-module-grid > label:not(.setting-toggle) > select { min-width: 0; height: 42px; margin: 0 !important; }
+.krea-module-grid > .setting-toggle { min-height: 42px; align-self: stretch; }
+.krea-filter-group { display: grid; gap: 9px; }
+.krea-filter-group + .krea-filter-group { margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--line); }
+.krea-filter-group > strong { color: var(--text-soft); font-size: var(--font-size-utility); }
 @media (max-width: 1180px) {
   .generation-run-dock { grid-template-columns: 1fr; }
   .generation-summary-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 9px; }
   .generation-summary-facts > div:nth-child(4) { padding-left: 0; border-left: 0; }
   .generation-run-dock > .generation-actions { justify-content: flex-end; }
+}
+@media (max-width: 980px) {
+  .krea-module-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 900px) {
   .generation-model-picker, .generation-mode-guide { grid-template-columns: 1fr; gap: 12px; }
@@ -1278,6 +1301,12 @@ textarea:focus { outline: 2px solid rgba(85,199,216,.22); border-color: var(--cy
   .generation-mode-guide-facts > div:first-child { padding-top: 0; border-top: 0; }
   .source-image-card { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .source-image-card > .upload-zone, .source-image-card .source-gallery-button { min-height: 150px; padding: 14px 9px; }
+}
+@media (max-width: 620px) {
+  .krea-module-header { grid-template-columns: 1fr; gap: 11px; padding: 13px 12px; }
+  .krea-module-header > .setting-toggle { width: 100%; min-width: 0; justify-content: flex-start; }
+  .krea-module-options { padding: 13px 12px 15px; }
+  .krea-module-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 520px) {
   .generation-summary-head { align-items: stretch; flex-direction: column; gap: 8px; }

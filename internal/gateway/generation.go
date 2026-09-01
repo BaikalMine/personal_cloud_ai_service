@@ -2390,8 +2390,15 @@ func generationAuditMetadata(definition workflowDefinition, input generationForm
 		metadata["krea2_text"] = map[string]any{
 			"base_megapixels": input.BaseMegapixels,
 			"upscale":         map[string]any{"steps": input.UpscaleSteps, "denoise": input.UpscaleDenoise, "auto_denoise": input.UpscaleAutoDenoise, "sampler": input.UpscaleSampler},
-			"detail":          map[string]any{"steps": input.DetailSteps, "denoise": input.DetailDenoise, "cfg": input.DetailCFG, "sampler": input.DetailSampler, "scheduler": input.DetailScheduler},
+			"sage_attention":  map[string]any{"enabled": input.KreaSageEnabled, "mode": input.KreaSageMode, "allow_compile": input.KreaSageAllowCompile, "fp16_accumulation": input.KreaFP16Accumulation},
+			"detail":          map[string]any{"enabled": input.DetailEnabled, "steps": input.DetailSteps, "denoise": input.DetailDenoise, "cfg": input.DetailCFG, "sampler": input.DetailSampler, "scheduler": input.DetailScheduler},
 			"color_transfer":  map[string]any{"enabled": input.ColorTransfer, "method": input.ColorMethod, "mode": input.ColorMode, "strength": input.ColorStrength},
+			"image_filter": map[string]any{
+				"enabled": input.ImageFilterEnabled, "brightness": input.ImageFilterBrightness, "contrast": input.ImageFilterContrast,
+				"saturation": input.ImageFilterSaturation, "sharpness": input.ImageFilterSharpness, "blur": input.ImageFilterBlur,
+				"gaussian_blur": input.ImageFilterGaussian, "edge_enhance": input.ImageFilterEdge, "detail_enhance": input.ImageFilterDetail,
+				"levels": map[string]any{"black": input.ImageLevelBlack, "mid": input.ImageLevelMid, "white": input.ImageLevelWhite},
+			},
 		}
 	case "image-to-image-krea2":
 		metadata["krea2_edit"] = map[string]any{

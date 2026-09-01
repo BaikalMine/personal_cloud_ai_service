@@ -177,6 +177,23 @@ func TestImageWorkflowManifestsDriveFamilyDefaults(t *testing.T) {
 	}
 }
 
+func TestKrea2TextManifestDefinesPhotoFlowBranchDefaults(t *testing.T) {
+	manifest := krea2TextWorkflowManifest()
+	var input generationForm
+	if err := applyWorkflowManifestDefaults(manifest, &input); err != nil {
+		t.Fatal(err)
+	}
+	if input.KreaSageEnabled || !input.DetailEnabled || !input.ColorTransfer || input.ImageFilterEnabled {
+		t.Fatalf("PhotoFlow branch defaults = %#v", input)
+	}
+	if input.KreaSageMode != "auto" || !input.KreaSageAllowCompile || !input.KreaFP16Accumulation {
+		t.Fatalf("SageAttention defaults = %#v", input)
+	}
+	if input.ImageFilterContrast != 1 || input.ImageFilterSaturation != 1 || input.ImageFilterSharpness != 1 || input.ImageLevelMid != 127.5 || input.ImageLevelWhite != 255 {
+		t.Fatalf("image filter defaults = %#v", input)
+	}
+}
+
 func TestWorkflowManifestResolverDoesNotGuessBetweenEditFamilies(t *testing.T) {
 	if _, ok := workflowManifestForInput(generationForm{TemplateID: "image-to-image"}); ok {
 		t.Fatal("ambiguous image-to-image workflow was resolved without a preset")

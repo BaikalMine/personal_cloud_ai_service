@@ -1192,6 +1192,32 @@
     updateWorkflowNext();
   };
 
+  const kreaModules = [...root.querySelectorAll("[data-krea-module]")];
+  const syncKreaOptionalModules = () => {
+    kreaModules.forEach((module) => {
+      const toggle = module.querySelector("[data-krea-module-toggle]");
+      const options = module.querySelector("[data-krea-module-options]");
+      const state = module.querySelector("[data-krea-module-state]");
+      if (!toggle || !options) return;
+      const enabled = toggle.checked;
+      module.classList.toggle("is-enabled", enabled);
+      options.hidden = !enabled;
+      toggle.setAttribute("aria-expanded", String(enabled));
+      if (state) state.textContent = enabled ? "Включено" : "Выключено";
+      options.querySelectorAll("input, select, textarea").forEach((control) => {
+        control.disabled = !enabled || toggle.disabled;
+      });
+    });
+  };
+
+  kreaModules.forEach((module) => {
+    module.querySelector("[data-krea-module-toggle]")?.addEventListener("change", () => {
+      syncKreaOptionalModules();
+      syncGenerationSummary();
+      syncBatchBuilder();
+    });
+  });
+
   const activeLoraSlotKind = () => {
     const family = selectedGenerationWorkflow()?.dataset.family || "";
     if (family === "minimax_h3") return "minimax";
@@ -1254,6 +1280,7 @@
     syncAdaptiveLoraSlots("krea");
     syncAdaptiveLoraSlots("flux");
     syncWorkflowFields();
+    syncKreaOptionalModules();
     calculateResolution();
     syncMiniMaxVideoProfile();
     syncMiniMaxSharpenFields();
@@ -1557,7 +1584,10 @@
         if (!preserveOriginalSize?.checked && factor > 1) options.push(`апскейл ${factor}×`);
       } else {
         if (Number(upscaleSteps?.value || 0) > 0) options.push("апскейл Krea2");
-        if (Number(detailSteps?.value || 0) > 0) options.push("финальная детализация");
+        if (form.elements.krea_sage_enabled?.checked) options.push("SageAttention");
+        if (form.elements.detail_enabled?.checked && Number(detailSteps?.value || 0) > 0) options.push("финальная детализация");
+        if (form.elements.color_transfer?.checked) options.push("согласование цвета");
+        if (form.elements.image_filter_enabled?.checked) options.push("фильтр и уровни");
       }
       if (megapixels >= 3) options.push(`${megapixels.toLocaleString("ru-RU")} Мп`);
     }
@@ -1895,6 +1925,7 @@
     if (isFluxEdit) syncAdaptiveLoraSlots("flux");
     if (isKreaText) syncAdaptiveLoraSlots("krea");
     if (isMiniMax) syncAdaptiveLoraSlots("minimax");
+    syncKreaOptionalModules();
     if (qualityField) qualityField.hidden = !isKreaText;
     if (editorProfile) editorProfile.hidden = !isEdit;
     syncSelectedImageSummary();
@@ -2898,6 +2929,9 @@
     for (const [name, value] of [...body.entries()]) {
       if (numericFieldNames.has(name) && typeof value === "string") body.set(name, value.replaceAll(",", "."));
     }
+    form.querySelectorAll('input[type="checkbox"][name]:not(:disabled)').forEach((checkbox) => {
+      body.set(checkbox.name, checkbox.checked ? "true" : "false");
+    });
     body.set("template_id", selectedChoice()?.dataset.workflowId || "");
     body.set("generation_workflow", selectedGenerationWorkflow()?.dataset.presetId || "");
     body.set("assistant_requested", assistant.original ? "true" : "false");

@@ -80,6 +80,11 @@ type generationForm struct {
 	UpscaleDenoise         float64
 	UpscaleAutoDenoise     bool
 	UpscaleSampler         string
+	KreaSageEnabled        bool
+	KreaSageMode           string
+	KreaSageAllowCompile   bool
+	KreaFP16Accumulation   bool
+	DetailEnabled          bool
 	DetailSteps            int
 	DetailDenoise          float64
 	DetailCFG              float64
@@ -89,6 +94,18 @@ type generationForm struct {
 	ColorMethod            string
 	ColorMode              string
 	ColorStrength          float64
+	ImageFilterEnabled     bool
+	ImageFilterBrightness  float64
+	ImageFilterContrast    float64
+	ImageFilterSaturation  float64
+	ImageFilterSharpness   float64
+	ImageFilterBlur        int
+	ImageFilterGaussian    float64
+	ImageFilterEdge        float64
+	ImageFilterDetail      bool
+	ImageLevelBlack        float64
+	ImageLevelMid          float64
+	ImageLevelWhite        float64
 	SourceMegapixels       float64
 	PreserveOriginalSize   bool
 	FluxGuidance           float64
@@ -385,6 +402,7 @@ func (definition workflowDefinition) buildPrompt(input generationForm) (map[stri
 	adaptWorkflowModelLoaders(definition.ID, cloned, input)
 	pruneOptionalImageNodes(definition.ID, cloned, input)
 	applyWorkflowLoras(definition.ID, cloned, input)
+	applyKrea2TextOptions(definition.ID, cloned, input)
 	applyWorkflowUpscale(definition.ID, cloned, input)
 	prompt := make(map[string]any, len(cloned))
 	for nodeID, node := range cloned {
@@ -573,15 +591,111 @@ func appendKrea2TextLoras(nodes map[string]map[string]any, input generationForm)
 		}
 		previousID = nodeID
 	}
-	if previousID == "19" {
+}
+
+func krea2TextLoraTail(input generationForm) string {
+	previousID := "19"
+	for index := 4; index < len(input.LoraNames); index++ {
+		if strings.TrimSpace(input.LoraNames[index]) != "" {
+			previousID = "gateway_lora_" + strconv.Itoa(index+1)
+		}
+	}
+	return previousID
+}
+
+// applyKrea2TextOptions mirrors the four Fast Groups Bypasser switches in the
+// PhotoFlow workflow. Disabled branches are removed from the submitted prompt,
+// so ComfyUI neither validates nor loads their nodes.
+func applyKrea2TextOptions(workflowID string, nodes map[string]map[string]any, input generationForm) {
+	if workflowID != "text-to-image-krea2" {
 		return
 	}
-	if modelPatch, ok := nodes["5"]["inputs"].(map[string]any); ok {
-		modelPatch["model"] = []any{previousID, 0}
+
+	loraTail := krea2TextLoraTail(input)
+	if textEncode, ok := workflowNodeInputs(nodes, "6"); ok {
+		textEncode["clip"] = []any{loraTail, 1}
 	}
-	if textEncode, ok := nodes["6"]["inputs"].(map[string]any); ok {
-		textEncode["clip"] = []any{previousID, 1}
+
+	modelSource := []any{loraTail, 0}
+	if input.KreaSageEnabled {
+		nodes["gateway_krea_sage"] = map[string]any{
+			"class_type": "PathchSageAttentionKJ",
+			"inputs": map[string]any{
+				"model":          modelSource,
+				"sage_attention": input.KreaSageMode,
+				"allow_compile":  input.KreaSageAllowCompile,
+			},
+		}
+		modelSource = []any{"gateway_krea_sage", 0}
+		if patch, ok := workflowNodeInputs(nodes, "5"); ok {
+			patch["model"] = []any{"gateway_krea_sage", 0}
+			patch["enable_fp16_accumulation"] = input.KreaFP16Accumulation
+			modelSource = []any{"5", 0}
+		}
+	} else {
+		delete(nodes, "5")
 	}
+	for _, nodeID := range []string{"9", "13", "14"} {
+		if sampler, ok := workflowNodeInputs(nodes, nodeID); ok {
+			sampler["model"] = modelSource
+		}
+	}
+
+	if !input.DetailEnabled {
+		delete(nodes, "14")
+		if decoder, ok := workflowNodeInputs(nodes, "15"); ok {
+			decoder["samples"] = []any{"13", 0}
+		}
+	}
+
+	image := []any{"15", 0}
+	if input.ColorTransfer {
+		if color, ok := workflowNodeInputs(nodes, "20"); ok {
+			color["image_target"] = image
+			image = []any{"20", 0}
+		}
+	} else {
+		delete(nodes, "20")
+	}
+
+	if input.ImageFilterEnabled {
+		nodes["gateway_krea_image_filter"] = map[string]any{
+			"class_type": "Image Filter Adjustments",
+			"inputs": map[string]any{
+				"image":          image,
+				"brightness":     input.ImageFilterBrightness,
+				"contrast":       input.ImageFilterContrast,
+				"saturation":     input.ImageFilterSaturation,
+				"sharpness":      input.ImageFilterSharpness,
+				"blur":           input.ImageFilterBlur,
+				"gaussian_blur":  input.ImageFilterGaussian,
+				"edge_enhance":   input.ImageFilterEdge,
+				"detail_enhance": strconv.FormatBool(input.ImageFilterDetail),
+			},
+		}
+		nodes["gateway_krea_image_levels"] = map[string]any{
+			"class_type": "Image Levels Adjustment",
+			"inputs": map[string]any{
+				"image":       []any{"gateway_krea_image_filter", 0},
+				"black_level": input.ImageLevelBlack,
+				"mid_level":   input.ImageLevelMid,
+				"white_level": input.ImageLevelWhite,
+			},
+		}
+		image = []any{"gateway_krea_image_levels", 0}
+	}
+	if save, ok := workflowNodeInputs(nodes, "16"); ok {
+		save["images"] = image
+	}
+}
+
+func workflowNodeInputs(nodes map[string]map[string]any, nodeID string) (map[string]any, bool) {
+	node, ok := nodes[nodeID]
+	if !ok {
+		return nil, false
+	}
+	inputs, ok := node["inputs"].(map[string]any)
+	return inputs, ok
 }
 
 // normalizeAndValidate is the runtime contract for one concrete workflow.
@@ -913,13 +1027,16 @@ func normalizeKreaTextWorkflow(input *generationForm) {
 	if input.UpscaleSampler == "" {
 		input.UpscaleSampler = "euler_ancestral"
 	}
+	if input.KreaSageMode == "" {
+		input.KreaSageMode = "auto"
+	}
 	if input.DetailSteps == 0 {
 		input.DetailSteps = 2
 	}
 	if input.DetailDenoise == 0 {
 		input.DetailDenoise = 0.03
 	}
-	if input.DetailCFG == 0 {
+	if input.DetailCFG == 0 && !input.DetailEnabled {
 		input.DetailCFG = 1
 	}
 	if input.DetailSampler == "" {
@@ -934,8 +1051,25 @@ func normalizeKreaTextWorkflow(input *generationForm) {
 	if input.ColorMode == "" {
 		input.ColorMode = "per_frame"
 	}
-	if input.ColorStrength == 0 {
+	if input.ColorStrength == 0 && !input.ColorTransfer {
 		input.ColorStrength = 1
+	}
+	if !input.ImageFilterEnabled {
+		if input.ImageFilterContrast == 0 {
+			input.ImageFilterContrast = 1
+		}
+		if input.ImageFilterSaturation == 0 {
+			input.ImageFilterSaturation = 1
+		}
+		if input.ImageFilterSharpness == 0 {
+			input.ImageFilterSharpness = 1
+		}
+		if input.ImageLevelMid == 0 {
+			input.ImageLevelMid = 127.5
+		}
+		if input.ImageLevelWhite == 0 {
+			input.ImageLevelWhite = 255
+		}
 	}
 }
 
@@ -954,13 +1088,28 @@ func validateKreaTextWorkflow(input generationForm) error {
 	if input.UpscaleSteps < 1 || input.UpscaleSteps > 12 || input.UpscaleDenoise < 0.01 || input.UpscaleDenoise > 0.5 || !allowedGenerationSampler(input.UpscaleSampler) {
 		return errors.New("некорректные параметры прохода апскейла")
 	}
-	if input.DetailSteps < 1 || input.DetailSteps > 8 || input.DetailDenoise < 0.01 || input.DetailDenoise > 0.2 || input.DetailCFG < 0 || input.DetailCFG > 30 || !allowedGenerationSampler(input.DetailSampler) || !allowedGenerationScheduler(input.DetailScheduler) {
+	if input.KreaSageEnabled && !allowedKreaSageMode(input.KreaSageMode) {
+		return errors.New("некорректный режим SageAttention Krea2")
+	}
+	if input.DetailEnabled && (input.DetailSteps < 1 || input.DetailSteps > 8 || input.DetailDenoise < 0.01 || input.DetailDenoise > 0.2 || input.DetailCFG < 0 || input.DetailCFG > 30 || !allowedGenerationSampler(input.DetailSampler) || !allowedGenerationScheduler(input.DetailScheduler)) {
 		return errors.New("некорректные параметры детализации")
 	}
-	if !allowedColorTransfer(input.ColorMethod, input.ColorMode) || input.ColorStrength < 0 || input.ColorStrength > 10 {
+	if input.ColorTransfer && (!allowedColorTransfer(input.ColorMethod, input.ColorMode) || input.ColorStrength < 0 || input.ColorStrength > 10) {
 		return errors.New("некорректные параметры переноса цвета")
 	}
+	if input.ImageFilterEnabled && (input.ImageFilterBrightness < -1 || input.ImageFilterBrightness > 1 || input.ImageFilterContrast < -1 || input.ImageFilterContrast > 2 || input.ImageFilterSaturation < 0 || input.ImageFilterSaturation > 5 || input.ImageFilterSharpness < -5 || input.ImageFilterSharpness > 5 || input.ImageFilterBlur < 0 || input.ImageFilterBlur > 16 || input.ImageFilterGaussian < 0 || input.ImageFilterGaussian > 1024 || input.ImageFilterEdge < 0 || input.ImageFilterEdge > 1 || input.ImageLevelBlack < 0 || input.ImageLevelBlack > 255 || input.ImageLevelMid < 0 || input.ImageLevelMid > 255 || input.ImageLevelWhite < 0 || input.ImageLevelWhite > 255) {
+		return errors.New("некорректные параметры фильтра Krea2")
+	}
 	return nil
+}
+
+func allowedKreaSageMode(value string) bool {
+	switch value {
+	case "disabled", "auto", "sageattn_qk_int8_pv_fp16_cuda", "sageattn_qk_int8_pv_fp16_triton", "sageattn_qk_int8_pv_fp8_cuda", "sageattn_qk_int8_pv_fp8_cuda++", "sageattn3", "sageattn3_per_block_mean":
+		return true
+	default:
+		return false
+	}
 }
 
 func (definition workflowDefinition) workflowValues(input generationForm) map[string]any {
@@ -1052,9 +1201,6 @@ func (definition workflowDefinition) workflowValues(input generationForm) map[st
 		values["color_method"] = input.ColorMethod
 		values["color_mode"] = input.ColorMode
 		values["color_strength"] = input.ColorStrength
-		if !input.ColorTransfer {
-			values["color_strength"] = 0
-		}
 		for index := range input.LoraNames {
 			name := input.LoraNames[index]
 			modelStrength := input.LoraModel[index]

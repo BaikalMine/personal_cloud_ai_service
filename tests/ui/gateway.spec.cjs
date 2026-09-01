@@ -123,6 +123,38 @@ test("video reference sources use equal tiles at every viewport", async ({ page 
   await expect(page.locator("#image-source-fields")).toHaveScreenshot("generation-video-reference-sources.png", { stylePath: visualStyle });
 });
 
+test("Krea2 exposes the PhotoFlow processing branches as independent modules", async ({ page }) => {
+  await open(page, "/preview/generate");
+  await page.getByRole("button", { name: /Текст в изображение/ }).click();
+  await page.getByRole("button", { name: "Продолжить" }).click();
+  await page.locator("#generation-open-exact").click();
+
+  const processing = page.locator(".krea-processing");
+  const sage = processing.locator('input[name="krea_sage_enabled"]');
+  const detail = processing.locator('input[name="detail_enabled"]');
+  const color = processing.locator('input[name="color_transfer"]');
+  const filter = processing.locator('input[name="image_filter_enabled"]');
+  await expect(processing).toBeVisible();
+  await expect(sage).not.toBeChecked();
+  await expect(detail).toBeChecked();
+  await expect(color).toBeChecked();
+  await expect(filter).not.toBeChecked();
+  await expect(page.locator("#krea-sage-options")).toBeHidden();
+  await expect(page.locator("#krea-detail-options")).toBeVisible();
+  await expect(page.locator("#krea-color-options")).toBeVisible();
+  await expect(page.locator("#krea-filter-options")).toBeHidden();
+
+  await sage.check();
+  await filter.check();
+  await expect(page.locator("#krea-sage-options")).toBeVisible();
+  await expect(page.locator("#krea-filter-options")).toBeVisible();
+  await expect(processing.locator('select[name="krea_sage_mode"]')).toBeEnabled();
+  await expect(processing.locator('input[name="image_filter_brightness"]')).toBeEnabled();
+  const overflow = await processing.locator(".krea-module").evaluateAll((modules) => modules.map((module) => module.scrollWidth - module.clientWidth));
+  expect(overflow.every((difference) => difference <= 1), `module overflow: ${overflow.join(", ")}`).toBeTruthy();
+  await expect(processing).toHaveScreenshot("generation-krea-processing.png", { stylePath: visualStyle });
+});
+
 test("repeat restores the active workflow LoRA stack and strengths", async ({ page }, testInfo) => {
   desktopOnly(testInfo);
 
@@ -136,6 +168,14 @@ test("repeat restores the active workflow LoRA stack and strengths", async ({ pa
   await expect(page.locator('.krea-lora-row input[name="lora_clip_strength_2"]')).toHaveValue("0.84");
   await page.locator("details.generation-advanced > summary").click();
   await expect(page.locator('.krea-lora-row[data-lora-slots="krea"]').nth(1)).toBeVisible();
+  await expect(page.locator('input[name="krea_sage_enabled"]')).toBeChecked();
+  await expect(page.locator('select[name="krea_sage_mode"]')).toHaveValue("sageattn_qk_int8_pv_fp16_triton");
+  await expect(page.locator('input[name="detail_enabled"]')).not.toBeChecked();
+  await expect(page.locator("#krea-detail-options")).toBeHidden();
+  await expect(page.locator('input[name="color_transfer"]')).not.toBeChecked();
+  await expect(page.locator('input[name="image_filter_enabled"]')).toBeChecked();
+  await expect(page.locator('input[name="image_filter_contrast"]')).toHaveValue("1.2");
+  await expect(page.locator('input[name="image_level_mid"]')).toHaveValue("126");
 });
 
 test("controlled generation batches stay clear and usable at every viewport", async ({ page }, testInfo) => {

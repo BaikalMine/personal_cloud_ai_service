@@ -125,9 +125,9 @@ func compatibilityFixtureObjectInfo(t *testing.T) map[string]comfyNodeInfo {
 	for _, classType := range []string{
 		"BasicGuider", "BasicScheduler", "CR Apply LoRA Stack", "CR LoRA Stack", "H3AIMDOResidencyLimiter",
 		"H3MemoryOptimization", "H3SparseAttentionAdvanced", "ImageSharpenKJ", "KSamplerSelect", "LCColorMatch",
-		"LCGetImage", "LCImageMaskResize", "LCVRAMCacheClear", "LoadAudio", "LoadImage", "MiniMaxH3ImageToVideo",
+		"Image Filter Adjustments", "Image Levels Adjustment", "LCGetImage", "LCImageMaskResize", "LCVRAMCacheClear", "LoadAudio", "LoadImage", "MiniMaxH3ImageToVideo",
 		"MiniMaxH3MemoryEfficientSageAttentionPatch", "MiniMaxH3ReferenceToVideo", "MiniMaxH3SigmaShift",
-		"MiniMaxH3TurboLoRA", "MiniMaxH3TurboSampler", "RandomNoise", "RIFE VFI", "RTXVideoSuperResolution",
+		"MiniMaxH3TurboLoRA", "MiniMaxH3TurboSampler", "PathchSageAttentionKJ", "RandomNoise", "RIFE VFI", "RTXVideoSuperResolution",
 		"SamplerCustomAdvanced", "TrimAudioDuration", "UNETLoader", "UpscaleModelLoader", "UltimateSDUpscale", "VAEDecode", "VAEDecodeAudio", "VAELoader",
 		"VHS_LoadVideo", "VHS_VideoCombine", "ComfyMathExpression", "SeedVR2LoadVAEModel", "SeedVR2LoadDiTModel", "SeedVR2VideoUpscaler",
 	} {

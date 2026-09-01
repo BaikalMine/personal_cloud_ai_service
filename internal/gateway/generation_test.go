@@ -549,7 +549,7 @@ func TestKrea2WorkflowKeepsFullHDPortraitDimensions(t *testing.T) {
 		Positive: "portrait", Width: 1080, Height: 1920, Steps: 8, CFG: 1,
 		Denoise: 1, Sampler: "euler", Scheduler: "simple", Seed: 42,
 		BaseMegapixels: 1.5, UpscaleSteps: 8, UpscaleDenoise: 0.22,
-		DetailSteps: 3, DetailDenoise: 0.035,
+		DetailEnabled: true, DetailSteps: 3, DetailDenoise: 0.035,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -597,6 +597,7 @@ func TestKrea2WorkflowAppliesLoraChainAndColorTransfer(t *testing.T) {
 		LoraModel: [maxGenerationLoraSlots]float64{0.8, 2, 0, 0, 0.45}, LoraClip: [maxGenerationLoraSlots]float64{1, 0.7, 0, 0, 0.55},
 		Positive: "portrait", AspectRatio: "3:4", OutputMegapixels: 1.9, DimensionMultiple: 16,
 		Width: 1024, Height: 1024, Steps: 8, CFG: 1, Denoise: 1, Seed: 42,
+		KreaSageEnabled: true, KreaSageMode: "auto", KreaSageAllowCompile: true, KreaFP16Accumulation: true,
 		ColorTransfer: true, ColorMethod: "mkl_lab", ColorMode: "uniform", ColorStrength: 0.75,
 	})
 	if err != nil {
@@ -610,13 +611,108 @@ func TestKrea2WorkflowAppliesLoraChainAndColorTransfer(t *testing.T) {
 	if fifthLora["lora_name"] != "Krea2/final-style.safetensors" || fifthLora["model"].([]any)[0] != "19" {
 		t.Fatalf("unexpected fifth LoRA: %#v", fifthLora)
 	}
-	if got := prompt["5"].(map[string]any)["inputs"].(map[string]any)["model"].([]any)[0]; got != "gateway_lora_5" {
-		t.Fatalf("Krea2 model is not connected to the fifth LoRA: %v", got)
+	sage := prompt["gateway_krea_sage"].(map[string]any)["inputs"].(map[string]any)
+	if got := sage["model"].([]any)[0]; got != "gateway_lora_5" {
+		t.Fatalf("Krea2 SageAttention is not connected to the fifth LoRA: %v", got)
+	}
+	if got := prompt["5"].(map[string]any)["inputs"].(map[string]any)["model"].([]any)[0]; got != "gateway_krea_sage" {
+		t.Fatalf("Krea2 torch patch is not connected to SageAttention: %v", got)
 	}
 	color := prompt["20"].(map[string]any)["inputs"].(map[string]any)
 	if color["method"] != "mkl_lab" || color["source_stats"] != "uniform" || color["strength"] != 0.75 {
 		t.Fatalf("unexpected color transfer: %#v", color)
 	}
+}
+
+func TestKrea2TextWorkflowMirrorsOptionalPhotoFlowBranches(t *testing.T) {
+	definitions, err := loadWorkflowDefinitions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition, ok := findWorkflow(definitions, "text-to-image-krea2")
+	if !ok {
+		t.Fatal("Krea 2 workflow is missing")
+	}
+	base := generationForm{
+		ModelName: "Krea2/model.safetensors", ModelFamily: modelFamilyKrea2,
+		TextEncoder: "encoder.safetensors", VAE: "vae.safetensors", Lora: "lenovo_krea2.safetensors",
+		Positive: "portrait", Width: 1024, Height: 1024, OutputMegapixels: 1.9,
+		Steps: 8, CFG: 1, Denoise: 1, Sampler: "euler", Scheduler: "simple", Seed: 42,
+	}
+
+	t.Run("all optional branches disabled", func(t *testing.T) {
+		prompt, err := definition.buildPrompt(base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, nodeID := range []string{"5", "14", "20", "gateway_krea_sage", "gateway_krea_image_filter", "gateway_krea_image_levels"} {
+			if _, exists := prompt[nodeID]; exists {
+				t.Fatalf("disabled branch left node %s in prompt", nodeID)
+			}
+		}
+		if got := prompt["9"].(map[string]any)["inputs"].(map[string]any)["model"]; !reflect.DeepEqual(got, []any{"19", 0}) {
+			t.Fatalf("base model source = %#v", got)
+		}
+		if got := prompt["15"].(map[string]any)["inputs"].(map[string]any)["samples"]; !reflect.DeepEqual(got, []any{"13", 0}) {
+			t.Fatalf("refinement bypass = %#v", got)
+		}
+		if got := prompt["16"].(map[string]any)["inputs"].(map[string]any)["images"]; !reflect.DeepEqual(got, []any{"15", 0}) {
+			t.Fatalf("base output = %#v", got)
+		}
+	})
+
+	t.Run("all optional branches enabled", func(t *testing.T) {
+		input := base
+		input.KreaSageEnabled = true
+		input.KreaSageMode = "sageattn_qk_int8_pv_fp16_triton"
+		input.KreaSageAllowCompile = true
+		input.KreaFP16Accumulation = true
+		input.DetailEnabled = true
+		input.DetailSteps = 3
+		input.DetailDenoise = 0.04
+		input.ColorTransfer = true
+		input.ColorMethod = "reinhard_lab"
+		input.ColorMode = "per_frame"
+		input.ColorStrength = 0.8
+		input.ImageFilterEnabled = true
+		input.ImageFilterBrightness = 0.1
+		input.ImageFilterContrast = 1.2
+		input.ImageFilterSaturation = 0.9
+		input.ImageFilterSharpness = 1.3
+		input.ImageFilterBlur = 1
+		input.ImageFilterGaussian = 0.5
+		input.ImageFilterEdge = 0.2
+		input.ImageFilterDetail = true
+		input.ImageLevelBlack = 2
+		input.ImageLevelMid = 126
+		input.ImageLevelWhite = 250
+
+		prompt, err := definition.buildPrompt(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sage := prompt["gateway_krea_sage"].(map[string]any)
+		if sage["class_type"] != "PathchSageAttentionKJ" || sage["inputs"].(map[string]any)["sage_attention"] != input.KreaSageMode {
+			t.Fatalf("SageAttention node = %#v", sage)
+		}
+		if got := prompt["13"].(map[string]any)["inputs"].(map[string]any)["model"]; !reflect.DeepEqual(got, []any{"5", 0}) {
+			t.Fatalf("patched model source = %#v", got)
+		}
+		if got := prompt["15"].(map[string]any)["inputs"].(map[string]any)["samples"]; !reflect.DeepEqual(got, []any{"14", float64(0)}) {
+			t.Fatalf("refinement source = %#v", got)
+		}
+		filter := prompt["gateway_krea_image_filter"].(map[string]any)["inputs"].(map[string]any)
+		if got := filter["image"]; !reflect.DeepEqual(got, []any{"20", 0}) || filter["detail_enhance"] != "true" || filter["contrast"] != 1.2 {
+			t.Fatalf("image filter = %#v", filter)
+		}
+		levels := prompt["gateway_krea_image_levels"].(map[string]any)["inputs"].(map[string]any)
+		if levels["mid_level"] != 126.0 || levels["white_level"] != 250.0 {
+			t.Fatalf("image levels = %#v", levels)
+		}
+		if got := prompt["16"].(map[string]any)["inputs"].(map[string]any)["images"]; !reflect.DeepEqual(got, []any{"gateway_krea_image_levels", 0}) {
+			t.Fatalf("filtered output = %#v", got)
+		}
+	})
 }
 
 func TestFlux2ImageWorkflowUsesReferenceLatent(t *testing.T) {
@@ -1615,6 +1711,31 @@ func TestGenerationJobValuesPreserveMiniMaxH3V4Controls(t *testing.T) {
 	}
 	if _, exists := values["untrusted_unrelated_parameter"]; exists {
 		t.Fatal("durable generation payload retained unrelated input")
+	}
+}
+
+func TestGenerationJobValuesPreserveKrea2PhotoFlowBranches(t *testing.T) {
+	form := url.Values{
+		"krea_sage_enabled":       {"true"},
+		"krea_sage_mode":          {"sageattn_qk_int8_pv_fp16_triton"},
+		"krea_sage_allow_compile": {"true"},
+		"krea_fp16_accumulation":  {"true"},
+		"detail_enabled":          {"false"},
+		"color_transfer":          {"false"},
+		"image_filter_enabled":    {"true"},
+		"image_filter_contrast":   {"1.2"},
+		"image_filter_detail":     {"true"},
+		"image_level_mid":         {"126"},
+	}
+	values := generationJobValues(form, 42)
+	for name, want := range map[string]string{
+		"krea_sage_enabled": "true", "krea_sage_mode": "sageattn_qk_int8_pv_fp16_triton",
+		"detail_enabled": "false", "color_transfer": "false", "image_filter_enabled": "true",
+		"image_filter_contrast": "1.2", "image_filter_detail": "true", "image_level_mid": "126",
+	} {
+		if got := values[name]; got != want {
+			t.Fatalf("saved Krea2 value %s = %q, want %q: %#v", name, got, want, values)
+		}
 	}
 }
 
