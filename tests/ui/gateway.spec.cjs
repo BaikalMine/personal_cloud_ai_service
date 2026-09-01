@@ -103,6 +103,26 @@ test("generation wizard covers Krea2, Flux2 and MiniMax", async ({ page }, testI
   await expect(page.locator("#minimax-video-reference")).toBeVisible();
 });
 
+test("video reference sources use equal tiles at every viewport", async ({ page }) => {
+  await open(page, "/preview/generate");
+  await page.getByRole("button", { name: /Видео Создаёт/ }).click();
+
+  const visibleSlots = page.locator(".source-image-card:visible");
+  await expect(visibleSlots).toHaveCount(2);
+  const tileBoxes = [];
+  for (let index = 0; index < 2; index += 1) {
+    const slot = visibleSlots.nth(index);
+    const uploadBox = await slot.locator(".upload-zone").boundingBox();
+    const galleryBox = await slot.locator(".source-gallery-button").boundingBox();
+    tileBoxes.push(uploadBox, galleryBox);
+  }
+  for (const [index, tileBox] of tileBoxes.entries()) {
+    expect(Math.abs(tileBox.width - tileBoxes[0].width), `tile ${index + 1} width`).toBeLessThanOrEqual(1);
+    expect(Math.abs(tileBox.height - tileBoxes[0].height), `tile ${index + 1} height`).toBeLessThanOrEqual(1);
+  }
+  await expect(page.locator("#image-source-fields")).toHaveScreenshot("generation-video-reference-sources.png", { stylePath: visualStyle });
+});
+
 test("repeat restores the active workflow LoRA stack and strengths", async ({ page }, testInfo) => {
   desktopOnly(testInfo);
 
