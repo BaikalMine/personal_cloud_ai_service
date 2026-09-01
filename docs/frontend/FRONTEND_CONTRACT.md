@@ -50,6 +50,12 @@ redefine the shared focus, disabled, loading or semantic state language.
 ## Verification
 
 `/preview/components` in `cmd/ui-preview` renders the canonical states. The
-frontend contract test guards the token and selector inventory; browser checks
-still verify overflow, wrapping and interaction because static checks cannot
-prove rendered layout.
+frontend contract test guards the token and selector inventory. The isolated
+`scripts/test-ui.ps1` gate starts the preview in Docker and runs Playwright at
+390x844, 768x1024, 1440x900 and 1920x1080. It verifies screenshots, horizontal
+overflow, text containment, keyboard navigation through the wizard, media
+picker and lightbox, canonical loading/empty/error/sensitive/offline/queued/
+completed states, and serious or critical axe violations on the main product
+surfaces. Use `scripts/test-ui.ps1 -UpdateSnapshots` only after visually
+reviewing an intentional interface change; the ordinary command must pass
+without rewriting baselines.

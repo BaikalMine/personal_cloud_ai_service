@@ -1,0 +1,15 @@
+*, *::before, *::after {
+  animation: none !important;
+  caret-color: transparent !important;
+  transition: none !important;
+}
+
+#generation-result,
+#generation-variants {
+  display: none !important;
+}
+
+time,
+[data-countdown] {
+  visibility: hidden !important;
+}

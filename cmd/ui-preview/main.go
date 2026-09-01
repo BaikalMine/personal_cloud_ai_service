@@ -58,6 +58,12 @@ func main() {
 	previewSVG := `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000"><rect width="1600" height="1000" fill="#13201d"/><rect x="120" y="120" width="1360" height="760" rx="28" fill="#20453a"/><circle cx="800" cy="500" r="250" fill="#71dfb9"/><path d="M420 650 700 360l190 180 150-140 260 250z" fill="#0a1714"/></svg>`
 	generationJobs := []map[string]any{
 		{
+			"job_id": "job-video-queued", "request_id": "request-video-queued", "state": "queued", "job_state": "queued", "message": "Ожидает свободный слот ComfyUI", "template_id": "minimax-h3-video",
+			"workflow_id": "minimax-h3-v4", "model_name": `MiniMaxH3\MiniMax_H3_FL2VA_pruned_int8_convrot.safetensors`, "seed": int64(8675309),
+			"attempt": 1, "input_count": 1, "prompt": "Первый кадр задаёт сцену, камера медленно приближается, свет и внешность сохраняются.",
+			"cancellable": true, "retryable": false, "created_at": now.Add(-2 * time.Minute), "updated_at": now.Add(-18 * time.Second), "duration_seconds": int64(0), "media": []map[string]any{},
+		},
+		{
 			"job_id": "job-video-running", "request_id": "request-video-running", "prompt_id": "prompt-video-running",
 			"state": "running", "job_state": "running", "message": "Генерация видео: шаг 8 из 25", "template_id": "minimax-h3-video",
 			"workflow_id": "minimax-h3-v4", "model_name": `MiniMaxH3\MiniMax_H3_FL2VA_pruned_int8_convrot.safetensors`, "seed": int64(73950205217521),

@@ -35,6 +35,7 @@ var embeddedFS embed.FS
 
 var staticJavaScriptAssetPaths = []string{
 	"static/app.js",
+	"static/dialog-focus.js",
 	"static/gallery.js",
 	"static/generate.js",
 	"static/generation-assistant.js",

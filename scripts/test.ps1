@@ -85,6 +85,8 @@ try {
         return
     }
 
+    & (Join-Path $PSScriptRoot 'test-ui.ps1')
+
     if ($Deep) {
         docker run --rm -v "${projectRoot}:/src" -w /src $goImage `
             sh -c '/usr/local/go/bin/go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...'

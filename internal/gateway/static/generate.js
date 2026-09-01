@@ -784,6 +784,8 @@
     progressSocket.onclose = () => { progressSocket = null; };
   };
 
+  const lightboxFocusTrap = window.AIGatewayDialogFocus?.createFocusTrap?.({ root: lightbox, documentRef: document }) || null;
+  const imagePickerFocusTrap = window.AIGatewayDialogFocus?.createFocusTrap?.({ root: imagePicker, documentRef: document }) || null;
   const lightboxController = generationModules.lightbox?.createController?.({
     elements: {
       root: lightbox,
@@ -796,6 +798,7 @@
     windowRef: window,
     store: generationStore,
     sensitiveContent: { reveal: (button) => window.aiGatewaySensitiveContent?.reveal?.(button) },
+    focusTrap: lightboxFocusTrap,
   }) || null;
   const closeLightbox = () => lightboxController?.close?.();
 
@@ -831,7 +834,7 @@
 
   lightbox?.querySelectorAll("[data-lightbox-close]").forEach((button) => button.addEventListener("click", closeLightbox));
   lightboxImage?.addEventListener("click", closeLightbox);
-  document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeLightbox(); });
+  if (!lightboxFocusTrap) document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeLightbox(); });
   fieldHelps.forEach((help) => {
     help.setAttribute("role", "button");
     help.setAttribute("aria-expanded", "false");
@@ -1997,7 +2000,8 @@
     imagePicker.hidden = true;
     galleryPickerSlot = null;
     document.body.classList.remove("generation-image-picker-open");
-    selectedSlot?.galleryButton?.focus({ preventScroll: true });
+    if (imagePickerFocusTrap) imagePickerFocusTrap.deactivate();
+    else selectedSlot?.galleryButton?.focus({ preventScroll: true });
   };
 
   const openGalleryImagePicker = async (item) => {
@@ -2011,7 +2015,12 @@
     imagePicker.hidden = false;
     document.body.classList.add("generation-image-picker-open");
     renderGalleryImagePicker();
-    imagePicker.querySelector(".generation-image-picker-close")?.focus({ preventScroll: true });
+    const closeButton = imagePicker.querySelector(".generation-image-picker-close");
+    if (imagePickerFocusTrap) {
+      imagePickerFocusTrap.activate({ trigger: item.galleryButton, initialFocus: closeButton, onEscape: closeGalleryImagePicker });
+    } else {
+      closeButton?.focus({ preventScroll: true });
+    }
     try {
       await refreshGalleryPickerImages();
     } catch (_) {}
@@ -2113,7 +2122,7 @@
 
   imagePicker?.querySelectorAll("[data-gallery-image-picker-close]").forEach((button) => button.addEventListener("click", closeGalleryImagePicker));
   imagePickerRefresh?.addEventListener("click", () => { refreshGalleryPickerImages().catch(() => {}); });
-  document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeGalleryImagePicker(); });
+  if (!imagePickerFocusTrap) document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeGalleryImagePicker(); });
 
   const uploadSelectedImage = async (item) => {
     const file = selectedImageFile(item);

@@ -606,7 +606,7 @@
     <div class="generation-history-content" id="generation-history-content"><div class="generation-variant-list generation-job-list" id="generation-variant-list"><p class="generation-variant-empty">Загружаем задания...</p></div></div>
   </section>
   <div class="generation-image-picker" id="generation-image-picker" hidden role="dialog" aria-modal="true" aria-labelledby="generation-image-picker-title">
-    <button class="generation-image-picker-backdrop" type="button" data-gallery-image-picker-close aria-label="Закрыть выбор изображения"></button>
+    <button class="generation-image-picker-backdrop" type="button" tabindex="-1" data-gallery-image-picker-close aria-label="Закрыть выбор изображения"></button>
     <section class="generation-image-picker-window">
       <header class="generation-image-picker-header">
         <div class="generation-image-picker-copy"><span>Мои генерации</span><h2 id="generation-image-picker-title">Выберите ранее созданное фото</h2><p>Изображение появится в <strong id="generation-image-picker-slot">карточке референса</strong> и будет передано в ComfyUI автоматически.</p></div>
@@ -620,7 +620,7 @@
   </div>
 
   <div class="generation-lightbox" id="generation-lightbox" hidden role="dialog" aria-modal="true" aria-label="Просмотр результата">
-    <button class="generation-lightbox-backdrop" type="button" data-lightbox-close aria-label="Закрыть просмотр"></button>
+    <button class="generation-lightbox-backdrop" type="button" tabindex="-1" data-lightbox-close aria-label="Закрыть просмотр"></button>
     <div class="generation-lightbox-window ui-dialog">
       <div class="generation-lightbox-toolbar ui-dialog__toolbar"><span id="generation-lightbox-name"></span><a class="button generation-lightbox-download" id="generation-lightbox-download" download>Скачать оригинал</a><button class="generation-lightbox-close" type="button" data-lightbox-close aria-label="Закрыть">&#10005;</button></div>
       <img id="generation-lightbox-image" alt="Результат генерации в полном размере">

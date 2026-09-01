@@ -14,6 +14,7 @@ const job = require("../../static/generation-job.js");
 const recipes = require("../../static/generation-recipes.js");
 const history = require("../../static/generation-history.js");
 const lightbox = require("../../static/generation-lightbox.js");
+const dialogFocus = require("../../static/dialog-focus.js");
 
 test("generation store publishes named and global changes", () => {
   const store = storeModule.createStore({ wizard: { step: 1 } });
@@ -210,6 +211,38 @@ test("lightbox state and download links distinguish media", () => {
   assert.equal(lightbox.downloadURL("/media/a.mp4?token=x", "https://gateway.test"), "/media/a.mp4?token=x&download=1");
   state = lightbox.reduce(state, { type: "CLOSE" });
   assert.deepEqual(state, lightbox.createState());
+});
+
+test("dialog focus trap cycles, closes and restores the trigger", () => {
+  let keydown = null;
+  const documentObject = {
+    activeElement: null,
+    addEventListener: (_type, listener) => { keydown = listener; },
+    removeEventListener: (_type, listener) => { if (keydown === listener) keydown = null; },
+  };
+  const element = () => ({
+    disabled: false,
+    hidden: false,
+    tabIndex: 0,
+    isConnected: true,
+    getAttribute: () => null,
+    getClientRects: () => [{}],
+    focus() { documentObject.activeElement = this; },
+  });
+  const trigger = element();
+  const first = element();
+  const last = element();
+  const root = { hidden: false, querySelectorAll: () => [first, last] };
+  const trap = dialogFocus.createFocusTrap({ root, documentRef: documentObject });
+  documentObject.activeElement = trigger;
+  trap.activate({ trigger, initialFocus: last, onEscape: () => trap.deactivate() });
+  assert.equal(documentObject.activeElement, last);
+
+  keydown({ key: "Tab", shiftKey: false, preventDefault() {}, stopPropagation() {} });
+  assert.equal(documentObject.activeElement, first);
+  keydown({ key: "Escape", preventDefault() {}, stopPropagation() {} });
+  assert.equal(documentObject.activeElement, trigger);
+  assert.equal(trap.isActive(), false);
 });
 
 class FakeClassList {

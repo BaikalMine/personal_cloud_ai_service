@@ -28,7 +28,7 @@
     return url.pathname + url.search;
   };
 
-  const createController = ({ elements = {}, documentRef, windowRef, store, sensitiveContent } = {}) => {
+  const createController = ({ elements = {}, documentRef, windowRef, store, sensitiveContent, focusTrap } = {}) => {
     const documentObject = documentRef || (typeof document !== "undefined" ? document : null);
     const windowObject = windowRef || (typeof window !== "undefined" ? window : null);
     let state = createState();
@@ -47,6 +47,7 @@
         elements.video.load();
       }
       documentObject?.body?.classList.remove("generation-lightbox-open");
+      focusTrap?.deactivate?.();
       commit({ type: "CLOSE" });
     };
     const open = (output) => {
@@ -69,7 +70,12 @@
       }
       elements.root.hidden = false;
       documentObject?.body?.classList.add("generation-lightbox-open");
-      elements.root.querySelector?.(".generation-lightbox-close")?.focus();
+      const closeButton = elements.root.querySelector?.(".generation-lightbox-close");
+      if (focusTrap) {
+        focusTrap.activate?.({ trigger: documentObject?.activeElement, initialFocus: closeButton, onEscape: close });
+      } else {
+        closeButton?.focus();
+      }
     };
     const wireVideoPreview = (button, output) => {
       const video = button?.querySelector?.("video");

@@ -9,6 +9,9 @@ coverage.out
 coverage.html
 dist/
 bin/
+artifacts/playwright/
+playwright-report/
+test-results/
 *.exe
 __pycache__/
 *.py[cod]

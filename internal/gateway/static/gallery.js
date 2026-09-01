@@ -10,6 +10,7 @@
   const lightboxVideo = lightbox?.querySelector("[data-gallery-lightbox-video]");
   const lightboxName = lightbox?.querySelector("[data-gallery-lightbox-name]");
   const lightboxDownload = lightbox?.querySelector("[data-gallery-lightbox-download]");
+  const lightboxFocusTrap = window.AIGatewayDialogFocus?.createFocusTrap?.({ root: lightbox, documentRef: document }) || null;
 
   const downloadURL = (source) => {
     const url = new URL(source, window.location.origin);
@@ -27,6 +28,7 @@
       lightboxVideo.load();
     }
     document.body.classList.remove("generation-lightbox-open");
+    lightboxFocusTrap?.deactivate();
   };
 
   const openLightbox = (trigger) => {
@@ -47,7 +49,12 @@
     lightboxDownload.download = filename;
     lightbox.hidden = false;
     document.body.classList.add("generation-lightbox-open");
-    lightbox.querySelector(".generation-lightbox-close")?.focus();
+    const closeButton = lightbox.querySelector(".generation-lightbox-close");
+    if (lightboxFocusTrap) {
+      lightboxFocusTrap.activate({ trigger, initialFocus: closeButton, onEscape: closeLightbox });
+    } else {
+      closeButton?.focus();
+    }
   };
 
   root.querySelectorAll("[data-gallery-open]").forEach((trigger) => {
@@ -73,7 +80,7 @@
   lightbox?.querySelectorAll("[data-gallery-close]").forEach((button) => button.addEventListener("click", closeLightbox));
   lightboxImage?.addEventListener("click", closeLightbox);
   lightboxVideo?.addEventListener("dblclick", closeLightbox);
-  document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeLightbox(); });
+  if (!lightboxFocusTrap) document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeLightbox(); });
 
   const applyFilter = (type) => {
     let count = 0;
