@@ -43,7 +43,7 @@ func TestGenerateTemplateRenders(t *testing.T) {
 		!strings.Contains(output.String(), "Перенос внешности и редактирование") || !strings.Contains(output.String(), "prompt-assistant-think") ||
 		!strings.Contains(output.String(), "Максимум деталей · 4,7 Мп") || !strings.Contains(output.String(), "data-gallery-image-picker-open") ||
 		!strings.Contains(output.String(), "Из моих генераций") || !strings.Contains(output.String(), "generation-image-picker-refresh") ||
-		!strings.Contains(output.String(), "generation-image-picker-grid") {
+		!strings.Contains(output.String(), "generation-image-picker-grid") || !strings.Contains(output.String(), `data-requires-advanced-settings="true"`) {
 		t.Fatal("generation template did not render the wizard")
 	}
 }
@@ -326,6 +326,42 @@ func TestParseGenerationFloatAcceptsRussianDecimalSeparator(t *testing.T) {
 		if err != nil || got != want {
 			t.Fatalf("parseGenerationFloat(%q) = %v, %v; want %v, nil", raw, got, err, want)
 		}
+	}
+}
+
+func TestEnforceGenerationSettingsAccessRemovesUnpermittedLoras(t *testing.T) {
+	input := generationForm{LorasConfigured: true}
+	input.LoraNames[0] = "MiniMaxH3/example.safetensors"
+	input.LoraModel[0] = 0.75
+	input.LoraClip[0] = 0.9
+
+	enforceGenerationSettingsAccess(&User{Role: "user"}, &input)
+	if input.LorasConfigured || input.LoraNames[0] != "" || input.LoraModel[0] != 0 || input.LoraClip[0] != 0 {
+		t.Fatalf("restricted user kept LoRA controls: %#v", input)
+	}
+
+	allowed := generationForm{LorasConfigured: true}
+	allowed.LoraNames[0] = "MiniMaxH3/example.safetensors"
+	enforceGenerationSettingsAccess(&User{Role: "user", CanUseAdvancedGenerationSettings: true}, &allowed)
+	if !allowed.LorasConfigured || allowed.LoraNames[0] == "" {
+		t.Fatalf("allowed user lost LoRA controls: %#v", allowed)
+	}
+}
+
+func TestValidateVideoGenerationQualityIncludesRTXUpscale(t *testing.T) {
+	user := &User{Role: "user", MaxVideoGenerationQuality: 720}
+	for name, input := range map[string]generationForm{
+		"source quality": {VideoQuality: 1080},
+		"rtx output":     {VideoQuality: 720, VideoRTXEnabled: true, VideoRTXScale: 2},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateVideoGenerationQuality(user, input); err == nil {
+				t.Fatal("video quality above the account limit was accepted")
+			}
+		})
+	}
+	if err := validateVideoGenerationQuality(user, generationForm{VideoQuality: 720}); err != nil {
+		t.Fatalf("video quality at the account limit was rejected: %v", err)
 	}
 }
 
@@ -1559,10 +1595,17 @@ func TestGenerationJobValuesPreserveMiniMaxH3V4Controls(t *testing.T) {
 		"input_audio":                   {"gateway/voice.mp3"},
 		"assistant_original_prompt":     {"original"},
 		"assistant_suggestion":          {"enhanced"},
+		"lora_1":                        {"MiniMaxH3\\VBVR_H3_attn_only.safetensors"},
+		"lora_model_strength_1":         {"0.85"},
+		"lora_clip_strength_1":          {"0.95"},
+		"lora_2":                        {"MiniMaxH3\\h3_Better_NSFW_Motion_V1.safetensors"},
+		"lora_model_strength_2":         {"1.15"},
+		"lora_clip_strength_2":          {"0.8"},
+		"loras_configured":              {"true"},
 		"untrusted_unrelated_parameter": {"omit"},
 	}
 	values := generationJobValues(form, 42)
-	for _, name := range []string{"video_memory_optimize", "video_memory_chunk_rows", "video_sparse_attention", "video_sparse_early_schedule", "video_rife_enabled", "video_rife_checkpoint", "video_rtx_enabled", "video_rtx_scale", "video_color_match", "video_sharpen_enabled", "video_output_crf", "input_image", "image_role_1", "image_source_1", "image_source_id_1", "image_source_name_1", "input_audio", "assistant_original_prompt", "assistant_suggestion", "seed"} {
+	for _, name := range []string{"video_memory_optimize", "video_memory_chunk_rows", "video_sparse_attention", "video_sparse_early_schedule", "video_rife_enabled", "video_rife_checkpoint", "video_rtx_enabled", "video_rtx_scale", "video_color_match", "video_sharpen_enabled", "video_output_crf", "input_image", "image_role_1", "image_source_1", "image_source_id_1", "image_source_name_1", "input_audio", "assistant_original_prompt", "assistant_suggestion", "lora_1", "lora_model_strength_1", "lora_clip_strength_1", "lora_2", "lora_model_strength_2", "lora_clip_strength_2", "loras_configured", "seed"} {
 		if values[name] == "" {
 			t.Fatalf("durable generation payload dropped %q: %#v", name, values)
 		}

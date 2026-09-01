@@ -179,30 +179,43 @@ func (s *Store) CreateGenerationBatch(ctx context.Context, params domain.CreateG
 	}
 
 	var allowed bool
-	var dailyLimit int
-	var totalLimit, totalUsed int64
-	if err := tx.QueryRowContext(ctx, `SELECT can_use_quick_generation,generation_daily_limit,generation_total_limit,generation_total_used
-		FROM users WHERE id=$1 FOR UPDATE`, params.UserID).Scan(&allowed, &dailyLimit, &totalLimit, &totalUsed); err != nil {
+	var imageDailyLimit, videoDailyLimit int
+	var imageTotalLimit, imageTotalUsed, videoTotalLimit, videoTotalUsed int64
+	if err := tx.QueryRowContext(ctx, `SELECT can_use_quick_generation,
+		generation_daily_limit,generation_total_limit,generation_total_used,
+		video_generation_daily_limit,video_generation_total_limit,video_generation_total_used
+		FROM users WHERE id=$1 FOR UPDATE`, params.UserID).Scan(&allowed,
+		&imageDailyLimit, &imageTotalLimit, &imageTotalUsed,
+		&videoDailyLimit, &videoTotalLimit, &videoTotalUsed); err != nil {
 		return domain.GenerationBatch{}, false, err
+	}
+	quotaKind := quickGenerationQuotaKind(params.TemplateID)
+	dailyLimit, totalLimit, totalUsed := imageDailyLimit, imageTotalLimit, imageTotalUsed
+	if quotaKind == QuickGenerationVideoQuota {
+		dailyLimit, totalLimit, totalUsed = videoDailyLimit, videoTotalLimit, videoTotalUsed
 	}
 	if !allowed {
 		return domain.GenerationBatch{}, false, ErrQuickGenerationForbidden
 	}
 	count := len(params.Jobs)
 	if totalLimit > 0 && (int64(count) > totalLimit-totalUsed) {
-		return domain.GenerationBatch{}, false, ErrQuickGenerationTotalLimit
+		return domain.GenerationBatch{}, false, quickGenerationLimitError(quotaKind, "total")
 	}
 	var usageDate time.Time
 	if err := tx.QueryRowContext(ctx, `SELECT timezone('Europe/Moscow',now())::date`).Scan(&usageDate); err != nil {
 		return domain.GenerationBatch{}, false, err
 	}
-	var usedToday int
-	err = tx.QueryRowContext(ctx, `SELECT used_count FROM quick_generation_daily_usage WHERE user_id=$1 AND usage_date=$2`, params.UserID, usageDate).Scan(&usedToday)
+	var imageUsedToday, videoUsedToday int
+	err = tx.QueryRowContext(ctx, `SELECT used_count,video_used_count FROM quick_generation_daily_usage WHERE user_id=$1 AND usage_date=$2`, params.UserID, usageDate).Scan(&imageUsedToday, &videoUsedToday)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return domain.GenerationBatch{}, false, err
 	}
+	usedToday := imageUsedToday
+	if quotaKind == QuickGenerationVideoQuota {
+		usedToday = videoUsedToday
+	}
 	if dailyLimit > 0 && count > dailyLimit-usedToday {
-		return domain.GenerationBatch{}, false, ErrQuickGenerationDailyLimit
+		return domain.GenerationBatch{}, false, quickGenerationLimitError(quotaKind, "daily")
 	}
 
 	var batchID int64
@@ -241,13 +254,24 @@ func (s *Store) CreateGenerationBatch(ctx context.Context, params domain.CreateG
 			return domain.GenerationBatch{}, false, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO quick_generation_daily_usage(user_id,usage_date,used_count)
-		VALUES($1,$2,$3) ON CONFLICT(user_id,usage_date) DO UPDATE
-		SET used_count=quick_generation_daily_usage.used_count+EXCLUDED.used_count`, params.UserID, usageDate, count); err != nil {
-		return domain.GenerationBatch{}, false, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE users SET generation_total_used=generation_total_used+$2 WHERE id=$1`, params.UserID, count); err != nil {
-		return domain.GenerationBatch{}, false, err
+	if quotaKind == QuickGenerationVideoQuota {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO quick_generation_daily_usage(user_id,usage_date,used_count,video_used_count)
+			VALUES($1,$2,0,$3) ON CONFLICT(user_id,usage_date) DO UPDATE
+			SET video_used_count=quick_generation_daily_usage.video_used_count+EXCLUDED.video_used_count`, params.UserID, usageDate, count); err != nil {
+			return domain.GenerationBatch{}, false, err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE users SET video_generation_total_used=video_generation_total_used+$2 WHERE id=$1`, params.UserID, count); err != nil {
+			return domain.GenerationBatch{}, false, err
+		}
+	} else {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO quick_generation_daily_usage(user_id,usage_date,used_count,video_used_count)
+			VALUES($1,$2,$3,0) ON CONFLICT(user_id,usage_date) DO UPDATE
+			SET used_count=quick_generation_daily_usage.used_count+EXCLUDED.used_count`, params.UserID, usageDate, count); err != nil {
+			return domain.GenerationBatch{}, false, err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE users SET generation_total_used=generation_total_used+$2 WHERE id=$1`, params.UserID, count); err != nil {
+			return domain.GenerationBatch{}, false, err
+		}
 	}
 	if err := incrementUserNotificationRevision(ctx, tx, params.UserID); err != nil {
 		return domain.GenerationBatch{}, false, err

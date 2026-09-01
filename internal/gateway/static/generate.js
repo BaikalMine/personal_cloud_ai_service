@@ -305,6 +305,7 @@
     const parsed = Number(String(value).replaceAll(",", "."));
     return Number.isFinite(parsed) ? parsed : fallback;
   };
+  const maxVideoGenerationQuality = numericValue(root.dataset.maxVideoGenerationQuality, 1440);
   const workflowControls = (name) => {
     const control = form?.elements?.namedItem(name);
     if (!control) return [];
@@ -382,6 +383,18 @@
     const profile = generationModules.video?.findProfile?.(manifest, profileID) || manifest?.quality_profiles?.find((candidate) => candidate.id === profileID);
     const profileRule = (name) => profile?.parameters?.[name] || null;
     const profileValue = (name, fallback) => profileRule(name)?.value ?? fallback;
+    if (miniMaxVideoQuality) {
+      [...miniMaxVideoQuality.options].forEach((item) => { item.disabled = numericValue(item.value) > maxVideoGenerationQuality; });
+      if (numericValue(miniMaxVideoQuality.value, 720) > maxVideoGenerationQuality) {
+        miniMaxVideoQuality.value = String(maxVideoGenerationQuality);
+      }
+      const rtxScale = form.elements.video_rtx_scale;
+      if (rtxScale instanceof HTMLInputElement) {
+        const maximumScale = Math.max(1, Math.min(4, maxVideoGenerationQuality / Math.max(1, numericValue(miniMaxVideoQuality.value, 720))));
+        rtxScale.max = String(maximumScale);
+        if (numericValue(rtxScale.value, 2) > maximumScale) rtxScale.value = String(maximumScale);
+      }
+    }
     const frameOption = miniMaxVideoModeInputs.find((input) => input.value === "frames");
     if (frameOption) frameOption.disabled = referenceOnly;
     if (referenceOnly && miniMaxMode() !== "references") {
@@ -1179,14 +1192,36 @@
     updateWorkflowNext();
   };
 
+  const activeLoraSlotKind = () => {
+    const family = selectedGenerationWorkflow()?.dataset.family || "";
+    if (family === "minimax_h3") return "minimax";
+    if (family === "flux2") return "flux";
+    if (family === "krea2") return "krea";
+    return "";
+  };
+
+  const namedControlCandidates = (name) => {
+    const named = form.elements.namedItem(name);
+    if (!named) return [];
+    const controls = named instanceof HTMLElement ? [named] : [...named].filter((item) => item instanceof HTMLElement);
+    if (name === "loras_configured" || /^lora_(?:model_strength_|clip_strength_)?\d+$/.test(name)) {
+      const kind = activeLoraSlotKind();
+      const scoped = controls.filter((control) => control.closest(`[data-lora-slots="${kind}"]`));
+      if (scoped.length) return scoped;
+    }
+    const enabled = controls.filter((control) => !control.disabled);
+    return enabled.length ? enabled : controls;
+  };
+
   const setNamedControlValue = (name, value) => {
-    const control = form.elements.namedItem(name);
-    if (!control) return;
-    if (typeof control === "object" && "length" in control && !control.tagName) {
-      const option = [...control].find((item) => item.value === value);
+    const controls = namedControlCandidates(name);
+    if (!controls.length) return;
+    if (controls.every((control) => control.type === "radio")) {
+      const option = controls.find((control) => control.value === value);
       if (option) option.checked = true;
       return;
     }
+    const control = controls[0];
     if (control.type === "checkbox") {
       control.checked = value === "true" || value === "on" || value === "1";
       return;
@@ -1200,7 +1235,19 @@
     if (scenario && !scenario.disabled && !scenario.classList.contains("is-selected")) chooseScenario(scenario);
     const workflow = values.generation_workflow ? root.querySelector(`.generation-workflow-choice[data-preset-id="${CSS.escape(values.generation_workflow)}"]`) : null;
     if (workflow && !workflow.disabled && !workflow.hidden && !workflow.classList.contains("is-selected")) chooseGenerationWorkflow(workflow);
-    Object.entries(values).forEach(([name, value]) => {
+    syncWorkflowFields();
+    const savedEntries = Object.entries(values).filter(([name]) => (
+      name !== "template_id" && name !== "generation_workflow" && name !== "input_image" && !name.startsWith("input_image_")
+    ));
+    const loraSelections = savedEntries
+      .filter(([name]) => /^lora_\d+$/.test(name))
+      .sort(([left], [right]) => Number(left.slice(5)) - Number(right.slice(5)));
+    loraSelections.forEach(([name, value]) => {
+      setNamedControlValue(name, String(value));
+      syncAdaptiveLoraSlots(activeLoraSlotKind());
+    });
+    savedEntries.forEach(([name, value]) => {
+      if (/^lora_\d+$/.test(name)) return;
       if (name === "template_id" || name === "generation_workflow" || name === "input_image" || name.startsWith("input_image_")) return;
       setNamedControlValue(name, String(value));
     });
@@ -1325,12 +1372,15 @@
     return { preset, selectedModel, family, references, hasAudio, hasVideo };
   };
 
-  const batchQuotaSnapshot = () => ({
-    dailyLimit: numericValue(root.dataset.generationDailyLimit),
-    dailyRemaining: numericValue(root.dataset.generationDailyRemaining),
-    totalLimit: numericValue(root.dataset.generationTotalLimit),
-    totalRemaining: numericValue(root.dataset.generationTotalRemaining),
-  });
+  const batchQuotaSnapshot = () => {
+    const kind = templateID?.value === "minimax-h3-video" ? "Video" : "Image";
+    return {
+      dailyLimit: numericValue(root.dataset[`generation${kind}DailyLimit`]),
+      dailyRemaining: numericValue(root.dataset[`generation${kind}DailyRemaining`]),
+      totalLimit: numericValue(root.dataset[`generation${kind}TotalLimit`]),
+      totalRemaining: numericValue(root.dataset[`generation${kind}TotalRemaining`]),
+    };
+  };
 
   const activeWorkflowControl = (name) => workflowControls(name).find((control) => (
     !control.disabled && !control.closest("[hidden]")
@@ -1788,8 +1838,9 @@
     if (isFluxEdit && maxSide?.value === "0") maxSide.value = "2160";
     const setFieldState = (selector, visible) => {
       root.querySelectorAll(selector).forEach((field) => {
-        field.hidden = !visible;
-        field.querySelectorAll("input, select, textarea, button").forEach((control) => { control.disabled = !visible; });
+        const permitted = !field.closest("[inert]");
+        field.hidden = !visible || !permitted;
+        field.querySelectorAll("input, select, textarea, button").forEach((control) => { control.disabled = !visible || !permitted; });
       });
     };
     setFieldState(".image-edit-field", isEdit);
@@ -3844,12 +3895,16 @@
 
   const updateGenerationQuota = (quota) => {
     if (!quota || typeof quota !== "object") return;
-    const datasetValues = {
-      generationDailyRemaining: quota.daily_remaining,
-      generationDailyLimit: quota.daily_limit,
-      generationTotalRemaining: quota.total_remaining,
-      generationTotalLimit: quota.total_limit,
-    };
+    const datasetValues = {};
+    ["image", "video"].forEach((kind) => {
+      const bucket = quota[kind];
+      if (!bucket || typeof bucket !== "object") return;
+      const prefix = kind[0].toUpperCase() + kind.slice(1);
+      datasetValues[`generation${prefix}DailyRemaining`] = bucket.daily_remaining;
+      datasetValues[`generation${prefix}DailyLimit`] = bucket.daily_limit;
+      datasetValues[`generation${prefix}TotalRemaining`] = bucket.total_remaining;
+      datasetValues[`generation${prefix}TotalLimit`] = bucket.total_limit;
+    });
     Object.entries(datasetValues).forEach(([name, value]) => {
       if (Number.isFinite(Number(value))) root.dataset[name] = String(Math.max(0, Number(value)));
     });
@@ -3861,10 +3916,14 @@
       const target = generationQuota.querySelector(selector);
       if (target && Number.isFinite(Number(value))) target.textContent = String(Math.max(0, Number(value)));
     };
-    assign("[data-generation-quota-daily-remaining]", quota.daily_remaining);
-    assign("[data-generation-quota-daily-limit]", quota.daily_limit);
-    assign("[data-generation-quota-total-remaining]", quota.total_remaining);
-    assign("[data-generation-quota-total-limit]", quota.total_limit);
+    ["image", "video"].forEach((kind) => {
+      const bucket = quota[kind];
+      if (!bucket || typeof bucket !== "object") return;
+      assign(`[data-generation-quota-${kind}-daily-remaining]`, bucket.daily_remaining);
+      assign(`[data-generation-quota-${kind}-daily-limit]`, bucket.daily_limit);
+      assign(`[data-generation-quota-${kind}-total-remaining]`, bucket.total_remaining);
+      assign(`[data-generation-quota-${kind}-total-limit]`, bucket.total_limit);
+    });
     syncBatchBuilder();
   };
 

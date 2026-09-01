@@ -13,6 +13,7 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	"math"
 	"mime"
 	"net/http"
 	"net/url"
@@ -89,14 +90,19 @@ type generationQueueOverview struct {
 	AverageTaskSeconds   int    `json:"average_task_seconds,omitempty"`
 }
 
-type generationQuotaView struct {
+type generationQuotaBucketView struct {
 	DailyLimit     int   `json:"daily_limit"`
 	DailyUsed      int   `json:"daily_used"`
 	DailyRemaining int   `json:"daily_remaining"`
 	TotalLimit     int64 `json:"total_limit"`
 	TotalUsed      int64 `json:"total_used"`
 	TotalRemaining int64 `json:"total_remaining"`
-	HasLimits      bool  `json:"has_limits"`
+}
+
+type generationQuotaView struct {
+	Image     generationQuotaBucketView `json:"image"`
+	Video     generationQuotaBucketView `json:"video"`
+	HasLimits bool                      `json:"has_limits"`
 }
 
 type comfyQueueSnapshot struct {
@@ -248,19 +254,21 @@ func (a *App) handleGeneratePage(w http.ResponseWriter, r *http.Request) {
 	a.queueSensitiveMediaClassification()
 	recentMedia := a.recentGenerationMedia(r.Context(), user.ID)
 	a.render(w, r, "generate", map[string]any{
-		"Title":                 "Быстрая генерация",
-		"Workflows":             views,
-		"ModelGroups":           catalog.Groups,
-		"GenerationPresets":     presets,
-		"QuickModels":           filterGenerationModels(quickGenerationModels(catalog), policy),
-		"LoraGroups":            filterGenerationLoraGroups(catalog.LoraGroups, policy.KreaLoraGroups),
-		"FluxLoraGroups":        filterGenerationLoraGroups(catalog.FluxLoraGroups, policy.FluxLoraGroups),
-		"MiniMaxLoraGroups":     catalog.MiniMaxLoraGroups,
-		"ComfyOnline":           catalog.Online,
-		"ModelsAvailable":       catalog.AvailableCount > 0,
-		"SelectedWorkflow":      r.URL.Query().Get("workflow"),
-		"RecentGenerationMedia": recentMedia,
-		"GenerationQuota":       quota,
+		"Title":                            "Быстрая генерация",
+		"Workflows":                        views,
+		"ModelGroups":                      catalog.Groups,
+		"GenerationPresets":                presets,
+		"QuickModels":                      filterGenerationModels(quickGenerationModels(catalog), policy),
+		"LoraGroups":                       filterGenerationLoraGroups(catalog.LoraGroups, policy.KreaLoraGroups),
+		"FluxLoraGroups":                   filterGenerationLoraGroups(catalog.FluxLoraGroups, policy.FluxLoraGroups),
+		"MiniMaxLoraGroups":                catalog.MiniMaxLoraGroups,
+		"ComfyOnline":                      catalog.Online,
+		"ModelsAvailable":                  catalog.AvailableCount > 0,
+		"SelectedWorkflow":                 r.URL.Query().Get("workflow"),
+		"RecentGenerationMedia":            recentMedia,
+		"GenerationQuota":                  quota,
+		"CanUseAdvancedGenerationSettings": user.Role == "admin" || user.CanUseAdvancedGenerationSettings,
+		"MaxVideoGenerationQuality":        maxVideoGenerationQuality(user),
 	})
 }
 
@@ -269,24 +277,69 @@ func (a *App) generationQuotaView(ctx context.Context, userID int64) (generation
 	if err != nil {
 		return generationQuotaView{}, err
 	}
-	view := generationQuotaView{
-		DailyLimit: quota.DailyLimit, DailyUsed: quota.DailyUsed,
-		TotalLimit: quota.TotalLimit, TotalUsed: quota.TotalUsed,
-		HasLimits: quota.DailyLimit > 0 || quota.TotalLimit > 0,
-	}
+	view := generationQuotaView{Image: generationQuotaBucketView{
+		DailyLimit: quota.Image.DailyLimit, DailyUsed: quota.Image.DailyUsed,
+		TotalLimit: quota.Image.TotalLimit, TotalUsed: quota.Image.TotalUsed,
+	}, Video: generationQuotaBucketView{
+		DailyLimit: quota.Video.DailyLimit, DailyUsed: quota.Video.DailyUsed,
+		TotalLimit: quota.Video.TotalLimit, TotalUsed: quota.Video.TotalUsed,
+	}}
+	view.Image.finish()
+	view.Video.finish()
+	view.HasLimits = view.Image.DailyLimit > 0 || view.Image.TotalLimit > 0 || view.Video.DailyLimit > 0 || view.Video.TotalLimit > 0
+	return view, nil
+}
+
+func (view *generationQuotaBucketView) finish() {
 	if view.DailyLimit > 0 {
-		view.DailyRemaining = view.DailyLimit - view.DailyUsed
-		if view.DailyRemaining < 0 {
-			view.DailyRemaining = 0
-		}
+		view.DailyRemaining = max(0, view.DailyLimit-view.DailyUsed)
 	}
 	if view.TotalLimit > 0 {
-		view.TotalRemaining = view.TotalLimit - view.TotalUsed
-		if view.TotalRemaining < 0 {
-			view.TotalRemaining = 0
+		view.TotalRemaining = max(int64(0), view.TotalLimit-view.TotalUsed)
+	}
+}
+
+func maxVideoGenerationQuality(user *User) int {
+	if user == nil || user.Role == "admin" {
+		return 1440
+	}
+	switch user.MaxVideoGenerationQuality {
+	case 480, 720, 1080, 1440:
+		return user.MaxVideoGenerationQuality
+	default:
+		return 1440
+	}
+}
+
+func enforceGenerationSettingsAccess(user *User, input *generationForm) {
+	if user == nil || user.Role == "admin" || user.CanUseAdvancedGenerationSettings || input == nil {
+		return
+	}
+	input.LoraNames = [maxGenerationLoraSlots]string{}
+	input.LoraModel = [maxGenerationLoraSlots]float64{}
+	input.LoraClip = [maxGenerationLoraSlots]float64{}
+	input.LorasConfigured = false
+}
+
+func validateVideoGenerationQuality(user *User, input generationForm) error {
+	quality := input.VideoQuality
+	if quality == 0 {
+		quality = miniMaxH3DefaultQuality
+	}
+	qualityLimit := maxVideoGenerationQuality(user)
+	if quality > qualityLimit {
+		return fmt.Errorf("для этой учётной записи доступно видео не выше %dp", qualityLimit)
+	}
+	if input.VideoRTXEnabled {
+		scale := input.VideoRTXScale
+		if scale == 0 {
+			scale = 2
+		}
+		if int(math.Ceil(float64(quality)*scale)) > qualityLimit {
+			return fmt.Errorf("RTX-апскейл превышает разрешённое итоговое качество %dp", qualityLimit)
 		}
 	}
-	return view, nil
+	return nil
 }
 
 func (a *App) recentGenerationMedia(ctx context.Context, userID int64) []generationMediaView {
@@ -561,6 +614,7 @@ func (a *App) prepareGeneration(ctx context.Context, user *User, input generatio
 	if definition.AdminOnly && user.Role != "admin" {
 		return generationPreparation{}, errors.New("этот сценарий доступен только администратору")
 	}
+	enforceGenerationSettingsAccess(user, &input)
 	catalog := a.comfyGenerationModels(ctx)
 	preset, ok := findGenerationPreset(buildGenerationPresets(catalog), input.PresetID, input.TemplateID)
 	if !ok {
@@ -596,6 +650,9 @@ func (a *App) prepareGeneration(ctx context.Context, user *User, input generatio
 	input.VideoIntegratedTurbo = model.VideoIntegratedTurbo
 	input.VideoReferenceOnly = model.VideoReferenceOnly
 	if model.Family == modelFamilyMiniMaxH3 {
+		if err := validateVideoGenerationQuality(user, input); err != nil {
+			return generationPreparation{}, err
+		}
 		if input.VideoSteps == 0 {
 			input.VideoSteps = model.DefaultSteps
 		}
@@ -927,11 +984,16 @@ func (a *App) postComfyGenerationControl(ctx context.Context, endpointPath strin
 }
 
 func quickGenerationLimitError(err error) (int, string) {
+	var limitErr *store.QuickGenerationLimitError
+	kind := "генераций изображений"
+	if errors.As(err, &limitErr) && limitErr.Kind == store.QuickGenerationVideoQuota {
+		kind = "генераций видео"
+	}
 	switch {
 	case errors.Is(err, store.ErrQuickGenerationDailyLimit):
-		return http.StatusTooManyRequests, "достигнут суточный лимит быстрых генераций"
+		return http.StatusTooManyRequests, "достигнут суточный лимит " + kind
 	case errors.Is(err, store.ErrQuickGenerationTotalLimit):
-		return http.StatusTooManyRequests, "достигнут общий лимит быстрых генераций"
+		return http.StatusTooManyRequests, "достигнут общий лимит " + kind
 	case errors.Is(err, store.ErrQuickGenerationForbidden):
 		return http.StatusForbidden, "доступ к быстрой генерации закрыт"
 	default:

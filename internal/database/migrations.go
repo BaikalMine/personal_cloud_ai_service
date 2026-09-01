@@ -1184,6 +1184,53 @@ var migrationCatalog = []migration{
 			`CREATE INDEX feature_suggestion_scans_pending_idx ON feature_suggestion_scans(status,lease_expires_at,created_at,id) WHERE status IN ('queued','in-progress')`,
 		},
 	},
+	{
+		version: 50,
+		name:    "separate_generation_quotas_and_invite_controls",
+		statements: []string{
+			`ALTER TABLE users ADD COLUMN IF NOT EXISTS video_generation_daily_limit INT NOT NULL DEFAULT 0`,
+			`ALTER TABLE users ADD COLUMN IF NOT EXISTS video_generation_total_limit BIGINT NOT NULL DEFAULT 0`,
+			`ALTER TABLE users ADD COLUMN IF NOT EXISTS video_generation_total_used BIGINT NOT NULL DEFAULT 0`,
+			`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_use_advanced_generation_settings BOOLEAN NOT NULL DEFAULT TRUE`,
+			`ALTER TABLE users ADD COLUMN IF NOT EXISTS max_video_generation_quality INT NOT NULL DEFAULT 1440`,
+			`ALTER TABLE invites ADD COLUMN IF NOT EXISTS video_generation_daily_limit INT NOT NULL DEFAULT 0`,
+			`ALTER TABLE invites ADD COLUMN IF NOT EXISTS video_generation_total_limit BIGINT NOT NULL DEFAULT 0`,
+			`ALTER TABLE invites ADD COLUMN IF NOT EXISTS grant_advanced_generation_settings BOOLEAN NOT NULL DEFAULT TRUE`,
+			`ALTER TABLE invites ADD COLUMN IF NOT EXISTS pause_mining_for_quick_generation BOOLEAN NOT NULL DEFAULT FALSE`,
+			`ALTER TABLE invites ADD COLUMN IF NOT EXISTS max_video_generation_quality INT NOT NULL DEFAULT 1440`,
+			`ALTER TABLE quick_generation_daily_usage ADD COLUMN IF NOT EXISTS video_used_count INT NOT NULL DEFAULT 0`,
+			`UPDATE users SET video_generation_daily_limit=generation_daily_limit, video_generation_total_limit=generation_total_limit`,
+			`UPDATE invites SET video_generation_daily_limit=generation_daily_limit, video_generation_total_limit=generation_total_limit`,
+			`WITH video_usage AS (
+				SELECT user_id, COUNT(*)::bigint AS used
+				FROM generation_jobs
+				WHERE user_id IS NOT NULL AND template_id='minimax-h3-video' AND quota_reserved_on IS NOT NULL
+				GROUP BY user_id
+			) UPDATE users u SET
+				video_generation_total_used=LEAST(u.generation_total_used,video_usage.used),
+				generation_total_used=GREATEST(u.generation_total_used-video_usage.used,0)
+			FROM video_usage WHERE u.id=video_usage.user_id`,
+			`WITH video_usage AS (
+				SELECT user_id, timezone('Europe/Moscow',quota_reserved_on)::date AS usage_date, COUNT(*)::int AS used
+				FROM generation_jobs
+				WHERE user_id IS NOT NULL AND template_id='minimax-h3-video' AND quota_reserved_on IS NOT NULL
+				GROUP BY user_id, timezone('Europe/Moscow',quota_reserved_on)::date
+			) UPDATE quick_generation_daily_usage d SET
+				video_used_count=LEAST(d.used_count,video_usage.used),
+				used_count=GREATEST(d.used_count-video_usage.used,0)
+			FROM video_usage WHERE d.user_id=video_usage.user_id AND d.usage_date=video_usage.usage_date`,
+			`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_video_generation_limits_valid`,
+			`ALTER TABLE users ADD CONSTRAINT users_video_generation_limits_valid CHECK (video_generation_daily_limit >= 0 AND video_generation_total_limit >= 0 AND video_generation_total_used >= 0)`,
+			`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_max_video_generation_quality_valid`,
+			`ALTER TABLE users ADD CONSTRAINT users_max_video_generation_quality_valid CHECK (max_video_generation_quality IN (480,720,1080,1440))`,
+			`ALTER TABLE invites DROP CONSTRAINT IF EXISTS invites_video_generation_limits_valid`,
+			`ALTER TABLE invites ADD CONSTRAINT invites_video_generation_limits_valid CHECK (video_generation_daily_limit >= 0 AND video_generation_total_limit >= 0)`,
+			`ALTER TABLE invites DROP CONSTRAINT IF EXISTS invites_max_video_generation_quality_valid`,
+			`ALTER TABLE invites ADD CONSTRAINT invites_max_video_generation_quality_valid CHECK (max_video_generation_quality IN (480,720,1080,1440))`,
+			`ALTER TABLE quick_generation_daily_usage DROP CONSTRAINT IF EXISTS quick_generation_daily_usage_video_used_valid`,
+			`ALTER TABLE quick_generation_daily_usage ADD CONSTRAINT quick_generation_daily_usage_video_used_valid CHECK (video_used_count >= 0)`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

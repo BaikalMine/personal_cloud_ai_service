@@ -46,7 +46,7 @@
       </dl>
     </section>
 
-    <section class="panel access-panel">
+    <section class="panel access-panel span-two">
       <div class="panel-heading"><div><p class="section-kicker">Разрешения</p><h2>Доступ к сервисам</h2></div></div>
       {{if eq .AccessStatus "changed"}}<p class="success-box">Права доступа обновлены.</p>{{end}}
 	  {{if eq .AccessStatus "invalid_limits"}}<p class="alert">Проверьте лимиты генераций: допустимы только неотрицательные числа.</p>{{end}}
@@ -65,8 +65,14 @@
         <label class="service-toggle ui-choice"><input name="can_use_comfyui" type="checkbox" {{if .Profile.CanUseComfyUI}}checked{{end}}><span><b>ComfyUI</b><small>{{if .Profile.CanUseComfyUI}}Доступ разрешён{{else}}Доступ закрыт{{end}}</small></span></label>
         <label class="service-toggle ui-choice"><input name="can_use_openwebui" type="checkbox" {{if .Profile.CanUseOpenWebUI}}checked{{end}}><span><b>OpenWebUI</b><small>{{if .Profile.CanUseOpenWebUI}}Доступ разрешён{{else}}Доступ закрыт{{end}}</small></span></label>
 		<label class="service-toggle ui-choice"><input name="can_manage_mining" type="checkbox" {{if .Profile.CanManageMining}}checked{{end}}><span><b>Доверенный доступ к майнингу</b><small>{{if .Profile.CanManageMining}}Видит состояние и может запускать или останавливать майнинг{{else}}Майнинг полностью скрыт{{end}}</small></span></label>
-		<label class="service-toggle ui-choice"><input name="pause_mining_for_quick_generation" type="checkbox" {{if .Profile.PauseMiningForQuickGeneration}}checked{{end}}><span><b>Пул приоритетной генерации</b><small>На время быстрой генерации приостанавливает майнинг и запускает его после завершения.</small></span></label>
-        <div class="invite-fields"><label>Суточный лимит быстрых генераций<input name="generation_daily_limit" type="number" min="0" max="100000" value="{{.Profile.GenerationDailyLimit}}"><small class="field-hint">0 = без лимита</small></label><label>Общий лимит быстрых генераций<input name="generation_total_limit" type="number" min="0" max="10000000" value="{{.Profile.GenerationTotalLimit}}"><small class="field-hint">0 = без лимита · использовано: {{.Profile.GenerationTotalUsed}}</small></label></div>
+        <section class="account-generation-controls">
+          <div class="invite-section-heading"><h3>Генерация и ресурсы</h3><p>Изображения и видео расходуют независимые квоты.</p></div>
+          <div class="invite-generation-grid">
+            <fieldset class="invite-quota-group"><legend><span>Изображения</span><small>Использовано всего: {{.Profile.GenerationTotalUsed}}</small></legend><label>В сутки<input name="image_generation_daily_limit" type="number" min="0" max="100000" value="{{.Profile.GenerationDailyLimit}}"></label><label>Всего<input name="image_generation_total_limit" type="number" min="0" max="10000000" value="{{.Profile.GenerationTotalLimit}}"></label></fieldset>
+            <fieldset class="invite-quota-group"><legend><span>Видео</span><small>Использовано всего: {{.Profile.VideoGenerationTotalUsed}}</small></legend><label>В сутки<input name="video_generation_daily_limit" type="number" min="0" max="100000" value="{{.Profile.VideoGenerationDailyLimit}}"></label><label>Всего<input name="video_generation_total_limit" type="number" min="0" max="10000000" value="{{.Profile.VideoGenerationTotalLimit}}"></label><label class="invite-video-quality">Максимум качества<select name="max_video_generation_quality"><option value="480" {{if eq .Profile.MaxVideoGenerationQuality 480}}selected{{end}}>480p</option><option value="720" {{if eq .Profile.MaxVideoGenerationQuality 720}}selected{{end}}>720p</option><option value="1080" {{if eq .Profile.MaxVideoGenerationQuality 1080}}selected{{end}}>1080p</option><option value="1440" {{if or (eq .Profile.MaxVideoGenerationQuality 0) (eq .Profile.MaxVideoGenerationQuality 1440)}}selected{{end}}>1440p · 2K</option></select><small class="field-hint">Включая RTX-апскейл.</small></label></fieldset>
+            <fieldset class="invite-runtime-group"><legend><span>Возможности</span><small>Права можно менять в любое время</small></legend><label class="service-toggle ui-choice"><input name="can_use_advanced_generation_settings" type="checkbox" {{if .Profile.CanUseAdvancedGenerationSettings}}checked{{end}}><span><b>Точные настройки</b><small>Сэмплеры, LoRA и обработка workflow.</small></span></label><label class="service-toggle ui-choice"><input name="pause_mining_for_quick_generation" type="checkbox" {{if .Profile.PauseMiningForQuickGeneration}}checked{{end}}><span><b>Приоритет</b><small>Освобождать ресурсы майнинга на время генерации.</small></span></label></fieldset>
+          </div>
+        </section>
         <button type="submit">Сохранить права</button>
       </form>
       {{end}}

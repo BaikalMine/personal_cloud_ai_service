@@ -71,6 +71,10 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	inviteID, err = repository.CreateInvite(ctx, store.CreateInviteParams{
 		TokenHash: security.HashToken("single-use-integration-invite"), CreatedByUserID: adminID, MaxUses: 1,
 		ExpiresAt: time.Now().Add(time.Hour), GrantComfyUI: true, GrantOpenWebUI: false,
+		GrantQuickGeneration: true, GrantTextToImage: true, GrantVideo: true,
+		GrantAdvancedGenerationSettings: true, PauseMiningForQuickGeneration: true,
+		GenerationDailyLimit: 12, GenerationTotalLimit: 50,
+		VideoGenerationDailyLimit: 2, VideoGenerationTotalLimit: 8, MaxVideoGenerationQuality: 720,
 	})
 	if err != nil || inviteID <= 0 {
 		t.Fatalf("recreate invite = id:%d err:%v", inviteID, err)
@@ -119,8 +123,23 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !user.CanUseComfyUI || user.CanUseOpenWebUI {
-		t.Fatalf("invite permissions were not preserved: comfy=%v openweb=%v", user.CanUseComfyUI, user.CanUseOpenWebUI)
+	if !user.CanUseComfyUI || user.CanUseOpenWebUI || !user.CanUseQuickGeneration || !user.CanGenerateTextToImage || !user.CanGenerateVideo || !user.CanUseAdvancedGenerationSettings || !user.PauseMiningForQuickGeneration || user.GenerationDailyLimit != 12 || user.GenerationTotalLimit != 50 || user.VideoGenerationDailyLimit != 2 || user.VideoGenerationTotalLimit != 8 || user.MaxVideoGenerationQuality != 720 {
+		t.Fatalf("invite permissions were not preserved: user=%+v", user)
+	}
+	updated, err := repository.SetServiceAccess(ctx, registeredUserID, store.SetServiceAccessParams{
+		OpenWebUI: true, QuickGeneration: true, ImageToImage: true, Video: true,
+		AdvancedGenerationSettings: false, PauseMiningForQuickGeneration: false,
+		ImageDailyLimit: 4, ImageTotalLimit: 20, VideoDailyLimit: 1, VideoTotalLimit: 3, MaxVideoQuality: 480,
+	})
+	if err != nil || !updated {
+		t.Fatalf("manual access update: updated=%v err=%v", updated, err)
+	}
+	user, err = repository.UserByID(ctx, registeredUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.CanUseComfyUI || !user.CanUseOpenWebUI || user.CanGenerateTextToImage || !user.CanGenerateImageToImage || !user.CanGenerateVideo || user.CanUseAdvancedGenerationSettings || user.PauseMiningForQuickGeneration || user.GenerationDailyLimit != 4 || user.GenerationTotalLimit != 20 || user.VideoGenerationDailyLimit != 1 || user.VideoGenerationTotalLimit != 3 || user.MaxVideoGenerationQuality != 480 {
+		t.Fatalf("manual access update was not preserved: user=%+v", user)
 	}
 	byEmail, passwordHash, err := repository.FindUserWithPassword(ctx, strings.ToUpper(user.Email.String))
 	if err != nil || byEmail.ID != registeredUserID || passwordHash != userHash {
@@ -603,13 +622,13 @@ func assertGenerationJobLifecycle(t *testing.T, ctx context.Context, db *sql.DB,
 		}
 		if !committedUsageDate.IsZero() {
 			if _, err := db.ExecContext(cleanupCtx, `UPDATE quick_generation_daily_usage
-				SET used_count=GREATEST(used_count-1,0) WHERE user_id=$1 AND usage_date=$2`, userID, committedUsageDate); err != nil {
+				SET video_used_count=GREATEST(video_used_count-1,0) WHERE user_id=$1 AND usage_date=$2`, userID, committedUsageDate); err != nil {
 				t.Errorf("clean generation job daily usage: %v", err)
 			}
-			if _, err := db.ExecContext(cleanupCtx, `DELETE FROM quick_generation_daily_usage WHERE user_id=$1 AND used_count=0`, userID); err != nil {
+			if _, err := db.ExecContext(cleanupCtx, `DELETE FROM quick_generation_daily_usage WHERE user_id=$1 AND used_count=0 AND video_used_count=0`, userID); err != nil {
 				t.Errorf("clean zero generation job daily usage: %v", err)
 			}
-			if _, err := db.ExecContext(cleanupCtx, `UPDATE users SET generation_total_used=GREATEST(generation_total_used-1,0) WHERE id=$1`, userID); err != nil {
+			if _, err := db.ExecContext(cleanupCtx, `UPDATE users SET video_generation_total_used=GREATEST(video_generation_total_used-1,0) WHERE id=$1`, userID); err != nil {
 				t.Errorf("clean generation job total usage: %v", err)
 			}
 		}
@@ -650,7 +669,7 @@ func assertGenerationJobLifecycle(t *testing.T, ctx context.Context, db *sql.DB,
 		t.Fatalf("prepare transition: job=%+v changed=%v err=%v", job, changed, err)
 	}
 	job, err = repository.PrepareGenerationJob(ctx, job.ID, domain.PreparedGenerationJob{
-		TemplateID: "video", WorkflowID: "minimax-h3-v4", ModelName: "MiniMax H3", Seed: 42,
+		TemplateID: "minimax-h3-video", WorkflowID: "minimax-h3-v4", ModelName: "MiniMax H3", Seed: 42,
 		PayloadCipher: []byte{1, 2, 3}, Dependencies: []string{" comfyui ", "rife", "comfyui"}, InputCount: 2,
 	})
 	if err != nil || job.WorkflowID != "minimax-h3-v4" || job.Seed != 42 || len(job.Dependencies) != 2 || job.InputCount != 2 {
@@ -675,7 +694,7 @@ func assertGenerationJobLifecycle(t *testing.T, ctx context.Context, db *sql.DB,
 		t.Fatalf("repeat generation job quota: reservation=%+v reserved=%v err=%v", repeatedReservation, reserved, err)
 	}
 	quotaAfterReservation, err := repository.QuickGenerationQuota(ctx, userID)
-	if err != nil || quotaAfterReservation.TotalUsed != quotaBefore.TotalUsed+1 || quotaAfterReservation.DailyUsed != quotaBefore.DailyUsed+1 {
+	if err != nil || quotaAfterReservation.Video.TotalUsed != quotaBefore.Video.TotalUsed+1 || quotaAfterReservation.Video.DailyUsed != quotaBefore.Video.DailyUsed+1 || quotaAfterReservation.Image != quotaBefore.Image {
 		t.Fatalf("generation quota after reservation=%+v before=%+v err=%v", quotaAfterReservation, quotaBefore, err)
 	}
 	job, requested, err := repository.RequestGenerationJobCancellation(ctx, job.ID, userID)
@@ -1015,7 +1034,7 @@ func assertGenerationBatchLifecycle(t *testing.T, ctx context.Context, db *sql.D
 		t.Fatalf("create generation batch: batch=%+v created=%v err=%v", batch, created, err)
 	}
 	quotaReserved, err := repository.QuickGenerationQuota(ctx, ownerID)
-	if err != nil || quotaReserved.DailyUsed != quotaBefore.DailyUsed+3 || quotaReserved.TotalUsed != quotaBefore.TotalUsed+3 {
+	if err != nil || quotaReserved.Image.DailyUsed != quotaBefore.Image.DailyUsed+3 || quotaReserved.Image.TotalUsed != quotaBefore.Image.TotalUsed+3 {
 		t.Fatalf("batch quota reservation: before=%+v after=%+v err=%v", quotaBefore, quotaReserved, err)
 	}
 
@@ -1026,7 +1045,7 @@ func assertGenerationBatchLifecycle(t *testing.T, ctx context.Context, db *sql.D
 		t.Fatalf("idempotent generation batch: batch=%+v created=%v err=%v", recovered, created, err)
 	}
 	quotaRepeated, err := repository.QuickGenerationQuota(ctx, ownerID)
-	if err != nil || quotaRepeated.DailyUsed != quotaReserved.DailyUsed || quotaRepeated.TotalUsed != quotaReserved.TotalUsed {
+	if err != nil || quotaRepeated.Image.DailyUsed != quotaReserved.Image.DailyUsed || quotaRepeated.Image.TotalUsed != quotaReserved.Image.TotalUsed {
 		t.Fatalf("repeated batch changed quota: before=%+v after=%+v err=%v", quotaReserved, quotaRepeated, err)
 	}
 
@@ -1135,7 +1154,7 @@ func assertGenerationBatchLifecycle(t *testing.T, ctx context.Context, db *sql.D
 		t.Fatalf("final generation batch state: batch=%+v err=%v", finalBatch, err)
 	}
 	quotaFinal, err := repository.QuickGenerationQuota(ctx, ownerID)
-	if err != nil || quotaFinal.DailyUsed != quotaBefore.DailyUsed+1 || quotaFinal.TotalUsed != quotaBefore.TotalUsed+1 {
+	if err != nil || quotaFinal.Image.DailyUsed != quotaBefore.Image.DailyUsed+1 || quotaFinal.Image.TotalUsed != quotaBefore.Image.TotalUsed+1 {
 		t.Fatalf("batch cancellation quota: before=%+v after=%+v err=%v", quotaBefore, quotaFinal, err)
 	}
 	if _, err := repository.SetGenerationBatchWinner(ctx, ownerID, batch.PublicID, second.PublicID); !errors.Is(err, store.ErrGenerationBatchWinnerConflict) {

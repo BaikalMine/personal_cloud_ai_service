@@ -318,6 +318,29 @@ func TestFeatureSuggestionReviewWorkflowMigration(t *testing.T) {
 	}
 }
 
+func TestSeparateGenerationQuotasAndInviteControlsMigration(t *testing.T) {
+	var quotaMigration *migration
+	for index := range migrationCatalog {
+		if migrationCatalog[index].version == 50 {
+			quotaMigration = &migrationCatalog[index]
+			break
+		}
+	}
+	if quotaMigration == nil || quotaMigration.name != "separate_generation_quotas_and_invite_controls" {
+		t.Fatal("separate generation quota migration is missing")
+	}
+	sql := strings.Join(quotaMigration.statements, "\n")
+	for _, expected := range []string{
+		"video_generation_daily_limit", "video_generation_total_used", "video_used_count",
+		"can_use_advanced_generation_settings", "pause_mining_for_quick_generation",
+		"max_video_generation_quality", "template_id='minimax-h3-video'",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("separate generation quota migration does not contain %q: %s", expected, sql)
+		}
+	}
+}
+
 func TestQuickGenerationRequestTelemetryMigration(t *testing.T) {
 	var telemetryMigration *migration
 	for index := range migrationCatalog {

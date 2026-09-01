@@ -227,7 +227,10 @@ func main() {
 		if r.Method == http.MethodPost {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"batch": generationBatches[0], "created": true,
-				"quota": map[string]any{"daily_limit": 12, "daily_remaining": 4, "total_limit": 100, "total_remaining": 70},
+				"quota": map[string]any{
+					"image": map[string]any{"daily_limit": 12, "daily_remaining": 4, "total_limit": 100, "total_remaining": 70},
+					"video": map[string]any{"daily_limit": 2, "daily_remaining": 1, "total_limit": 8, "total_remaining": 5},
+				},
 			})
 			return
 		}
@@ -330,7 +333,7 @@ func main() {
 	mux.HandleFunc("/generate/variants", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = w.Write([]byte(`{"variants":[
-			{"id":"preview-1","template_id":"text-to-image","model_name":"Krea2 / Raw INT8 Mixed","seed":284797972294826,"state":"completed","duration_seconds":15,"values":{"template_id":"text-to-image","generation_workflow":"photoflow-krea2","model":"krea2:test","positive_prompt":"A cinematic portrait of a woman in a quiet neon-lit street, realistic skin, dramatic atmosphere."},"media":[{"id":1,"filename":"AI-Gateway-Krea2-portrait.png","media_type":"image","url":"/preview/result.svg","sensitive":false}]},
+			{"id":"preview-1","template_id":"text-to-image","model_name":"Krea2 / Raw INT8 Mixed","seed":284797972294826,"state":"completed","duration_seconds":15,"values":{"template_id":"text-to-image","generation_workflow":"photoflow-krea2","model":"krea2:test","positive_prompt":"A cinematic portrait of a woman in a quiet neon-lit street, realistic skin, dramatic atmosphere.","lora_1":"lenovo_krea2.safetensors","lora_model_strength_1":"0.72","lora_clip_strength_1":"0.91","lora_2":"Krea2-realism-V2.safetensors","lora_model_strength_2":"1.15","lora_clip_strength_2":"0.84","loras_configured":"true"},"media":[{"id":1,"filename":"AI-Gateway-Krea2-portrait.png","media_type":"image","url":"/preview/result.svg","sensitive":false}]},
 			{"id":"preview-2","template_id":"text-to-image","model_name":"Krea2 / Raw INT8 Mixed","seed":1033409957175067,"state":"completed","duration_seconds":16,"values":{"template_id":"text-to-image","generation_workflow":"photoflow-krea2","model":"krea2:test","positive_prompt":"A calm seaside embankment at sunset with editorial fashion photography and soft detailed light."},"media":[{"id":2,"filename":"AI-Gateway-Krea2-seaside.png","media_type":"image","url":"/preview/result.svg","sensitive":false}]},
 			{"id":"preview-3","template_id":"image-to-image","model_name":"Flux 2 / Klein 9B","seed":1019794942414480,"state":"completed","duration_seconds":15,"values":{"template_id":"image-to-image","generation_workflow":"photoflow-flux2-edit","model":"flux2:test","positive_prompt":"Keep the subject identity and composition, replace the background with a warm studio environment."},"media":[{"id":3,"filename":"AI-Gateway-Flux2-editorial.png","media_type":"image","url":"/preview/result.svg","sensitive":true}]},
 			{"id":"preview-4","template_id":"text-to-image","model_name":"Krea2 / Raw INT8 Mixed","seed":45876641139403,"state":"error","duration_seconds":0,"error_message":"Недостаточно памяти для выбранного разрешения.","values":{"positive_prompt":"A detailed fashion portrait with dramatic lighting."},"media":[]}
@@ -401,7 +404,13 @@ func main() {
 			}},
 		},
 		"ComfyOnline": true, "ModelsAvailable": true, "SelectedWorkflow": "", "PreviewOutputURL": "/preview/result.svg",
-		"GenerationQuota": map[string]any{"HasLimits": true, "DailyLimit": 12, "DailyRemaining": 7, "TotalLimit": int64(100), "TotalRemaining": int64(73)},
+		"GenerationQuota": map[string]any{
+			"HasLimits": true,
+			"Image":     map[string]any{"DailyLimit": 12, "DailyRemaining": 7, "TotalLimit": int64(100), "TotalRemaining": int64(73)},
+			"Video":     map[string]any{"DailyLimit": 2, "DailyRemaining": 1, "TotalLimit": int64(8), "TotalRemaining": int64(5)},
+		},
+		"CanUseAdvancedGenerationSettings": true,
+		"MaxVideoGenerationQuality":        720,
 		"RecentGenerationMedia": []map[string]any{
 			{"ID": int64(1), "URL": "/preview/result.svg", "Filename": "AI-Gateway-preview.png", "MediaType": "image", "ExpiresUnix": now.Add(18*time.Hour + 27*time.Minute).UnixMilli()},
 			{"ID": int64(2), "URL": "/preview/result.svg", "Filename": "AI-Gateway-sensitive-preview.png", "MediaType": "image", "Sensitive": true, "ExpiresUnix": now.Add(17*time.Hour + 5*time.Minute).UnixMilli()},
@@ -440,12 +449,18 @@ func main() {
 		"Invalid":     false,
 		"Token":       "preview",
 		"Access": domain.InviteAccess{
-			GrantComfyUI:         true,
-			GrantOpenWebUI:       true,
-			GrantQuickGeneration: true,
-			GrantTextToImage:     true,
-			GenerationDailyLimit: 12,
-			GenerationTotalLimit: 50,
+			GrantComfyUI:                    true,
+			GrantOpenWebUI:                  true,
+			GrantQuickGeneration:            true,
+			GrantTextToImage:                true,
+			GrantVideo:                      true,
+			GrantAdvancedGenerationSettings: true,
+			PauseMiningForQuickGeneration:   true,
+			GenerationDailyLimit:            12,
+			GenerationTotalLimit:            50,
+			VideoGenerationDailyLimit:       2,
+			VideoGenerationTotalLimit:       8,
+			MaxVideoGenerationQuality:       720,
 		},
 	}))
 	hostHistory := []domain.HostMetric{
@@ -667,7 +682,7 @@ func main() {
 	}))
 	users := []domain.UserRow{
 		{ID: 1, Username: "admin", Email: "admin@example.local", Role: "admin", CanUseComfyUI: true, CanUseOpenWebUI: true, Requests: 96, LastLoginAt: sql.NullTime{Time: now.Add(-time.Hour), Valid: true}},
-		{ID: 2, Username: "rayka", Email: "rayka@example.local", Role: "user", CanUseComfyUI: true, CanUseOpenWebUI: true, Requests: 302, LastLoginAt: sql.NullTime{Time: now.Add(-8 * time.Minute), Valid: true}, AccountExpiresAt: sql.NullTime{Time: now.Add(5*time.Hour + 43*time.Minute + 18*time.Second), Valid: true}},
+		{ID: 2, Username: "rayka", Email: "rayka@example.local", Role: "user", CanUseComfyUI: true, CanUseOpenWebUI: true, CanUseQuickGeneration: true, CanGenerateTextToImage: true, CanGenerateVideo: true, CanUseAdvancedGenerationSettings: true, PauseMiningForQuickGeneration: true, GenerationDailyLimit: 12, GenerationTotalLimit: 50, GenerationTotalUsed: 17, VideoGenerationDailyLimit: 2, VideoGenerationTotalLimit: 8, VideoGenerationTotalUsed: 3, MaxVideoGenerationQuality: 720, Requests: 302, LastLoginAt: sql.NullTime{Time: now.Add(-8 * time.Minute), Valid: true}, AccountExpiresAt: sql.NullTime{Time: now.Add(5*time.Hour + 43*time.Minute + 18*time.Second), Valid: true}},
 		{ID: 3, Username: "demo4518", Role: "user", CanUseOpenWebUI: true, Requests: 188, LastLoginAt: sql.NullTime{Time: now.Add(-24 * time.Hour), Valid: true}},
 		{ID: 4, Username: "disabled-user-with-long-name", Email: "long.address@example.local", Role: "user", Disabled: true, CanUseComfyUI: true, Requests: 4, AccountExpiresAt: sql.NullTime{Time: now.Add(-2 * time.Minute), Valid: true}},
 	}
@@ -683,12 +698,12 @@ func main() {
 	}
 	mux.HandleFunc("/preview/audit", render("admin_audit", "Журнал аудита", map[string]any{"Audits": audits}))
 	invites := []domain.InviteRow{
-		{ID: 48, CreatedBy: "admin", MaxUses: 1, ExpiresAt: now.Add(48 * time.Hour), GrantComfyUI: true, GrantOpenWebUI: true, Status: "active", CreatedAt: now.Add(-time.Hour)},
+		{ID: 48, CreatedBy: "admin", MaxUses: 1, ExpiresAt: now.Add(48 * time.Hour), GrantQuickGeneration: true, GrantTextToImage: true, GrantVideo: true, GrantAdvancedGenerationSettings: true, PauseMiningForQuickGeneration: true, GenerationDailyLimit: 12, GenerationTotalLimit: 50, VideoGenerationDailyLimit: 2, VideoGenerationTotalLimit: 8, MaxVideoGenerationQuality: 720, Status: "active", CreatedAt: now.Add(-time.Hour)},
 		{ID: 47, CreatedBy: "admin", MaxUses: 3, UsedCount: 1, ExpiresAt: now.Add(24 * time.Hour), Revoked: true, GrantOpenWebUI: true, Status: "revoked", CreatedAt: now.Add(-4 * time.Hour)},
 		{ID: 46, CreatedBy: "admin", MaxUses: 1, UsedCount: 1, ExpiresAt: now.Add(-24 * time.Hour), GrantComfyUI: true, Status: "used", CreatedAt: now.Add(-72 * time.Hour)},
 	}
 	mux.HandleFunc("/preview/invites", render("admin_invites", "Invites UI preview", map[string]any{"Invites": invites, "InviteLink": "https://ai.example.test/invite/preview-token"}))
-	profile := domain.User{ID: 2, Username: "rayka", Email: sql.NullString{String: "rayka@example.local", Valid: true}, Role: "user", CanUseComfyUI: true, CanUseOpenWebUI: true, CreatedAt: now.Add(-720 * time.Hour), LastLoginAt: sql.NullTime{Time: now.Add(-8 * time.Minute), Valid: true}, AccountExpiresAt: sql.NullTime{Time: now.Add(5*time.Hour + 43*time.Minute + 18*time.Second), Valid: true}}
+	profile := domain.User{ID: 2, Username: "rayka", Email: sql.NullString{String: "rayka@example.local", Valid: true}, Role: "user", CanUseComfyUI: true, CanUseOpenWebUI: true, CanUseQuickGeneration: true, CanGenerateTextToImage: true, CanGenerateVideo: true, CanUseAdvancedGenerationSettings: true, PauseMiningForQuickGeneration: true, GenerationDailyLimit: 12, GenerationTotalLimit: 50, GenerationTotalUsed: 17, VideoGenerationDailyLimit: 2, VideoGenerationTotalLimit: 8, VideoGenerationTotalUsed: 3, MaxVideoGenerationQuality: 720, CreatedAt: now.Add(-720 * time.Hour), LastLoginAt: sql.NullTime{Time: now.Add(-8 * time.Minute), Valid: true}, AccountExpiresAt: sql.NullTime{Time: now.Add(5*time.Hour + 43*time.Minute + 18*time.Second), Valid: true}}
 	mux.HandleFunc("/preview/user", render("admin_user_detail", "Пользователь rayka", map[string]any{
 		"Profile": profile, "Stats": domain.UserStats{TotalRequests: 302, TotalBytesOut: 4200000000, LastService: "ComfyUI", Chart: chart, ByService: []domain.ServiceUsage{{Service: "comfyui", Requests: 210, Bytes: 4100000000, Errors: 1}, {Service: "openwebui", Requests: 92, Bytes: 8700000}}}, "Activities": activities,
 		"PasswordStatus": "", "AccessStatus": "", "SecurityStatus": "", "AccountLocked": false,

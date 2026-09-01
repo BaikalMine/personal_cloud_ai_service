@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"testing"
 )
 
@@ -53,4 +54,64 @@ func TestParseInviteExpiryDuration(t *testing.T) {
 	if _, err := parseInviteExpiry(r); err == nil {
 		t.Fatal("parseInviteExpiry() accepted a zero-hour lifetime")
 	}
+}
+
+func TestParseGenerationLimits(t *testing.T) {
+	tests := []struct {
+		name      string
+		form      url.Values
+		wantDaily int
+		wantTotal int64
+		valid     bool
+	}{
+		{name: "blank means unlimited", form: url.Values{}, valid: true},
+		{name: "separate image limits", form: url.Values{"image_generation_daily_limit": {"12"}, "image_generation_total_limit": {"50"}}, wantDaily: 12, wantTotal: 50, valid: true},
+		{name: "zero means unlimited", form: url.Values{"image_generation_daily_limit": {"0"}, "image_generation_total_limit": {"0"}}, valid: true},
+		{name: "negative daily", form: url.Values{"image_generation_daily_limit": {"-1"}}, valid: false},
+		{name: "invalid total", form: url.Values{"image_generation_total_limit": {"many"}}, valid: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/admin/invites", nil)
+			r.Form = tt.form
+			daily, total, err := parseGenerationLimits(r, "image_generation", "изображений")
+			if (err == nil) != tt.valid {
+				t.Fatalf("parseGenerationLimits() error = %v, valid = %v", err, tt.valid)
+			}
+			if err == nil && (daily != tt.wantDaily || total != tt.wantTotal) {
+				t.Fatalf("parseGenerationLimits() = (%d, %d), want (%d, %d)", daily, total, tt.wantDaily, tt.wantTotal)
+			}
+		})
+	}
+}
+
+func TestParseMaxVideoGenerationQuality(t *testing.T) {
+	for _, quality := range []string{"480", "720", "1080", "1440"} {
+		t.Run(quality, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/admin/invites", nil)
+			r.Form = url.Values{"max_video_generation_quality": {quality}}
+			got, err := parseMaxVideoGenerationQuality(r)
+			if err != nil || got != mustAtoi(t, quality) {
+				t.Fatalf("parseMaxVideoGenerationQuality() = %d, %v", got, err)
+			}
+		})
+	}
+	for _, quality := range []string{"360", "721", "2160", "invalid"} {
+		t.Run("reject "+quality, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/admin/invites", nil)
+			r.Form = url.Values{"max_video_generation_quality": {quality}}
+			if _, err := parseMaxVideoGenerationQuality(r); err == nil {
+				t.Fatalf("parseMaxVideoGenerationQuality() accepted %q", quality)
+			}
+		})
+	}
+}
+
+func mustAtoi(t *testing.T, raw string) int {
+	t.Helper()
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return value
 }

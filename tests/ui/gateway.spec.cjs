@@ -9,7 +9,9 @@ const responsiveRoutes = [
   { route: "/preview/gallery", snapshot: "gallery.png" },
   { route: "/preview/profile", snapshot: "profile.png" },
   { route: "/preview/invites", snapshot: "invitations.png" },
+  { route: "/preview/invite", snapshot: "invite-registration.png" },
   { route: "/preview/users", snapshot: "users.png" },
+  { route: "/preview/user", snapshot: "user-detail.png" },
   { route: "/preview/admin", snapshot: "admin-dashboard.png" },
   { route: "/preview/content", snapshot: "ai-content.png" },
   { route: "/preview/suggestions", snapshot: "suggestions.png" },
@@ -99,6 +101,21 @@ test("generation wizard covers Krea2, Flux2 and MiniMax", async ({ page }, testI
   await expect(page.locator(".source-image-card:visible")).toHaveCount(4);
   await expect(page.locator("#minimax-audio-reference")).toBeVisible();
   await expect(page.locator("#minimax-video-reference")).toBeVisible();
+});
+
+test("repeat restores the active workflow LoRA stack and strengths", async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+
+  await open(page, "/preview/generate?variant=preview-1");
+  await expect(page.locator("#generation-repeat-notice")).toContainText("Параметры перенесены");
+  await expect(page.locator('.krea-lora-row select[name="lora_1"]')).toHaveValue("lenovo_krea2.safetensors");
+  await expect(page.locator('.krea-lora-row input[name="lora_model_strength_1"]')).toHaveValue("0.72");
+  await expect(page.locator('.krea-lora-row input[name="lora_clip_strength_1"]')).toHaveValue("0.91");
+  await expect(page.locator('.krea-lora-row select[name="lora_2"]')).toHaveValue("Krea2-realism-V2.safetensors");
+  await expect(page.locator('.krea-lora-row input[name="lora_model_strength_2"]')).toHaveValue("1.15");
+  await expect(page.locator('.krea-lora-row input[name="lora_clip_strength_2"]')).toHaveValue("0.84");
+  await page.locator("details.generation-advanced > summary").click();
+  await expect(page.locator('.krea-lora-row[data-lora-slots="krea"]').nth(1)).toBeVisible();
 });
 
 test("controlled generation batches stay clear and usable at every viewport", async ({ page }, testInfo) => {

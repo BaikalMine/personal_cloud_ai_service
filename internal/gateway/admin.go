@@ -798,21 +798,47 @@ func (a *App) handleAdminUserDetail(w http.ResponseWriter, r *http.Request, rest
 			imageToImage := quickGeneration && r.Form.Get("can_generate_image_to_image") == "on"
 			video := quickGeneration && r.Form.Get("can_generate_video") == "on"
 			quickGeneration = quickGeneration && (textToImage || imageToImage || video)
+			advancedGenerationSettings := quickGeneration && r.Form.Get("can_use_advanced_generation_settings") == "on"
 			manageMining := r.Form.Get("can_manage_mining") == "on"
 			pauseMiningForQuickGeneration := quickGeneration && r.Form.Get("pause_mining_for_quick_generation") == "on"
-			dailyLimit, totalLimit, limitErr := parseGenerationLimits(r)
+			imageDailyLimit, imageTotalLimit, limitErr := parseGenerationLimits(r, "image_generation", "изображений")
 			if limitErr != nil {
 				http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?access=invalid_limits", id), http.StatusFound)
 				return
 			}
-			updated, err := a.store.SetServiceAccess(r.Context(), id, comfyUI, openWebUI, quickGeneration, textToImage, imageToImage, video, manageMining, pauseMiningForQuickGeneration, dailyLimit, totalLimit)
+			videoDailyLimit, videoTotalLimit, limitErr := parseGenerationLimits(r, "video_generation", "видео")
+			if limitErr != nil {
+				http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?access=invalid_limits", id), http.StatusFound)
+				return
+			}
+			maxVideoQuality, qualityErr := parseMaxVideoGenerationQuality(r)
+			if qualityErr != nil {
+				http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?access=invalid_limits", id), http.StatusFound)
+				return
+			}
+			updated, err := a.store.SetServiceAccess(r.Context(), id, store.SetServiceAccessParams{
+				ComfyUI: comfyUI, OpenWebUI: openWebUI, QuickGeneration: quickGeneration,
+				TextToImage: textToImage, ImageToImage: imageToImage, Video: video,
+				AdvancedGenerationSettings: advancedGenerationSettings, ManageMining: manageMining,
+				PauseMiningForQuickGeneration: pauseMiningForQuickGeneration,
+				ImageDailyLimit:               imageDailyLimit, ImageTotalLimit: imageTotalLimit,
+				VideoDailyLimit: videoDailyLimit, VideoTotalLimit: videoTotalLimit, MaxVideoQuality: maxVideoQuality,
+			})
 			if err != nil {
 				http.Error(w, "не удалось обновить права доступа", http.StatusInternalServerError)
 				return
 			}
 			if updated {
 				a.closeUserWebSockets(id)
-				a.audit(r.Context(), &actor.ID, "user_service_access_updated", "user", &id, a.clientIP(r), r.UserAgent(), map[string]any{"comfyui": comfyUI, "openwebui": openWebUI, "quick_generation": quickGeneration, "text_to_image": textToImage, "image_to_image": imageToImage, "video": video, "manage_mining": manageMining, "pause_mining_for_quick_generation": pauseMiningForQuickGeneration, "generation_daily_limit": dailyLimit, "generation_total_limit": totalLimit})
+				a.audit(r.Context(), &actor.ID, "user_service_access_updated", "user", &id, a.clientIP(r), r.UserAgent(), map[string]any{
+					"comfyui": comfyUI, "openwebui": openWebUI, "quick_generation": quickGeneration,
+					"text_to_image": textToImage, "image_to_image": imageToImage, "video": video,
+					"advanced_generation_settings": advancedGenerationSettings, "manage_mining": manageMining,
+					"pause_mining_for_quick_generation": pauseMiningForQuickGeneration,
+					"image_generation_daily_limit":      imageDailyLimit, "image_generation_total_limit": imageTotalLimit,
+					"video_generation_daily_limit": videoDailyLimit, "video_generation_total_limit": videoTotalLimit,
+					"max_video_generation_quality": maxVideoQuality,
+				})
 			}
 			http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?access=changed", id), http.StatusFound)
 			return
@@ -927,15 +953,29 @@ func (a *App) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
 		grantTextToImage := grantQuickGeneration && r.Form.Get("grant_text_to_image") == "on"
 		grantImageToImage := grantQuickGeneration && r.Form.Get("grant_image_to_image") == "on"
 		grantVideo := grantQuickGeneration && r.Form.Get("grant_video") == "on"
+		grantAdvancedGenerationSettings := grantQuickGeneration && r.Form.Get("grant_advanced_generation_settings") == "on"
+		pauseMiningForQuickGeneration := grantQuickGeneration && r.Form.Get("pause_mining_for_quick_generation") == "on"
 		if grantQuickGeneration && !grantTextToImage && !grantImageToImage && !grantVideo {
 			invites, _ := a.store.ListInvites(r.Context(), 200)
 			a.render(w, r, "admin_invites", map[string]any{"Title": "Приглашения", "Invites": invites, "Error": "Для быстрой генерации выберите хотя бы один сценарий."})
 			return
 		}
-		dailyLimit, totalLimit, limitErr := parseGenerationLimits(r)
+		imageDailyLimit, imageTotalLimit, limitErr := parseGenerationLimits(r, "image_generation", "изображений")
 		if limitErr != nil {
 			invites, _ := a.store.ListInvites(r.Context(), 200)
 			a.render(w, r, "admin_invites", map[string]any{"Title": "Приглашения", "Invites": invites, "Error": limitErr.Error()})
+			return
+		}
+		videoDailyLimit, videoTotalLimit, limitErr := parseGenerationLimits(r, "video_generation", "видео")
+		if limitErr != nil {
+			invites, _ := a.store.ListInvites(r.Context(), 200)
+			a.render(w, r, "admin_invites", map[string]any{"Title": "Приглашения", "Invites": invites, "Error": limitErr.Error()})
+			return
+		}
+		maxVideoQuality, qualityErr := parseMaxVideoGenerationQuality(r)
+		if qualityErr != nil {
+			invites, _ := a.store.ListInvites(r.Context(), 200)
+			a.render(w, r, "admin_invites", map[string]any{"Title": "Приглашения", "Invites": invites, "Error": qualityErr.Error()})
 			return
 		}
 		if !grantComfyUI && !grantOpenWebUI && !grantQuickGeneration {
@@ -949,25 +989,37 @@ func (a *App) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		id, err := a.store.CreateInvite(r.Context(), store.CreateInviteParams{
-			TokenHash:              security.HashToken(token),
-			CreatedByUserID:        actor.ID,
-			MaxUses:                maxUses,
-			ExpiresAt:              expiresAt,
-			GrantComfyUI:           grantComfyUI,
-			GrantOpenWebUI:         grantOpenWebUI,
-			GrantQuickGeneration:   grantQuickGeneration,
-			GrantTextToImage:       grantTextToImage,
-			GrantImageToImage:      grantImageToImage,
-			GrantVideo:             grantVideo,
-			GenerationDailyLimit:   dailyLimit,
-			GenerationTotalLimit:   totalLimit,
-			AccountLifetimeSeconds: accountLifetimeSeconds,
+			TokenHash:                       security.HashToken(token),
+			CreatedByUserID:                 actor.ID,
+			MaxUses:                         maxUses,
+			ExpiresAt:                       expiresAt,
+			GrantComfyUI:                    grantComfyUI,
+			GrantOpenWebUI:                  grantOpenWebUI,
+			GrantQuickGeneration:            grantQuickGeneration,
+			GrantTextToImage:                grantTextToImage,
+			GrantImageToImage:               grantImageToImage,
+			GrantVideo:                      grantVideo,
+			GrantAdvancedGenerationSettings: grantAdvancedGenerationSettings,
+			PauseMiningForQuickGeneration:   pauseMiningForQuickGeneration,
+			GenerationDailyLimit:            imageDailyLimit,
+			GenerationTotalLimit:            imageTotalLimit,
+			VideoGenerationDailyLimit:       videoDailyLimit,
+			VideoGenerationTotalLimit:       videoTotalLimit,
+			MaxVideoGenerationQuality:       maxVideoQuality,
+			AccountLifetimeSeconds:          accountLifetimeSeconds,
 		})
 		if err != nil {
 			http.Error(w, "ошибка базы данных", http.StatusInternalServerError)
 			return
 		}
-		a.audit(r.Context(), &actor.ID, "invite_created", "invite", &id, a.clientIP(r), r.UserAgent(), map[string]any{"max_uses": maxUses, "expires_at": expiresAt, "grant_comfyui": grantComfyUI, "grant_openwebui": grantOpenWebUI, "grant_quick_generation": grantQuickGeneration, "text_to_image": grantTextToImage, "image_to_image": grantImageToImage, "video": grantVideo, "generation_daily_limit": dailyLimit, "generation_total_limit": totalLimit, "account_lifetime_seconds": accountLifetimeSeconds})
+		a.audit(r.Context(), &actor.ID, "invite_created", "invite", &id, a.clientIP(r), r.UserAgent(), map[string]any{
+			"max_uses": maxUses, "expires_at": expiresAt, "grant_comfyui": grantComfyUI, "grant_openwebui": grantOpenWebUI,
+			"grant_quick_generation": grantQuickGeneration, "text_to_image": grantTextToImage, "image_to_image": grantImageToImage, "video": grantVideo,
+			"advanced_generation_settings": grantAdvancedGenerationSettings, "pause_mining_for_quick_generation": pauseMiningForQuickGeneration,
+			"image_generation_daily_limit": imageDailyLimit, "image_generation_total_limit": imageTotalLimit,
+			"video_generation_daily_limit": videoDailyLimit, "video_generation_total_limit": videoTotalLimit,
+			"max_video_generation_quality": maxVideoQuality, "account_lifetime_seconds": accountLifetimeSeconds,
+		})
 		invites, _ := a.store.ListInvites(r.Context(), 200)
 		a.render(w, r, "admin_invites", map[string]any{
 			"Title":      "Приглашения",
@@ -984,16 +1036,41 @@ func (a *App) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
 	a.render(w, r, "admin_invites", map[string]any{"Title": "Приглашения", "Invites": invites})
 }
 
-func parseGenerationLimits(r *http.Request) (int, int64, error) {
-	dailyLimit, err := strconv.Atoi(strings.TrimSpace(r.Form.Get("generation_daily_limit")))
-	if err != nil || dailyLimit < 0 || dailyLimit > 100000 {
-		return 0, 0, fmt.Errorf("суточный лимит должен быть числом от 0 до 100000")
+func parseGenerationLimits(r *http.Request, prefix, label string) (int, int64, error) {
+	rawDaily := strings.TrimSpace(r.Form.Get(prefix + "_daily_limit"))
+	if rawDaily == "" {
+		rawDaily = "0"
 	}
-	totalLimit, err := strconv.ParseInt(strings.TrimSpace(r.Form.Get("generation_total_limit")), 10, 64)
+	dailyLimit, err := strconv.Atoi(rawDaily)
+	if err != nil || dailyLimit < 0 || dailyLimit > 100000 {
+		return 0, 0, fmt.Errorf("суточный лимит %s должен быть числом от 0 до 100000", label)
+	}
+	rawTotal := strings.TrimSpace(r.Form.Get(prefix + "_total_limit"))
+	if rawTotal == "" {
+		rawTotal = "0"
+	}
+	totalLimit, err := strconv.ParseInt(rawTotal, 10, 64)
 	if err != nil || totalLimit < 0 || totalLimit > 10000000 {
-		return 0, 0, fmt.Errorf("общий лимит должен быть числом от 0 до 10000000")
+		return 0, 0, fmt.Errorf("общий лимит %s должен быть числом от 0 до 10000000", label)
 	}
 	return dailyLimit, totalLimit, nil
+}
+
+func parseMaxVideoGenerationQuality(r *http.Request) (int, error) {
+	raw := strings.TrimSpace(r.Form.Get("max_video_generation_quality"))
+	if raw == "" {
+		raw = "720"
+	}
+	quality, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("выберите максимальное качество видео")
+	}
+	switch quality {
+	case 480, 720, 1080, 1440:
+		return quality, nil
+	default:
+		return 0, fmt.Errorf("максимальное качество видео должно быть 480p, 720p, 1080p или 1440p")
+	}
 }
 
 func parseInviteExpiry(r *http.Request) (time.Time, error) {

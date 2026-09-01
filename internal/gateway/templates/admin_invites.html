@@ -42,21 +42,36 @@
         </section>
 
         <section class="invite-builder-section invite-builder-section--limits">
-          <div class="invite-section-heading"><p class="section-kicker">02</p><h3>Сроки и лимиты</h3><p>Срок ссылки не связан со сроком временной учётной записи.</p></div>
+          <div class="invite-section-heading"><p class="section-kicker">02</p><h3>Ссылка и учётная запись</h3><p>Срок ссылки не связан со сроком временной учётной записи.</p></div>
           <div class="invite-limit-grid">
             <label>Ссылка действует<select name="invite_ttl_hours"><option value="1">1 час</option><option value="24" selected>24 часа</option><option value="72">3 дня</option><option value="168">7 дней</option><option value="720">30 дней</option></select></label>
             <label>Количество активаций<input name="max_uses" type="number" value="1" min="1" max="10000" inputmode="numeric"></label>
           </div>
           <label class="invite-temporary-lifetime ui-field" data-temporary-lifetime hidden>Срок доступа после регистрации<select name="temporary_account_hours" disabled><option value="1">1 час</option><option value="6">6 часов</option><option value="12">12 часов</option><option value="24">1 день</option><option value="72">3 дня</option><option value="168" selected>7 дней</option><option value="336">14 дней</option><option value="720">30 дней</option><option value="2160">90 дней</option></select><small class="field-hint">По окончании срока учётная запись удаляется, а история и медиа остаются до штатного срока хранения с пометкой об удалённом пользователе.</small></label>
-          <details class="invite-advanced-limits">
-            <summary>Дополнительные ограничения</summary>
-            <div class="invite-limit-grid">
-              <label>Суточный лимит генераций<input name="generation_daily_limit" type="number" value="0" min="0" max="100000" inputmode="numeric"><small class="field-hint">0 = без лимита</small></label>
-              <label>Общий лимит генераций<input name="generation_total_limit" type="number" value="0" min="0" max="10000000" inputmode="numeric"><small class="field-hint">0 = без лимита</small></label>
-            </div>
-          </details>
         </section>
       </div>
+
+      <section class="invite-generation-policy" data-quick-policy>
+        <div class="invite-section-heading"><p class="section-kicker">03</p><h3>Генерация и ресурсы</h3><p>Квоты считаются отдельно. Ноль означает отсутствие ограничения для выбранного типа.</p></div>
+        <div class="invite-generation-grid">
+          <fieldset class="invite-quota-group" data-image-policy>
+            <legend><span>Изображения</span><small>Текст в изображение и фото с промтом</small></legend>
+            <label>В сутки<input name="image_generation_daily_limit" type="number" value="0" min="0" max="100000" inputmode="numeric"></label>
+            <label>Всего<input name="image_generation_total_limit" type="number" value="0" min="0" max="10000000" inputmode="numeric"></label>
+          </fieldset>
+          <fieldset class="invite-quota-group" data-video-policy>
+            <legend><span>Видео</span><small>Отдельная квота для MiniMax H3</small></legend>
+            <label>В сутки<input name="video_generation_daily_limit" type="number" value="0" min="0" max="100000" inputmode="numeric"></label>
+            <label>Всего<input name="video_generation_total_limit" type="number" value="0" min="0" max="10000000" inputmode="numeric"></label>
+            <label class="invite-video-quality">Максимум качества<select name="max_video_generation_quality"><option value="480">480p</option><option value="720" selected>720p</option><option value="1080">1080p</option><option value="1440">1440p · 2K</option></select><small class="field-hint">Учитывается и финальный RTX-апскейл.</small></label>
+          </fieldset>
+          <fieldset class="invite-runtime-group">
+            <legend><span>Возможности</span><small>Начальные настройки новой учётной записи</small></legend>
+            <label class="service-toggle ui-choice"><input name="grant_advanced_generation_settings" type="checkbox"><span><b>Точные настройки</b><small>Сэмплеры, LoRA и обработка workflow.</small></span></label>
+            <label class="service-toggle ui-choice"><input name="pause_mining_for_quick_generation" type="checkbox"><span><b>Приоритет</b><small>Освобождать ресурсы майнинга на время генерации.</small></span></label>
+          </fieldset>
+        </div>
+      </section>
 
       <div class="invite-submit-row"><p>После создания ссылку можно скопировать один раз. Секретный токен в базе не хранится в открытом виде.</p><button type="submit">Создать приглашение</button></div>
     </form>
@@ -65,12 +80,13 @@
   <section class="panel invite-history-panel">
     <div class="panel-heading"><div><p class="section-kicker">История</p><h2>Созданные приглашения</h2></div></div>
     {{if .Invites}}
-    <div class="table-scroll"><table><thead><tr><th>ID</th><th>Создал</th><th>Доступ</th><th>Учётная запись</th><th>Активации</th><th>Ссылка истекает</th><th>Статус</th><th></th></tr></thead><tbody>
+    <div class="table-scroll invite-history-table"><table><thead><tr><th>ID</th><th>Создал</th><th>Доступ</th><th>Ограничения</th><th>Учётная запись</th><th>Активации</th><th>Ссылка истекает</th><th>Статус</th><th></th></tr></thead><tbody>
     {{range .Invites}}
       <tr>
         <td data-label="ID">{{.ID}}</td>
         <td data-label="Создал">{{.CreatedBy}}</td>
-        <td data-label="Доступ">{{if .GrantQuickGeneration}}<span class="badge ok">Быстрая генерация</span>{{if .GrantTextToImage}} <span class="badge">Текст в изображение</span>{{end}}{{if .GrantImageToImage}} <span class="badge">Фото и промт</span>{{end}}{{if .GrantVideo}} <span class="badge">Видео</span>{{end}}{{end}} {{if .GrantComfyUI}}<span class="badge">ComfyUI</span>{{end}} {{if .GrantOpenWebUI}}<span class="badge">OpenWebUI</span>{{end}}<small class="table-note">{{if gt .GenerationDailyLimit 0}}день: {{.GenerationDailyLimit}}{{else}}день: без лимита{{end}} · {{if gt .GenerationTotalLimit 0}}всего: {{.GenerationTotalLimit}}{{else}}всего: без лимита{{end}}</small></td>
+        <td data-label="Доступ">{{if .GrantQuickGeneration}}<span class="badge ok">Быстрая генерация</span>{{if .GrantTextToImage}} <span class="badge">Текст в изображение</span>{{end}}{{if .GrantImageToImage}} <span class="badge">Фото и промт</span>{{end}}{{if .GrantVideo}} <span class="badge">Видео</span>{{end}}{{if .GrantAdvancedGenerationSettings}} <span class="badge">Точные настройки</span>{{end}}{{if .PauseMiningForQuickGeneration}} <span class="badge warning">Приоритет</span>{{end}}{{end}} {{if .GrantComfyUI}}<span class="badge">ComfyUI</span>{{end}} {{if .GrantOpenWebUI}}<span class="badge">OpenWebUI</span>{{end}}</td>
+        <td data-label="Ограничения"><small class="table-note"><b>Фото:</b> {{if gt .GenerationDailyLimit 0}}{{.GenerationDailyLimit}}/сутки{{else}}без суточного{{end}}, {{if gt .GenerationTotalLimit 0}}{{.GenerationTotalLimit}} всего{{else}}без общего{{end}}</small>{{if .GrantVideo}}<small class="table-note"><b>Видео:</b> {{if gt .VideoGenerationDailyLimit 0}}{{.VideoGenerationDailyLimit}}/сутки{{else}}без суточного{{end}}, {{if gt .VideoGenerationTotalLimit 0}}{{.VideoGenerationTotalLimit}} всего{{else}}без общего{{end}} · до {{.MaxVideoGenerationQuality}}p</small>{{end}}</td>
         <td data-label="Учётная запись">{{if gt .AccountLifetimeSeconds 0}}<span class="badge warning">Временная</span><small class="table-note">{{accountLifetimeLabel .AccountLifetimeSeconds}} после регистрации</small>{{else}}<span class="badge">Постоянная</span>{{end}}</td>
         <td data-label="Активации">{{.UsedCount}} / {{.MaxUses}}</td>
         <td data-label="Ссылка истекает">{{formatTime .ExpiresAt}}</td>

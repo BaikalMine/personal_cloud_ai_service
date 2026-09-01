@@ -778,6 +778,14 @@
     const temporarySelect = temporaryLifetime?.querySelector("select");
     const quickAccess = inviteComposer.querySelector("[data-quick-generation-access]");
     const scenarios = inviteComposer.querySelector("[data-quick-scenarios]");
+    const quickPolicy = inviteComposer.querySelector("[data-quick-policy]");
+    const imagePolicy = inviteComposer.querySelector("[data-image-policy]");
+    const videoPolicy = inviteComposer.querySelector("[data-video-policy]");
+    const setPolicyEnabled = (target, enabled) => {
+      if (!(target instanceof HTMLElement)) return;
+      target.classList.toggle("is-disabled", !enabled);
+      target.querySelectorAll("input, select").forEach((control) => { control.disabled = !enabled; });
+    };
     const syncInviteComposer = () => {
       const temporary = accountTypes.some((input) => input instanceof HTMLInputElement && input.checked && input.value === "temporary");
       if (temporaryLifetime instanceof HTMLElement) temporaryLifetime.hidden = !temporary;
@@ -789,9 +797,19 @@
         scenarios.classList.toggle("is-disabled", !quickEnabled);
         scenarios.querySelectorAll("input").forEach((input) => { input.disabled = !quickEnabled; });
       }
+      const textToImage = inviteComposer.elements.grant_text_to_image;
+      const imageToImage = inviteComposer.elements.grant_image_to_image;
+      const video = inviteComposer.elements.grant_video;
+      const imageEnabled = quickEnabled && Boolean(textToImage?.checked || imageToImage?.checked);
+      const videoEnabled = quickEnabled && Boolean(video?.checked);
+      if (quickPolicy instanceof HTMLElement) quickPolicy.classList.toggle("is-disabled", !quickEnabled);
+      setPolicyEnabled(imagePolicy, imageEnabled);
+      setPolicyEnabled(videoPolicy, videoEnabled);
+      quickPolicy?.querySelectorAll(".invite-runtime-group input").forEach((input) => { input.disabled = !quickEnabled; });
     };
     accountTypes.forEach((input) => input.addEventListener("change", syncInviteComposer));
     quickAccess?.addEventListener("change", syncInviteComposer);
+    scenarios?.addEventListener("change", syncInviteComposer);
     syncInviteComposer();
   }
 

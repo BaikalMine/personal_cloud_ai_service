@@ -6,27 +6,32 @@ import (
 )
 
 type User struct {
-	ID                            int64
-	Username                      string
-	Email                         sql.NullString
-	Role                          string
-	Disabled                      bool
-	CanUseComfyUI                 bool
-	CanUseOpenWebUI               bool
-	CanUseQuickGeneration         bool
-	CanGenerateTextToImage        bool
-	CanGenerateImageToImage       bool
-	CanGenerateVideo              bool
-	CanManageMining               bool
-	PauseMiningForQuickGeneration bool
-	GenerationDailyLimit          int
-	GenerationTotalLimit          int64
-	GenerationTotalUsed           int64
-	FailedLoginCount              int
-	LockedUntil                   sql.NullTime
-	AccountExpiresAt              sql.NullTime
-	CreatedAt                     time.Time
-	LastLoginAt                   sql.NullTime
+	ID                               int64
+	Username                         string
+	Email                            sql.NullString
+	Role                             string
+	Disabled                         bool
+	CanUseComfyUI                    bool
+	CanUseOpenWebUI                  bool
+	CanUseQuickGeneration            bool
+	CanGenerateTextToImage           bool
+	CanGenerateImageToImage          bool
+	CanGenerateVideo                 bool
+	CanUseAdvancedGenerationSettings bool
+	CanManageMining                  bool
+	PauseMiningForQuickGeneration    bool
+	GenerationDailyLimit             int
+	GenerationTotalLimit             int64
+	GenerationTotalUsed              int64
+	VideoGenerationDailyLimit        int
+	VideoGenerationTotalLimit        int64
+	VideoGenerationTotalUsed         int64
+	MaxVideoGenerationQuality        int
+	FailedLoginCount                 int
+	LockedUntil                      sql.NullTime
+	AccountExpiresAt                 sql.NullTime
+	CreatedAt                        time.Time
+	LastLoginAt                      sql.NullTime
 }
 
 func (u User) CanUseQuickGenerationType(templateID string) bool {
@@ -73,29 +78,34 @@ func (u User) CanUseService(service string) bool {
 }
 
 type UserRow struct {
-	ID                            int64
-	Username                      string
-	Email                         string
-	Role                          string
-	Disabled                      bool
-	CanUseComfyUI                 bool
-	CanUseOpenWebUI               bool
-	CanUseQuickGeneration         bool
-	CanGenerateTextToImage        bool
-	CanGenerateImageToImage       bool
-	CanGenerateVideo              bool
-	CanManageMining               bool
-	PauseMiningForQuickGeneration bool
-	GenerationDailyLimit          int
-	GenerationTotalLimit          int64
-	GenerationTotalUsed           int64
-	FailedLoginCount              int
-	LockedUntil                   sql.NullTime
-	AccountExpiresAt              sql.NullTime
-	Locked                        bool
-	CreatedAt                     time.Time
-	LastLoginAt                   sql.NullTime
-	Requests                      int64
+	ID                               int64
+	Username                         string
+	Email                            string
+	Role                             string
+	Disabled                         bool
+	CanUseComfyUI                    bool
+	CanUseOpenWebUI                  bool
+	CanUseQuickGeneration            bool
+	CanGenerateTextToImage           bool
+	CanGenerateImageToImage          bool
+	CanGenerateVideo                 bool
+	CanUseAdvancedGenerationSettings bool
+	CanManageMining                  bool
+	PauseMiningForQuickGeneration    bool
+	GenerationDailyLimit             int
+	GenerationTotalLimit             int64
+	GenerationTotalUsed              int64
+	VideoGenerationDailyLimit        int
+	VideoGenerationTotalLimit        int64
+	VideoGenerationTotalUsed         int64
+	MaxVideoGenerationQuality        int
+	FailedLoginCount                 int
+	LockedUntil                      sql.NullTime
+	AccountExpiresAt                 sql.NullTime
+	Locked                           bool
+	CreatedAt                        time.Time
+	LastLoginAt                      sql.NullTime
+	Requests                         int64
 }
 
 type AccountSession struct {
