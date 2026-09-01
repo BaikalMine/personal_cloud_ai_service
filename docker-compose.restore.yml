@@ -1,0 +1,112 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "5m"
+    max-file: "1"
+
+services:
+  postgres:
+    image: postgres:16-alpine@sha256:fd1e8d0274f13f5a03a2673a207b28e14823c2f2efc3ca4bb4197c8a9f841bdc
+    environment:
+      POSTGRES_DB: gateway_restore
+      POSTGRES_USER: gateway_restore
+      POSTGRES_PASSWORD: gateway-restore-password
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gateway_restore -d gateway_restore"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    logging: *default-logging
+    mem_limit: 1g
+    pids_limit: 128
+
+  openwebui-restore:
+    image: alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
+    environment:
+      RESTORE_OPENWEB_ARCHIVE: ${RESTORE_OPENWEB_ARCHIVE:?RESTORE_OPENWEB_ARCHIVE is required}
+    command:
+      - sh
+      - -ec
+      - |
+        tar -xzf "/backup/$${RESTORE_OPENWEB_ARCHIVE}" -C /restore
+        test -s /restore/webui.db
+        test -d /restore/uploads
+    volumes:
+      - type: bind
+        source: ${RESTORE_BACKUP_DIR:?RESTORE_BACKUP_DIR is required}
+        target: /backup
+        read_only: true
+      - openwebui-restore:/restore
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    logging: *default-logging
+    mem_limit: 512m
+    pids_limit: 32
+    restart: "no"
+
+  app:
+    build: .
+    environment:
+      DATABASE_URL: postgres://gateway_restore:gateway-restore-password@postgres:5432/gateway_restore?sslmode=disable
+      ADMIN_USERNAME: restore-admin
+      ADMIN_PASSWORD: restore-only-admin-password
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET from .env is required to validate encrypted data}
+      PUBLIC_BASE_URL: http://127.0.0.1:${RESTORE_PUBLIC_PORT:?RESTORE_PUBLIC_PORT is required}
+      ADMIN_BASE_URL: http://127.0.0.1:${RESTORE_ADMIN_PORT:?RESTORE_ADMIN_PORT is required}
+      PUBLIC_ADDR: :8090
+      ADMIN_ADDR: :8091
+      COOKIE_SECURE: "false"
+      SESSION_TTL: 1h
+      SESSION_IDLE_TIMEOUT: 1h
+      ACCOUNT_LOCK_THRESHOLD: "3"
+      ACCOUNT_LOCK_DURATION: 2m
+      TRUSTED_PROXIES: 127.0.0.1,::1
+      ADMIN_ALLOWED_CIDRS: 0.0.0.0/0,::/0
+      COMFYUI_UPSTREAM: http://127.0.0.1:1
+      OPENWEBUI_UPSTREAM: http://127.0.0.1:1
+      OLLAMA_UPSTREAM: http://127.0.0.1:1
+      CONTENT_MODERATOR_UPSTREAM: http://127.0.0.1:1
+      MINING_AGENT_URL: http://127.0.0.1:1
+      MINING_AGENT_TOKEN: restore-mining-agent-token-0000000000000000
+      SYSTEM_MONITOR_AGENT_URL: http://127.0.0.1:1
+      SYSTEM_MONITOR_AGENT_TOKEN: restore-monitor-agent-token-0000000000000
+      UPDATE_AGENT_URL: http://127.0.0.1:1
+      UPDATE_AGENT_TOKEN: restore-update-agent-token-0000000000000000
+      FEATURE_SUGGESTIONS_ENABLED: "false"
+      MEDIA_INFLIGHT_LIMIT_MB: "64"
+      MEDIA_SPOOL_DIR: /var/lib/gateway-spool
+      PPROF_ENABLED: "false"
+    ports:
+      - "127.0.0.1:${RESTORE_PUBLIC_PORT}:8090"
+      - "127.0.0.1:${RESTORE_ADMIN_PORT}:8091"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - gateway-spool:/var/lib/gateway-spool
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8090/healthz"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+      start_period: 5s
+    logging: *default-logging
+    mem_limit: 768m
+    pids_limit: 128
+    stop_grace_period: 10s
+    restart: "no"
+
+volumes:
+  gateway-spool:
+  openwebui-restore:

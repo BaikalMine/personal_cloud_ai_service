@@ -1,7 +1,8 @@
 param(
     [string] $Destination,
     [ValidateRange(1, 100)]
-    [int] $Keep = 3
+    [int] $Keep = 3,
+    [switch] $SkipRestoreDrill
 )
 
 $ErrorActionPreference = 'Stop'
@@ -72,20 +73,25 @@ try {
     $manifestPath = Join-Path $Destination "backup-$stamp.json"
     $manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
-    $expiredManifests = @(Get-ChildItem -LiteralPath $Destination -Filter 'backup-*.json' -File |
-        Sort-Object Name -Descending | Select-Object -Skip $Keep)
-    foreach ($expiredManifest in $expiredManifests) {
-        $expired = Get-Content -LiteralPath $expiredManifest.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
-        foreach ($file in @($expired.Files)) {
-            $candidate = [IO.Path]::GetFullPath((Join-Path $Destination ([IO.Path]::GetFileName($file.Name))))
-            if ([IO.Path]::GetDirectoryName($candidate) -ne $Destination) {
-                throw "Refusing to remove a backup outside $Destination"
+    if (-not $SkipRestoreDrill) {
+        & (Join-Path $PSScriptRoot 'restore.ps1') -Manifest $manifestPath
+        $expiredManifests = @(Get-ChildItem -LiteralPath $Destination -Filter 'backup-*.json' -File |
+            Sort-Object Name -Descending | Select-Object -Skip $Keep)
+        foreach ($expiredManifest in $expiredManifests) {
+            $expired = Get-Content -LiteralPath $expiredManifest.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+            foreach ($file in @($expired.Files)) {
+                $candidate = [IO.Path]::GetFullPath((Join-Path $Destination ([IO.Path]::GetFileName($file.Name))))
+                if ([IO.Path]::GetDirectoryName($candidate) -ne $Destination) {
+                    throw "Refusing to remove a backup outside $Destination"
+                }
+                if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                    Remove-Item -LiteralPath $candidate -Force
+                }
             }
-            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
-                Remove-Item -LiteralPath $candidate -Force
-            }
+            Remove-Item -LiteralPath $expiredManifest.FullName -Force
         }
-        Remove-Item -LiteralPath $expiredManifest.FullName -Force
+    } else {
+        Write-Warning 'Restore drill and backup retention were skipped; no previously verified set was removed.'
     }
     Write-Host "Backup completed: $manifestPath" -ForegroundColor Green
     $files | Format-Table -AutoSize

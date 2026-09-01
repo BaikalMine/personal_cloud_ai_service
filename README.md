@@ -160,7 +160,22 @@ volume, always unpauses it in `finally`, validates both archives, and writes a
 JSON manifest with sizes and SHA-256 hashes under `backups`. It does not include
 `.env`, Basic Auth files, or plaintext credentials. It keeps the three newest
 manifest-backed backup sets by default; use `-Keep` to choose another retention
-count. Older manual dumps without a manifest are never removed.
+count. Older manual dumps without a manifest are never removed. Every normal
+backup also runs an isolated restore drill before retention removes an older
+verified set. Use `-SkipRestoreDrill` only for an explicitly unverified emergency
+snapshot.
+
+To verify the latest backup without touching production containers or volumes:
+
+```powershell
+.\scripts\restore.ps1
+```
+
+The drill restores PostgreSQL and OpenWebUI into a unique disposable Compose
+project, migrates the database with the current Gateway image, checks inventory
+and HTTP readiness, writes `restore-drill-*.json`, and removes the temporary
+environment. The recovery procedure and RPO/RTO contract are documented in
+`docs/RESTORE_RUNBOOK.md`.
 
 ## Main routes
 
