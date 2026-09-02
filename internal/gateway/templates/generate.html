@@ -80,12 +80,12 @@
         </label>
       </section>
       <section class="minimax-video-mode" id="minimax-video-mode" hidden>
-        <div class="minimax-mode-heading"><div><span>Способ создания</span><strong>Как использовать загруженные материалы?</strong></div><small id="minimax-video-mode-hint" aria-live="polite">Ветка FL2VA: ролик строится по промту; Фото 1 и Фото 2 при наличии фиксируют точные начало и финал.</small></div>
+        <div class="minimax-mode-heading"><div><span>Способ создания</span><strong>Как использовать загруженные материалы?</strong></div><small id="minimax-video-mode-hint" aria-live="polite">Ветка точных кадров автоматически выбирает T2VA без фото, I2VA с первым кадром или FL2VA с первым и последним кадрами.</small></div>
         <div class="minimax-mode-segments ui-segmented" role="radiogroup" aria-label="Способ создания видео MiniMax H3">
           <label>
             <input type="radio" name="video_mode" value="frames" aria-describedby="minimax-video-mode-hint" checked>
             <span class="minimax-mode-option">
-              <span class="minimax-mode-option-head"><b>FL2VA · Промт + точные кадры</b><em>0–2 фото</em></span>
+              <span class="minimax-mode-option-head"><b>T2VA / I2VA / FL2VA · Текст и точные кадры</b><em>0–2 фото</em></span>
               <small>Промт задаёт действие и звук. Фото при наличии фиксируют границы ролика.</small>
               <span class="minimax-mode-cases">
                 <span><b>0 фото</b><small>Ролик целиком по промту</small></span>
@@ -197,7 +197,7 @@
         <details class="workflow-mini-guide" data-workflow-guide="video" hidden>
           <summary><span>MiniMax H3 v5: как собрать ролик</span><small>Режим, исходники, промт, память и финальная обработка без терминологии нод.</small></summary>
           <div class="workflow-mini-guide-grid">
-            <section><strong>FL2VA · точные кадры</strong><p>Без фото модель строит ролик только по тексту. Фото 1 становится точным первым кадром. Фото 1 и Фото 2 задают точные начало и финал, поэтому промт должен описывать один достижимый переход между ними.</p></section>
+            <section><strong>T2VA / I2VA / FL2VA · точные кадры</strong><p>Без фото работает T2VA по тексту. Фото 1 включает I2VA и становится точным первым кадром. Фото 1 и Фото 2 включают FL2VA и задают точные начало и финал, поэтому промт описывает один достижимый непрерывный переход между ними.</p></section>
             <section><strong>REF2VA · свободные референсы</strong><p>Этот режим тоже создаёт видео по промту и может работать без файлов. До четырёх фото передают внешность, одежду, предметы, стиль или сцену; видео — движение и работу камеры; аудио — голос, музыку или окружение.</p></section>
             <section><strong>Размер кадра</strong><p>При наличии Фото 1 его пропорции используются по умолчанию. Качество 480–1440 ограничивает длинную сторону, а обе стороны выравниваются до 32 px. Без фото выберите формат кадра вручную.</p></section>
             <section><strong>Модели и Turbo</strong><p>Gateway сам подключает подходящую внутреннюю ветку для выбранного способа. Внешний Turbo опционален; модели со встроенным Turbo получают подходящее число шагов автоматически.</p></section>
@@ -234,7 +234,7 @@
       <section class="prompt-assistant" id="prompt-assistant" aria-live="polite">
         <label class="prompt-assistant-toggle ui-choice"><input type="checkbox" id="prompt-assistant-enabled"><span><strong>Промт-ассистент</strong><small id="prompt-assistant-description">Локальная модель подготовит вариант, но генерация начнётся только после вашего подтверждения.</small></span></label>
         <div class="prompt-assistant-controls" id="prompt-assistant-controls" hidden>
-          <label>Шаблон ассистента<select id="prompt-assistant-template"><option value="workflow-default">Универсальный</option><option value="photographic">Редакционная фотография</option><option value="realistic">Естественный реализм</option><option value="anime">Иллюстрация и аниме</option><option value="nsfw">NSFW (Контент для взрослых)</option><option value="flux-edit" data-image-only>Перенос внешности и редактирование</option><option value="minimax-h3-fl2va" data-video-only data-video-mode="frames">MiniMax H3 FL2VA · точные кадры</option><option value="minimax-h3-ref2va" data-video-only data-video-mode="references">MiniMax H3 REF2VA · свободные референсы</option></select></label>
+          <label>Шаблон ассистента<select id="prompt-assistant-template"><option value="workflow-default">Универсальный</option><option value="photographic">Редакционная фотография</option><option value="realistic">Естественный реализм</option><option value="anime">Иллюстрация и аниме</option><option value="nsfw">NSFW (Контент для взрослых)</option><option value="flux-edit" data-image-only>Перенос внешности и редактирование</option><option value="minimax-h3-fl2va" data-video-only data-video-mode="frames">MiniMax H3 · T2VA / I2VA / FL2VA</option><option value="minimax-h3-ref2va" data-video-only data-video-mode="references">MiniMax H3 REF2VA · свободные референсы</option></select></label>
           <label class="prompt-assistant-think"><input type="checkbox" id="prompt-assistant-think"><span>Режим рассуждений</span></label>
           <button type="button" class="button ghost" id="prompt-assistant-improve">Подготовить вариант</button>
           <p class="prompt-assistant-state" id="prompt-assistant-state">Вариант будет создан локальной моделью e4b и затем выгружен из видеопамяти.</p>
@@ -251,7 +251,7 @@
                 <article><h4>Вариант ассистента</h4><div id="prompt-assistant-diff-suggestion"></div></article>
               </div>
             </section>
-            <label class="prompt-assistant-draft">Итоговый вариант<textarea id="prompt-assistant-draft" rows="7" maxlength="4000"></textarea><small>Можно изменить перед применением.</small></label>
+            <label class="prompt-assistant-draft">Итоговый вариант<textarea id="prompt-assistant-draft" rows="7" maxlength="4000"></textarea><small id="prompt-assistant-draft-limit">Можно изменить перед применением. До 4000 символов.</small></label>
             <div class="prompt-assistant-actions"><button type="button" class="button" id="prompt-assistant-apply">Применить в промт</button><button type="button" class="button ghost" id="prompt-assistant-keep">Оставить мой промт</button></div>
           </div>
         </div>
@@ -263,7 +263,7 @@
       </div>
       <section class="workflow-settings-section minimax-video-settings minimax-v4-settings" hidden>
         <div class="workflow-settings-heading"><div><strong>MiniMax H3 v5 · видео</strong><small>Качество задаёт максимальную длинную сторону кадра. Размер всегда кратен 32.</small></div><output class="resolution-preview" id="minimax-video-resolution-preview">432 × 720 · формат 9:16</output></div>
-        <p class="minimax-model-profile" id="minimax-video-model-profile">Активная ветка: FL2VA · MiniMax_H3_FL2VA. Она создаёт видео по промту и принимает опциональные точные первый и последний кадры.</p>
+        <p class="minimax-model-profile" id="minimax-video-model-profile">Активная модель: MiniMax_H3_FL2VA. Режим автоматически становится T2VA, I2VA или FL2VA по количеству точных кадров.</p>
         <div class="generation-fields minimax-primary-grid">
           <label><span class="field-label">Базовое качество <span class="field-help" tabindex="0" data-tooltip="Это максимальная длинная сторона кадра до постобработки. Лимит учётной записи применяется только здесь; финальный RTX-апскейл может увеличить готовое видео.">?</span></span><select name="video_quality" id="minimax-video-quality"><option value="480">480 · быстрый просмотр</option><option value="720" selected>720 · рекомендуем</option><option value="1080">1080 · Full HD</option><option value="1440">1440 · 2K</option></select><small class="field-hint">База доступна до {{.MaxVideoGenerationQuality}}p. RTX-апскейл не входит в лимит.</small></label>
           <label><span class="field-label">Длительность <span class="field-help" tabindex="0" data-tooltip="5–15 секунд — основной диапазон MiniMax H3. Значения до 60 секунд доступны для экспериментов и требуют заметно больше времени и памяти.">?</span></span><input name="video_duration_seconds" id="minimax-video-duration" type="number" min="5" max="60" step="1" value="5"><small class="field-hint">5–60 секунд</small></label>

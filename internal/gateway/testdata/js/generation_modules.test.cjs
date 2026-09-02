@@ -121,8 +121,8 @@ test("generation guides cover every quick-generation family and video mode", () 
   assert.equal(summary.guideFor({ family: "krea2", templateID: "text-to-image" }).eyebrow, "Текст в изображение");
   assert.equal(summary.guideFor({ family: "krea2", templateID: "image-to-image" }).eyebrow, "Редактирование фото");
   assert.equal(summary.guideFor({ family: "flux2", templateID: "image-to-image" }).eyebrow, "Точное редактирование");
-  assert.equal(summary.modeLabel({ family: "minimax_h3", templateID: "minimax-h3-video", references: [] }), "FL2VA · текст в видео");
-  assert.equal(summary.modeLabel({ family: "minimax_h3", templateID: "minimax-h3-video", references: [{ number: 1 }] }), "FL2VA · первый кадр");
+  assert.equal(summary.modeLabel({ family: "minimax_h3", templateID: "minimax-h3-video", references: [] }), "T2VA · текст в видео");
+  assert.equal(summary.modeLabel({ family: "minimax_h3", templateID: "minimax-h3-video", references: [{ number: 1 }] }), "I2VA · первый кадр");
   assert.equal(summary.modeLabel({ family: "minimax_h3", templateID: "minimax-h3-video", references: [{ number: 1 }, { number: 2 }] }), "FL2VA · первый и последний кадры");
   assert.equal(summary.modeLabel({ family: "minimax_h3", templateID: "minimax-h3-video", videoMode: "references" }), "REF2VA · свободные референсы");
 });

@@ -12,8 +12,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"ai-access-gateway/internal/domain"
+	"ai-access-gateway/internal/promptassistant"
 )
 
 const maxGenerationRecipePayload = 32 << 10
@@ -394,7 +396,11 @@ func generationRecipeValues(form url.Values, resolvedSeed int64) map[string]stri
 			continue
 		}
 		value := strings.TrimSpace(raw[0])
-		if len(value) > 4000 {
+		limit := promptassistant.MaxImagePromptCharacters
+		if name == "positive_prompt" && strings.TrimSpace(form.Get("template_id")) == "minimax-h3-video" {
+			limit = promptassistant.MaxVideoPromptCharacters
+		}
+		if utf8.RuneCountInString(value) > limit {
 			continue
 		}
 		values[name] = value

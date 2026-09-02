@@ -12,6 +12,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
+
+	"ai-access-gateway/internal/promptassistant"
 )
 
 //go:embed workflows/*.json
@@ -736,7 +739,11 @@ func (definition workflowDefinition) normalizeAndValidate(input *generationForm)
 	if strings.TrimSpace(input.Positive) == "" {
 		return errors.New("добавьте позитивный промт")
 	}
-	if len(input.Positive) > 4000 || len(input.Negative) > 4000 {
+	promptMode := promptassistant.ModeTextToImage
+	if definition.ID == "minimax-h3-video" {
+		promptMode = promptassistant.ModeTextToVideo
+	}
+	if utf8.RuneCountInString(input.Positive) > promptassistant.PromptCharacterLimit(promptMode) || utf8.RuneCountInString(input.Negative) > promptassistant.MaxImagePromptCharacters {
 		return errors.New("промт слишком длинный")
 	}
 	if input.AssistantRequested {

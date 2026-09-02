@@ -173,6 +173,10 @@ func TestEnhanceVideoUsesMiniMaxContextForReferenceAudio(t *testing.T) {
 			!strings.Contains(system, "<Picture 1> (attached image 1): the base scene") ||
 			!strings.Contains(system, "<Picture 2> (attached image 2): the person or character's identity") ||
 			!strings.Contains(system, "at least three concrete visible attributes") ||
+			!strings.Contains(system, "keyframe completion, reference generation, video editing, video continuation, audio reuse, audio reference") ||
+			!strings.Contains(system, "Target 1500-2500 characters for detailed_description") ||
+			!strings.Contains(system, "Danbooru-style tags") ||
+			!strings.Contains(system, "which body part contacts which") ||
 			!strings.Contains(system, "<Subject 1>") ||
 			body.Format != "json" || body.Options.NumPredict != DefaultVideoNumPredict || len(body.Messages[1].Images) != 2 || body.Messages[1].Images[0] != "aW1hZ2UtMQ==" || body.Messages[1].Images[1] != "aW1hZ2UtMg==" {
 			t.Fatalf("wrong MiniMax context: %#v", body)
@@ -225,13 +229,17 @@ func TestEnhanceVideoGroundsExactFrameImages(t *testing.T) {
 			t.Fatal(err)
 		}
 		system := body.Messages[0].Content
-		if !strings.Contains(system, "dedicated MiniMax H3 FL2VA prompt assistant") ||
+		if !strings.Contains(system, "dedicated MiniMax H3 frames-branch prompt assistant") ||
 			!strings.Contains(system, "The attached keyframes are") ||
 			!strings.Contains(system, "<Picture 1> (attached image 1): the exact opening frame") ||
 			!strings.Contains(system, "<Picture 2> (attached image 2): the exact final frame") ||
 			!strings.Contains(system, "Picture 1 (from [Shot 1]) aligns with the 0.00-second mark") ||
 			!strings.Contains(system, "exactly one [Shot 1]") ||
 			!strings.Contains(system, "Do not add Shot 2, cuts, scene switches, or timestamp subsections") ||
+			!strings.Contains(system, "Target 2000-3000 characters for the integrated description") ||
+			!strings.Contains(system, "2-4 sentences that explicitly anchor") ||
+			!strings.Contains(system, "[STATIC_CAMERA] or [LOCKED_OFF]") ||
+			!strings.Contains(system, "visually identical") ||
 			!strings.Contains(system, "Do not treat either keyframe as a loose style reference") || len(body.Messages[1].Images) != 2 {
 			t.Fatalf("wrong FL2VA visual context: %#v", body)
 		}
@@ -259,10 +267,12 @@ func TestEnhanceVideoUsesT2VAStructureWithoutImages(t *testing.T) {
 			t.Fatal(err)
 		}
 		system := body.Messages[0].Content
-		if !strings.Contains(system, "dedicated MiniMax H3 FL2VA prompt assistant") ||
+		if !strings.Contains(system, "dedicated MiniMax H3 frames-branch prompt assistant") ||
 			!strings.Contains(system, "selected mode is T2VA") ||
 			!strings.Contains(system, "There is no opening or closing picture") ||
-			!strings.Contains(system, "60-second video") {
+			!strings.Contains(system, "60-second video") ||
+			!strings.Contains(system, "Additional sequential shots are allowed") ||
+			!strings.Contains(system, "Target 2500-5000 characters for integrated_multimodal_description") {
 			t.Fatalf("wrong T2VA context: %s", system)
 		}
 		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"A complete text-to-video prompt."}}`))
@@ -274,6 +284,34 @@ func TestEnhanceVideoUsesT2VAStructureWithoutImages(t *testing.T) {
 	}
 	result, err := NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3FL2VA, "a distant storm approaches", nil, VideoContext{Mode: "frames", DurationSeconds: 60, ImageCount: 0}, false)
 	if err != nil || result != "A complete text-to-video prompt." {
+		t.Fatalf("result = %q, err = %v", result, err)
+	}
+}
+
+func TestEnhanceVideoUsesI2VAStructureWithOneOpeningFrame(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body chatRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		system := body.Messages[0].Content
+		if !strings.Contains(system, "selected mode is I2VA") ||
+			!strings.Contains(system, "at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced") ||
+			!strings.Contains(system, "Additional sequential shots are allowed") ||
+			strings.Contains(system, "Picture 2 (from [Shot 1]) aligns") ||
+			!strings.Contains(body.Messages[1].Content, "supplied visual references") || len(body.Messages[1].Images) != 1 {
+			t.Fatalf("wrong I2VA context: %#v", body)
+		}
+		writeAssistantResponse(t, w, `{"prompt":"A grounded image-to-video prompt.","references":[{"id":"Picture 1","summary":"A woman stands by a bright window.","use":"Use as the exact opening frame."}]}`)
+	}))
+	defer server.Close()
+	base, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	references := []ImageReference{{Number: 1, Role: ImageReferenceBaseScene, MIMEType: "image/png", Image: []byte("first")}}
+	result, err := NewClient(base, "test:e4b").EnhanceVideo(context.Background(), ModeTextToVideo, ProfileMiniMaxH3FL2VA, "", references, VideoContext{Mode: "frames", DurationSeconds: 5, ImageCount: 1}, false)
+	if err != nil || result != "A grounded image-to-video prompt." {
 		t.Fatalf("result = %q, err = %v", result, err)
 	}
 }

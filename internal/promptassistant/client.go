@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	maxPromptBytes   = 16 << 10
-	maxResponseBytes = 32 << 10
+	maxPromptBytes   = 32 << 10
+	maxResponseBytes = 64 << 10
 	maxImageBytes    = 32 << 20
 )
 
@@ -116,7 +116,10 @@ func (c *Client) PolicyFor(mode Mode, profile Profile, think bool) RequestPolicy
 func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt string, references []ImageReference, video VideoContext, think bool) (Result, error) {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
-		return Result{}, errors.New("введите исходный промт")
+		if mode != ModeTextToVideo || len(references) == 0 {
+			return Result{}, errors.New("введите исходный промт")
+		}
+		prompt = "Use only the supplied visual references to derive a complete, natural video. Do not ask for clarification."
 	}
 	if len(prompt) > maxPromptBytes {
 		return Result{}, errors.New("промт слишком длинный")

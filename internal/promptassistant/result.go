@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -16,6 +17,8 @@ const (
 	DefaultImageTimeout         = 120 * time.Second
 	DefaultVideoTimeout         = 240 * time.Second
 	DefaultKeepAlive            = "0"
+	MaxImagePromptCharacters    = 4000
+	MaxVideoPromptCharacters    = 7000
 )
 
 // ModelPolicy controls the resource envelope for the configured local model.
@@ -81,6 +84,15 @@ func DefaultModelPolicy() ModelPolicy {
 		VideoNumPredict: DefaultVideoNumPredict, VideoThinkNumPredict: DefaultVideoThinkNumPredict,
 		ImageTimeout: DefaultImageTimeout, VideoTimeout: DefaultVideoTimeout, KeepAlive: DefaultKeepAlive,
 	}
+}
+
+// PromptCharacterLimit mirrors the real workflow envelope. MiniMax H3 emits
+// structured Context-IR that is materially longer than an image prompt.
+func PromptCharacterLimit(mode Mode) int {
+	if mode == ModeTextToVideo {
+		return MaxVideoPromptCharacters
+	}
+	return MaxImagePromptCharacters
 }
 
 func (policy ModelPolicy) normalized() ModelPolicy {
@@ -221,8 +233,9 @@ func parseModelResult(raw string, mode Mode, references []ImageReference, video 
 		if prompt == "" {
 			return Result{}, errors.New("локальная модель не вернула вариант промта")
 		}
-		if len(prompt) > 4000 {
-			return Result{}, errors.New("локальная модель вернула промт длиннее 4000 символов")
+		limit := PromptCharacterLimit(mode)
+		if utf8.RuneCountInString(prompt) > limit {
+			return Result{}, fmt.Errorf("локальная модель вернула промт длиннее %d символов", limit)
 		}
 		return Result{Prompt: prompt, References: []ReferenceUnderstanding{}}, nil
 	}
@@ -230,8 +243,9 @@ func parseModelResult(raw string, mode Mode, references []ImageReference, video 
 	if decoded.Prompt == "" {
 		return Result{}, errors.New("локальная модель не вернула вариант промта")
 	}
-	if len(decoded.Prompt) > 4000 {
-		return Result{}, errors.New("локальная модель вернула промт длиннее 4000 символов")
+	limit := PromptCharacterLimit(mode)
+	if utf8.RuneCountInString(decoded.Prompt) > limit {
+		return Result{}, fmt.Errorf("локальная модель вернула промт длиннее %d символов", limit)
 	}
 	provided := make(map[string]struct{ summary, use string }, len(decoded.References))
 	for _, reference := range decoded.References {

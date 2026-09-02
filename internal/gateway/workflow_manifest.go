@@ -211,7 +211,7 @@ func miniMaxH3WorkflowManifest() workflowManifest {
 		},
 		Modes: []workflowModeManifest{
 			{
-				ID: "frames", Name: "FL2VA · промт и точные кадры", Default: true,
+				ID: "frames", Name: "T2VA / I2VA / FL2VA · текст и точные кадры", Default: true,
 				Description:     "Текст создаёт ролик; одно фото фиксирует первый кадр, два фото фиксируют начало и финал.",
 				InputLimits:     map[string]workflowLimit{"image": {Minimum: 0, Maximum: 2}, "audio": {Minimum: 0, Maximum: 0}, "video": {Minimum: 0, Maximum: 0}},
 				RequiredClasses: []string{"MiniMaxH3ImageToVideo", "LCImageMaskResize"},
@@ -266,8 +266,9 @@ func miniMaxH3WorkflowManifest() workflowManifest {
 			},
 			ModeRules: map[string][]string{
 				"frames": {
-					"Picture 1 — точный первый кадр, Picture 2 — точный последний кадр; это не свободные референсы.",
-					"Описать ровно один непрерывный [Shot 1] без склеек, Shot 2 и внутренних отметок времени.",
+					"Без фото использовать T2VA без Picture-идентификаторов; с одним фото использовать I2VA и точную привязку Picture 1 к 0.00 секунды.",
+					"С двумя фото использовать FL2VA: Picture 1 — точный первый кадр, Picture 2 — точный последний кадр; это не свободные референсы.",
+					"Только FL2VA с двумя кадрами требует ровно один непрерывный [Shot 1] без склеек, Shot 2 и внутренних отметок времени.",
 					"Для двух кадров использовать точную строку привязки Picture 1 и Picture 2 к началу и концу ролика.",
 				},
 				"references": {
@@ -283,7 +284,7 @@ func miniMaxH3WorkflowManifest() workflowManifest {
 
 func miniMaxH3WorkflowParameters() []workflowParameterManifest {
 	return []workflowParameterManifest{
-		enumWorkflowParameter("video_mode", "VideoMode", "Режим", "source", "frames", option("frames", "FL2VA · промт и точные кадры"), option("references", "REF2VA · промт и свободные референсы")),
+		enumWorkflowParameter("video_mode", "VideoMode", "Режим", "source", "frames", option("frames", "T2VA / I2VA / FL2VA · текст и точные кадры"), option("references", "REF2VA · промт и свободные референсы")),
 		enumWorkflowParameter("video_quality", "VideoQuality", "Качество", "source", 720, option(480, "480p"), option(720, "720p"), option(1080, "1080p"), option(1440, "1440p")),
 		integerWorkflowParameter("video_duration_seconds", "VideoDurationSeconds", "Длительность", "source", 5, 5, 60, 1),
 		stringWorkflowParameter("video_filename", "VideoFilename", "Имя файла", "source", "AI-Gateway-MiniMaxH3", 80),

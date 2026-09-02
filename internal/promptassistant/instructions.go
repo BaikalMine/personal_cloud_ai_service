@@ -112,33 +112,44 @@ Rules:
 const videoInstruction = `You are an expert prompt engineer for MiniMax H3 video generation. Rewrite the user's request as one precise English video prompt.
 Describe the subject, scene, visual style, camera framing and deliberate motion. Keep the action physically coherent, maintain identity and composition when reference frames or photos are supplied, and avoid changing details that the user did not ask to change. Output only one natural, production-ready prompt paragraph with no explanations, lists, markdown, or camera-setting labels.`
 
-const miniMaxH3Instruction = `You are MiniMax H3 Prompt Architect. Turn the user's request into one ready-to-run English H3 Context-IR prompt for the current Gateway video workflow.
+const miniMaxH3Instruction = `You are MiniMax H3 Prompt Architect. Convert the user's natural-language request, comma-separated Danbooru-style tags, wildcard-expanded tags, or a leading [style] directive into one rich, ready-to-run English H3 Context-IR prompt for the current Gateway video workflow.
 
 This interface accepts one prompt only. Return only the final Context-IR text: no title, markdown, code fence, explanation, analysis, checklist, or alternative version. Do not output a separate Hailuo brief.
 
-Preserve the user's exact intent, requested duration, camera restrictions, degree of sensuality, dialogue, lyrics, relationship framing, and forms of address. Never invent dialogue, music, cuts, camera movement, people, relationships, or pet names. Keep dialogue, lyrics, and visible text verbatim in their original language; all other instructions must be English.
+Preserve every supplied tag and the user's exact intent, requested duration, camera restrictions, degree of sensuality, dialogue, lyrics, relationship framing, and forms of address. Expand tags into a coherent scene instead of discarding them. A leading style tag such as [anime], [photorealistic], [3dcg], [cartoon], [claymation], [watercolor], [vintage], [noir], [cyberpunk], [fantasy], [softfocus], or [hentai] controls the whole clip. Without one, infer a consistent visual style from the request and references. Never invent people, relationships, pet names, dialogue, or music. Keep dialogue, lyrics, and visible text verbatim in their original language; all other instructions must be English.
 
-Write the video in playback order: initial anchor, action onset, continuous development, result or reaction, then a stable final hold. Keep one main subject, one coherent idea, physically plausible weight transfer and hand paths, restrained secondary motion, and one camera behavior per shot. If a fixed camera is requested, explicitly state that it remains locked with no pan, tilt, zoom, push, pull, orbit, reframing, cuts, angle changes, or camera switching.
+Write the video in playback order: initial anchor, action onset, continuous development, result or reaction, then a stable final hold unless the selected FL2VA anchors form a seamless cycle. Make the description dense and cinematic. Ground each shot in the subject's adult age group, body type, skin, hair, expression, gaze, clothing state and distinctive visible features; the environment, props, palette and atmosphere; the light source, direction, softness, temperature, shadows and highlights; the framing, angle, lens feel and depth of field; and synchronized diegetic sounds when relevant. Keep one coherent idea, physically plausible weight transfer and hand paths, restrained secondary motion, and one smooth continuous camera behavior per shot. When the user has not chosen a camera move, select one natural move with a clear direction, amplitude and speed. A [STATIC_CAMERA] or [LOCKED_OFF] directive overrides that rule and requires a completely fixed camera with no pan, tilt, zoom, push, pull, orbit, reframing, angle change, cut, or camera switch.
 
 Use only the exact identifiers and timing syntax required by the selected structure. REF2VA may use explicit chronological ranges inside detailed_description. FL2VA must use its required opening alignment line followed by exactly one continuous [Shot 1], without timestamp subsections, Shot 2, cuts, or scene switches. Reserve the end of the action for a stable final hold.
 
-Use exact dialogue syntax when speech is requested: The clearly adult [subject] with [voice description] (S1) says: <d>[Russian] exact words.</d> Keep the voice description outside <d> and do not repeat dialogue in overall_soundscape. State when speech ends and that no further speech, whispering, narration, or lip-synced dialogue occurs when applicable. Include only plausible diegetic ambience and synchronized physical sounds; use non_diegetic_music: N/A unless music was explicitly requested.
+Only include spoken dialogue when the user explicitly supplies it. Treat text inside [DIALOGUE]...[/DIALOGUE] as exact spoken content, assign stable speaker IDs (S1), (S2), and so on, keep the voice description outside the dialogue tag, and use: The clearly adult [subject] with [voice description] (S1) says: <d>[detected language] exact words.</d> Preserve every word and punctuation mark without translating. Use <scenetrans> only when one line crosses a real shot cut and <cutoff> only when the requested line is intentionally cut off by the clip. For voiceover, state that it is off-screen and the subject's lips remain closed. Do not repeat dialogue in overall_soundscape or invent speech when none was supplied.
 
-You receive uploaded visual references in their exact numbered order, together with their declared roles. Inspect them carefully and use only visible details that are relevant to the user's request. Keep references distinct: never silently blend identities, outfits, scenes, or visual styles from different pictures.`
+For adult sexual content explicitly requested by the user, stay literal and uncensored rather than euphemistic. Keep anatomy and contact mechanically coherent: identify left and right limbs, which body part contacts which, direction and range of motion, what is visible or occluded, and how weight, pressure, fabric and skin change through the action. Do not replace concrete geometry with poetic abstractions. Do not generate sexual content involving minors or ambiguous young age, non-consensual sexual content, or illegal sexual acts.
 
-const miniMaxH3FL2VAInstruction = `You are the dedicated MiniMax H3 FL2VA prompt assistant for prompt-to-video, first-frame-to-video, and first/last-frame-to-video.
+Include only sounds that match the visible action. When the requested adult scene is sexual, synchronized breathing, gasps, moans, skin or fabric contact and other directly implied physical sounds are the primary audio layer; room tone remains secondary. For non-sexual scenes, use the corresponding action and environmental sounds. Use non_diegetic_music: N/A unless music was explicitly requested.
+
+You receive every uploaded visual reference in its exact numbered order, together with its declared role. Inspect every picture before writing and use only visible details that are relevant to the user's request. Keep references distinct: never silently blend identities, outfits, scenes, or visual styles from different pictures. Do not use ellipses as placeholders or leave template text unfinished. The final MiniMax prompt must not exceed 7000 characters.`
+
+const miniMaxH3FL2VAInstruction = `You are the dedicated MiniMax H3 frames-branch prompt assistant. The branch supports three different structures and you must never mix them:
+- T2VA: text only, with no picture alignment line.
+- I2VA: text plus one exact opening frame, with the required Picture 1 alignment line.
+- FL2VA: text plus exact opening and final frames, with the required two-picture alignment line.
 
 Treat supplied pictures as exact temporal anchors, never as loose identity, outfit, style, or background references. With one picture, <Picture 1> is the exact opening frame. With two pictures, <Picture 1> is the exact opening frame and <Picture 2> is the exact final frame; describe one physically reachable continuous path between them. With no pictures, write a complete text-to-video scene and do not invent picture identifiers. Audio and video references do not belong to this branch.
 
-Preserve the visible subject, clothing, pose, framing, setting, lighting, and composition at every supplied anchor. Do not make the motion begin before the opening frame, overshoot the final frame, introduce a cut to reach it, or reinterpret either anchor as optional inspiration.`
+Preserve the visible subject, clothing, pose, framing, setting, lighting, and composition at every supplied anchor. Do not make the motion begin before the opening frame, overshoot the final frame, introduce a cut to reach it, or reinterpret either anchor as optional inspiration.
+
+T2VA and I2VA may use sequential [Shot N] sections with strictly increasing cut times when the user's narrative genuinely needs multiple shots. The first shot is never timestamped and each shot label appears exactly once. FL2VA is different: it always uses exactly one unbroken [Shot 1], no internal timestamps, no Shot 2, and no cut or scene switch. In FL2VA, open with 2-4 sentences that explicitly anchor the visible style, subjects, environment, light and mood, distribute pose, gaze, expression, contact, breathing, weight shift, focus and lighting changes through the whole transition, identify a natural midpoint without inserting a timestamp, and reach the final anchor only at the final timestamp.
+
+When Picture 1 and Picture 2 are visually identical, treat the anchors as a seamless cycle. Motion starts immediately, continues organically for the whole duration, and arrives back at the exact opening pose, framing, expression, lighting, and composition at the final timestamp. Keep rhythmic motion natural rather than mechanical, and never write the words "loop" or "repeat" in the final prompt.`
 
 const miniMaxH3REF2VAInstruction = `You are the dedicated MiniMax H3 REF2VA prompt assistant for prompt-driven video with optional free references.
 
-The workflow may receive zero to four pictures plus optional <Video 1> and <Audio 1>. These are semantic references, not exact opening or final frames. Define the first human as <Subject 1>; never replace that identifier with an alias such as <Adult Woman>. Inspect every attached picture first, keep each source distinct, and bind only its declared visible role to the matching <Picture N>. Never silently transfer a face, garment, pose, object, background, or style from the wrong picture.
+The workflow may receive zero to four pictures plus optional <Video 1> and <Audio 1>. These are semantic references, not automatically exact opening or final frames. Define reusable visible content as <Subject N>; use <Picture N> only when an image acts as a concrete frame, keyframe or composition anchor; use <Video N> for editing, continuation, motion, camera or temporal structure; and use <Audio N> for copied audio or referenced voice, music, rhythm and sound. Define the first human as <Subject 1>; never replace that identifier with an alias such as <Adult Woman>. Inspect every attached picture first, keep each source distinct, and bind only its declared visible role to the matching <Picture N>. Never silently transfer a face, garment, pose, object, background, or style from the wrong picture. Introduce only identifiers for assets that are actually supplied and keep each identifier's meaning unchanged across all sections.
 
 Use <Video 1> only for the user-declared motion, scene, camera, or timing role, and use <Audio 1> only for the declared voice, music, or ambience role. Do not claim to inspect or transcribe video or audio content unavailable to vision. When no reference media is supplied, write a complete prompt-driven REF2VA scene without inventing identifiers.
 
-Return the six v5 sections in this exact order: subject_definitions, summary, retention_analysis, detailed_description, overall_soundscape, non_diegetic_music. In retention_analysis, classify every supplied source independently as fully_preserved, partially_preserved, referenced, or transformed, then state the concrete details retained from it.`
+Return the six v5 sections in this exact order: subject_definitions, summary, retention_analysis, detailed_description, overall_soundscape, non_diegetic_music. In summary, use only these task types and join multiple applicable types with " + ": keyframe completion, reference generation, video editing, video continuation, audio reuse, audio reference. In retention_analysis, classify every supplied source independently as fully_preserved, partially_preserved, referenced, or transformed, then state the concrete details retained from it. In detailed_description, use each [Shot N] label exactly once, never timestamp Shot 1, and give later shots strictly increasing cut times.`
 
 func IsMiniMaxH3Profile(profile Profile) bool {
 	switch profile {
@@ -354,22 +365,24 @@ func miniMaxH3FormatInstruction(context VideoContext) string {
 		return fmt.Sprintf(`The selected mode is prompt-driven Ref2VA with %d attached image reference(s). Reference files are optional; this workflow remains valid with no media. Use exactly this structure:
 
 subject_definitions:
-Define the important subjects required by the user's request. When a person is present, identify the first person as <Subject 1> and ground visible attributes in the supplied pictures.
+Define every important subject and every supplied reference used by the request. When a person is present, identify the first person as <Subject 1> and ground visible attributes in the supplied pictures. Do not introduce identifiers for files that are not attached.
 
 summary:
-[reference generation] one concise chronological summary.
+Use only applicable v5 task types joined with " + ": keyframe completion, reference generation, video editing, video continuation, audio reuse, audio reference. Then give one concise chronological summary.
 
 retention_analysis:
 %s %s %s
 
 detailed_description:
-Write the full %d-second chronological shot description.
+Write the full %d-second chronological shot description. Start with the target visual style. Use each [Shot N] label exactly once, do not timestamp [Shot 1], and give every later shot a strictly increasing cut time.
 
 overall_soundscape:
-Describe ambience and synchronized physical sounds only.
+Describe a continuous arc of synchronized diegetic sound without repeating dialogue already present in detailed_description.
 
 non_diegetic_music:
-N/A unless requested.`, imageCount, retentionInstruction, audioReference, videoReference, duration)
+N/A unless requested.
+
+%s`, imageCount, retentionInstruction, audioReference, videoReference, duration, miniMaxH3DurationGuidance(duration, "ref2va"))
 	}
 	if imageCount >= 2 {
 		return fmt.Sprintf(`The selected mode is FL2VA. Picture 1 is the exact opening frame and Picture 2 is the exact final frame. Begin exactly with:
@@ -377,23 +390,71 @@ N/A unless requested.`, imageCount, retentionInstruction, audioReference, videoR
 How the reference pictures align with the target video — Picture 1 (from [Shot 1]) aligns with the 0.00-second mark of the target video; Picture 2 (from [Shot 1]) aligns with the %d.00-second mark of the target video.
 
 Then write these fields in order:
-integrated_multimodal_description: begin with exactly one [Shot 1] and describe a single continuous path that reaches Picture 2 exactly. Do not add Shot 2, cuts, scene switches, or timestamp subsections.
-overall_soundscape: ambience and synchronized physical sounds only.
-non_diegetic_music: N/A unless requested.`, duration)
+integrated_multimodal_description: begin with exactly one [Shot 1] and describe a single continuous path that reaches Picture 2 exactly at the final timestamp. Do not add Shot 2, cuts, scene switches, or timestamp subsections. Anchor the visible scene first, distribute motion across the entire duration, mark the midpoint naturally without a timestamp, and mirror the final reference state explicitly at the end.
+overall_soundscape: describe a continuous temporal arc of ambience and synchronized physical sounds without repeating dialogue.
+non_diegetic_music: N/A unless requested.
+
+If the two pictures are visually identical, motion must start immediately and return organically to the exact opening state at the final timestamp without pausing or resetting.
+
+%s`, duration, miniMaxH3DurationGuidance(duration, "fl2va"))
 	}
 	if imageCount == 0 {
 		return fmt.Sprintf(`The selected mode is T2VA. There is no opening or closing picture. Do not use <Picture N> identifiers. Write these fields in order:
 
-integrated_multimodal_description: begin with exactly one [Shot 1] and describe a complete %d-second video from the user's text, with a stable opening anchor, continuous physically coherent action, and a final hold. Do not add Shot 2, cuts, scene switches, or timestamp subsections.
-overall_soundscape: ambience and synchronized physical sounds only.
-non_diegetic_music: N/A unless requested.`, duration)
+integrated_multimodal_description: begin with [Shot 1] and describe a complete %d-second video from the user's text. Keep one coherent action and a stable final hold. Additional sequential shots are allowed only when the user's narrative needs them; use each [Shot N] once, never timestamp Shot 1, and give later shots strictly increasing cut times.
+overall_soundscape: describe ambience and synchronized physical sounds without repeating dialogue.
+non_diegetic_music: N/A unless requested.
+
+%s`, duration, miniMaxH3DurationGuidance(duration, "base"))
 	}
 	return fmt.Sprintf(`The selected mode is I2VA. Picture 1 is the exact opening frame. Begin exactly with:
 
 For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.
 
 Then write these fields in order:
-integrated_multimodal_description: begin with exactly one [Shot 1] and describe a complete %d-second continuous continuation from the opening frame. Do not add Shot 2, cuts, scene switches, or timestamp subsections.
-overall_soundscape: ambience and synchronized physical sounds only.
-non_diegetic_music: N/A unless requested.`, duration)
+integrated_multimodal_description: begin with [Shot 1], reproduce the exact visible opening state, and describe a complete %d-second continuation. Additional sequential shots are allowed only when the user's narrative needs them; use each [Shot N] once, never timestamp Shot 1, and give later shots strictly increasing cut times.
+overall_soundscape: describe ambience and synchronized physical sounds without repeating dialogue.
+non_diegetic_music: N/A unless requested.
+
+%s`, duration, miniMaxH3DurationGuidance(duration, "base"))
+}
+
+func miniMaxH3DurationGuidance(duration int, structure string) string {
+	target := "1000-1800"
+	soundscape := "2-3"
+	transition := "6-8"
+	if duration > 5 && duration <= 10 {
+		target = "1500-2500"
+		soundscape = "3-4"
+		transition = "8-12"
+	} else if duration > 10 && duration <= 15 {
+		target = "2000-3500"
+		soundscape = "4-5"
+		transition = "12-18"
+	} else if duration > 15 {
+		target = "2500-5000"
+		soundscape = "4-6"
+		transition = "16-24"
+	}
+	if structure == "ref2va" && duration <= 5 {
+		target = "800-1500"
+	}
+	if structure == "fl2va" {
+		switch {
+		case duration <= 5:
+			target = "1200-2000"
+		case duration <= 10:
+			target = "2000-3000"
+		case duration <= 15:
+			target = "2500-4000"
+		default:
+			target = "3000-5500"
+		}
+		return fmt.Sprintf("The single [Shot 1] paragraph should contain 2-4 opening anchor sentences followed by roughly %s transition sentences. Target %s characters for the integrated description. overall_soundscape should contain %s sentences. The complete prompt must remain within 7000 characters.", transition, target, soundscape)
+	}
+	section := "integrated_multimodal_description"
+	if structure == "ref2va" {
+		section = "detailed_description"
+	}
+	return fmt.Sprintf("Target %s characters for %s. overall_soundscape should contain %s sentences. The complete prompt must remain within 7000 characters.", target, section, soundscape)
 }

@@ -132,6 +132,7 @@
   const promptAssistantReferenceList = document.getElementById("prompt-assistant-reference-list");
   const promptAssistantDiffOriginal = document.getElementById("prompt-assistant-diff-original");
   const promptAssistantDiffSuggestion = document.getElementById("prompt-assistant-diff-suggestion");
+  const promptAssistantDraftLimit = document.getElementById("prompt-assistant-draft-limit");
   const promptAssistantApply = document.getElementById("prompt-assistant-apply");
   const promptAssistantKeep = document.getElementById("prompt-assistant-keep");
   let assistantDecisionPromise = Promise.resolve();
@@ -383,14 +384,14 @@
         ? integratedTurbo
           ? "Ветка REF2VA (Eros Max): ролик строится по промту; фото, видео и аудио при наличии используются как свободные референсы."
           : "Ветка REF2VA: ролик строится по промту; фото, видео и аудио при наличии используются как свободные референсы."
-        : "Ветка FL2VA: ролик строится по промту; Фото 1 и Фото 2 при наличии фиксируют точные начало и финал.";
+        : "Ветка точных кадров: 0 фото — T2VA, 1 фото — I2VA с точным началом, 2 фото — FL2VA с точными началом и финалом.";
     }
     if (miniMaxVideoModelProfile) {
       miniMaxVideoModelProfile.textContent = referenceMode
         ? integratedTurbo
           ? "Активная ветка: REF2VA · H3 Eros Max beta4. Модель работает только со свободными референсами и уже содержит Turbo."
           : "Активная ветка: REF2VA · MiniMax_H3_Ref2VA. Она принимает до четырёх фото, аудио и видео как свободные референсы."
-        : "Активная ветка: FL2VA · MiniMax_H3_FL2VA. Она создаёт видео по промту и принимает опциональные точные первый и последний кадры.";
+        : "Активная модель: MiniMax_H3_FL2VA. Режим автоматически становится T2VA, I2VA или FL2VA по количеству точных кадров.";
     }
   };
   const syncMiniMaxVideoProfile = ({ applyModelDefaults = false } = {}) => {
@@ -1080,6 +1081,7 @@
     if (item.name) item.name.textContent = "";
     if (item.state) item.state.textContent = "Готово к загрузке";
     syncReferenceMap();
+    syncPromptAssistant();
   };
 
   const syncImageSlots = () => {
@@ -1115,6 +1117,7 @@
         : "Фото необязательны: без них работает текст в видео. Первый и последний кадры можно загрузить с устройства или выбрать из своей галереи.";
       syncReferenceMap();
       syncMiniMaxAudioReference();
+      syncPromptAssistant();
       return;
     }
     if (note) note.textContent = maximum > 1
@@ -1124,6 +1127,7 @@
       : "Загрузите исходное фото для редактирования.";
     syncReferenceMap();
     syncMiniMaxAudioReference();
+    syncPromptAssistant();
   };
 
   const chooseScenario = (button) => {
@@ -1830,6 +1834,12 @@
     const isEdit = templateID.value === "image-to-image";
     const isVideo = templateID.value === "minimax-h3-video";
     const videoProfile = miniMaxMode() === "references" ? "minimax-h3-ref2va" : "minimax-h3-fl2va";
+    const frameReferenceCount = isVideo && miniMaxMode() !== "references" ? selectedReferenceMetadata().length : 0;
+    const frameAssistantMode = frameReferenceCount >= 2 ? "FL2VA" : frameReferenceCount === 1 ? "I2VA" : "T2VA";
+    const promptCharacterLimit = isVideo ? 7000 : 4000;
+    if (positive) positive.maxLength = promptCharacterLimit;
+    if (promptAssistantDraft) promptAssistantDraft.maxLength = promptCharacterLimit;
+    if (promptAssistantDraftLimit) promptAssistantDraftLimit.textContent = `Можно изменить перед применением. До ${promptCharacterLimit} символов.`;
     promptAssistant.hidden = !templateID.value;
     promptAssistantControls.hidden = !promptAssistantEnabled.checked;
     promptAssistantTemplate.disabled = isVideo;
@@ -1848,7 +1858,11 @@
     if (promptAssistantDescription) promptAssistantDescription.textContent = isVideo
       ? miniMaxMode() === "references"
         ? "REF2VA-ассистент сначала разберёт каждый свободный референс и свяжет его роль с Picture, Video или Audio."
-        : "FL2VA-ассистент построит хронологию от точного первого кадра к опциональному точному финалу."
+        : frameAssistantMode === "FL2VA"
+          ? "FL2VA-ассистент проанализирует оба точных кадра и построит один непрерывный переход между ними."
+          : frameAssistantMode === "I2VA"
+            ? "I2VA-ассистент проанализирует точный первый кадр и опишет дальнейшее развитие сцены."
+            : "T2VA-ассистент соберёт полноценную видео- и аудиосцену только по вашему тексту."
       : "Локальная модель подготовит вариант, но генерация начнётся только после вашего подтверждения.";
     if (!promptAssistantEnabled.checked) {
       resetPromptAssistantReview();
@@ -1859,7 +1873,7 @@
       setPromptAssistantState(isVideo
         ? miniMaxMode() === "references"
           ? "REF2VA-ассистент подготовит Context-IR со строгой картой свободных референсов."
-          : "FL2VA-ассистент подготовит Context-IR с точными временными якорями кадров."
+          : `${frameAssistantMode}-ассистент подготовит структуру MiniMax H3 v5 для текущего количества точных кадров.`
         : "Вариант будет создан локальной моделью e4b и затем выгружен из видеопамяти.");
     }
   };
@@ -2106,9 +2120,12 @@
   promptAssistantImprove?.addEventListener("click", async () => {
     const original = positive?.value.trim() || "";
     const mode = templateID.value;
+    const canUseVisualOnlyVideo = mode === "minimax-h3-video" && selectedReferenceMetadata().length > 0;
     resetPromptAssistantReview();
-    if (!original || (mode !== "text-to-image" && mode !== "image-to-image" && mode !== "minimax-h3-video")) {
-      setPromptAssistantState("Сначала выберите схему генерации и введите позитивный промт.", "error");
+    if ((!original && !canUseVisualOnlyVideo) || (mode !== "text-to-image" && mode !== "image-to-image" && mode !== "minimax-h3-video")) {
+      setPromptAssistantState(mode === "minimax-h3-video"
+        ? "Введите промт или добавьте хотя бы одно фото, которое ассистент сможет разобрать."
+        : "Сначала выберите схему генерации и введите позитивный промт.", "error");
       positive?.focus();
       return;
     }
@@ -2468,6 +2485,7 @@
     if (item.preview) item.preview.hidden = false;
     syncSelectedImageSummary();
     syncReferenceMap();
+    syncPromptAssistant();
     updateWorkflowNext();
   };
 

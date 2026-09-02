@@ -91,14 +91,20 @@ test("generation wizard covers Krea2, Flux2 and MiniMax", async ({ page }, testI
   await page.getByRole("button", { name: /Видео Создаёт/ }).click();
   await expect(page.locator("#generation-model option:checked")).toContainText("FL2VA + REF2VA");
   await expect(page.locator("#prompt-assistant-template")).toHaveValue("minimax-h3-fl2va");
-  await expect(page.locator("#prompt-assistant-description")).toContainText("FL2VA-ассистент");
-  await expect(page.locator("#generation-mode-guide-eyebrow")).toHaveText("FL2VA · текст в видео");
+  await expect(page.locator("#positive-prompt")).toHaveAttribute("maxlength", "7000");
+  await expect(page.locator("#prompt-assistant-draft")).toHaveAttribute("maxlength", "7000");
+  await expect(page.locator("#prompt-assistant-description")).toContainText("T2VA-ассистент");
+  await expect(page.locator("#generation-mode-guide-eyebrow")).toHaveText("T2VA · текст в видео");
   await expect(page.locator("#generation-mode-guide-title")).toHaveText("Видео полностью по вашему описанию");
   await page.locator('[data-image-slot="1"] [data-gallery-image-picker-open]').click();
   await page.getByRole("button", { name: "Выбрать AI-Gateway-Krea2-portrait.png" }).click();
+  await expect(page.locator("#prompt-assistant-description")).toContainText("I2VA-ассистент");
+  await expect(page.locator("#generation-mode-guide-eyebrow")).toHaveText("I2VA · первый кадр");
   await expect(page.locator("#generation-mode-guide-title")).toHaveText("Видео начинается с выбранного фото");
   await page.locator('[data-image-slot="2"] [data-gallery-image-picker-open]').click();
   await page.getByRole("button", { name: "Выбрать AI-Gateway-Krea2-product.png" }).click();
+  await expect(page.locator("#prompt-assistant-description")).toContainText("FL2VA-ассистент");
+  await expect(page.locator("#generation-mode-guide-eyebrow")).toHaveText("FL2VA · первый и последний кадры");
   await expect(page.locator("#generation-mode-guide-title")).toHaveText("Переход между двумя точными кадрами");
   await page.locator("#minimax-video-mode label").filter({ hasText: "Промт + свободные референсы" }).click();
   await expect(page.locator("#prompt-assistant-template")).toHaveValue("minimax-h3-ref2va");
@@ -111,6 +117,24 @@ test("generation wizard covers Krea2, Flux2 and MiniMax", async ({ page }, testI
   await page.locator("#workflow-next").click();
   await expect(page.locator("#minimax-video-model-profile")).toContainText("REF2VA · MiniMax_H3_Ref2VA");
   await expect(page.locator("#generation-summary")).toContainText("REF2VA · свободные референсы");
+});
+
+test("video prompt assistant can derive an I2VA prompt from the opening frame", async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+
+  await open(page, "/preview/generate");
+  await page.getByRole("button", { name: /Видео Создаёт/ }).click();
+  await page.locator('[data-image-slot="1"] [data-gallery-image-picker-open]').click();
+  await page.getByRole("button", { name: "Выбрать AI-Gateway-Krea2-portrait.png" }).click();
+  await page.locator("#workflow-next").click();
+  await expect(page.locator("#positive-prompt")).toHaveValue("");
+  await page.locator("#prompt-assistant-enabled").check();
+  await page.locator("#prompt-assistant-improve").click();
+
+  await expect(page.locator("#prompt-assistant-review")).toBeVisible();
+  await expect(page.locator("#prompt-assistant-reference-list li")).toHaveCount(1);
+  await expect(page.locator("#prompt-assistant-draft")).not.toHaveValue("");
+  await expect(page.locator("#prompt-assistant-state")).toContainText("Вариант подготовлен");
 });
 
 test("video reference sources use equal tiles at every viewport", async ({ page }) => {

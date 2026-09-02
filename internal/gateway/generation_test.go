@@ -1768,6 +1768,24 @@ func TestGenerationRecipeKeepsReferenceRolesWithoutUserMediaSources(t *testing.T
 	}
 }
 
+func TestGenerationRecipeKeepsLongMiniMaxVideoPrompt(t *testing.T) {
+	prompt := strings.Repeat("v", 6500)
+	values := generationRecipeValues(url.Values{
+		"template_id":     {"minimax-h3-video"},
+		"positive_prompt": {prompt},
+	}, 42)
+	if values["positive_prompt"] != prompt {
+		t.Fatalf("long MiniMax prompt was not preserved in the recipe: %d chars", len(values["positive_prompt"]))
+	}
+	imageValues := generationRecipeValues(url.Values{
+		"template_id":     {"text-to-image"},
+		"positive_prompt": {prompt},
+	}, 42)
+	if _, exists := imageValues["positive_prompt"]; exists {
+		t.Fatal("image recipe accepted a prompt above its 4000-character limit")
+	}
+}
+
 func TestGenerationQueueOverviewCountsRunningAndPending(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/queue" {

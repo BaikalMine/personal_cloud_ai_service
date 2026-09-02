@@ -57,3 +57,25 @@ func TestModelPolicySeparatesImageAndVideoBudgets(t *testing.T) {
 		t.Fatalf("unexpected video policy: %+v", video)
 	}
 }
+
+func TestParseModelResultUsesVideoSpecificCharacterLimit(t *testing.T) {
+	videoPrompt := strings.Repeat("v", 5000)
+	result, err := parseModelResult(videoPrompt, ModeTextToVideo, nil, VideoContext{})
+	if err != nil || result.Prompt != videoPrompt {
+		t.Fatalf("5000-character video prompt = %d chars, err = %v", len(result.Prompt), err)
+	}
+	if _, err := parseModelResult(videoPrompt, ModeTextToImage, nil, VideoContext{}); err == nil || !strings.Contains(err.Error(), "4000") {
+		t.Fatalf("image prompt must keep the 4000-character limit, got %v", err)
+	}
+	if _, err := parseModelResult(strings.Repeat("v", 7001), ModeTextToVideo, nil, VideoContext{}); err == nil || !strings.Contains(err.Error(), "7000") {
+		t.Fatalf("video prompt must reject more than 7000 characters, got %v", err)
+	}
+}
+
+func TestParseModelResultCountsUnicodeCharactersNotBytes(t *testing.T) {
+	prompt := strings.Repeat("я", MaxImagePromptCharacters)
+	result, err := parseModelResult(prompt, ModeTextToImage, nil, VideoContext{})
+	if err != nil || result.Prompt != prompt {
+		t.Fatalf("unicode prompt at the visible character limit was rejected: %v", err)
+	}
+}

@@ -74,7 +74,7 @@
       }
       if (count === 1) {
         return {
-          eyebrow: "FL2VA · первый кадр",
+          eyebrow: "I2VA · первый кадр",
           title: "Видео начинается с выбранного фото",
           description: "Фото фиксирует композицию первого кадра. Дальнейшее движение, камера и звук задаются промтом.",
           facts: [
@@ -86,7 +86,7 @@
         };
       }
       return {
-        eyebrow: "FL2VA · текст в видео",
+        eyebrow: "T2VA · текст в видео",
         title: "Видео полностью по вашему описанию",
         description: "Исходные файлы не нужны. Модель сама определит композицию, поэтому промт должен описывать сцену целиком.",
         facts: [
@@ -134,8 +134,8 @@
     if (family === "minimax_h3") {
       if (videoMode === "references") return "REF2VA · свободные референсы";
       if (references.length >= 2) return "FL2VA · первый и последний кадры";
-      if (references.length === 1) return "FL2VA · первый кадр";
-      return "FL2VA · текст в видео";
+      if (references.length === 1) return "I2VA · первый кадр";
+      return "T2VA · текст в видео";
     }
     if (templateID === "image-to-image") return family === "flux2" ? "Точное редактирование" : "Фото и промт";
     return "Текст в изображение";

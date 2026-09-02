@@ -12,13 +12,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"ai-access-gateway/internal/domain"
 	"ai-access-gateway/internal/promptassistant"
 )
 
 const (
-	maxPromptAssistantInput          = 4000
 	maxPromptAssistantReferenceBytes = 64 << 20
 	promptAssistantMemoryReservation = 192 << 20
 )
@@ -57,9 +57,15 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 		writeGenerationError(w, http.StatusForbidden, "проверка безопасности не пройдена")
 		return
 	}
+	mode := promptassistant.Mode(strings.TrimSpace(r.Form.Get("template_id")))
+	if mode != promptassistant.ModeTextToImage && mode != promptassistant.ModeImageToImage && mode != promptassistant.ModeTextToVideo {
+		writeGenerationError(w, http.StatusBadRequest, "неизвестный режим генерации")
+		return
+	}
 	prompt := strings.TrimSpace(r.Form.Get("prompt"))
-	if prompt == "" || len(prompt) > maxPromptAssistantInput {
-		writeGenerationError(w, http.StatusBadRequest, "введите промт длиной до 4000 символов")
+	promptLimit := promptassistant.PromptCharacterLimit(mode)
+	if utf8.RuneCountInString(prompt) > promptLimit {
+		writeGenerationError(w, http.StatusBadRequest, fmt.Sprintf("введите промт длиной до %d символов", promptLimit))
 		return
 	}
 	user := a.currentUser(r)
@@ -70,11 +76,6 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 	if err := validateGenerationPrompt(prompt); err != nil {
 		a.audit(r.Context(), &user.ID, "generation_safety_blocked", "prompt_assistant", nil, a.clientIP(r), r.UserAgent(), map[string]any{"reason": "minor_sexual_content"})
 		writeGenerationError(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	mode := promptassistant.Mode(strings.TrimSpace(r.Form.Get("template_id")))
-	if mode != promptassistant.ModeTextToImage && mode != promptassistant.ModeImageToImage && mode != promptassistant.ModeTextToVideo {
-		writeGenerationError(w, http.StatusBadRequest, "неизвестный режим генерации")
 		return
 	}
 	if !user.CanUseQuickGenerationType(promptAssistantTemplateID(mode)) {
@@ -111,6 +112,10 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer releasePromptAssistantImages(references)
+	if prompt == "" && (mode != promptassistant.ModeTextToVideo || len(references) == 0) {
+		writeGenerationError(w, http.StatusBadRequest, fmt.Sprintf("введите промт длиной до %d символов", promptLimit))
+		return
+	}
 	thinkValue := r.Form.Get("assistant_think")
 	if thinkValue != "" && thinkValue != "true" && thinkValue != "false" {
 		writeGenerationError(w, http.StatusBadRequest, "некорректное значение режима рассуждений")
@@ -273,20 +278,6 @@ func (a *App) handlePromptAssistantDecision(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	finalPrompt := strings.TrimSpace(r.Form.Get("final_prompt"))
-	if len(finalPrompt) > 4000 {
-		writeGenerationError(w, http.StatusBadRequest, "итоговый промт длиннее 4000 символов")
-		return
-	}
-	if decision != "kept_original" {
-		if finalPrompt == "" {
-			writeGenerationError(w, http.StatusBadRequest, "итоговый промт пуст")
-			return
-		}
-		if err := validateGenerationPrompt(finalPrompt); err != nil {
-			writeGenerationError(w, http.StatusUnprocessableEntity, err.Error())
-			return
-		}
-	}
 	eventID, metadataCipher, err := a.store.PromptAssistantEventMetadata(r.Context(), user.ID, correlation)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeGenerationError(w, http.StatusNotFound, "вариант ассистента уже недоступен")
@@ -305,6 +296,21 @@ func (a *App) handlePromptAssistantDecision(w http.ResponseWriter, r *http.Reque
 	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil || !metadata.PromptAssistant.Requested {
 		writeGenerationError(w, http.StatusConflict, "данные варианта ассистента повреждены")
 		return
+	}
+	promptLimit := promptassistant.PromptCharacterLimit(metadata.PromptAssistant.Mode)
+	if utf8.RuneCountInString(finalPrompt) > promptLimit {
+		writeGenerationError(w, http.StatusBadRequest, fmt.Sprintf("итоговый промт длиннее %d символов", promptLimit))
+		return
+	}
+	if decision != "kept_original" {
+		if finalPrompt == "" {
+			writeGenerationError(w, http.StatusBadRequest, "итоговый промт пуст")
+			return
+		}
+		if err := validateGenerationPrompt(finalPrompt); err != nil {
+			writeGenerationError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
 	}
 	if decision == "kept_original" {
 		finalPrompt = metadata.PromptAssistant.OriginalPrompt
