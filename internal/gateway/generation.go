@@ -13,7 +13,6 @@ import (
 	"io"
 	"log"
 	"log/slog"
-	"math"
 	"mime"
 	"net/http"
 	"net/url"
@@ -328,15 +327,15 @@ func validateVideoGenerationQuality(user *User, input generationForm) error {
 	}
 	qualityLimit := maxVideoGenerationQuality(user)
 	if quality > qualityLimit {
-		return fmt.Errorf("для этой учётной записи доступно видео не выше %dp", qualityLimit)
+		return fmt.Errorf("для этой учётной записи базовое качество видео доступно до %dp; RTX-апскейл в лимит не входит", qualityLimit)
 	}
 	if input.VideoRTXEnabled {
 		scale := input.VideoRTXScale
 		if scale == 0 {
 			scale = 2
 		}
-		if int(math.Ceil(float64(quality)*scale)) > qualityLimit {
-			return fmt.Errorf("RTX-апскейл превышает разрешённое итоговое качество %dp", qualityLimit)
+		if scale < 1 || scale > 2 {
+			return errors.New("штатный масштаб RTX-апскейла должен быть от 1× до 2×")
 		}
 	}
 	return nil

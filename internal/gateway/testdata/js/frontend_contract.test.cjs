@@ -177,6 +177,14 @@ test("queued generations show server status without fake animated progress", () 
   assert.match(css, /animation-iteration-count: 1 !important/);
 });
 
+test("video quality limits the base render without constraining RTX upscale", () => {
+  assert.match(generateScript, /item\.disabled = numericValue\(item\.value\) > maxVideoGenerationQuality/);
+  assert.doesNotMatch(generateScript, /maxVideoGenerationQuality \/ Math\.max/);
+  assert.match(generateTemplate, /База доступна до \{\{\.MaxVideoGenerationQuality\}\}p\. RTX-апскейл не входит в лимит\./);
+  assert.match(generateTemplate, /name="video_rtx_scale" type="number" min="1" max="2"/);
+  assert.match(templates, /Финальный RTX-апскейл этим лимитом не ограничивается\./);
+});
+
 test("suggestions keep public intake hidden without hiding the admin review queue", () => {
   assert.match(suggestionsTemplate, /name="action" value="save"/);
   assert.match(suggestionsTemplate, /name="action" value="submit"/);

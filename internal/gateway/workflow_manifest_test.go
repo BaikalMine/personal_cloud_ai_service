@@ -113,7 +113,7 @@ func TestMiniMaxManifestDrivesFormDefaultsAndValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if input.VideoQuality != 720 || input.VideoDurationSeconds != 5 || input.VideoSteps != 25 {
+	if input.VideoQuality != 720 || input.VideoDurationSeconds != 5 || input.VideoSteps != 25 || input.VideoRTXScale != 2 {
 		t.Fatalf("manifest defaults were not applied: %#v", input)
 	}
 	if input.VideoSparseBudget != 0.35 || input.VideoSparseEarlyStep != 3 || input.VideoSparseLateStep != 4 {
@@ -128,6 +128,14 @@ func TestMiniMaxManifestDrivesFormDefaultsAndValidation(t *testing.T) {
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	if _, err := parseGenerationForm(request); err == nil {
 		t.Fatal("unsupported MiniMax quality was accepted")
+	}
+
+	form.Set("video_quality", "720")
+	form.Set("video_rtx_scale", "2.1")
+	request = httptest.NewRequest(http.MethodPost, "/generate/run", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if _, err := parseGenerationForm(request); err == nil {
+		t.Fatal("RTX scale above the workflow maximum was accepted")
 	}
 }
 

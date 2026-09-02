@@ -409,12 +409,6 @@
       if (numericValue(miniMaxVideoQuality.value, 720) > maxVideoGenerationQuality) {
         miniMaxVideoQuality.value = String(maxVideoGenerationQuality);
       }
-      const rtxScale = form.elements.video_rtx_scale;
-      if (rtxScale instanceof HTMLInputElement) {
-        const maximumScale = Math.max(1, Math.min(4, maxVideoGenerationQuality / Math.max(1, numericValue(miniMaxVideoQuality.value, 720))));
-        rtxScale.max = String(maximumScale);
-        if (numericValue(rtxScale.value, 2) > maximumScale) rtxScale.value = String(maximumScale);
-      }
     }
     const frameOption = miniMaxVideoModeInputs.find((input) => input.value === "frames");
     if (frameOption) frameOption.disabled = referenceOnly;

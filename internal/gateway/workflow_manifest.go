@@ -328,7 +328,7 @@ func miniMaxH3WorkflowParameters() []workflowParameterManifest {
 		booleanWorkflowParameter("video_rife_ensemble", "VideoRIFEEnsemble", "RIFE Ensemble", "postprocessing", true),
 		booleanWorkflowParameter("video_rife_compile", "VideoRIFECompile", "Компиляция RIFE", "postprocessing", true),
 		booleanWorkflowParameter("video_rtx_enabled", "VideoRTXEnabled", "Финальный RTX апскейл", "postprocessing", false),
-		numberWorkflowParameter("video_rtx_scale", "VideoRTXScale", "Масштаб RTX", "postprocessing", 2, 1, 4, 0.1),
+		numberWorkflowParameter("video_rtx_scale", "VideoRTXScale", "Масштаб RTX", "postprocessing", 2, 1, 2, 0.1),
 		enumWorkflowParameter("video_rtx_quality", "VideoRTXQuality", "Качество RTX", "postprocessing", "ULTRA", option("LOW", "Low"), option("MEDIUM", "Medium"), option("HIGH", "High"), option("ULTRA", "Ultra")),
 		booleanWorkflowParameter("video_color_match", "VideoColorMatch", "Палитра референса", "postprocessing", false),
 		enumWorkflowParameter("video_color_method", "VideoColorMethod", "Метод ColorMatch", "postprocessing", "adain", option("adain", "AdaIN"), option("mean_std", "Mean / Std")),

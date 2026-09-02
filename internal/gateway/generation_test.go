@@ -348,20 +348,24 @@ func TestEnforceGenerationSettingsAccessRemovesUnpermittedLoras(t *testing.T) {
 	}
 }
 
-func TestValidateVideoGenerationQualityIncludesRTXUpscale(t *testing.T) {
+func TestValidateVideoGenerationQualityLimitsBaseOnly(t *testing.T) {
 	user := &User{Role: "user", MaxVideoGenerationQuality: 720}
+	if err := validateVideoGenerationQuality(user, generationForm{VideoQuality: 1080}); err == nil {
+		t.Fatal("base video quality above the account limit was accepted")
+	}
 	for name, input := range map[string]generationForm{
-		"source quality": {VideoQuality: 1080},
-		"rtx output":     {VideoQuality: 720, VideoRTXEnabled: true, VideoRTXScale: 2},
+		"base at limit":       {VideoQuality: 720},
+		"two times RTX":       {VideoQuality: 720, VideoRTXEnabled: true, VideoRTXScale: 2},
+		"default RTX scaling": {VideoQuality: 720, VideoRTXEnabled: true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := validateVideoGenerationQuality(user, input); err == nil {
-				t.Fatal("video quality above the account limit was accepted")
+			if err := validateVideoGenerationQuality(user, input); err != nil {
+				t.Fatalf("allowed base quality with optional RTX upscale was rejected: %v", err)
 			}
 		})
 	}
-	if err := validateVideoGenerationQuality(user, generationForm{VideoQuality: 720}); err != nil {
-		t.Fatalf("video quality at the account limit was rejected: %v", err)
+	if err := validateVideoGenerationQuality(user, generationForm{VideoQuality: 720, VideoRTXEnabled: true, VideoRTXScale: 2.1}); err == nil {
+		t.Fatal("RTX scale above the workflow maximum was accepted")
 	}
 }
 

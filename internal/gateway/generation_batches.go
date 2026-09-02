@@ -161,7 +161,7 @@ func generationBatchParameter(input generationForm, name string) (generationBatc
 	case "video_rife_multiplier":
 		return byName(generationBatchParameterSpec{Name: name, Label: "Множитель кадров RIFE", Minimum: 2, Maximum: 4, Step: 1, Integer: true}, miniMax && input.VideoRIFEEnabled)
 	case "video_rtx_scale":
-		return byName(generationBatchParameterSpec{Name: name, Label: "Масштаб RTX", Minimum: 1, Maximum: 4, Step: 0.25}, miniMax && input.VideoRTXEnabled)
+		return byName(generationBatchParameterSpec{Name: name, Label: "Масштаб RTX", Minimum: 1, Maximum: 2, Step: 0.25}, miniMax && input.VideoRTXEnabled)
 	case "video_color_strength":
 		return byName(generationBatchParameterSpec{Name: name, Label: "Сила ColorMatch", Minimum: 0, Maximum: 1, Step: 0.05}, miniMax && input.VideoColorMatch)
 	case "video_sharpen_strength":
