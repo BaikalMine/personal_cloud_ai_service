@@ -168,6 +168,15 @@ test("controlled generation batches are wired through the form, job center, and 
   }
 });
 
+test("queued generations show server status without fake animated progress", () => {
+  assert.match(generateScript, /const setQueueProgress = \(detail\) =>/);
+  assert.match(generateScript, /setGenerationProgress\("В очереди ComfyUI", detail, null, "queue"\)/);
+  assert.match(generateScript, /generationProgressbar\.hidden = isQueueWaiting/);
+  assert.equal((generateScript.match(/setGenerationProgress\("В очереди ComfyUI"/g) || []).length, 1);
+  assert.match(css, /\.generation-run-progress\.is-queue-waiting \.generation-run-progress-head \{ margin-bottom: 0; \}/);
+  assert.match(css, /animation-iteration-count: 1 !important/);
+});
+
 test("suggestions keep public intake hidden without hiding the admin review queue", () => {
   assert.match(suggestionsTemplate, /name="action" value="save"/);
   assert.match(suggestionsTemplate, /name="action" value="submit"/);

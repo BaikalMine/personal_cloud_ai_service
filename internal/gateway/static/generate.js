@@ -718,13 +718,21 @@
     updateResolutionPreview();
   };
 
-  const setGenerationProgress = (stage, detail = "", percent = null) => {
+  const setGenerationProgress = (stage, detail = "", percent = null, mode = "work") => {
     if (!runProgress || !generationStage || !generationStageDetail || !generationProgressbarFill) return;
+    const isQueueWaiting = mode === "queue";
     runProgress.hidden = false;
+    runProgress.classList.toggle("is-queue-waiting", isQueueWaiting);
     generationStage.textContent = stage;
     generationStageDetail.textContent = detail;
+    generationProgressbar.hidden = isQueueWaiting;
+    generationProgressbarFill.classList.remove("is-indeterminate");
+    generationProgressbar.removeAttribute("aria-valuenow");
+    if (isQueueWaiting) {
+      generationProgressbarFill.style.width = "0%";
+      return;
+    }
     if (percent === null) {
-      generationProgressbar.removeAttribute("aria-valuenow");
       generationProgressbarFill.classList.add("is-indeterminate");
       generationProgressbarFill.style.width = "34%";
       return;
@@ -733,6 +741,10 @@
     generationProgressbar.setAttribute("aria-valuenow", String(bounded));
     generationProgressbarFill.classList.remove("is-indeterminate");
     generationProgressbarFill.style.width = `${bounded}%`;
+  };
+
+  const setQueueProgress = (detail) => {
+    setGenerationProgress("В очереди ComfyUI", detail, null, "queue");
   };
 
   const formatWait = (seconds) => {
@@ -4007,7 +4019,7 @@
         if (!liveProgressReceived) {
           if (payload.state === "queued") {
             const detail = queuePositionDetail(payload.queue_position, payload.queue_total, payload.estimated_wait_seconds);
-            setGenerationProgress("В очереди ComfyUI", detail, null);
+            setQueueProgress(detail);
           } else if (payload.state === "running") {
             setGenerationProgress("ComfyUI выполняет workflow", "Статус восстанавливается через HTTP", null);
           }
@@ -4097,7 +4109,7 @@
           resultTitle.textContent = "Генерация выполняется";
           resultStatus.textContent = payload.message || "Генерация восстановлена.";
           if (payload.state === "queued") {
-            setGenerationProgress("В очереди ComfyUI", queuePositionDetail(payload.queue_position, payload.queue_total, payload.estimated_wait_seconds), null);
+            setQueueProgress(queuePositionDetail(payload.queue_position, payload.queue_total, payload.estimated_wait_seconds));
           } else if (payload.state === "running") {
             setGenerationProgress("ComfyUI выполняет workflow", "Статус восстанавливается через HTTP", null);
           }
@@ -4325,7 +4337,7 @@
       activeGenerationID = payload.prompt_id;
       persistActiveGeneration();
       if (payload.state === "queued") {
-        setGenerationProgress("В очереди ComfyUI", queuePositionDetail(payload.queue_position, payload.queue_total, payload.estimated_wait_seconds), null);
+        setQueueProgress(queuePositionDetail(payload.queue_position, payload.queue_total, payload.estimated_wait_seconds));
       } else if (payload.state === "running") {
         setGenerationProgress("ComfyUI начал генерацию", "Подготавливаем workflow", null);
       }
