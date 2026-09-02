@@ -2426,6 +2426,8 @@ func generationAuditMetadata(definition workflowDefinition, input generationForm
 			"steps":           input.VideoSteps, "turbo": input.VideoTurbo, "integrated_turbo": input.VideoIntegratedTurbo, "sampler": input.VideoSampler, "scheduler": input.VideoScheduler,
 			"shift_video": input.VideoShiftVideo, "shift_audio": input.VideoShiftAudio,
 			"sage_attention": input.VideoSageAttention, "clear_vram": input.VideoClearVRAM,
+			"low_vram_attention":  map[string]any{"enabled": input.VideoLowVRAMAttention, "head_chunks": input.VideoLowVRAMHeadChunks},
+			"chunk_feed_forward":  map[string]any{"enabled": input.VideoChunkFeedForward, "chunks": input.VideoChunkFFChunks, "threshold": input.VideoChunkFFThreshold},
 			"memory_optimization": map[string]any{"enabled": input.VideoMemoryOptimize, "mlp": input.VideoMemoryMLP, "chunk_rows": input.VideoMemoryChunkRows, "precision": input.VideoMemoryPrecision, "qkv_streaming": input.VideoMemoryQKV, "attention_memory": input.VideoMemoryAttention},
 			"aimdo_residency":     map[string]any{"enabled": input.VideoAIMDOEnabled, "residency": input.VideoAIMDOResidency},
 			"sparse_attention":    map[string]any{"enabled": input.VideoSparseAttention, "budget": input.VideoSparseBudget, "early_schedule": input.VideoSparseSchedule, "early_steps": input.VideoSparseEarlyStep, "early_kv": input.VideoSparseEarlyKV, "late_steps": input.VideoSparseLateStep, "late_kv": input.VideoSparseLateKV, "backend": input.VideoSparseBackend},

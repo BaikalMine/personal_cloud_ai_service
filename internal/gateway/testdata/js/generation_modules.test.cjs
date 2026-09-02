@@ -139,7 +139,7 @@ test("launch summary reports shared settings and heavy work for all families", (
   assert.match(imageSummary.impact, /SeedVR2/);
 
   const videoSummary = summary.buildSummary({
-    family: "minimax_h3", templateID: "minimax-h3-video", workflowName: "MiniMaxH3 Видео", modelName: "MiniMax H3 v4",
+    family: "minimax_h3", templateID: "minimax-h3-video", workflowName: "MiniMaxH3 Видео", modelName: "MiniMax H3 v5",
     duration: "10 секунд", output: "480p", videoMode: "references", hasAudio: true,
   });
   assert.equal(videoSummary.facts.find((item) => item.label === "Режим").value, "REF2VA · свободные референсы");

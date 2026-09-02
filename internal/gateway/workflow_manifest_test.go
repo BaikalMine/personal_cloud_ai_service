@@ -20,7 +20,7 @@ func TestWorkflowManifestCatalogIsValid(t *testing.T) {
 	if !ok {
 		t.Fatal("MiniMax H3 manifest is missing")
 	}
-	if manifest.Version != "4" || manifest.maximumInput("image") != 4 || manifest.requiresInput("image") {
+	if manifest.Version != "5" || manifest.maximumInput("image") != 4 || manifest.requiresInput("image") {
 		t.Fatalf("unexpected MiniMax manifest summary: %#v", manifest)
 	}
 	body, err := json.Marshal(workflowManifestCatalogValue())
@@ -84,28 +84,33 @@ func TestWorkflowManifestParametersHaveFormControls(t *testing.T) {
 
 func TestMiniMaxManifestDrivesFormDefaultsAndValidation(t *testing.T) {
 	form := url.Values{
-		"template_id":                 {"minimax-h3-video"},
-		"video_sparse_budget":         {"0,35"},
-		"video_sage_attention":        {"true"},
-		"video_memory_optimize":       {"true"},
-		"video_sparse_attention":      {"true"},
-		"video_sparse_early_steps":    {"3"},
-		"video_sparse_late_steps":     {"4"},
-		"video_use_source_aspect":     {"true"},
-		"video_rife_checkpoint":       {"rife49.pth"},
-		"video_rife_multiplier":       {"2"},
-		"video_rife_dtype":            {"float32"},
-		"video_rife_batch_size":       {"1"},
-		"video_rtx_quality":           {"ULTRA"},
-		"video_color_method":          {"adain"},
-		"video_sharpen_method":        {"rcas"},
-		"video_memory_mlp":            {"auto"},
-		"video_memory_precision":      {"Auto"},
-		"video_memory_qkv":            {"Auto"},
-		"video_memory_attention":      {"Standard"},
-		"video_aimdo_residency":       {"0 blocks"},
-		"video_sparse_backend":        {"Kitchen INT8"},
-		"video_sparse_early_schedule": {"Hold"},
+		"template_id":                        {"minimax-h3-video"},
+		"video_sparse_budget":                {"0,35"},
+		"video_sage_attention":               {"true"},
+		"video_low_vram_attention":           {"true"},
+		"video_low_vram_head_chunks":         {"8"},
+		"video_chunk_feed_forward":           {"true"},
+		"video_chunk_feed_forward_chunks":    {"3"},
+		"video_chunk_feed_forward_threshold": {"8192"},
+		"video_memory_optimize":              {"true"},
+		"video_sparse_attention":             {"true"},
+		"video_sparse_early_steps":           {"3"},
+		"video_sparse_late_steps":            {"4"},
+		"video_use_source_aspect":            {"true"},
+		"video_rife_checkpoint":              {"rife49.pth"},
+		"video_rife_multiplier":              {"2"},
+		"video_rife_dtype":                   {"float32"},
+		"video_rife_batch_size":              {"1"},
+		"video_rtx_quality":                  {"ULTRA"},
+		"video_color_method":                 {"adain"},
+		"video_sharpen_method":               {"rcas"},
+		"video_memory_mlp":                   {"auto"},
+		"video_memory_precision":             {"Auto"},
+		"video_memory_qkv":                   {"Auto"},
+		"video_memory_attention":             {"Standard"},
+		"video_aimdo_residency":              {"0 blocks"},
+		"video_sparse_backend":               {"Kitchen INT8"},
+		"video_sparse_early_schedule":        {"Hold"},
 	}
 	request := httptest.NewRequest(http.MethodPost, "/generate/run", strings.NewReader(form.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -119,7 +124,7 @@ func TestMiniMaxManifestDrivesFormDefaultsAndValidation(t *testing.T) {
 	if input.VideoSparseBudget != 0.35 || input.VideoSparseEarlyStep != 3 || input.VideoSparseLateStep != 4 {
 		t.Fatalf("manifest values were not parsed: %#v", input)
 	}
-	if !input.VideoSageAttention || !input.VideoMemoryOptimize || !input.VideoSparseAttention || !input.VideoUseSourceAspect {
+	if !input.VideoSageAttention || !input.VideoLowVRAMAttention || input.VideoLowVRAMHeadChunks != 8 || !input.VideoChunkFeedForward || input.VideoChunkFFChunks != 3 || input.VideoChunkFFThreshold != 8192 || !input.VideoMemoryOptimize || !input.VideoSparseAttention || !input.VideoUseSourceAspect {
 		t.Fatalf("manifest booleans were not parsed: %#v", input)
 	}
 

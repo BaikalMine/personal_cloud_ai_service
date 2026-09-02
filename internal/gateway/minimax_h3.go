@@ -148,6 +148,21 @@ func normalizeMiniMaxH3(input *generationForm) error {
 	if input.VideoShiftVideo < 1 || input.VideoShiftVideo > 32 || input.VideoShiftAudio < 1 || input.VideoShiftAudio > 32 {
 		return errors.New("shift MiniMax H3 должен быть от 1 до 32")
 	}
+	if input.VideoLowVRAMHeadChunks == 0 {
+		input.VideoLowVRAMHeadChunks = 4
+	}
+	if input.VideoLowVRAMHeadChunks < 1 || input.VideoLowVRAMHeadChunks > 56 {
+		return errors.New("число групп Low VRAM Attention должно быть от 1 до 56")
+	}
+	if input.VideoChunkFFChunks == 0 {
+		input.VideoChunkFFChunks = 2
+	}
+	if input.VideoChunkFFThreshold == 0 {
+		input.VideoChunkFFThreshold = 4096
+	}
+	if input.VideoChunkFFChunks < 1 || input.VideoChunkFFChunks > 64 || input.VideoChunkFFThreshold < 256 || input.VideoChunkFFThreshold > 262144 || input.VideoChunkFFThreshold%256 != 0 {
+		return errors.New("некорректные параметры MiniMax H3 Chunk FeedForward")
+	}
 	if input.VideoMemoryMLP == "" {
 		input.VideoMemoryMLP = "auto"
 	}
@@ -221,8 +236,8 @@ func normalizeMiniMaxH3(input *generationForm) error {
 	if input.VideoRTXScale == 0 {
 		input.VideoRTXScale = 2
 	}
-	if input.VideoRTXScale < 1 || input.VideoRTXScale > 4 {
-		return errors.New("масштаб RTX Super Resolution должен быть от 1 до 4")
+	if input.VideoRTXScale < 1 || input.VideoRTXScale > 2 {
+		return errors.New("масштаб RTX Super Resolution должен быть от 1 до 2")
 	}
 	if input.VideoRTXQuality == "" {
 		input.VideoRTXQuality = "ULTRA"
@@ -415,7 +430,7 @@ func miniMaxH3Node(classType string, inputs map[string]any) map[string]any {
 	return map[string]any{"class_type": classType, "inputs": inputs}
 }
 
-// buildMiniMaxH3Prompt mirrors the executable path of the saved MiniMax H3 v4
+// buildMiniMaxH3Prompt mirrors the executable path of the saved MiniMax H3 v5
 // workflow. The H.264 output is deliberate so generated MP4 files remain
 // playable on desktop and Android.
 func buildMiniMaxH3Prompt(input generationForm) (map[string]any, error) {
@@ -444,8 +459,20 @@ func buildMiniMaxH3Prompt(input generationForm) (map[string]any, error) {
 		"15": miniMaxH3Node("VAEDecode", map[string]any{"samples": []any{"14", 0}, "vae": []any{"3", 0}}),
 		"16": miniMaxH3Node("VAEDecodeAudio", map[string]any{"samples": []any{"14", 0}, "vae": []any{"4", 0}}),
 	}
+	if input.VideoLowVRAMAttention {
+		nodes["28"] = miniMaxH3Node("MiniMaxLowVRAMAttention", map[string]any{
+			"model": []any{modelInputID, 0}, "head_chunks": input.VideoLowVRAMHeadChunks,
+		})
+		modelInputID = "28"
+	}
+	if input.VideoChunkFeedForward {
+		nodes["29"] = miniMaxH3Node("MiniMaxChunkFeedForward", map[string]any{
+			"model": []any{modelInputID, 0}, "chunks": input.VideoChunkFFChunks, "seq_threshold": input.VideoChunkFFThreshold,
+		})
+		modelInputID = "29"
+	}
 	if input.VideoSageAttention {
-		nodes["5"] = miniMaxH3Node("MiniMaxH3MemoryEfficientSageAttentionPatch", map[string]any{"model": []any{"1", 0}})
+		nodes["5"] = miniMaxH3Node("MiniMaxH3MemoryEfficientSageAttentionPatch", map[string]any{"model": []any{modelInputID, 0}})
 		modelInputID = "5"
 	}
 	if input.VideoMemoryOptimize {

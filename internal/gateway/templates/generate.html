@@ -195,14 +195,14 @@
           </div>
         </details>
         <details class="workflow-mini-guide" data-workflow-guide="video" hidden>
-          <summary><span>MiniMax H3 v4: как собрать ролик</span><small>Режим, исходники, промт, память и финальная обработка без терминологии нод.</small></summary>
+          <summary><span>MiniMax H3 v5: как собрать ролик</span><small>Режим, исходники, промт, память и финальная обработка без терминологии нод.</small></summary>
           <div class="workflow-mini-guide-grid">
             <section><strong>FL2VA · точные кадры</strong><p>Без фото модель строит ролик только по тексту. Фото 1 становится точным первым кадром. Фото 1 и Фото 2 задают точные начало и финал, поэтому промт должен описывать один достижимый переход между ними.</p></section>
             <section><strong>REF2VA · свободные референсы</strong><p>Этот режим тоже создаёт видео по промту и может работать без файлов. До четырёх фото передают внешность, одежду, предметы, стиль или сцену; видео — движение и работу камеры; аудио — голос, музыку или окружение.</p></section>
             <section><strong>Размер кадра</strong><p>При наличии Фото 1 его пропорции используются по умолчанию. Качество 480–1440 ограничивает длинную сторону, а обе стороны выравниваются до 32 px. Без фото выберите формат кадра вручную.</p></section>
             <section><strong>Модели и Turbo</strong><p>Gateway сам подключает подходящую внутреннюю ветку для выбранного способа. Внешний Turbo опционален; модели со встроенным Turbo получают подходящее число шагов автоматически.</p></section>
             <section><strong>Промт-ассистент</strong><p>Ассистент получает тот же режим и порядок файлов, что MiniMax: точные первый и последний кадры либо до четырёх свободных фото. Он анализирует каждый материал и собирает один редактируемый план. Для видео и аудио явно напишите, что брать: движение, сцену, голос, музыку или окружение.</p></section>
-            <section><strong>Длительность и память</strong><p>5–15 секунд — основной проверенный диапазон; более длинные ролики экспериментальны и заметно тяжелее. Memory Optimization и поэтапная очистка VRAM оставлены включёнными. При артефактах сначала отключайте Sparse Attention.</p></section>
+            <section><strong>Длительность и память</strong><p>5–15 секунд — основной проверенный диапазон; более длинные ролики экспериментальны и заметно тяжелее. Memory Optimization и очистка VRAM включены. Low VRAM Attention и Chunk FeedForward из v5 оставлены опциональными для случаев нехватки памяти.</p></section>
             <section><strong>RIFE, RTX и Sharpen</strong><p>RIFE добавляет промежуточные кадры, RTX увеличивает разрешение, Sharpen подчёркивает детали. Они выполняются именно в таком порядке. Все этапы опциональны: сначала получите удачный базовый ролик, затем включайте нужные улучшения.</p></section>
             <section><strong>Звук и экспорт</strong><p>MiniMax генерирует финальную аудиодорожку вместе с видео. Аудиофайл или звук видеореференса используются как ориентир в режиме свободных референсов. Gateway сохраняет H.264 с yuv420p, чтобы ролик открывался в браузере и на Android.</p></section>
           </div>
@@ -262,7 +262,7 @@
         <label>Профиль качества Krea2<select id="generation-quality"><option value="fast">Быстрое · 1,0 Мп</option><option value="balanced" selected>Оптимальное · 1,9 Мп</option><option value="krea-2-5">Детальное · 2,5 Мп</option><option value="krea-3-2">Высокое · 3,2 Мп</option><option value="maximum">Максимальное · 4,0 Мп</option><option value="krea-4-7">Максимум деталей · 4,7 Мп</option></select></label>
       </div>
       <section class="workflow-settings-section minimax-video-settings minimax-v4-settings" hidden>
-        <div class="workflow-settings-heading"><div><strong>MiniMax H3 v4 · видео</strong><small>Качество задаёт максимальную длинную сторону кадра. Размер всегда кратен 32.</small></div><output class="resolution-preview" id="minimax-video-resolution-preview">432 × 720 · формат 9:16</output></div>
+        <div class="workflow-settings-heading"><div><strong>MiniMax H3 v5 · видео</strong><small>Качество задаёт максимальную длинную сторону кадра. Размер всегда кратен 32.</small></div><output class="resolution-preview" id="minimax-video-resolution-preview">432 × 720 · формат 9:16</output></div>
         <p class="minimax-model-profile" id="minimax-video-model-profile">Активная ветка: FL2VA · MiniMax_H3_FL2VA. Она создаёт видео по промту и принимает опциональные точные первый и последний кадры.</p>
         <div class="generation-fields minimax-primary-grid">
           <label><span class="field-label">Базовое качество <span class="field-help" tabindex="0" data-tooltip="Это максимальная длинная сторона кадра до постобработки. Лимит учётной записи применяется только здесь; финальный RTX-апскейл может увеличить готовое видео.">?</span></span><select name="video_quality" id="minimax-video-quality"><option value="480">480 · быстрый просмотр</option><option value="720" selected>720 · рекомендуем</option><option value="1080">1080 · Full HD</option><option value="1440">1440 · 2K</option></select><small class="field-hint">База доступна до {{.MaxVideoGenerationQuality}}p. RTX-апскейл не входит в лимит.</small></label>
@@ -279,7 +279,7 @@
         </div>
       </section>
       <section class="workflow-settings-section minimax-video-settings minimax-v4-settings" hidden {{if not .CanUseAdvancedGenerationSettings}}inert data-requires-advanced-settings="true"{{end}}>
-        <div class="workflow-settings-heading"><div><strong>MiniMax H3 v4 · LoRA</strong><small>Адаптеры из отдельной папки MiniMaxH3 подключаются после оптимизаций модели. Внешний Turbo применяется только к базовой модели.</small></div></div>
+        <div class="workflow-settings-heading"><div><strong>MiniMax H3 v5 · LoRA</strong><small>Адаптеры из отдельной папки MiniMaxH3 подключаются после оптимизаций модели. Внешний Turbo применяется только к базовой модели.</small></div></div>
         <div class="lora-list">
           <div class="lora-row" data-lora-slots="minimax"><span class="lora-number">1</span><label>LoRA<select name="lora_1" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .MiniMaxLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label>Модель<input name="lora_model_strength_1" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label><label>CLIP<input name="lora_clip_strength_1" class="generation-lora-clip" type="number" min="-100" max="100" step="0.05" value="1"></label></div>
           <div class="lora-row" data-lora-slots="minimax" hidden><span class="lora-number">2</span><label>LoRA<select name="lora_2" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .MiniMaxLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label>Модель<input name="lora_model_strength_2" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label><label>CLIP<input name="lora_clip_strength_2" class="generation-lora-clip" type="number" min="-100" max="100" step="0.05" value="1"></label></div>
@@ -291,11 +291,11 @@
       </section>
       <details class="generation-advanced" {{if not .CanUseAdvancedGenerationSettings}}hidden inert{{end}}><summary>Точные настройки workflow</summary><div class="workflow-settings">
         <section class="workflow-settings-section minimax-video-settings minimax-v4-settings" hidden>
-          <div class="workflow-settings-heading minimax-settings-heading"><div><span>ГЕНЕРАЦИЯ</span><strong>Семплирование MiniMax H3 v4</strong><small>Модель задаёт безопасные значения при выборе. Меняйте их только для осознанного сравнения результатов.</small></div></div>
+          <div class="workflow-settings-heading minimax-settings-heading"><div><span>ГЕНЕРАЦИЯ</span><strong>Семплирование MiniMax H3 v5</strong><small>Модель задаёт безопасные значения при выборе. Меняйте их только для осознанного сравнения результатов.</small></div></div>
           <div class="minimax-parameter-grid">
             <label class="minimax-field">Seed<input name="seed" type="number" min="-1" value="-1"><small>-1 выбирает новый seed.</small></label>
-            <label class="minimax-field">Сэмплер<select name="video_sampler" id="minimax-video-sampler"><option value="euler" selected>Euler · v4 рекомендует</option><option value="res_multistep">Res Multistep · совместимость v3</option></select><small>Режим Turbo использует собственный сэмплер.</small></label>
-            <label class="minimax-field">Планировщик<select name="video_scheduler" id="minimax-video-scheduler"><option value="simple" selected>Simple · рекомендуем</option><option value="sgm_uniform">SGM Uniform</option><option value="karras">Karras</option><option value="exponential">Exponential</option><option value="beta">Beta</option><option value="normal">Normal</option></select><small>Simple соответствует workflow v4.</small></label>
+            <label class="minimax-field">Сэмплер<select name="video_sampler" id="minimax-video-sampler"><option value="euler" selected>Euler · v5 рекомендует</option><option value="res_multistep">Res Multistep · совместимость v3</option></select><small>Режим Turbo использует собственный сэмплер.</small></label>
+            <label class="minimax-field">Планировщик<select name="video_scheduler" id="minimax-video-scheduler"><option value="simple" selected>Simple · рекомендуем</option><option value="sgm_uniform">SGM Uniform</option><option value="karras">Karras</option><option value="exponential">Exponential</option><option value="beta">Beta</option><option value="normal">Normal</option></select><small>Simple соответствует workflow v5.</small></label>
             <label class="minimax-field">Video Sigma<input name="video_shift_video" id="minimax-video-shift-video" type="number" min="1" max="32" step="1" value="11"><small>11 для базовой модели, 12 для Eros Max.</small></label>
             <label class="minimax-field">Audio Sigma<input name="video_shift_audio" id="minimax-video-shift-audio" type="number" min="1" max="32" step="1" value="3"><small>3 для базовой модели, 7 для Eros Max.</small></label>
           </div>
@@ -307,15 +307,32 @@
         <section class="workflow-settings-section minimax-video-settings minimax-v4-settings" hidden>
           <div class="workflow-settings-heading minimax-settings-heading"><div><span>КАДР</span><strong>Подготовка ключевых кадров</strong><small>Эти параметры повторяют геометрию Aspect Ratio Simplifier. Они влияют только на Фото 1 и Фото 2 в режиме ключевых кадров.</small></div></div>
           <div class="minimax-parameter-grid minimax-frame-grid">
-            <label class="minimax-field">Масштабирование<select name="video_resize_method"><option value="nearest-exact" selected>Nearest exact · workflow v4</option><option value="lanczos">Lanczos · фото</option><option value="bicubic">Bicubic</option><option value="bilinear">Bilinear</option><option value="area">Area</option><option value="nvidia_rtx_vsr">NVIDIA RTX VSR</option></select><small>Фильтр изменения размера.</small></label>
+            <label class="minimax-field">Масштабирование<select name="video_resize_method"><option value="nearest-exact" selected>Nearest exact · workflow v5</option><option value="lanczos">Lanczos · фото</option><option value="bicubic">Bicubic</option><option value="bilinear">Bilinear</option><option value="area">Area</option><option value="nvidia_rtx_vsr">NVIDIA RTX VSR</option></select><small>Фильтр изменения размера.</small></label>
             <label class="minimax-field">Вписывание<select name="video_proportion"><option value="crop" selected>Заполнить и обрезать</option><option value="pad">Вписать с полями</option><option value="resize">Вписать без холста</option><option value="stretch">Растянуть</option><option value="total_pixels">Сохранить бюджет пикселей</option></select><small>Как согласовать разные пропорции.</small></label>
             <label class="minimax-field">Позиция обрезки<select name="video_crop_location"><option value="center" selected>По центру</option><option value="top">Сверху</option><option value="bottom">Снизу</option><option value="left">Слева</option><option value="right">Справа</option></select><small>Используется только для обрезки.</small></label>
             <label class="minimax-field">Цвет полей<input name="video_pad_color" value="0, 0, 0" maxlength="32"><small>RGB: 0–255 или 0–1.</small></label>
           </div>
         </section>
         <section class="workflow-settings-section minimax-video-settings minimax-v4-settings" hidden>
-          <div class="workflow-settings-heading minimax-settings-heading"><div><span>H3 v4</span><strong>Память и ускорение внимания</strong><small>Параметры соответствуют H3-Optimizations 0.2.35. При артефактах сначала отключайте Sparse Attention; при OOM уменьшайте блок, резидентность или выбирайте Lower VRAM.</small></div></div>
+          <div class="workflow-settings-heading minimax-settings-heading"><div><span>H3 v5</span><strong>Память и ускорение внимания</strong><small>Low VRAM Attention и Chunk FeedForward экспериментальны и выключены по умолчанию. При артефактах сначала отключайте Sparse Attention; при OOM подключайте экономичные режимы по одному.</small></div></div>
           <div class="video-enhancements minimax-optimizations">
+            <section class="video-enhancement">
+              <label class="video-enhancement-toggle ui-choice"><input name="video_low_vram_attention" type="checkbox" value="true"><span><strong>Low VRAM Attention</strong><small>Разбивает attention по группам голов и снижает его пиковое потребление VRAM.</small></span><b>V5</b></label>
+              <div class="video-enhancement-settings video-enhancement-settings--compact">
+                <div class="video-enhancement-fields">
+                  <label>Группы голов<input name="video_low_vram_head_chunks" type="number" min="1" max="56" step="1" value="4"><small class="field-hint">4 — значение workflow v5. Больше групп экономит память, но добавляет накладные расходы.</small></label>
+                </div>
+              </div>
+            </section>
+            <section class="video-enhancement">
+              <label class="video-enhancement-toggle ui-choice"><input name="video_chunk_feed_forward" type="checkbox" value="true"><span><strong>Chunk FeedForward</strong><small>Делит длинную последовательность токенов на части для снижения пика VRAM.</small></span><b>V5</b></label>
+              <div class="video-enhancement-settings video-enhancement-settings--compact">
+                <div class="video-enhancement-fields">
+                  <label>Число частей<input name="video_chunk_feed_forward_chunks" type="number" min="1" max="64" step="1" value="2"></label>
+                  <label>Порог токенов<input name="video_chunk_feed_forward_threshold" type="number" min="256" max="262144" step="256" value="4096"><small class="field-hint">Разбиение включается только для последовательностей длиннее порога.</small></label>
+                </div>
+              </div>
+            </section>
             <section class="video-enhancement">
               <label class="video-enhancement-toggle ui-choice"><input name="video_memory_optimize" type="checkbox" value="true" checked><span><strong>H3 Memory Optimization</strong><small>Ограничивает пиковые активации и управляет точностью вычислений.</small></span><b>VRAM</b></label>
               <div class="video-enhancement-settings">
@@ -340,7 +357,7 @@
               <label class="video-enhancement-toggle ui-choice"><input name="video_sparse_attention" type="checkbox" value="true" checked><span><strong>H3 Sparse Attention</strong><small>Ускоряет внимание, сохраняя больше связей в начале и конце денойзинга.</small></span><b>SPARSE</b></label>
               <div class="video-enhancement-settings">
                 <div class="minimax-optimization-fields minimax-sparse-fields">
-                  <label>Бюджет видео<input name="video_sparse_budget" type="number" min="0.01" max="1" step="0.01" value="0.30"><small class="field-hint">0,30 — значение v4; 1,0 = плотное внимание.</small></label>
+                  <label>Бюджет видео<input name="video_sparse_budget" type="number" min="0.01" max="1" step="0.01" value="0.30"><small class="field-hint">0,30 — значение v5; 1,0 = плотное внимание.</small></label>
                   <label>Backend<select name="video_sparse_backend"><option value="Kitchen INT8" selected>Kitchen INT8 · рекомендуем</option><option value="FROST BF16 (SM89)">FROST BF16 (SM89)</option><option value="Sparse Sage">Sparse Sage</option><option value="BF16 Triton">BF16 Triton</option><option value="FP8 FlexAttention">FP8 FlexAttention</option></select></label>
                   <label>Раннее расписание<select name="video_sparse_early_schedule"><option value="Hold" selected>Hold · постоянный KV</option><option value="Ramp">Ramp · плавный переход</option></select></label>
                   <label>Ранние шаги<input name="video_sparse_early_steps" type="number" min="0" max="1000" step="1" value="2"></label>
@@ -367,7 +384,7 @@
                 <div class="video-enhancement-flags">
                   <label class="minimax-utility-toggle ui-choice"><input name="video_rife_fast_mode" type="checkbox" value="true" checked><span><strong>Быстрый режим</strong><small>Приоритет скорости.</small></span></label>
                   <label class="minimax-utility-toggle ui-choice"><input name="video_rife_ensemble" type="checkbox" value="true" checked><span><strong>Ensemble</strong><small>Стабильнее движение.</small></span></label>
-                  <label class="minimax-utility-toggle ui-choice"><input name="video_rife_compile" type="checkbox" value="true" checked><span><strong>Компиляция</strong><small>Значение исходного v4; первый запуск дольше.</small></span></label>
+                  <label class="minimax-utility-toggle ui-choice"><input name="video_rife_compile" type="checkbox" value="true" checked><span><strong>Компиляция</strong><small>Значение исходного v5; первый запуск дольше.</small></span></label>
                 </div>
               </div>
             </section>
@@ -393,7 +410,7 @@
               <label class="video-enhancement-toggle ui-choice"><input name="video_sharpen_enabled" type="checkbox" value="true"><span><strong>Финальная резкость</strong><small>Подчёркивает детали после плавности движения и апскейла.</small><em class="workflow-load-note"><b>Время +</b><b>VRAM +</b></em></span><b>SHARPEN</b></label>
               <div class="video-enhancement-settings">
                 <div class="video-enhancement-fields video-sharpen-fields">
-                  <label>Метод<select name="video_sharpen_method" id="minimax-video-sharpen-method"><option value="rcas" selected>RCAS · workflow v4</option><option value="adaptive_usm">Adaptive USM</option><option value="high_pass">High Pass</option><option value="deconvolution">Deconvolution</option></select></label>
+                  <label>Метод<select name="video_sharpen_method" id="minimax-video-sharpen-method"><option value="rcas" selected>RCAS · workflow v5</option><option value="adaptive_usm">Adaptive USM</option><option value="high_pass">High Pass</option><option value="deconvolution">Deconvolution</option></select></label>
                   <label>Сила<input name="video_sharpen_strength" type="number" min="0" max="1" step="0.01" value="0.8"></label>
                   <label data-sharpen-field="radius" hidden>Радиус<input name="video_sharpen_radius" type="number" min="0.5" max="5" step="0.1" value="1"></label>
                   <label data-sharpen-field="threshold" hidden>Порог шума<input name="video_sharpen_threshold" type="number" min="0" max="1" step="0.01" value="0.05"></label>

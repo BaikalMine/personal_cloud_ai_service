@@ -216,7 +216,7 @@ func buildGenerationModelCatalog(info map[string]comfyNodeInfo) generationModelC
 			fluxModels = append(fluxModels, model)
 		case strings.Contains(lower, "minimax_h3_fl2va"):
 			model := generationModel{
-				ID: generationModelID(modelFamilyMiniMaxH3, name), Name: name, DisplayName: "MiniMax H3 v4 · FL2VA + REF2VA", Family: modelFamilyMiniMaxH3,
+				ID: generationModelID(modelFamilyMiniMaxH3, name), Name: name, DisplayName: "MiniMax H3 v5 · FL2VA + REF2VA", Family: modelFamilyMiniMaxH3,
 				TextEncoder: miniMaxEncoder, VAE: miniMaxVideoVAE, AudioVAE: miniMaxAudioVAE, ReferenceModel: miniMaxReferenceModel,
 				DefaultSteps: 25, DefaultCFG: 1, DefaultSampler: "euler", DefaultScheduler: "simple", DefaultVideoShift: 11, DefaultAudioShift: 3,
 			}
@@ -661,7 +661,7 @@ func missingMiniMaxH3Dependencies(encoder, videoVAE, audioVAE, referenceModel st
 		missing = append(missing, "MiniMax H3 reference model")
 	}
 	if len(missing) == 0 {
-		return "Не установлены обязательные ноды MiniMax H3 v4"
+		return "Не установлены обязательные ноды MiniMax H3 v5"
 	}
 	return "Не установлено: " + strings.Join(missing, ", ")
 }

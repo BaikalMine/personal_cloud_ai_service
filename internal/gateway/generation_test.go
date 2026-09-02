@@ -1348,7 +1348,7 @@ func TestGenerationModelCatalogEnablesInstalledEditWorkflows(t *testing.T) {
 	}
 }
 
-func TestGenerationModelCatalogDiscoversMiniMaxH3V4AndErosMax(t *testing.T) {
+func TestGenerationModelCatalogDiscoversMiniMaxH3V5AndErosMax(t *testing.T) {
 	var info map[string]comfyNodeInfo
 	fixture := `{
 		"UNETLoader":{"input":{"required":{"unet_name":[["MiniMax\\MiniMax_H3_FL2VA_pruned_int8_convrot.safetensors","MiniMax\\MiniMax_H3_Ref2VA_pruned_int8_convrot.safetensors","MiniMax\\h3ErosMax_beta4.safetensors"]]}}},
@@ -1377,7 +1377,7 @@ func TestGenerationModelCatalogDiscoversMiniMaxH3V4AndErosMax(t *testing.T) {
 		}
 	}
 	if !base.Available || base.DefaultSampler != "euler" || base.DefaultVideoShift != 11 || base.DefaultAudioShift != 3 {
-		t.Fatalf("unexpected MiniMax H3 v4 base model: %#v", base)
+		t.Fatalf("unexpected MiniMax H3 v5 base model: %#v", base)
 	}
 	if !eros.Available || !eros.VideoIntegratedTurbo || !eros.VideoReferenceOnly || eros.ReferenceModel != eros.Name || eros.DefaultSteps != 8 || eros.DefaultVideoShift != 12 || eros.DefaultAudioShift != 7 {
 		t.Fatalf("unexpected H3 Eros Max model: %#v", eros)
@@ -1673,39 +1673,44 @@ func TestFindComfyPromptByGenerationJobInHistory(t *testing.T) {
 	}
 }
 
-func TestGenerationJobValuesPreserveMiniMaxH3V4Controls(t *testing.T) {
+func TestGenerationJobValuesPreserveMiniMaxH3V5Controls(t *testing.T) {
 	form := url.Values{
-		"csrf":                          {"omit"},
-		"video_memory_optimize":         {"true"},
-		"video_memory_chunk_rows":       {"4096"},
-		"video_sparse_attention":        {"true"},
-		"video_sparse_early_schedule":   {"Ramp"},
-		"video_rife_enabled":            {"true"},
-		"video_rife_checkpoint":         {"rife49.pth"},
-		"video_rtx_enabled":             {"true"},
-		"video_rtx_scale":               {"2"},
-		"video_color_match":             {"true"},
-		"video_sharpen_enabled":         {"true"},
-		"video_output_crf":              {"19"},
-		"input_image":                   {"gateway/image.png"},
-		"image_role_1":                  {"first_frame"},
-		"image_source_1":                {"gallery"},
-		"image_source_id_1":             {"17"},
-		"image_source_name_1":           {"saved.png"},
-		"input_audio":                   {"gateway/voice.mp3"},
-		"assistant_original_prompt":     {"original"},
-		"assistant_suggestion":          {"enhanced"},
-		"lora_1":                        {"MiniMaxH3\\VBVR_H3_attn_only.safetensors"},
-		"lora_model_strength_1":         {"0.85"},
-		"lora_clip_strength_1":          {"0.95"},
-		"lora_2":                        {"MiniMaxH3\\h3_Better_NSFW_Motion_V1.safetensors"},
-		"lora_model_strength_2":         {"1.15"},
-		"lora_clip_strength_2":          {"0.8"},
-		"loras_configured":              {"true"},
-		"untrusted_unrelated_parameter": {"omit"},
+		"csrf":                               {"omit"},
+		"video_low_vram_attention":           {"true"},
+		"video_low_vram_head_chunks":         {"4"},
+		"video_chunk_feed_forward":           {"true"},
+		"video_chunk_feed_forward_chunks":    {"2"},
+		"video_chunk_feed_forward_threshold": {"4096"},
+		"video_memory_optimize":              {"true"},
+		"video_memory_chunk_rows":            {"4096"},
+		"video_sparse_attention":             {"true"},
+		"video_sparse_early_schedule":        {"Ramp"},
+		"video_rife_enabled":                 {"true"},
+		"video_rife_checkpoint":              {"rife49.pth"},
+		"video_rtx_enabled":                  {"true"},
+		"video_rtx_scale":                    {"2"},
+		"video_color_match":                  {"true"},
+		"video_sharpen_enabled":              {"true"},
+		"video_output_crf":                   {"19"},
+		"input_image":                        {"gateway/image.png"},
+		"image_role_1":                       {"first_frame"},
+		"image_source_1":                     {"gallery"},
+		"image_source_id_1":                  {"17"},
+		"image_source_name_1":                {"saved.png"},
+		"input_audio":                        {"gateway/voice.mp3"},
+		"assistant_original_prompt":          {"original"},
+		"assistant_suggestion":               {"enhanced"},
+		"lora_1":                             {"MiniMaxH3\\VBVR_H3_attn_only.safetensors"},
+		"lora_model_strength_1":              {"0.85"},
+		"lora_clip_strength_1":               {"0.95"},
+		"lora_2":                             {"MiniMaxH3\\h3_Better_NSFW_Motion_V1.safetensors"},
+		"lora_model_strength_2":              {"1.15"},
+		"lora_clip_strength_2":               {"0.8"},
+		"loras_configured":                   {"true"},
+		"untrusted_unrelated_parameter":      {"omit"},
 	}
 	values := generationJobValues(form, 42)
-	for _, name := range []string{"video_memory_optimize", "video_memory_chunk_rows", "video_sparse_attention", "video_sparse_early_schedule", "video_rife_enabled", "video_rife_checkpoint", "video_rtx_enabled", "video_rtx_scale", "video_color_match", "video_sharpen_enabled", "video_output_crf", "input_image", "image_role_1", "image_source_1", "image_source_id_1", "image_source_name_1", "input_audio", "assistant_original_prompt", "assistant_suggestion", "lora_1", "lora_model_strength_1", "lora_clip_strength_1", "lora_2", "lora_model_strength_2", "lora_clip_strength_2", "loras_configured", "seed"} {
+	for _, name := range []string{"video_low_vram_attention", "video_low_vram_head_chunks", "video_chunk_feed_forward", "video_chunk_feed_forward_chunks", "video_chunk_feed_forward_threshold", "video_memory_optimize", "video_memory_chunk_rows", "video_sparse_attention", "video_sparse_early_schedule", "video_rife_enabled", "video_rife_checkpoint", "video_rtx_enabled", "video_rtx_scale", "video_color_match", "video_sharpen_enabled", "video_output_crf", "input_image", "image_role_1", "image_source_1", "image_source_id_1", "image_source_name_1", "input_audio", "assistant_original_prompt", "assistant_suggestion", "lora_1", "lora_model_strength_1", "lora_clip_strength_1", "lora_2", "lora_model_strength_2", "lora_clip_strength_2", "loras_configured", "seed"} {
 		if values[name] == "" {
 			t.Fatalf("durable generation payload dropped %q: %#v", name, values)
 		}
@@ -2051,6 +2056,40 @@ func TestMiniMaxH3ErosMaxUsesIntegratedTurboReferencePath(t *testing.T) {
 	}
 }
 
+func TestMiniMaxH3V5BuildsOptionalMemoryNodesInWorkflowOrder(t *testing.T) {
+	input := generationForm{
+		ModelName: "MiniMax/model.safetensors", TextEncoder: "MiniMax/text.safetensors", VAE: "MiniMax/video.safetensors", AudioVAE: "MiniMax/audio.safetensors",
+		Positive: "A single continuous camera move.", Width: 768, Height: 1024, Seed: 42,
+		VideoMode: miniMaxH3FrameMode, VideoDurationSeconds: 5, VideoSteps: 25, VideoSampler: "euler", VideoScheduler: "simple", VideoShiftVideo: 11, VideoShiftAudio: 3,
+		VideoLowVRAMAttention: true, VideoLowVRAMHeadChunks: 4,
+		VideoChunkFeedForward: true, VideoChunkFFChunks: 2, VideoChunkFFThreshold: 4096,
+		VideoSageAttention: true, VideoMemoryOptimize: true, VideoMemoryChunkRows: 4096, VideoMemoryMLP: "auto", VideoMemoryPrecision: "Auto", VideoMemoryQKV: "Auto", VideoMemoryAttention: "Standard",
+		VideoAIMDOEnabled: true, VideoAIMDOResidency: "0 blocks",
+		VideoSparseAttention: true, VideoSparseBudget: 0.30, VideoSparseSchedule: "Hold", VideoSparseEarlyStep: 2, VideoSparseEarlyKV: 0.5, VideoSparseLateStep: 2, VideoSparseLateKV: 0.5, VideoSparseBackend: "Kitchen INT8",
+	}
+	prompt, err := buildMiniMaxH3Prompt(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for nodeID, classType := range map[string]string{"28": "MiniMaxLowVRAMAttention", "29": "MiniMaxChunkFeedForward", "5": "MiniMaxH3MemoryEfficientSageAttentionPatch"} {
+		if got := prompt[nodeID].(map[string]any)["class_type"]; got != classType {
+			t.Fatalf("node %s = %v, want %q", nodeID, got, classType)
+		}
+	}
+	if got, want := prompt["28"].(map[string]any)["inputs"].(map[string]any)["model"], []any{"1", 0}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Low VRAM input = %#v, want %#v", got, want)
+	}
+	if got, want := prompt["29"].(map[string]any)["inputs"].(map[string]any)["model"], []any{"28", 0}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Chunk FeedForward input = %#v, want %#v", got, want)
+	}
+	if got, want := prompt["5"].(map[string]any)["inputs"].(map[string]any)["model"], []any{"29", 0}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("SageAttention input = %#v, want %#v", got, want)
+	}
+	if got, want := prompt["9"].(map[string]any)["inputs"].(map[string]any)["model"], []any{"25", 0}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("final model chain = %#v, want %#v", got, want)
+	}
+}
+
 func TestMiniMaxH3WorkflowBuildsOptionalPostProcessing(t *testing.T) {
 	definitions, err := loadWorkflowDefinitions()
 	if err != nil {
@@ -2168,6 +2207,28 @@ func TestMiniMaxH3RejectsAudioOutsideReferenceMode(t *testing.T) {
 	input := generationForm{VideoMode: miniMaxH3FrameMode, VideoResolution: "portrait", VideoDurationSeconds: 5, VideoSteps: 25, InputImage: "gateway/first.png", InputAudio: "gateway/reference.mp3"}
 	if err := normalizeMiniMaxH3(&input); err == nil || !strings.Contains(err.Error(), "аудиореференс") {
 		t.Fatalf("frame-mode audio error = %v", err)
+	}
+}
+
+func TestMiniMaxH3V5RejectsUnsupportedMemoryAndRTXRanges(t *testing.T) {
+	base := generationForm{VideoQuality: 480, VideoDurationSeconds: 5, VideoSteps: 25, VideoMode: miniMaxH3FrameMode, Width: 480, Height: 640}
+
+	input := base
+	input.VideoLowVRAMHeadChunks = 57
+	if err := normalizeMiniMaxH3(&input); err == nil || !strings.Contains(err.Error(), "Low VRAM Attention") {
+		t.Fatalf("head chunk error = %v", err)
+	}
+
+	input = base
+	input.VideoChunkFFThreshold = 500
+	if err := normalizeMiniMaxH3(&input); err == nil || !strings.Contains(err.Error(), "Chunk FeedForward") {
+		t.Fatalf("feed-forward threshold error = %v", err)
+	}
+
+	input = base
+	input.VideoRTXScale = 2.1
+	if err := normalizeMiniMaxH3(&input); err == nil || !strings.Contains(err.Error(), "от 1 до 2") {
+		t.Fatalf("RTX range error = %v", err)
 	}
 }
 
@@ -2297,7 +2358,7 @@ func TestGenerationAuditMetadataCapturesMiniMaxSettingsAndLoras(t *testing.T) {
 		Width: 480, Height: 640, Steps: 20, CFG: 1, Denoise: 1, Sampler: "res_multistep", Scheduler: "simple", Seed: 42,
 		VideoMode: miniMaxH3ReferenceMode, VideoResolution: "reference-480p", VideoQuality: 480, VideoDurationSeconds: 5,
 		VideoReferenceSize: "match", VideoSteps: 20, VideoScheduler: "simple", VideoShiftVideo: 11, VideoShiftAudio: 3,
-		VideoSampler: "euler", VideoSageAttention: true, VideoClearVRAM: true,
+		VideoSampler: "euler", VideoSageAttention: true, VideoLowVRAMAttention: true, VideoLowVRAMHeadChunks: 4, VideoChunkFeedForward: true, VideoChunkFFChunks: 2, VideoChunkFFThreshold: 4096, VideoClearVRAM: true,
 		VideoMemoryOptimize: true, VideoMemoryMLP: "auto", VideoMemoryChunkRows: 4096, VideoMemoryPrecision: "Auto", VideoMemoryQKV: "Auto", VideoMemoryAttention: "Standard",
 		VideoAIMDOEnabled: true, VideoAIMDOResidency: "0 blocks",
 		VideoSparseAttention: true, VideoSparseBudget: 0.15, VideoSparseSchedule: "Hold", VideoSparseEarlyStep: 4, VideoSparseEarlyKV: 0.5, VideoSparseLateStep: 0, VideoSparseLateKV: 0.5, VideoSparseBackend: "Kitchen INT8",
@@ -2315,8 +2376,8 @@ func TestGenerationAuditMetadataCapturesMiniMaxSettingsAndLoras(t *testing.T) {
 	if video["rife"].(map[string]any)["enabled"] != true || video["rtx"].(map[string]any)["scale"] != float64(2) || video["color_match"].(map[string]any)["enabled"] != true {
 		t.Fatalf("MiniMax post-processing audit settings = %#v", video)
 	}
-	if video["memory_optimization"].(map[string]any)["enabled"] != true || video["aimdo_residency"].(map[string]any)["residency"] != "0 blocks" || video["sparse_attention"].(map[string]any)["early_schedule"] != "Hold" || video["sparse_attention"].(map[string]any)["backend"] != "Kitchen INT8" || video["sharpen"].(map[string]any)["method"] != "rcas" {
-		t.Fatalf("MiniMax v4 audit settings = %#v", video)
+	if video["low_vram_attention"].(map[string]any)["head_chunks"] != 4 || video["chunk_feed_forward"].(map[string]any)["threshold"] != 4096 || video["memory_optimization"].(map[string]any)["enabled"] != true || video["aimdo_residency"].(map[string]any)["residency"] != "0 blocks" || video["sparse_attention"].(map[string]any)["early_schedule"] != "Hold" || video["sparse_attention"].(map[string]any)["backend"] != "Kitchen INT8" || video["sharpen"].(map[string]any)["method"] != "rcas" {
+		t.Fatalf("MiniMax v5 audit settings = %#v", video)
 	}
 	loras, ok := metadata["loras"].([]map[string]any)
 	if !ok || len(loras) != 1 || loras[0]["name"] != "MiniMaxH3/motion.safetensors" || loras[0]["model_strength"] != 0.9 {

@@ -383,7 +383,7 @@ func generationFamilyLabel(family string) string {
 	case modelFamilyFlux2:
 		return "Flux2"
 	case modelFamilyMiniMaxH3:
-		return "MiniMax H3 v4"
+		return "MiniMax H3 v5"
 	default:
 		return family
 	}

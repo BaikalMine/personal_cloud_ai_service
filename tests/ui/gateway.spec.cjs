@@ -134,6 +134,27 @@ test("video reference sources use equal tiles at every viewport", async ({ page 
   await expect(page.locator("#image-source-fields")).toHaveScreenshot("generation-video-reference-sources.png", { stylePath: visualStyle });
 });
 
+test("MiniMax H3 v5 memory modules stay usable at every viewport", async ({ page }, testInfo) => {
+  await open(page, "/preview/generate");
+  await page.getByRole("button", { name: /Видео Создаёт/ }).click();
+  await page.locator("#workflow-next").click();
+  await page.locator("#generation-open-exact").click();
+
+  const modules = page.locator(".minimax-optimizations");
+  const lowVRAM = modules.locator('input[name="video_low_vram_attention"]');
+  const chunkFF = modules.locator('input[name="video_chunk_feed_forward"]');
+  await expect(modules.locator(":scope > .video-enhancement")).toHaveCount(5);
+  await expect(lowVRAM).not.toBeChecked();
+  await expect(chunkFF).not.toBeChecked();
+
+  await lowVRAM.check();
+  await chunkFF.check();
+  await expect(modules.locator('input[name="video_low_vram_head_chunks"]')).toBeVisible();
+  await expect(modules.locator('input[name="video_chunk_feed_forward_chunks"]')).toBeVisible();
+  await expect(modules.locator('input[name="video_chunk_feed_forward_threshold"]')).toBeVisible();
+  await assertNoViewportOverflow(page, `${testInfo.project.name} MiniMax H3 v5 memory modules`);
+});
+
 test("Krea2 exposes the PhotoFlow processing branches as independent modules", async ({ page }) => {
   await open(page, "/preview/generate");
   await page.getByRole("button", { name: /Текст в изображение/ }).click();

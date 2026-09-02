@@ -120,7 +120,7 @@ Preserve the user's exact intent, requested duration, camera restrictions, degre
 
 Write the video in playback order: initial anchor, action onset, continuous development, result or reaction, then a stable final hold. Keep one main subject, one coherent idea, physically plausible weight transfer and hand paths, restrained secondary motion, and one camera behavior per shot. If a fixed camera is requested, explicitly state that it remains locked with no pan, tilt, zoom, push, pull, orbit, reframing, cuts, angle changes, or camera switching.
 
-Use only the exact identifiers required by the selected structure. Include explicit chronological time ranges that cover the requested duration and reserve the final interval for a stable hold.
+Use only the exact identifiers and timing syntax required by the selected structure. REF2VA may use explicit chronological ranges inside detailed_description. FL2VA must use its required opening alignment line followed by exactly one continuous [Shot 1], without timestamp subsections, Shot 2, cuts, or scene switches. Reserve the end of the action for a stable final hold.
 
 Use exact dialogue syntax when speech is requested: The clearly adult [subject] with [voice description] (S1) says: <d>[Russian] exact words.</d> Keep the voice description outside <d> and do not repeat dialogue in overall_soundscape. State when speech ends and that no further speech, whispering, narration, or lip-synced dialogue occurs when applicable. Include only plausible diegetic ambience and synchronized physical sounds; use non_diegetic_music: N/A unless music was explicitly requested.
 
@@ -136,7 +136,9 @@ const miniMaxH3REF2VAInstruction = `You are the dedicated MiniMax H3 REF2VA prom
 
 The workflow may receive zero to four pictures plus optional <Video 1> and <Audio 1>. These are semantic references, not exact opening or final frames. Define the first human as <Subject 1>; never replace that identifier with an alias such as <Adult Woman>. Inspect every attached picture first, keep each source distinct, and bind only its declared visible role to the matching <Picture N>. Never silently transfer a face, garment, pose, object, background, or style from the wrong picture.
 
-Use <Video 1> only for the user-declared motion, scene, camera, or timing role, and use <Audio 1> only for the declared voice, music, or ambience role. Do not claim to inspect or transcribe video or audio content unavailable to vision. When no reference media is supplied, write a complete prompt-driven REF2VA scene without inventing identifiers.`
+Use <Video 1> only for the user-declared motion, scene, camera, or timing role, and use <Audio 1> only for the declared voice, music, or ambience role. Do not claim to inspect or transcribe video or audio content unavailable to vision. When no reference media is supplied, write a complete prompt-driven REF2VA scene without inventing identifiers.
+
+Return the six v5 sections in this exact order: subject_definitions, summary, retention_analysis, detailed_description, overall_soundscape, non_diegetic_music. In retention_analysis, classify every supplied source independently as fully_preserved, partially_preserved, referenced, or transformed, then state the concrete details retained from it.`
 
 func IsMiniMaxH3Profile(profile Profile) bool {
 	switch profile {
@@ -347,7 +349,7 @@ func miniMaxH3FormatInstruction(context VideoContext) string {
 		}
 		retentionInstruction := "Write N/A - no reference media supplied. Do not invent <Picture N>, <Video N>, or <Audio N> identifiers."
 		if imageCount > 0 || context.AudioReference || context.VideoReference {
-			retentionInstruction = "State separately what every supplied <Picture N>, <Video 1>, and <Audio 1> contributes. Use only identifiers for media that is actually attached."
+			retentionInstruction = "State separately what every supplied <Picture N>, <Video 1>, and <Audio 1> contributes. Classify each as fully_preserved, partially_preserved, referenced, or transformed. Use only identifiers for media that is actually attached."
 		}
 		return fmt.Sprintf(`The selected mode is prompt-driven Ref2VA with %d attached image reference(s). Reference files are optional; this workflow remains valid with no media. Use exactly this structure:
 
@@ -372,17 +374,17 @@ N/A unless requested.`, imageCount, retentionInstruction, audioReference, videoR
 	if imageCount >= 2 {
 		return fmt.Sprintf(`The selected mode is FL2VA. Picture 1 is the exact opening frame and Picture 2 is the exact final frame. Begin exactly with:
 
-How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the %d.00-second mark of the target video.
+How the reference pictures align with the target video — Picture 1 (from [Shot 1]) aligns with the 0.00-second mark of the target video; Picture 2 (from [Shot 1]) aligns with the %d.00-second mark of the target video.
 
 Then write these fields in order:
-integrated_multimodal_description: a complete chronological path that reaches Picture 2 exactly.
+integrated_multimodal_description: begin with exactly one [Shot 1] and describe a single continuous path that reaches Picture 2 exactly. Do not add Shot 2, cuts, scene switches, or timestamp subsections.
 overall_soundscape: ambience and synchronized physical sounds only.
 non_diegetic_music: N/A unless requested.`, duration)
 	}
 	if imageCount == 0 {
 		return fmt.Sprintf(`The selected mode is T2VA. There is no opening or closing picture. Do not use <Picture N> identifiers. Write these fields in order:
 
-integrated_multimodal_description: a complete chronological %d-second video described purely from the user's text, with a stable opening anchor, continuous physically coherent action, and a final hold.
+integrated_multimodal_description: begin with exactly one [Shot 1] and describe a complete %d-second video from the user's text, with a stable opening anchor, continuous physically coherent action, and a final hold. Do not add Shot 2, cuts, scene switches, or timestamp subsections.
 overall_soundscape: ambience and synchronized physical sounds only.
 non_diegetic_music: N/A unless requested.`, duration)
 	}
@@ -391,7 +393,7 @@ non_diegetic_music: N/A unless requested.`, duration)
 For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.
 
 Then write these fields in order:
-integrated_multimodal_description: a complete %d-second chronological continuation from the opening frame.
+integrated_multimodal_description: begin with exactly one [Shot 1] and describe a complete %d-second continuous continuation from the opening frame. Do not add Shot 2, cuts, scene switches, or timestamp subsections.
 overall_soundscape: ambience and synchronized physical sounds only.
 non_diegetic_music: N/A unless requested.`, duration)
 }

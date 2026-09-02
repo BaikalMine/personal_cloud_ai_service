@@ -166,6 +166,8 @@ func TestEnhanceVideoUsesMiniMaxContextForReferenceAudio(t *testing.T) {
 		system := body.Messages[0].Content
 		if !strings.Contains(system, "dedicated MiniMax H3 REF2VA prompt assistant") ||
 			!strings.Contains(system, "prompt-driven Ref2VA with 2 attached image reference") ||
+			!strings.Contains(system, "subject_definitions, summary, retention_analysis, detailed_description, overall_soundscape, non_diegetic_music") ||
+			!strings.Contains(system, "fully_preserved, partially_preserved, referenced, or transformed") ||
 			!strings.Contains(system, "<Audio 1> reference is attached") ||
 			!strings.Contains(system, "<Video 1> reference is attached") ||
 			!strings.Contains(system, "<Picture 1> (attached image 1): the base scene") ||
@@ -227,6 +229,9 @@ func TestEnhanceVideoGroundsExactFrameImages(t *testing.T) {
 			!strings.Contains(system, "The attached keyframes are") ||
 			!strings.Contains(system, "<Picture 1> (attached image 1): the exact opening frame") ||
 			!strings.Contains(system, "<Picture 2> (attached image 2): the exact final frame") ||
+			!strings.Contains(system, "Picture 1 (from [Shot 1]) aligns with the 0.00-second mark") ||
+			!strings.Contains(system, "exactly one [Shot 1]") ||
+			!strings.Contains(system, "Do not add Shot 2, cuts, scene switches, or timestamp subsections") ||
 			!strings.Contains(system, "Do not treat either keyframe as a loose style reference") || len(body.Messages[1].Images) != 2 {
 			t.Fatalf("wrong FL2VA visual context: %#v", body)
 		}

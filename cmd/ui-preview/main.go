@@ -379,7 +379,7 @@ func main() {
 		"QuickModels": []map[string]any{
 			{"ID": "krea2:test", "DisplayName": "Krea2 / Raw INT8 Mixed", "Family": "krea2", "Available": true, "DefaultSteps": 8, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "LoraStrength": 0.8},
 			{"ID": "flux2:test", "DisplayName": "Flux 2 / Klein 9B", "Family": "flux2", "Available": true, "DefaultSteps": 20, "DefaultCFG": 5, "DefaultSampler": "euler", "DefaultScheduler": "flux2"},
-			{"ID": "minimax:h3", "DisplayName": "MiniMax H3 v4 · FL2VA + REF2VA", "Family": "minimax_h3", "Available": true, "DefaultSteps": 25, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "DefaultVideoShift": 11, "DefaultAudioShift": 3},
+			{"ID": "minimax:h3", "DisplayName": "MiniMax H3 v5 · FL2VA + REF2VA", "Family": "minimax_h3", "Available": true, "DefaultSteps": 25, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "DefaultVideoShift": 11, "DefaultAudioShift": 3},
 			{"ID": "minimax:eros", "DisplayName": "H3 Eros Max beta4 · встроенный Turbo", "Family": "minimax_h3", "Available": true, "VideoIntegratedTurbo": true, "VideoReferenceOnly": true, "DefaultSteps": 8, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "DefaultVideoShift": 12, "DefaultAudioShift": 7},
 		},
 		"LoraGroups": []map[string]any{
@@ -536,7 +536,7 @@ func main() {
 			"TopTables": []map[string]any{{"Label": "Медиа генераций", "EstimatedRows": int64(9), "TotalBytes": int64(176 << 20)}, {"Label": "Зашифрованные блоки медиа", "EstimatedRows": int64(144), "TotalBytes": int64(38 << 20)}, {"Label": "Запросы к сервисам", "EstimatedRows": int64(14820), "TotalBytes": int64(15 << 20)}},
 		},
 		"ActiveJobs": []map[string]any{
-			{"PublicID": "job-preview-minimax-active", "Username": "rayka", "Workflow": "MiniMax H3 v4", "Model": "MiniMax H3 FL2VA INT8 ConvRot", "StateLabel": "Выполняется", "StateClass": "running", "StatusMessage": "ComfyUI выполняет workflow", "CreatedAt": now.Add(-18 * time.Minute), "Age": 18 * time.Minute, "StateAge": 12 * time.Minute, "HasLease": true},
+			{"PublicID": "job-preview-minimax-active", "Username": "rayka", "Workflow": "MiniMax H3 v5", "Model": "MiniMax H3 FL2VA INT8 ConvRot", "StateLabel": "Выполняется", "StateClass": "running", "StatusMessage": "ComfyUI выполняет workflow", "CreatedAt": now.Add(-18 * time.Minute), "Age": 18 * time.Minute, "StateAge": 12 * time.Minute, "HasLease": true},
 			{"PublicID": "job-preview-krea-overdue", "Username": "demo4518", "Workflow": "Krea2 · Текст в изображение", "Model": "Krea2 v4.0", "StateLabel": "Ожидание ресурсов", "StateClass": "overdue", "StatusMessage": "Ожидаем освобождения GPU", "CreatedAt": now.Add(-71 * time.Minute), "Age": 71 * time.Minute, "StateAge": 56 * time.Minute, "Overdue": true},
 		},
 		"Failures": operationsFailures, "ProblemWorkers": []gateway.MaintenanceWorkerState{workers[3]}, "BackgroundWorkers": backgroundWorkers,
@@ -673,9 +673,9 @@ func main() {
 			"Failed":      1,
 			"Unavailable": 1,
 			"Results": []map[string]any{
-				{"Status": "error", "Scenario": "Полная обработка видео", "Family": "MiniMax H3 v4", "Description": "RIFE, RTX, ColorMatch и Sharpen", "Model": "MiniMax H3 FL2VA INT8 ConvRot", "NodeCount": 31, "Issues": []map[string]any{{"Label": "Финальный апскейл", "Message": "У ноды отсутствует обязательный параметр resize_type.", "ClassType": "RTXVideoSuperResolution", "InputName": "resize_type"}}},
+				{"Status": "error", "Scenario": "Полная обработка видео", "Family": "MiniMax H3 v5", "Description": "RIFE, RTX, ColorMatch и Sharpen", "Model": "MiniMax H3 FL2VA INT8 ConvRot", "NodeCount": 31, "Issues": []map[string]any{{"Label": "Финальный апскейл", "Message": "У ноды отсутствует обязательный параметр resize_type.", "ClassType": "RTXVideoSuperResolution", "InputName": "resize_type"}}},
 				{"Status": "unavailable", "Scenario": "Готовность модели", "Family": "Flux2", "Description": "Модель отсутствует в установленном ComfyUI", "Model": "Flux 2 Klein 9B", "NodeCount": 0, "Issues": []map[string]any{{"Label": "Зависимости модели", "Message": "Checkpoint не найден в каталоге diffusion_models."}}},
-				{"Status": "ok", "Scenario": "Первый и последний кадр", "Family": "MiniMax H3 v4", "Description": "FL2VA с двумя точными кадрами", "Model": "MiniMax H3 FL2VA INT8 ConvRot", "NodeCount": 24, "Issues": []map[string]any{}},
+				{"Status": "ok", "Scenario": "Первый и последний кадр", "Family": "MiniMax H3 v5", "Description": "FL2VA с двумя точными кадрами", "Model": "MiniMax H3 FL2VA INT8 ConvRot", "NodeCount": 24, "Issues": []map[string]any{}},
 			},
 		},
 		"Message": "",

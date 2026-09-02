@@ -191,6 +191,11 @@ type generationForm struct {
 	VideoShiftVideo        int
 	VideoShiftAudio        int
 	VideoSageAttention     bool
+	VideoLowVRAMAttention  bool
+	VideoLowVRAMHeadChunks int
+	VideoChunkFeedForward  bool
+	VideoChunkFFChunks     int
+	VideoChunkFFThreshold  int
 	VideoClearVRAM         bool
 	VideoMemoryOptimize    bool
 	VideoMemoryMLP         string
@@ -1486,15 +1491,27 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 	if err != nil {
 		return generationForm{}, errors.New("некорректный audio shift MiniMax H3")
 	}
+	videoLowVRAMHeadChunks, err := parseInt("video_low_vram_head_chunks", 4)
+	if err != nil {
+		return generationForm{}, errors.New("некорректное число групп внимания MiniMax H3")
+	}
+	videoChunkFFChunks, err := parseInt("video_chunk_feed_forward_chunks", 2)
+	if err != nil {
+		return generationForm{}, errors.New("некорректное число блоков Chunk FeedForward")
+	}
+	videoChunkFFThreshold, err := parseInt("video_chunk_feed_forward_threshold", 4096)
+	if err != nil {
+		return generationForm{}, errors.New("некорректный порог Chunk FeedForward")
+	}
 	videoMemoryChunkRows, err := parseInt("video_memory_chunk_rows", 4096)
 	if err != nil {
 		return generationForm{}, errors.New("некорректный размер блока H3 Memory Optimization")
 	}
-	videoSparseBudget, err := parseFloat("video_sparse_budget", 0.15)
+	videoSparseBudget, err := parseFloat("video_sparse_budget", 0.30)
 	if err != nil {
 		return generationForm{}, errors.New("некорректный бюджет H3 Sparse Attention")
 	}
-	videoSparseEarlyStep, err := parseInt("video_sparse_early_steps", 4)
+	videoSparseEarlyStep, err := parseInt("video_sparse_early_steps", 2)
 	if err != nil {
 		return generationForm{}, errors.New("некорректное число ранних шагов H3 Sparse Attention")
 	}
@@ -1502,7 +1519,7 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 	if err != nil {
 		return generationForm{}, errors.New("некорректный ранний KV H3 Sparse Attention")
 	}
-	videoSparseLateStep, err := parseInt("video_sparse_late_steps", 0)
+	videoSparseLateStep, err := parseInt("video_sparse_late_steps", 2)
 	if err != nil {
 		return generationForm{}, errors.New("некорректное число финальных шагов H3 Sparse Attention")
 	}
@@ -1675,7 +1692,10 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 		VideoResizeMethod: strings.TrimSpace(r.Form.Get("video_resize_method")), VideoProportion: strings.TrimSpace(r.Form.Get("video_proportion")), VideoCropLocation: strings.TrimSpace(r.Form.Get("video_crop_location")), VideoPadColor: strings.TrimSpace(r.Form.Get("video_pad_color")), VideoQuality: videoQuality,
 		VideoDurationSeconds: videoDurationSeconds, VideoReferenceSize: strings.TrimSpace(r.Form.Get("video_reference_size")), VideoReferenceStart: videoReferenceStart, VideoReferenceDuration: videoReferenceDuration, VideoReferenceAudio: r.Form.Get("video_reference_audio") == "true", VideoFilename: strings.TrimSpace(r.Form.Get("video_filename")), VideoSteps: videoSteps, VideoTurbo: r.Form.Get("video_turbo") == "true",
 		VideoSampler: strings.TrimSpace(r.Form.Get("video_sampler")), VideoScheduler: strings.TrimSpace(r.Form.Get("video_scheduler")), VideoShiftVideo: videoShiftVideo, VideoShiftAudio: videoShiftAudio,
-		VideoSageAttention: r.Form.Get("video_sage_attention") == "true", VideoClearVRAM: r.Form.Get("video_clear_vram") == "true",
+		VideoSageAttention:    r.Form.Get("video_sage_attention") == "true",
+		VideoLowVRAMAttention: r.Form.Get("video_low_vram_attention") == "true", VideoLowVRAMHeadChunks: videoLowVRAMHeadChunks,
+		VideoChunkFeedForward: r.Form.Get("video_chunk_feed_forward") == "true", VideoChunkFFChunks: videoChunkFFChunks, VideoChunkFFThreshold: videoChunkFFThreshold,
+		VideoClearVRAM:      r.Form.Get("video_clear_vram") == "true",
 		VideoMemoryOptimize: r.Form.Get("video_memory_optimize") == "true", VideoMemoryMLP: strings.TrimSpace(r.Form.Get("video_memory_mlp")), VideoMemoryChunkRows: videoMemoryChunkRows,
 		VideoMemoryPrecision: strings.TrimSpace(r.Form.Get("video_memory_precision")), VideoMemoryQKV: strings.TrimSpace(r.Form.Get("video_memory_qkv")), VideoMemoryAttention: strings.TrimSpace(r.Form.Get("video_memory_attention")),
 		VideoAIMDOEnabled: r.Form.Get("video_aimdo_enabled") == "true", VideoAIMDOResidency: strings.TrimSpace(r.Form.Get("video_aimdo_residency")),

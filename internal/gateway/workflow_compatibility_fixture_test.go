@@ -66,7 +66,7 @@ func TestCurrentKreaFluxAndMiniMaxFixturesValidateRepresentativeGraphs(t *testin
 			failures = append(failures, result.Family+" / "+result.Scenario+": "+message)
 		}
 	}
-	for _, family := range []string{"Krea2", "Flux2", "MiniMax H3 v4"} {
+	for _, family := range []string{"Krea2", "Flux2", "MiniMax H3 v5"} {
 		if !seen[family] {
 			t.Fatalf("matrix is missing %s: %#v", family, results)
 		}
@@ -87,8 +87,8 @@ func TestAdminWorkflowCompatibilityTemplateRendersOperationalStates(t *testing.T
 		"Report": workflowCompatibilityReport{
 			SourceLabel: "получен из ComfyUI", Fingerprint: "0123456789ab", NodeCount: 420, Compatible: 1, Failed: 1,
 			Snapshot: comfyObjectInfoSnapshot{FetchedAt: time.Now()}, Results: []workflowCompatibilityResult{
-				{Scenario: "Первый и последний кадр", Family: "MiniMax H3 v4", Model: "MiniMax H3", Status: workflowCompatibilityOK, NodeCount: 24},
-				{Scenario: "Полная обработка видео", Family: "MiniMax H3 v4", Model: "MiniMax H3", Status: workflowCompatibilityErrorStatus, Issues: []workflowCompatibilityIssue{{Label: "Финальный апскейл", Message: "Не найден resize_type", ClassType: "RTXVideoSuperResolution", InputName: "resize_type"}}},
+				{Scenario: "Первый и последний кадр", Family: "MiniMax H3 v5", Model: "MiniMax H3", Status: workflowCompatibilityOK, NodeCount: 24},
+				{Scenario: "Полная обработка видео", Family: "MiniMax H3 v5", Model: "MiniMax H3", Status: workflowCompatibilityErrorStatus, Issues: []workflowCompatibilityIssue{{Label: "Финальный апскейл", Message: "Не найден resize_type", ClassType: "RTXVideoSuperResolution", InputName: "resize_type"}}},
 			},
 		},
 	})
@@ -126,7 +126,7 @@ func compatibilityFixtureObjectInfo(t *testing.T) map[string]comfyNodeInfo {
 		"BasicGuider", "BasicScheduler", "CR Apply LoRA Stack", "CR LoRA Stack", "H3AIMDOResidencyLimiter",
 		"H3MemoryOptimization", "H3SparseAttentionAdvanced", "ImageSharpenKJ", "KSamplerSelect", "LCColorMatch",
 		"Image Filter Adjustments", "Image Levels Adjustment", "LCGetImage", "LCImageMaskResize", "LCVRAMCacheClear", "LoadAudio", "LoadImage", "MiniMaxH3ImageToVideo",
-		"MiniMaxH3MemoryEfficientSageAttentionPatch", "MiniMaxH3ReferenceToVideo", "MiniMaxH3SigmaShift",
+		"MiniMaxChunkFeedForward", "MiniMaxH3MemoryEfficientSageAttentionPatch", "MiniMaxH3ReferenceToVideo", "MiniMaxH3SigmaShift", "MiniMaxLowVRAMAttention",
 		"MiniMaxH3TurboLoRA", "MiniMaxH3TurboSampler", "PathchSageAttentionKJ", "RandomNoise", "RIFE VFI", "RTXVideoSuperResolution",
 		"SamplerCustomAdvanced", "TrimAudioDuration", "UNETLoader", "UpscaleModelLoader", "UltimateSDUpscale", "VAEDecode", "VAEDecodeAudio", "VAELoader",
 		"VHS_LoadVideo", "VHS_VideoCombine", "ComfyMathExpression", "SeedVR2LoadVAEModel", "SeedVR2LoadDiTModel", "SeedVR2VideoUpscaler",
