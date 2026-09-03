@@ -122,6 +122,7 @@ func (a *App) registerLoraTrainingRoutes(mux *http.ServeMux) {
 	}
 	mux.Handle("/train-lora", access(http.HandlerFunc(a.handleLoraTraining)))
 	mux.Handle("/train-lora/", access(http.HandlerFunc(a.handleLoraTrainingAction)))
+	mux.Handle("/api/lora-training/caption", access(http.HandlerFunc(a.handleLoraTrainingCaption)))
 	mux.Handle("/api/lora-training/jobs", access(http.HandlerFunc(a.handleLoraTrainingJobsAPI)))
 	mux.Handle("/api/lora-training/jobs/", access(http.HandlerFunc(a.handleLoraTrainingJobAPI)))
 }
@@ -545,11 +546,9 @@ func trainingCaptions(values []string, fallback, trigger string, count int) ([]s
 		if caption == "" {
 			return nil, fmt.Errorf("добавьте описание для изображения %d или общее описание датасета", index+1)
 		}
+		caption = ensureLoraCaptionTrigger(trigger, caption)
 		if len([]rune(caption)) > 1000 {
 			return nil, fmt.Errorf("описание изображения %d длиннее 1000 символов", index+1)
-		}
-		if !strings.Contains(strings.ToLower(caption), strings.ToLower(trigger)) {
-			caption = trigger + ", " + caption
 		}
 		captions[index] = caption
 	}
@@ -609,16 +608,27 @@ func validateLoraTrainingForm(form loraTrainingForm) error {
 	if !loraOutputNamePattern.MatchString(form.OutputName) {
 		return errors.New("Имя файла: 3–64 латинских символа, цифры, дефис или подчёркивание.")
 	}
-	if len([]rune(form.TriggerWord)) < 2 || len([]rune(form.TriggerWord)) > 80 || strings.ContainsAny(form.TriggerWord, "\r\n") {
-		return errors.New("Триггер должен содержать от 2 до 80 символов в одной строке.")
+	if err := validateLoraTriggerWord(form.TriggerWord); err != nil {
+		return err
 	}
-	if form.ConceptType != "character" && form.ConceptType != "style" && form.ConceptType != "object" && form.ConceptType != "product" {
+	if !validLoraConceptType(form.ConceptType) {
 		return errors.New("Выберите тип LoRA.")
 	}
 	if form.Resolution != 512 && form.Resolution != 768 && form.Resolution != 1024 {
 		return errors.New("Выберите разрешение 512, 768 или 1024.")
 	}
 	return nil
+}
+
+func validateLoraTriggerWord(value string) error {
+	if len([]rune(strings.TrimSpace(value))) < 2 || len([]rune(strings.TrimSpace(value))) > 80 || strings.ContainsAny(value, "\r\n") {
+		return errors.New("Триггер должен содержать от 2 до 80 символов в одной строке.")
+	}
+	return nil
+}
+
+func validLoraConceptType(value string) bool {
+	return value == "character" || value == "style" || value == "object" || value == "product"
 }
 
 func (a *App) loraTrainingProfiles(ctx context.Context) ([]loratraining.Profile, string) {

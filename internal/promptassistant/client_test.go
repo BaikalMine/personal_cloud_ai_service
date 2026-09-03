@@ -121,6 +121,62 @@ func TestClassifyImageRejectsUnsupportedMedia(t *testing.T) {
 	}
 }
 
+func TestCaptionImageSendsExactlyOneImageWithDatasetMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body chatRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if r.URL.Path != "/api/chat" || body.Model != "test:e4b" || body.Stream || body.Think || body.Format != "json" {
+			t.Fatalf("unexpected caption request: %#v", body)
+		}
+		if len(body.Messages) != 2 || len(body.Messages[1].Images) != 1 || body.Messages[1].Images[0] != "c2luZ2xlLWltYWdl" {
+			t.Fatalf("caption request must contain exactly one image: %#v", body.Messages)
+		}
+		if !strings.Contains(body.Messages[0].Content, "Analyze exactly the one attached image") ||
+			!strings.Contains(body.Messages[0].Content, "begin with the exact trigger_word") {
+			t.Fatalf("missing LoRA caption constraints: %s", body.Messages[0].Content)
+		}
+		var metadata map[string]string
+		if err := json.Unmarshal([]byte(body.Messages[1].Content), &metadata); err != nil {
+			t.Fatal(err)
+		}
+		if metadata["trigger_word"] != "anna_person" || metadata["concept_type"] != "character" {
+			t.Fatalf("unexpected caption metadata: %#v", metadata)
+		}
+		if body.Options.NumPredict != DefaultLoraCaptionNumPredict || body.Options.Temperature != 0.15 {
+			t.Fatalf("unexpected caption policy: %#v", body.Options)
+		}
+		writeAssistantResponse(t, w, `{"caption":"anna_person, three-quarter portrait in soft window light"}`)
+	}))
+	defer server.Close()
+	base, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewClient(base, "test:e4b").CaptionImage(context.Background(), "anna_person", "character", []byte("single-image"), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Caption != "anna_person, three-quarter portrait in soft window light" || result.Policy.NumPredict != DefaultLoraCaptionNumPredict {
+		t.Fatalf("unexpected caption result: %+v", result)
+	}
+}
+
+func TestCaptionImageRejectsUnsupportedConceptAndMedia(t *testing.T) {
+	base, err := url.Parse("http://127.0.0.1:11434")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := NewClient(base, "test:e4b")
+	if _, err := client.CaptionImage(context.Background(), "subject", "video", []byte("image"), "image/png"); err == nil {
+		t.Fatal("expected unsupported concept error")
+	}
+	if _, err := client.CaptionImage(context.Background(), "subject", "character", []byte("image"), "image/gif"); !errors.Is(err, ErrUnsupportedImage) {
+		t.Fatalf("expected unsupported image error, got %v", err)
+	}
+}
+
 func TestWorkflowProfilesAreLimitedToCompatibleGenerationModes(t *testing.T) {
 	profiles := []Profile{ProfileWorkflowDefault, ProfilePhotographic, ProfileRealistic, ProfileAnime, ProfileNSFW}
 	for _, profile := range profiles {

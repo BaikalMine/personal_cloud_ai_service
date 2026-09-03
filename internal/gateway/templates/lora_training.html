@@ -36,7 +36,7 @@
           <div class="lora-identity-grid">
             <label class="ui-field"><span>Название</span><input name="name" value="{{.Form.Name}}" minlength="3" maxlength="80" required placeholder="Например, Портрет Анны"></label>
             <label class="ui-field"><span>Имя файла</span><input name="output_name" value="{{.Form.OutputName}}" pattern="[A-Za-z0-9][A-Za-z0-9_-]{2,63}" maxlength="64" required placeholder="anna_portrait_v1"><small class="field-hint">Латиница, цифры, дефис и подчёркивание.</small></label>
-            <label class="ui-field"><span>Триггер</span><input name="trigger_word" value="{{.Form.TriggerWord}}" minlength="2" maxlength="80" required placeholder="anna_person"><small class="field-hint">Добавится к каждому описанию, если его там нет.</small></label>
+            <label class="ui-field"><span>Триггер</span><input name="trigger_word" value="{{.Form.TriggerWord}}" minlength="2" maxlength="80" required placeholder="anna_person"><small class="field-hint">Всегда будет первым в каждой подписи датасета.</small></label>
           </div>
           <div class="ui-segmented lora-concept-picker" role="radiogroup" aria-label="Тип LoRA">
             <label class="ui-choice"><input type="radio" name="concept_type" value="character" {{if eq .Form.ConceptType "character"}}checked{{end}}><span><b>Персонаж</b><small>Лицо и внешность</small></span></label>
@@ -54,7 +54,11 @@
             <span><b>Выбрать изображения</b><small>PNG, JPG или WebP · до 24 МБ каждое · общий размер до 512 МБ</small></span>
           </label>
           <div class="lora-dataset-summary" data-lora-dataset-summary hidden><strong data-lora-image-count>0 изображений</strong><span data-lora-image-size>0 МБ</span><button type="button" class="button ghost" data-lora-clear-images>Очистить</button></div>
-          <label class="ui-field lora-global-caption"><span>Общее описание</span><textarea name="global_caption" rows="3" maxlength="1000" placeholder="Например: portrait photo of a woman, natural skin texture, indoor daylight">{{.Form.Caption}}</textarea><small class="field-hint">Используется там, где индивидуальное описание не заполнено. Нужен хотя бы один из вариантов.</small></label>
+          <div class="lora-caption-assistant" data-lora-caption-assistant aria-busy="false">
+            <div><span aria-hidden="true">AI</span><p><b>Подписи промт-ассистентом</b><small>Каждый кадр анализируется отдельно; заполненные подписи остаются без изменений.</small></p></div>
+            <div><small data-lora-caption-status role="status" aria-live="polite">Добавьте изображения и укажите триггер.</small><button type="button" class="button ghost" data-lora-caption-all disabled>Описать пустые</button></div>
+          </div>
+          <label class="ui-field lora-global-caption"><span>Общее описание · запасной вариант</span><textarea name="global_caption" rows="3" maxlength="1000" placeholder="Например: portrait photo of a woman, natural skin texture, indoor daylight">{{.Form.Caption}}</textarea><small class="field-hint">Подставляется только вместо оставшихся пустых подписей.</small></label>
           <div class="lora-dataset-grid" data-lora-dataset-grid aria-live="polite"></div>
         </fieldset>
 

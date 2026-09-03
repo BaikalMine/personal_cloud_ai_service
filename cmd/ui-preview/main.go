@@ -380,6 +380,23 @@ func main() {
 		{"id": "lora-preview-running", "name": "Редакционный портрет", "output_name": "editorial_portrait_v1", "profile_id": "krea2-moody-v7-bf16", "family": "krea2", "family_label": "Krea2", "base_model": "moodyKrea2Mix_v70BF16.safetensors", "state": "running", "state_label": "Обучение", "state_class": "is-active", "stage": "Обучаем LoRA", "progress": 61, "message": "Шаг 976 из 1600. Задание использует GPU, майнинг приостановлен.", "sample_count": 24, "concept_label": "Персонаж", "preset_label": "Основной", "resolution": 768, "max_train_steps": 1600, "can_cancel": true, "cancel_url": "/train-lora/lora-preview-running/cancel", "created_at": now.Add(-46 * time.Minute).UnixMilli(), "updated_at": now.Add(-4 * time.Second).UnixMilli()},
 		{"id": "lora-preview-complete", "name": "Свет предметной съёмки", "output_name": "product_light_v2", "profile_id": "flux2-klein-9b-pornmaster-v4-base", "family": "flux2-klein", "family_label": "Flux.2 Klein", "base_model": "pornmasterFlux2Klein_v4BaseBf16.safetensors", "state": "completed", "state_label": "Готово", "state_class": "is-complete", "stage": "Готово", "progress": 100, "message": "LoRA установлена в ComfyUI и готова к использованию.", "sample_count": 38, "concept_label": "Стиль", "preset_label": "Детальный", "resolution": 1024, "max_train_steps": 2800, "can_download": true, "download_url": "/train-lora/lora-preview-complete/download", "artifact_name": "product_light_v2.safetensors", "created_at": now.Add(-7 * time.Hour).UnixMilli(), "updated_at": now.Add(-6 * time.Hour).UnixMilli()},
 	}
+	mux.HandleFunc("/api/lora-training/caption", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(25 << 20); err != nil {
+			http.Error(w, "invalid multipart request", http.StatusBadRequest)
+			return
+		}
+		file, header, err := r.FormFile("image")
+		if err != nil {
+			http.Error(w, "missing image", http.StatusBadRequest)
+			return
+		}
+		file.Close()
+		trigger := strings.TrimSpace(r.FormValue("trigger_word"))
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"caption": fmt.Sprintf("%s, three-quarter portrait from %s with a relaxed pose, neutral studio background, and soft directional light", trigger, header.Filename),
+		})
+	})
 	mux.HandleFunc("/api/lora-training/jobs", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(w).Encode(map[string]any{"jobs": loraAPIJobs, "server_time": now.UnixMilli()})

@@ -64,6 +64,44 @@ test("LoRA dataset composer keeps files and captions together", async ({ page },
   await expect(page.locator("[data-lora-image-count]")).toHaveText("4 изображения");
 });
 
+test("LoRA caption assistant sends every dataset image separately", async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+  let activeRequests = 0;
+  let maximumActiveRequests = 0;
+  let requestCount = 0;
+  const imageParts = [];
+  await page.route("**/api/lora-training/caption", async (route) => {
+    activeRequests += 1;
+    maximumActiveRequests = Math.max(maximumActiveRequests, activeRequests);
+    requestCount += 1;
+    const requestBody = route.request().postDataBuffer()?.toString("latin1") || "";
+    imageParts.push((requestBody.match(/name="image"/g) || []).length);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ caption: `subject_token, separately analyzed frame ${requestCount}` }),
+    });
+    activeRequests -= 1;
+  });
+
+  await open(page, "/preview/lora-training");
+  const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+  await page.locator("[data-lora-images]").setInputFiles(Array.from({ length: 5 }, (_, index) => ({
+    name: `assistant-${index + 1}.png`, mimeType: "image/png", buffer: pixel,
+  })));
+  await page.locator('input[name="trigger_word"]').fill("subject_token");
+  await page.getByRole("button", { name: "Описать пустые" }).click();
+
+  await expect(page.locator("[data-lora-caption-status]")).toContainText("Готово 5");
+  const captions = await page.locator('.lora-dataset-item textarea[name="caption"]').evaluateAll((nodes) => nodes.map((node) => node.value));
+  expect(captions).toHaveLength(5);
+  expect(captions.every((caption) => caption.startsWith("subject_token,"))).toBe(true);
+  expect(requestCount).toBe(5);
+  expect(maximumActiveRequests).toBe(1);
+  expect(imageParts).toEqual([1, 1, 1, 1, 1]);
+});
+
 test("suggestion intake and review expose one clear next action", async ({ page }, testInfo) => {
   desktopOnly(testInfo);
 

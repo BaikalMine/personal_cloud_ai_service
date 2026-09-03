@@ -11,6 +11,11 @@
   const sizeNode = page.querySelector("[data-lora-image-size]");
   const clearButton = page.querySelector("[data-lora-clear-images]");
   const submitButton = page.querySelector("[data-lora-submit]");
+  const captionAssistant = page.querySelector("[data-lora-caption-assistant]");
+  const captionAllButton = page.querySelector("[data-lora-caption-all]");
+  const captionAssistantStatus = page.querySelector("[data-lora-caption-status]");
+  const triggerInput = form?.querySelector('input[name="trigger_word"]');
+  const conceptInputs = [...(form?.querySelectorAll('input[name="concept_type"]') || [])];
   const historyList = page.querySelector("[data-lora-job-list]");
   const historyCount = page.querySelector(".lora-history-heading > span");
   const csrf = page.dataset.csrf || "";
@@ -19,6 +24,9 @@
   let files = [];
   let previewURLs = [];
   let outputNameEdited = false;
+  let captionRun = null;
+  let previousTrigger = triggerInput?.value.trim() || "";
+  const captionStates = new Map();
 
   const fileKey = (file) => `${file.name}:${file.size}:${file.lastModified}`;
   const formatBytes = (bytes) => {
@@ -38,6 +46,14 @@
     return value.toLowerCase().split("").map((char) => map[char] ?? char).join("")
       .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 64);
   };
+  const replaceLeadingTrigger = (value, before, after) => {
+    const caption = value.trim();
+    if (!caption || !before || !after || caption.slice(0, before.length).toLocaleLowerCase() !== before.toLocaleLowerCase()) return value;
+    const boundary = caption.slice(before.length, before.length + 1);
+    if (boundary && !/[\s,.;:!?-]/u.test(boundary)) return value;
+    const rest = caption.slice(before.length).replace(/^[\s,.;:!?-]+/u, "");
+    return rest ? `${after}, ${rest}` : after;
+  };
 
   const syncFileInput = () => {
     const transfer = new DataTransfer();
@@ -50,6 +66,69 @@
       captions.set(card.dataset.fileKey, card.querySelector('textarea[name="caption"]')?.value || "");
     });
     return captions;
+  };
+  const setAssistantMessage = (message, tone = "") => {
+    if (!captionAssistantStatus) return;
+    captionAssistantStatus.textContent = message;
+    captionAssistantStatus.classList.remove("is-success", "is-error", "is-warning");
+    if (tone) captionAssistantStatus.classList.add(`is-${tone}`);
+  };
+  const updateCaptionCard = (key) => {
+    const card = grid?.querySelector(`[data-file-key="${CSS.escape(key)}"]`);
+    if (!card) return;
+    const textarea = card.querySelector('textarea[name="caption"]');
+    const action = card.querySelector("[data-lora-caption-one]");
+    const status = card.querySelector("[data-lora-caption-item-status]");
+    const state = captionStates.get(key);
+    card.classList.toggle("is-caption-loading", state?.tone === "loading");
+    card.classList.toggle("is-caption-error", state?.tone === "error");
+    card.classList.toggle("is-caption-success", state?.tone === "success");
+    if (action) {
+      action.textContent = textarea?.value.trim() ? "Описать заново" : "Описать";
+      action.disabled = Boolean(captionRun);
+    }
+    if (status) {
+      status.textContent = state?.message || (textarea?.value.trim() ? "Подпись заполнена" : "Ожидает описания");
+      status.classList.remove("is-success", "is-error", "is-loading", "is-manual");
+      if (state?.tone) status.classList.add(`is-${state.tone}`);
+    }
+  };
+  const setCaptionState = (key, tone, message) => {
+    captionStates.set(key, { tone, message });
+    updateCaptionCard(key);
+  };
+  const updateAssistantControls = () => {
+    const busy = Boolean(captionRun);
+    captionAssistant?.setAttribute("aria-busy", String(busy));
+    captionAllButton?.classList.toggle("danger", captionRun?.kind === "batch");
+    if (captionAllButton) {
+      captionAllButton.textContent = captionRun?.kind === "batch" ? "Остановить" : "Описать пустые";
+      captionAllButton.disabled = files.length === 0 || (busy && captionRun.kind !== "batch");
+    }
+    clearButton && (clearButton.disabled = busy);
+    if (input) input.disabled = busy;
+    dropzone?.classList.toggle("is-disabled", busy);
+    grid?.querySelectorAll("[data-lora-caption-one], .lora-dataset-remove").forEach((button) => { button.disabled = busy; });
+    grid?.querySelectorAll("[data-file-key]").forEach((card) => updateCaptionCard(card.dataset.fileKey));
+  };
+  const captionMetadata = () => {
+    if (!triggerInput?.checkValidity()) {
+      triggerInput?.reportValidity();
+      setAssistantMessage("Сначала укажите триггер длиной от 2 до 80 символов.", "error");
+      return null;
+    }
+    const concept = conceptInputs.find((inputNode) => inputNode.checked)?.value || "";
+    if (!concept) {
+      setAssistantMessage("Выберите тип LoRA.", "error");
+      return null;
+    }
+    return { trigger: triggerInput.value.trim(), concept };
+  };
+  const responseError = async (response) => {
+    const payload = await response.json().catch(() => ({}));
+    const error = new Error(payload.error || `Сервис ответил HTTP ${response.status}.`);
+    error.status = response.status;
+    throw error;
   };
   const renderFiles = (captions = collectCaptions()) => {
     previewURLs.forEach((url) => URL.revokeObjectURL(url));
@@ -84,21 +163,31 @@
       remove.addEventListener("click", () => {
         const currentCaptions = collectCaptions();
         currentCaptions.delete(key);
+        captionStates.delete(key);
         files = files.filter((candidate) => fileKey(candidate) !== key);
         syncFileInput();
         renderFiles(currentCaptions);
+        setAssistantMessage(files.length ? `${pluralImages(files.length)} готовы к раздельному описанию.` : "Добавьте изображения и укажите триггер.");
       });
       media.append(image, indexNode, remove);
       const body = document.createElement("div");
       body.className = "lora-dataset-body";
       const heading = document.createElement("div");
+      heading.className = "lora-dataset-heading";
+      const identity = document.createElement("div");
       const name = document.createElement("strong");
       name.textContent = file.name;
       name.title = file.name;
       const meta = document.createElement("small");
       meta.textContent = formatBytes(file.size);
       image.addEventListener("load", () => { meta.textContent = `${image.naturalWidth} × ${image.naturalHeight} · ${formatBytes(file.size)}`; });
-      heading.append(name, meta);
+      identity.append(name, meta);
+      const describe = document.createElement("button");
+      describe.type = "button";
+      describe.className = "button ghost lora-caption-one";
+      describe.dataset.loraCaptionOne = "";
+      describe.addEventListener("click", () => { void runSingleCaption(file, key); });
+      heading.append(identity, describe);
       const caption = document.createElement("textarea");
       caption.name = "caption";
       caption.rows = 3;
@@ -106,12 +195,122 @@
       caption.placeholder = "Что меняется именно в этом кадре: ракурс, одежда, фон, свет";
       caption.value = captions.get(key) || "";
       caption.setAttribute("aria-label", `Описание кадра ${index + 1}`);
-      body.append(heading, caption);
+      caption.addEventListener("input", () => {
+        caption.setCustomValidity("");
+        setCaptionState(key, "manual", "Изменено вручную");
+      });
+      const captionStatus = document.createElement("small");
+      captionStatus.className = "lora-caption-item-status";
+      captionStatus.dataset.loraCaptionItemStatus = "";
+      captionStatus.setAttribute("role", "status");
+      body.append(heading, caption, captionStatus);
       card.append(media, body);
       grid.append(card);
+      updateCaptionCard(key);
     });
+    updateAssistantControls();
+  };
+  const requestCaption = async (file, key, metadata, signal) => {
+    setCaptionState(key, "loading", "Ассистент анализирует этот кадр");
+    const requestBody = new FormData();
+    requestBody.append("csrf", csrf);
+    requestBody.append("trigger_word", metadata.trigger);
+    requestBody.append("concept_type", metadata.concept);
+    requestBody.append("image", file, file.name);
+    const response = await fetch("/api/lora-training/caption", {
+      method: "POST",
+      body: requestBody,
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+      signal,
+    });
+    if (!response.ok) await responseError(response);
+    const payload = await response.json();
+    const captionValue = typeof payload.caption === "string" ? payload.caption.trim() : "";
+    if (!captionValue) throw new Error("Ассистент вернул пустое описание.");
+    const card = grid?.querySelector(`[data-file-key="${CSS.escape(key)}"]`);
+    const textarea = card?.querySelector('textarea[name="caption"]');
+    if (!textarea) throw new Error("Карточка изображения больше недоступна.");
+    textarea.value = captionValue;
+    textarea.setCustomValidity("");
+    setCaptionState(key, "success", "Описание готово, его можно изменить");
+    return payload;
+  };
+  const runSingleCaption = async (file, key) => {
+    if (captionRun) return;
+    const metadata = captionMetadata();
+    if (!metadata) return;
+    const controller = new AbortController();
+    captionRun = { kind: "single", controller };
+    updateAssistantControls();
+    setAssistantMessage(`Описываем ${file.name} отдельно от остальных кадров.`);
+    try {
+      const payload = await requestCaption(file, key, metadata, controller.signal);
+      setAssistantMessage(payload.warning || "Описание кадра готово.", payload.warning ? "warning" : "success");
+    } catch (error) {
+      if (error.name === "AbortError") {
+        setCaptionState(key, "manual", "Описание остановлено");
+        setAssistantMessage("Описание остановлено.", "warning");
+      } else {
+        setCaptionState(key, "error", error.message || "Не удалось описать кадр");
+        setAssistantMessage(error.message || "Не удалось описать кадр.", "error");
+      }
+    } finally {
+      captionRun = null;
+      updateAssistantControls();
+    }
+  };
+  const runBatchCaptions = async () => {
+    if (captionRun) return;
+    const metadata = captionMetadata();
+    if (!metadata) return;
+    const captions = collectCaptions();
+    const targets = files.filter((file) => !(captions.get(fileKey(file)) || "").trim());
+    if (!targets.length) {
+      setAssistantMessage("Пустых подписей нет. Для замены используйте кнопку в нужной карточке.", "success");
+      return;
+    }
+    const controller = new AbortController();
+    captionRun = { kind: "batch", controller };
+    updateAssistantControls();
+    let completed = 0;
+    let failed = 0;
+    let stoppedByService = false;
+    for (let index = 0; index < targets.length; index += 1) {
+      const file = targets[index];
+      const key = fileKey(file);
+      setAssistantMessage(`Кадр ${index + 1} из ${targets.length}: ${file.name}. В модель отправлен только этот кадр.`);
+      try {
+        await requestCaption(file, key, metadata, controller.signal);
+        completed += 1;
+      } catch (error) {
+        if (error.name === "AbortError") {
+          setCaptionState(key, "manual", "Описание остановлено");
+          break;
+        }
+        failed += 1;
+        setCaptionState(key, "error", error.message || "Не удалось описать кадр");
+        if (error.status === 429 || error.status >= 500) {
+          stoppedByService = true;
+          break;
+        }
+      }
+    }
+    const aborted = controller.signal.aborted;
+    captionRun = null;
+    updateAssistantControls();
+    if (aborted) {
+      setAssistantMessage(`Остановлено. Готово ${completed} из ${targets.length}.`, "warning");
+    } else if (stoppedByService) {
+      setAssistantMessage(`Сервис временно недоступен. Готово ${completed}, ошибок ${failed}; остальные кадры не отправлялись.`, "error");
+    } else if (failed) {
+      setAssistantMessage(`Готово ${completed}, ошибок ${failed}. Ошибочные кадры можно повторить отдельно.`, "warning");
+    } else {
+      setAssistantMessage(`Готово ${completed}. Каждый кадр был обработан отдельным запросом.`, "success");
+    }
   };
   const addFiles = (incoming) => {
+    if (captionRun) return;
     const captions = collectCaptions();
     const byKey = new Map(files.map((file) => [fileKey(file), file]));
     let rejected = "";
@@ -130,6 +329,7 @@
     else input.setCustomValidity("");
     syncFileInput();
     renderFiles(captions);
+    if (files.length) setAssistantMessage(`${pluralImages(files.length)} готовы к раздельному описанию.`);
   };
 
   if (input && grid && summary && dropzone) {
@@ -145,11 +345,30 @@
     dropzone.addEventListener("drop", (event) => addFiles(event.dataTransfer?.files || []));
     clearButton?.addEventListener("click", () => {
       files = [];
+      captionStates.clear();
       input.setCustomValidity("");
       syncFileInput();
       renderFiles(new Map());
+      setAssistantMessage("Добавьте изображения и укажите триггер.");
     });
   }
+
+  captionAllButton?.addEventListener("click", () => {
+    if (captionRun?.kind === "batch") {
+      captionRun.controller.abort();
+      return;
+    }
+    void runBatchCaptions();
+  });
+  triggerInput?.addEventListener("change", () => {
+    const nextTrigger = triggerInput.value.trim();
+    if (previousTrigger && nextTrigger && previousTrigger !== nextTrigger) {
+      grid?.querySelectorAll('textarea[name="caption"]').forEach((caption) => {
+        caption.value = replaceLeadingTrigger(caption.value, previousTrigger, nextTrigger);
+      });
+    }
+    previousTrigger = nextTrigger;
+  });
 
   const nameInput = form?.querySelector('input[name="name"]');
   const outputInput = form?.querySelector('input[name="output_name"]');
@@ -158,6 +377,11 @@
     if (!outputNameEdited && outputInput) outputInput.value = transliterate(nameInput.value);
   });
   form?.addEventListener("submit", (event) => {
+    if (captionRun) {
+      event.preventDefault();
+      setAssistantMessage("Дождитесь окончания описания или остановите очередь.", "warning");
+      return;
+    }
     const globalCaption = form.querySelector('textarea[name="global_caption"]')?.value.trim() || "";
     const captions = [...form.querySelectorAll('textarea[name="caption"]')];
     if (files.length < 5 || files.length > 100) {
