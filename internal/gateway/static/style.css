@@ -2368,6 +2368,217 @@ body.show-sensitive-content .sensitive-media-cover, .sensitive-media.is-revealed
   .content-prompt-step > span { width: 21px; height: 21px; }
 }
 
+/* Image LoRA training */
+.lora-training-page { width: min(1520px, calc(100vw - 48px)); }
+.lora-training-hero { align-items: flex-end; }
+.lora-agent-state { flex: 0 0 auto; min-width: 190px; display: flex; align-items: center; gap: 10px; padding: 9px 11px; border: 1px solid #6f5527; border-radius: var(--radius-control); background: #292114; }
+.lora-agent-state > span { flex: 0 0 9px; width: 9px; height: 9px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 0 4px rgba(239, 189, 104, .1); }
+.lora-agent-state > div { min-width: 0; display: grid; line-height: 1.25; }
+.lora-agent-state strong { font-size: 12px; }
+.lora-agent-state small { color: var(--muted); }
+.lora-agent-state.is-ready { border-color: #2d785f; background: #142a22; }
+.lora-agent-state.is-ready > span { background: var(--mint); box-shadow: 0 0 0 4px rgba(105, 223, 185, .1); }
+.lora-training-workspace { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 310px; align-items: start; gap: 24px; }
+.lora-training-composer { margin: 0; padding: 0; overflow: hidden; box-shadow: none; }
+.lora-section-heading, .lora-history-heading { min-height: 78px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; }
+.lora-section-heading h2, .lora-history-heading h2 { margin: 0; font-size: 18px; }
+.lora-section-heading > span { padding: 5px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--muted); font-size: var(--font-size-utility); font-weight: 800; white-space: nowrap; }
+.lora-training-form { display: grid; }
+.lora-form-section { min-width: 0; margin: 0; padding: 20px; border: 0; border-top: 1px solid var(--line); }
+.lora-form-section > legend { width: 100%; display: flex; align-items: flex-start; gap: 11px; margin: 0 0 16px; padding: 0; }
+.lora-form-section > legend > span { flex: 0 0 27px; width: 27px; height: 27px; display: grid; place-items: center; border: 1px solid #3f6d62; border-radius: var(--radius-sm); background: #142a22; color: var(--mint); font-size: var(--font-size-utility); font-weight: 850; }
+.lora-form-section > legend > div { min-width: 0; display: grid; gap: 3px; }
+.lora-form-section > legend b { color: var(--text); font-size: 14px; }
+.lora-form-section > legend small { color: var(--muted); font-weight: 600; }
+.lora-profile-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.lora-profile-option { min-height: 108px; }
+.lora-profile-option > span { width: 100%; }
+.lora-profile-heading { min-width: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 9px; }
+.lora-profile-heading b { min-width: 0; color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
+.lora-profile-heading em { flex: 0 0 auto; font-style: normal; }
+.lora-profile-option small { overflow-wrap: anywhere; }
+.lora-profile-empty { grid-column: 1 / -1; border: 1px dashed var(--line); border-radius: var(--radius-control); }
+.lora-identity-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.lora-identity-grid .ui-field { align-content: start; margin: 0; }
+.lora-concept-picker { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 14px; }
+.lora-concept-picker .ui-choice { min-height: 68px; }
+.lora-concept-picker .ui-choice span b { color: var(--text); }
+.lora-dataset-drop { position: relative; min-height: 92px; display: flex; align-items: center; justify-content: center; gap: 13px; margin: 0; padding: 16px; border: 1px dashed #447a77; border-radius: var(--radius-control); background: #101a1b; color: var(--text); cursor: pointer; text-align: left; transition: border-color var(--transition-fast), background-color var(--transition-fast); }
+.lora-dataset-drop:hover, .lora-dataset-drop.is-dragging { border-color: var(--cyan); background: #132428; }
+.lora-dataset-drop input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.lora-drop-add { flex: 0 0 38px; width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--cyan); border-radius: 50%; color: var(--cyan); font-size: 25px; font-weight: 400; line-height: 1; }
+.lora-dataset-drop > span:last-child { min-width: 0; display: grid; gap: 3px; }
+.lora-dataset-drop small { color: var(--muted); font-weight: 600; }
+.lora-dataset-drop.has-files { min-height: 64px; justify-content: flex-start; }
+.lora-dataset-summary { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--canvas-soft); }
+.lora-dataset-summary strong { font-size: 12px; }
+.lora-dataset-summary > span { margin-right: auto; color: var(--muted); font-size: 12px; }
+.lora-dataset-summary button { min-height: 32px; padding: 0 10px; font-size: var(--font-size-utility); }
+.lora-global-caption { margin: 14px 0 0; }
+.lora-dataset-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.lora-dataset-grid:empty { display: none; }
+.lora-dataset-item { min-width: 0; display: grid; grid-template-columns: 118px minmax(0, 1fr); overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--canvas-soft); }
+.lora-dataset-media { position: relative; min-height: 148px; overflow: hidden; border-right: 1px solid var(--line); background: #080a0a; }
+.lora-dataset-media img { width: 100%; height: 100%; position: absolute; inset: 0; display: block; object-fit: cover; }
+.lora-dataset-media > span { position: absolute; left: 7px; bottom: 7px; padding: 3px 6px; border-radius: var(--radius-sm); background: rgba(8, 10, 10, .86); color: var(--text); font: 800 var(--font-size-utility)/1.3 var(--font-mono); }
+.lora-dataset-remove { position: absolute; top: 6px; right: 6px; width: 30px; height: 30px; min-height: 0; padding: 0; border-color: #6f4142; border-radius: 50%; background: rgba(36, 20, 21, .92); color: #ffc1bd; font-size: 19px; box-shadow: none; }
+.lora-dataset-remove:hover { border-color: var(--coral); background: #4b282b; color: white; }
+.lora-dataset-body { min-width: 0; display: grid; align-content: start; gap: 9px; padding: 10px; }
+.lora-dataset-body > div { min-width: 0; display: grid; gap: 2px; }
+.lora-dataset-body strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.lora-dataset-body small { color: var(--muted); font-size: var(--font-size-utility); }
+.lora-dataset-body textarea { min-height: 84px; padding: 8px 9px; font-size: var(--font-size-utility); }
+.lora-preset-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.lora-preset-option { min-height: 88px; }
+.lora-preset-option b { color: var(--text); font-size: 13px; }
+.lora-resolution-control { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--line); }
+.lora-resolution-control > span { min-width: 0; display: grid; gap: 3px; }
+.lora-resolution-control > span b { font-size: 13px; }
+.lora-resolution-control > span small { color: var(--muted); }
+.lora-resolution-control > .ui-segmented { flex: 0 0 280px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.lora-resolution-control .ui-choice { min-height: 40px; align-items: center; justify-content: center; padding: 8px; }
+.lora-resolution-control .ui-choice input { width: 16px; height: 16px; }
+.lora-submit-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 20px; border-top: 1px solid var(--line); background: var(--canvas-soft); }
+.lora-submit-row p { max-width: 660px; margin: 0; color: var(--muted); font-size: 12px; }
+.lora-submit-row button { flex: 0 0 auto; min-width: 190px; }
+.lora-training-form.is-submitting { pointer-events: none; opacity: .72; }
+.lora-training-guide { position: sticky; top: 94px; min-width: 0; border-top: 3px solid var(--cyan); border-bottom: 1px solid var(--line); background: var(--canvas-soft); }
+.lora-training-guide > section { padding: 18px 16px; border-right: 1px solid var(--line); border-left: 1px solid var(--line); }
+.lora-training-guide > section + section { border-top: 1px solid var(--line); }
+.lora-training-guide h2 { margin: 0; font-size: 16px; }
+.lora-training-guide ol { display: grid; gap: 0; margin: 15px 0 0; padding: 0; list-style: none; }
+.lora-training-guide li { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 9px; padding: 10px 0; border-top: 1px solid var(--line); }
+.lora-training-guide li > span { color: var(--cyan); font: 800 var(--font-size-utility)/1.5 var(--font-mono); }
+.lora-training-guide li p { display: grid; gap: 2px; margin: 0; }
+.lora-training-guide li b { font-size: 12px; }
+.lora-training-guide li small { color: var(--muted); line-height: 1.45; }
+.lora-stage-guide > div { display: grid; grid-template-columns: auto 1fr auto 1fr auto 1fr auto; align-items: center; gap: 5px; margin: 14px 0 11px; }
+.lora-stage-guide > div span { color: var(--text-soft); font-size: var(--font-size-utility); font-weight: 800; }
+.lora-stage-guide > div i { height: 1px; background: var(--line-strong); }
+.lora-stage-guide > p { margin: 0; color: var(--muted); font-size: var(--font-size-utility); line-height: 1.45; }
+.lora-training-history { min-width: 0; margin-top: 26px; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); }
+.lora-training-history > .lora-history-heading { border-bottom: 1px solid var(--line); }
+.lora-history-heading > span { min-width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--canvas-soft); color: var(--text-soft); font-size: 12px; font-weight: 850; }
+.lora-job-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.lora-job { min-width: 0; display: grid; align-content: start; gap: 13px; padding: 17px 19px; border-bottom: 1px solid var(--line); border-left: 3px solid var(--cyan); }
+.lora-job:nth-child(odd) { border-right: 1px solid var(--line); }
+.lora-job.is-complete { border-left-color: var(--mint); }
+.lora-job.is-error { border-left-color: var(--coral); }
+.lora-job.is-muted { border-left-color: var(--faint); opacity: .8; }
+.lora-job.state-changed { background: #172421; }
+.lora-job > header { min-width: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.lora-job > header > div { min-width: 0; display: grid; gap: 2px; }
+.lora-job-family { color: var(--cyan); font-size: var(--font-size-utility); font-weight: 850; text-transform: uppercase; }
+.lora-job h3 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+.lora-job header small { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.lora-job-facts { display: flex; flex-wrap: wrap; gap: 6px; }
+.lora-job-facts span { padding: 4px 7px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-soft); font-size: var(--font-size-utility); font-weight: 700; }
+.lora-job-progress { display: grid; gap: 6px; }
+.lora-job-progress > div { display: flex; justify-content: space-between; gap: 12px; color: var(--text-soft); font-size: 12px; }
+.lora-job-progress > div b { font-variant-numeric: tabular-nums; }
+.lora-job-progress progress { width: 100%; height: 8px; overflow: hidden; border: 0; border-radius: 4px; background: #252d2b; accent-color: var(--cyan); }
+.lora-job-progress progress::-webkit-progress-bar { background: #252d2b; }
+.lora-job-progress progress::-webkit-progress-value { background: var(--cyan); }
+.lora-job-progress progress::-moz-progress-bar { background: var(--cyan); }
+.lora-job-progress p { min-height: 19px; margin: 0; color: var(--muted); font-size: var(--font-size-utility); }
+.lora-job-error { margin: 0; padding: 9px 10px; border-left: 3px solid var(--coral); background: #2d1b1d; color: #ffc1bd; font: var(--font-size-utility)/1.45 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.lora-job-log { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-control); background: #0b0e0e; }
+.lora-job-log summary { padding: 8px 10px; color: var(--muted); font-size: var(--font-size-utility); font-weight: 750; cursor: pointer; }
+.lora-job-log pre { max-height: 190px; margin: 0; padding: 10px; overflow: auto; border-top: 1px solid var(--line); color: #b6c5be; font: var(--font-size-utility)/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.lora-job > footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: auto -19px -17px; padding: 10px 19px; border-top: 1px solid var(--line); background: var(--canvas-soft); }
+.lora-job > footer > span { color: var(--muted); font-size: var(--font-size-utility); }
+.lora-job > footer > div { display: flex; gap: 7px; }
+.lora-job > footer button, .lora-job > footer .button { min-height: 34px; padding: 0 10px; font-size: var(--font-size-utility); }
+.lora-history-empty { grid-column: 1 / -1; min-height: 140px; display: flex; align-items: center; justify-content: center; gap: 13px; }
+.lora-history-empty > span { flex: 0 0 38px; width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; color: var(--muted); font-size: 22px; }
+.lora-history-empty h3 { margin: 0; color: var(--text); font-size: 14px; }
+.lora-history-empty p { margin: 3px 0 0; font-size: 12px; }
+.lora-training-page.is-poll-stale .lora-history-heading::after { content: "Обновление приостановлено"; color: var(--amber); font-size: var(--font-size-utility); }
+
+@media (max-width: 1180px) {
+  .lora-training-workspace { grid-template-columns: 1fr; }
+  .lora-training-guide { position: static; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top-width: 1px; }
+  .lora-training-guide > section + section { border-top: 0; border-left: 0; }
+}
+
+@media (max-width: 840px) {
+  .lora-profile-options, .lora-dataset-grid, .lora-job-list { grid-template-columns: 1fr; }
+  .lora-identity-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lora-identity-grid .ui-field:last-child { grid-column: 1 / -1; }
+  .lora-concept-picker { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lora-job:nth-child(odd) { border-right: 0; }
+}
+
+@media (max-width: 620px) {
+  .lora-training-page { width: min(100% - 24px, 1520px); }
+  .lora-training-hero { align-items: flex-start; flex-direction: column; }
+  .lora-agent-state { width: 100%; }
+  .lora-section-heading, .lora-history-heading { padding: 14px; }
+  .lora-form-section { padding: 16px 14px; }
+  .lora-profile-options, .lora-identity-grid, .lora-preset-grid, .lora-training-guide { grid-template-columns: 1fr; }
+  .lora-identity-grid .ui-field:last-child { grid-column: auto; }
+  .lora-training-guide > section + section { border-top: 1px solid var(--line); border-left: 1px solid var(--line); }
+  .lora-dataset-item { grid-template-columns: 96px minmax(0, 1fr); }
+  .lora-dataset-media { min-height: 154px; }
+  .lora-resolution-control { align-items: stretch; flex-direction: column; }
+  .lora-resolution-control > .ui-segmented { width: 100%; flex-basis: auto; }
+  .lora-submit-row { align-items: stretch; flex-direction: column; padding: 14px; }
+  .lora-submit-row button { width: 100%; min-width: 0; }
+  .lora-job { padding: 15px 14px; }
+  .lora-job > footer { align-items: stretch; flex-direction: column; margin: auto -14px -15px; padding: 10px 14px; }
+  .lora-job > footer > div { width: 100%; display: grid; grid-template-columns: 1fr; }
+  .lora-job > footer button, .lora-job > footer .button { width: 100%; }
+}
+
+@media (max-width: 400px) {
+  .lora-concept-picker { grid-template-columns: 1fr; }
+  .lora-dataset-item { grid-template-columns: 1fr; }
+  .lora-dataset-media { min-height: 220px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .lora-dataset-summary { align-items: flex-start; flex-wrap: wrap; }
+  .lora-dataset-summary button { width: 100%; }
+}
+
+.admin-lora-hero { align-items: flex-end; }
+.admin-lora-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); }
+.admin-lora-metrics > div { min-width: 0; display: grid; gap: 5px; padding: 15px 17px; border-right: 1px solid var(--line); }
+.admin-lora-metrics > div:last-child { border-right: 0; }
+.admin-lora-metrics span { color: var(--muted); font-size: var(--font-size-utility); font-weight: 750; }
+.admin-lora-metrics strong { font-size: 22px; line-height: 1.15; }
+.admin-lora-profiles { padding-bottom: 0; overflow: hidden; }
+.admin-lora-profile-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0 -20px; border-top: 1px solid var(--line); }
+.admin-lora-profile-list > article { min-width: 0; padding: 15px 20px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); border-left: 3px solid var(--amber); }
+.admin-lora-profile-list > article:nth-child(even) { border-right: 0; }
+.admin-lora-profile-list > article.is-ready { border-left-color: var(--mint); }
+.admin-lora-profile-list header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.admin-lora-profile-list header > div { min-width: 0; display: grid; gap: 2px; }
+.admin-lora-profile-list header > div > span { color: var(--cyan); font-size: var(--font-size-utility); font-weight: 850; text-transform: uppercase; }
+.admin-lora-profile-list h3 { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.admin-lora-profile-list p { margin: 9px 0 0; color: var(--text-soft); font-size: 12px; line-height: 1.45; }
+.admin-lora-profile-list article > small { display: block; margin-top: 7px; color: var(--muted); overflow-wrap: anywhere; }
+.admin-lora-queue { min-width: 0; margin-top: 18px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); }
+.admin-lora-table { min-width: 1120px; }
+.admin-lora-table td { vertical-align: top; }
+.admin-lora-table td > strong { display: block; }
+.admin-lora-table td > small { display: block; margin-top: 3px; color: var(--muted); }
+.admin-lora-table td > code { max-width: 270px; display: block; margin-top: 6px; overflow: hidden; color: var(--cyan); font-size: var(--font-size-utility); text-overflow: ellipsis; white-space: nowrap; }
+.admin-lora-progress { min-width: 220px; display: grid; gap: 5px; }
+.admin-lora-progress > span { color: var(--text-soft); font-size: var(--font-size-utility); }
+.admin-lora-progress progress { width: 100%; height: 7px; accent-color: var(--cyan); }
+.admin-lora-progress small { max-width: 360px; display: -webkit-box; overflow: hidden; color: var(--muted); line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+
+@media (max-width: 900px) {
+  .admin-lora-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin-lora-metrics > div:nth-child(2) { border-right: 0; }
+  .admin-lora-metrics > div:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
+}
+
+@media (max-width: 620px) {
+  .admin-lora-hero { align-items: flex-start; flex-direction: column; }
+  .admin-lora-hero .button { width: 100%; }
+  .admin-lora-profile-list { grid-template-columns: 1fr; }
+  .admin-lora-profile-list > article { border-right: 0; }
+}
+
 @media (max-width: 760px) {
   .minimax-core-grid, .minimax-export-grid, .minimax-parameter-grid, .minimax-utility-grid, .minimax-optimization-fields, .video-enhancement-fields, .video-enhancement-settings--compact .video-enhancement-fields, .video-enhancement-flags, .minimax-primary-grid, .minimax-aspect-controls, .minimax-reference-media-grid { grid-template-columns: 1fr; }
   .minimax-mode-heading { align-items: stretch; flex-direction: column; gap: 7px; }

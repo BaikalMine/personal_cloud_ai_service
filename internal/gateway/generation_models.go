@@ -264,15 +264,17 @@ func buildGenerationModelCatalog(info map[string]comfyNodeInfo) generationModelC
 }
 
 func buildGenerationLoraGroups(values []string) []generationLoraGroup {
-	order := []string{"Базовые Krea2", "Реализм и детали", "Стили", "Остальные Krea2"}
+	order := []string{"Базовые Krea2", "Обученные Krea2", "Реализм и детали", "Стили", "Остальные Krea2"}
 	grouped := make(map[string][]generationLora)
 	for _, name := range values {
-		lower := strings.ToLower(name)
+		lower := normalizeGenerationModelPath(name)
 		if strings.Contains(lower, "ltx2\\") || !isKreaLora(lower) {
 			continue
 		}
 		category := "Остальные Krea2"
 		switch {
+		case strings.HasPrefix(lower, "trained\\krea2\\"):
+			category = "Обученные Krea2"
 		case strings.Contains(lower, "lenovo") || strings.Contains(lower, "turbo") || strings.Contains(lower, "projector") || strings.Contains(lower, "textfusion") || strings.Contains(lower, "filterbypass"):
 			category = "Базовые Krea2"
 		case strings.Contains(lower, "real") || strings.Contains(lower, "detail") || strings.Contains(lower, "skin") || strings.Contains(lower, "onglass") || strings.Contains(lower, "photo"):
@@ -302,8 +304,8 @@ func buildGenerationLoraGroups(values []string) []generationLoraGroup {
 func buildFlux2LoraGroups(values []string) []generationLoraGroup {
 	loras := make([]generationLora, 0)
 	for _, name := range values {
-		lower := strings.ToLower(strings.ReplaceAll(name, "/", "\\"))
-		if !strings.HasPrefix(lower, "flux2\\") && !strings.HasPrefix(lower, "flux.2\\") {
+		lower := normalizeGenerationModelPath(name)
+		if !strings.HasPrefix(lower, "flux2\\") && !strings.HasPrefix(lower, "flux.2\\") && !strings.HasPrefix(lower, "trained\\flux2-klein\\") {
 			continue
 		}
 		loras = append(loras, generationLora{
@@ -365,6 +367,10 @@ func miniMaxH3LoraDefaultStrength(lower string) float64 {
 
 func isKreaLora(lower string) bool {
 	return strings.Contains(lower, "krea") || strings.Contains(lower, "lenovo")
+}
+
+func normalizeGenerationModelPath(name string) string {
+	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(name), "/", "\\"))
 }
 
 func generationLoraDefaultStrength(lower string) float64 {

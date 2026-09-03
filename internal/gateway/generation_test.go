@@ -1393,13 +1393,28 @@ func TestFlux2LoraGroupsExcludeOtherFamilies(t *testing.T) {
 		"Krea2/detailer.safetensors",
 		"Flux2/klein_style.safetensors",
 		"Flux.2/character.safetensors",
+		"Trained/Flux2-Klein/alice/portrait.safetensors",
 		"LTX2/video.safetensors",
 	})
-	if len(groups) != 1 || groups[0].Name != "Flux2" || len(groups[0].Loras) != 2 {
+	if len(groups) != 1 || groups[0].Name != "Flux2" || len(groups[0].Loras) != 3 {
 		t.Fatalf("unexpected Flux2 LoRA groups: %#v", groups)
 	}
-	if groups[0].Loras[0].Name != "Flux.2/character.safetensors" || groups[0].Loras[1].Name != "Flux2/klein_style.safetensors" {
+	if groups[0].Loras[0].Name != "Flux.2/character.safetensors" || groups[0].Loras[1].Name != "Flux2/klein_style.safetensors" || groups[0].Loras[2].Name != "Trained/Flux2-Klein/alice/portrait.safetensors" {
 		t.Fatalf("unexpected Flux2 LoRA entries: %#v", groups[0].Loras)
+	}
+}
+
+func TestKrea2LoraGroupsExposeTrainedAdaptersSeparately(t *testing.T) {
+	groups := buildGenerationLoraGroups([]string{
+		"lenovo_krea2.safetensors",
+		"Trained/Krea2/alice/portrait.safetensors",
+		"Flux2/style.safetensors",
+	})
+	if len(groups) != 2 || groups[0].Name != "Базовые Krea2" || groups[1].Name != "Обученные Krea2" {
+		t.Fatalf("unexpected Krea2 LoRA groups: %#v", groups)
+	}
+	if len(groups[1].Loras) != 1 || groups[1].Loras[0].Name != "Trained/Krea2/alice/portrait.safetensors" {
+		t.Fatalf("trained Krea2 LoRA is missing: %#v", groups[1].Loras)
 	}
 }
 

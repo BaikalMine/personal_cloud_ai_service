@@ -355,6 +355,62 @@ func main() {
 			}
 		}
 	}
+	loraProfiles := []map[string]any{
+		{"ID": "krea2-moody-v7-bf16", "Family": "krea2", "Name": "Krea2 Moody v7 RAW", "BaseModel": "moodyKrea2Mix_v70BF16.safetensors", "Description": "Персонажи, стили, объекты и продукты на базе Krea2 RAW.", "Ready": true},
+		{"ID": "flux2-klein-9b-pornmaster-v4-base", "Family": "flux2-klein", "Name": "Flux.2 Klein 9B PornMaster v4 Base", "BaseModel": "pornmasterFlux2Klein_v4BaseBf16.safetensors", "Description": "Обучаемая base-модель Flux.2 Klein 9B.", "Ready": true},
+	}
+	loraPresets := []map[string]any{
+		{"ID": "quick", "Name": "Пробный", "Description": "800 шагов · rank 16. Быстрая проверка датасета и триггера."},
+		{"ID": "balanced", "Name": "Основной", "Description": "1600 шагов · rank 32. Базовый вариант для большинства задач."},
+		{"ID": "detailed", "Name": "Детальный", "Description": "2800 шагов · rank 32. Для чистого разнообразного датасета."},
+	}
+	loraJobs := []map[string]any{
+		{
+			"PublicID": "lora-preview-running", "UsernameSnapshot": "admin", "Family": "krea2", "FamilyLabel": "Krea2", "Name": "Редакционный портрет", "OutputName": "editorial_portrait_v1", "BaseModel": "moodyKrea2Mix_v70BF16.safetensors",
+			"State": "running", "StateLabel": "Обучение", "StateClass": "is-active", "ConceptLabel": "Персонаж", "SampleCount": 24, "Resolution": 768, "PresetLabel": "Основной", "NetworkDim": 32, "MaxTrainSteps": 1600,
+			"Stage": "Обучаем LoRA", "Progress": 61, "Message": "Шаг 976 из 1600. Задание использует GPU, майнинг приостановлен.", "CanCancel": true, "CanDownload": false, "CreatedAt": now.Add(-46 * time.Minute),
+		},
+		{
+			"PublicID": "lora-preview-complete", "UsernameSnapshot": "preview-user", "Family": "flux2-klein", "FamilyLabel": "Flux.2 Klein", "Name": "Свет предметной съёмки", "OutputName": "product_light_v2", "BaseModel": "pornmasterFlux2Klein_v4BaseBf16.safetensors",
+			"State": "completed", "StateLabel": "Готово", "StateClass": "is-complete", "ConceptLabel": "Стиль", "SampleCount": 38, "Resolution": 1024, "PresetLabel": "Детальный", "NetworkDim": 32, "MaxTrainSteps": 2800,
+			"Stage": "Готово", "Progress": 100, "Message": "LoRA установлена в ComfyUI и готова к использованию.", "CanCancel": false, "CanDownload": true, "ArtifactName": "product_light_v2.safetensors", "CreatedAt": now.Add(-7 * time.Hour),
+		},
+	}
+	loraAPIJobs := []map[string]any{
+		{"id": "lora-preview-running", "name": "Редакционный портрет", "output_name": "editorial_portrait_v1", "profile_id": "krea2-moody-v7-bf16", "family": "krea2", "family_label": "Krea2", "base_model": "moodyKrea2Mix_v70BF16.safetensors", "state": "running", "state_label": "Обучение", "state_class": "is-active", "stage": "Обучаем LoRA", "progress": 61, "message": "Шаг 976 из 1600. Задание использует GPU, майнинг приостановлен.", "sample_count": 24, "concept_label": "Персонаж", "preset_label": "Основной", "resolution": 768, "max_train_steps": 1600, "can_cancel": true, "cancel_url": "/train-lora/lora-preview-running/cancel", "created_at": now.Add(-46 * time.Minute).UnixMilli(), "updated_at": now.Add(-4 * time.Second).UnixMilli()},
+		{"id": "lora-preview-complete", "name": "Свет предметной съёмки", "output_name": "product_light_v2", "profile_id": "flux2-klein-9b-pornmaster-v4-base", "family": "flux2-klein", "family_label": "Flux.2 Klein", "base_model": "pornmasterFlux2Klein_v4BaseBf16.safetensors", "state": "completed", "state_label": "Готово", "state_class": "is-complete", "stage": "Готово", "progress": 100, "message": "LoRA установлена в ComfyUI и готова к использованию.", "sample_count": 38, "concept_label": "Стиль", "preset_label": "Детальный", "resolution": 1024, "max_train_steps": 2800, "can_download": true, "download_url": "/train-lora/lora-preview-complete/download", "artifact_name": "product_light_v2.safetensors", "created_at": now.Add(-7 * time.Hour).UnixMilli(), "updated_at": now.Add(-6 * time.Hour).UnixMilli()},
+	}
+	mux.HandleFunc("/api/lora-training/jobs", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jobs": loraAPIJobs, "server_time": now.UnixMilli()})
+	})
+	mux.HandleFunc("/api/lora-training/jobs/", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/api/lora-training/jobs/")
+		for _, job := range loraAPIJobs {
+			if job["id"] == id {
+				copyJob := make(map[string]any, len(job)+1)
+				for key, value := range job {
+					copyJob[key] = value
+				}
+				if id == "lora-preview-running" {
+					copyJob["log_tail"] = []string{"Caching complete", "Loading Krea2 RAW weights", "steps: 976 / 1600"}
+				}
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				_ = json.NewEncoder(w).Encode(copyJob)
+				return
+			}
+		}
+		http.NotFound(w, r)
+	})
+	mux.HandleFunc("/preview/lora-training", render("lora_training", "Обучение LoRA", map[string]any{
+		"Profiles": loraProfiles, "ReadyProfiles": 2, "Presets": loraPresets,
+		"Form": map[string]any{"ProfileID": "krea2-moody-v7-bf16", "ConceptType": "character", "Preset": "balanced", "Resolution": 768},
+		"Jobs": loraJobs,
+	}))
+	mux.HandleFunc("/preview/admin-lora-training", render("admin_lora_training", "Обучение LoRA", map[string]any{
+		"Profiles": loraProfiles, "ReadyProfiles": 2, "Jobs": loraJobs,
+		"ActiveJobs": 1, "CompletedJobs": 1, "FailedJobs": 0,
+	}))
 
 	mux.HandleFunc("/preview/app", render("app", "Рабочее пространство", map[string]any{
 		"Services":     []gateway.ServiceStatus{{Name: "ComfyUI", Online: true, Latency: 24 * time.Millisecond, Detail: "Готов"}, {Name: "OpenWebUI", Online: true, Latency: 41 * time.Millisecond, Detail: "Готов"}},

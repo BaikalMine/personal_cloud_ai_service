@@ -23,7 +23,7 @@ func (s *Store) FindUserWithPassword(ctx context.Context, identity string) (doma
 	var user domain.User
 	var passwordHash string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, username, email, role, disabled, can_use_comfyui, can_use_openwebui, can_use_quick_generation, can_generate_text_to_image, can_generate_image_to_image, can_generate_video, can_use_advanced_generation_settings, can_manage_mining, pause_mining_for_quick_generation,
+		SELECT id, username, email, role, disabled, can_use_comfyui, can_use_openwebui, can_use_quick_generation, can_generate_text_to_image, can_generate_image_to_image, can_generate_video, can_use_advanced_generation_settings, can_train_image_lora, can_manage_mining, pause_mining_for_quick_generation,
 		       generation_daily_limit, generation_total_limit, generation_total_used,
 		       video_generation_daily_limit, video_generation_total_limit, video_generation_total_used, max_video_generation_quality,
 		       failed_login_count, locked_until, account_expires_at, created_at, last_login_at, password_hash
@@ -34,7 +34,7 @@ func (s *Store) FindUserWithPassword(ctx context.Context, identity string) (doma
 		LIMIT 1
 	`, identity).Scan(
 		&user.ID, &user.Username, &user.Email, &user.Role, &user.Disabled,
-		&user.CanUseComfyUI, &user.CanUseOpenWebUI, &user.CanUseQuickGeneration, &user.CanGenerateTextToImage, &user.CanGenerateImageToImage, &user.CanGenerateVideo, &user.CanUseAdvancedGenerationSettings, &user.CanManageMining, &user.PauseMiningForQuickGeneration,
+		&user.CanUseComfyUI, &user.CanUseOpenWebUI, &user.CanUseQuickGeneration, &user.CanGenerateTextToImage, &user.CanGenerateImageToImage, &user.CanGenerateVideo, &user.CanUseAdvancedGenerationSettings, &user.CanTrainImageLora, &user.CanManageMining, &user.PauseMiningForQuickGeneration,
 		&user.GenerationDailyLimit, &user.GenerationTotalLimit, &user.GenerationTotalUsed,
 		&user.VideoGenerationDailyLimit, &user.VideoGenerationTotalLimit, &user.VideoGenerationTotalUsed, &user.MaxVideoGenerationQuality,
 		&user.FailedLoginCount, &user.LockedUntil, &user.AccountExpiresAt,
@@ -47,7 +47,7 @@ func (s *Store) UserBySessionHash(ctx context.Context, tokenHash string, idleTim
 	var user domain.User
 	err := s.db.QueryRowContext(ctx, `
 		SELECT u.id, u.username, u.email, u.role, u.disabled, u.can_use_comfyui,
-		       u.can_use_openwebui, u.can_use_quick_generation, u.can_generate_text_to_image, u.can_generate_image_to_image, u.can_generate_video, u.can_use_advanced_generation_settings, u.can_manage_mining, u.pause_mining_for_quick_generation, u.generation_daily_limit,
+		       u.can_use_openwebui, u.can_use_quick_generation, u.can_generate_text_to_image, u.can_generate_image_to_image, u.can_generate_video, u.can_use_advanced_generation_settings, u.can_train_image_lora, u.can_manage_mining, u.pause_mining_for_quick_generation, u.generation_daily_limit,
 		       u.generation_total_limit, u.generation_total_used, u.video_generation_daily_limit, u.video_generation_total_limit, u.video_generation_total_used, u.max_video_generation_quality,
 		       u.failed_login_count, u.locked_until, u.account_expires_at, u.created_at, u.last_login_at
 		FROM sessions s JOIN users u ON u.id = s.user_id
@@ -58,7 +58,7 @@ func (s *Store) UserBySessionHash(ctx context.Context, tokenHash string, idleTim
 		  AND (u.account_expires_at IS NULL OR u.account_expires_at > now())
 	`, tokenHash, int64(idleTimeout.Seconds())).Scan(
 		&user.ID, &user.Username, &user.Email, &user.Role, &user.Disabled,
-		&user.CanUseComfyUI, &user.CanUseOpenWebUI, &user.CanUseQuickGeneration, &user.CanGenerateTextToImage, &user.CanGenerateImageToImage, &user.CanGenerateVideo, &user.CanUseAdvancedGenerationSettings, &user.CanManageMining, &user.PauseMiningForQuickGeneration,
+		&user.CanUseComfyUI, &user.CanUseOpenWebUI, &user.CanUseQuickGeneration, &user.CanGenerateTextToImage, &user.CanGenerateImageToImage, &user.CanGenerateVideo, &user.CanUseAdvancedGenerationSettings, &user.CanTrainImageLora, &user.CanManageMining, &user.PauseMiningForQuickGeneration,
 		&user.GenerationDailyLimit, &user.GenerationTotalLimit, &user.GenerationTotalUsed,
 		&user.VideoGenerationDailyLimit, &user.VideoGenerationTotalLimit, &user.VideoGenerationTotalUsed, &user.MaxVideoGenerationQuality,
 		&user.FailedLoginCount, &user.LockedUntil, &user.AccountExpiresAt,
@@ -70,14 +70,14 @@ func (s *Store) UserBySessionHash(ctx context.Context, tokenHash string, idleTim
 func (s *Store) UserByID(ctx context.Context, id int64) (domain.User, error) {
 	var user domain.User
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, username, email, role, disabled, can_use_comfyui, can_use_openwebui, can_use_quick_generation, can_generate_text_to_image, can_generate_image_to_image, can_generate_video, can_use_advanced_generation_settings, can_manage_mining, pause_mining_for_quick_generation,
+		SELECT id, username, email, role, disabled, can_use_comfyui, can_use_openwebui, can_use_quick_generation, can_generate_text_to_image, can_generate_image_to_image, can_generate_video, can_use_advanced_generation_settings, can_train_image_lora, can_manage_mining, pause_mining_for_quick_generation,
 		       generation_daily_limit, generation_total_limit, generation_total_used,
 		       video_generation_daily_limit, video_generation_total_limit, video_generation_total_used, max_video_generation_quality,
 		       failed_login_count, locked_until, account_expires_at, created_at, last_login_at
 		FROM users WHERE id = $1
 	`, id).Scan(
 		&user.ID, &user.Username, &user.Email, &user.Role, &user.Disabled,
-		&user.CanUseComfyUI, &user.CanUseOpenWebUI, &user.CanUseQuickGeneration, &user.CanGenerateTextToImage, &user.CanGenerateImageToImage, &user.CanGenerateVideo, &user.CanUseAdvancedGenerationSettings, &user.CanManageMining, &user.PauseMiningForQuickGeneration,
+		&user.CanUseComfyUI, &user.CanUseOpenWebUI, &user.CanUseQuickGeneration, &user.CanGenerateTextToImage, &user.CanGenerateImageToImage, &user.CanGenerateVideo, &user.CanUseAdvancedGenerationSettings, &user.CanTrainImageLora, &user.CanManageMining, &user.PauseMiningForQuickGeneration,
 		&user.GenerationDailyLimit, &user.GenerationTotalLimit, &user.GenerationTotalUsed,
 		&user.VideoGenerationDailyLimit, &user.VideoGenerationTotalLimit, &user.VideoGenerationTotalUsed, &user.MaxVideoGenerationQuality,
 		&user.FailedLoginCount, &user.LockedUntil, &user.AccountExpiresAt,
@@ -89,7 +89,7 @@ func (s *Store) UserByID(ctx context.Context, id int64) (domain.User, error) {
 func (s *Store) ListUsers(ctx context.Context, search string) ([]domain.UserRow, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT u.id, u.username, COALESCE(u.email,''), u.role, u.disabled,
-		       u.can_use_comfyui, u.can_use_openwebui, u.can_use_quick_generation, u.can_generate_text_to_image, u.can_generate_image_to_image, u.can_generate_video, u.can_use_advanced_generation_settings, u.can_manage_mining, u.pause_mining_for_quick_generation,
+		       u.can_use_comfyui, u.can_use_openwebui, u.can_use_quick_generation, u.can_generate_text_to_image, u.can_generate_image_to_image, u.can_generate_video, u.can_use_advanced_generation_settings, u.can_train_image_lora, u.can_manage_mining, u.pause_mining_for_quick_generation,
 		       u.generation_daily_limit, u.generation_total_limit, u.generation_total_used,
 		       u.video_generation_daily_limit, u.video_generation_total_limit, u.video_generation_total_used, u.max_video_generation_quality,
 		       u.failed_login_count, u.locked_until, u.account_expires_at,
@@ -111,7 +111,7 @@ func (s *Store) ListUsers(ctx context.Context, search string) ([]domain.UserRow,
 		var user domain.UserRow
 		if err := rows.Scan(
 			&user.ID, &user.Username, &user.Email, &user.Role, &user.Disabled,
-			&user.CanUseComfyUI, &user.CanUseOpenWebUI, &user.CanUseQuickGeneration, &user.CanGenerateTextToImage, &user.CanGenerateImageToImage, &user.CanGenerateVideo, &user.CanUseAdvancedGenerationSettings, &user.CanManageMining, &user.PauseMiningForQuickGeneration,
+			&user.CanUseComfyUI, &user.CanUseOpenWebUI, &user.CanUseQuickGeneration, &user.CanGenerateTextToImage, &user.CanGenerateImageToImage, &user.CanGenerateVideo, &user.CanUseAdvancedGenerationSettings, &user.CanTrainImageLora, &user.CanManageMining, &user.PauseMiningForQuickGeneration,
 			&user.GenerationDailyLimit, &user.GenerationTotalLimit, &user.GenerationTotalUsed,
 			&user.VideoGenerationDailyLimit, &user.VideoGenerationTotalLimit, &user.VideoGenerationTotalUsed, &user.MaxVideoGenerationQuality,
 			&user.FailedLoginCount, &user.LockedUntil, &user.AccountExpiresAt,
@@ -264,6 +264,7 @@ type SetServiceAccessParams struct {
 	ImageToImage                  bool
 	Video                         bool
 	AdvancedGenerationSettings    bool
+	TrainImageLora                bool
 	ManageMining                  bool
 	PauseMiningForQuickGeneration bool
 	ImageDailyLimit               int
@@ -281,12 +282,12 @@ func (s *Store) SetServiceAccess(ctx context.Context, userID int64, params SetSe
 		UPDATE users
 		SET can_use_comfyui = $2, can_use_openwebui = $3, can_use_quick_generation = $4,
 		    can_generate_text_to_image = $5, can_generate_image_to_image = $6, can_generate_video = $7,
-		    can_use_advanced_generation_settings = $8, can_manage_mining = $9, pause_mining_for_quick_generation = $10,
-		    generation_daily_limit = $11, generation_total_limit = $12,
-		    video_generation_daily_limit = $13, video_generation_total_limit = $14, max_video_generation_quality = $15
+		    can_use_advanced_generation_settings = $8, can_train_image_lora = $9, can_manage_mining = $10, pause_mining_for_quick_generation = $11,
+		    generation_daily_limit = $12, generation_total_limit = $13,
+		    video_generation_daily_limit = $14, video_generation_total_limit = $15, max_video_generation_quality = $16
 		WHERE id = $1 AND role <> 'admin'
 	`, userID, params.ComfyUI, params.OpenWebUI, params.QuickGeneration, params.TextToImage, params.ImageToImage, params.Video,
-		params.AdvancedGenerationSettings, params.ManageMining, params.PauseMiningForQuickGeneration,
+		params.AdvancedGenerationSettings, params.TrainImageLora, params.ManageMining, params.PauseMiningForQuickGeneration,
 		params.ImageDailyLimit, params.ImageTotalLimit, params.VideoDailyLimit, params.VideoTotalLimit, params.MaxVideoQuality)
 	if err != nil {
 		return false, err

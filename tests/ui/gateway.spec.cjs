@@ -36,6 +36,34 @@ test("key surfaces fit every supported viewport", async ({ page }, testInfo) => 
   }
 });
 
+test("LoRA training surfaces fit every supported viewport", async ({ page }, testInfo) => {
+  const surfaces = [
+    { route: "/preview/lora-training", snapshot: "lora-training.png" },
+    { route: "/preview/admin-lora-training", snapshot: "admin-lora-training.png" },
+  ];
+  for (const { route, snapshot } of surfaces) {
+    await open(page, route);
+    await assertNoViewportOverflow(page, `${testInfo.project.name} ${route}`);
+    await expect(page).toHaveScreenshot(snapshot, { fullPage: true, stylePath: visualStyle });
+  }
+});
+
+test("LoRA dataset composer keeps files and captions together", async ({ page }, testInfo) => {
+  desktopOnly(testInfo);
+  await open(page, "/preview/lora-training");
+  const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+  await page.locator("[data-lora-images]").setInputFiles(Array.from({ length: 5 }, (_, index) => ({
+    name: `portrait-${index + 1}.png`, mimeType: "image/png", buffer: pixel,
+  })));
+  await expect(page.locator("[data-lora-dataset-grid] .lora-dataset-item")).toHaveCount(5);
+  await expect(page.locator("[data-lora-image-count]")).toHaveText("5 изображений");
+  await page.locator('.lora-dataset-item textarea[name="caption"]').first().fill("front portrait, soft daylight");
+  await expect(page.locator('.lora-dataset-item textarea[name="caption"]').first()).toHaveValue("front portrait, soft daylight");
+  await page.locator(".lora-dataset-item .lora-dataset-remove").last().click();
+  await expect(page.locator("[data-lora-dataset-grid] .lora-dataset-item")).toHaveCount(4);
+  await expect(page.locator("[data-lora-image-count]")).toHaveText("4 изображения");
+});
+
 test("suggestion intake and review expose one clear next action", async ({ page }, testInfo) => {
   desktopOnly(testInfo);
 
@@ -544,7 +572,7 @@ test("operations center puts live work and failures before analytics", async ({ 
 
 test("critical product surfaces have no serious axe violations", async ({ page }, testInfo) => {
   desktopOnly(testInfo);
-  const routes = ["/preview/components", "/preview/generate", "/preview/gallery", "/preview/profile", "/preview/invites", "/preview/users", "/preview/content", "/preview/admin", "/preview/suggestions", "/preview/admin-suggestions"];
+  const routes = ["/preview/components", "/preview/generate", "/preview/gallery", "/preview/profile", "/preview/invites", "/preview/users", "/preview/content", "/preview/admin", "/preview/suggestions", "/preview/admin-suggestions", "/preview/lora-training", "/preview/admin-lora-training"];
   const routeViolations = [];
 
   for (const route of routes) {

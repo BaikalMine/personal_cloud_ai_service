@@ -341,6 +341,28 @@ func TestSeparateGenerationQuotasAndInviteControlsMigration(t *testing.T) {
 	}
 }
 
+func TestImageLoraTrainingMigration(t *testing.T) {
+	var trainingMigration *migration
+	for index := range migrationCatalog {
+		if migrationCatalog[index].version == 51 {
+			trainingMigration = &migrationCatalog[index]
+			break
+		}
+	}
+	if trainingMigration == nil || trainingMigration.name != "image_lora_training" {
+		t.Fatal("image LoRA training migration is missing")
+	}
+	sql := strings.Join(trainingMigration.statements, "\n")
+	for _, expected := range []string{
+		"can_train_image_lora", "grant_train_image_lora", "lora_training_jobs",
+		"lora_training_jobs_user_active_idx", "lora_training_job_id", "flux2-klein",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("image LoRA training migration does not contain %q: %s", expected, sql)
+		}
+	}
+}
+
 func TestQuickGenerationRequestTelemetryMigration(t *testing.T) {
 	var telemetryMigration *migration
 	for index := range migrationCatalog {

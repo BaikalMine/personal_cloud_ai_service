@@ -1,0 +1,102 @@
+{{define "lora_training"}}
+{{template "head" .}}
+{{template "nav" .}}
+<main class="page lora-training-page" id="main-content" data-lora-training-page data-csrf="{{.CSRF}}">
+  <section class="hero lora-training-hero">
+    <div><p class="eyebrow">Изображения</p><h1>Обучение LoRA</h1><p class="hero-copy">Соберите подписанный датасет, выберите совместимую базовую модель и следите за обучением без входа в консоль.</p></div>
+    <div class="lora-agent-state {{if gt .ReadyProfiles 0}}is-ready{{else}}is-blocked{{end}}"><span aria-hidden="true"></span><div><strong>{{if gt .ReadyProfiles 0}}Агент готов{{else}}Запуск недоступен{{end}}</strong><small>Профилей доступно: {{.ReadyProfiles}}</small></div></div>
+  </section>
+
+  {{if .Message}}<p class="success-box ui-status-banner is-success" aria-live="polite">{{.Message}}</p>{{end}}
+  {{if .Error}}<p class="alert ui-status-banner is-error" role="alert">{{.Error}}</p>{{end}}
+  {{if .AgentMessage}}<p class="ui-status-banner is-warning" role="status">{{.AgentMessage}}</p>{{end}}
+
+  <div class="lora-training-workspace">
+    <section class="panel lora-training-composer" aria-labelledby="lora-training-title">
+      <header class="lora-section-heading"><div><p class="section-kicker">Новое задание</p><h2 id="lora-training-title">Подготовить датасет</h2></div><span>5–100 изображений</span></header>
+      <form method="post" action="/train-lora" enctype="multipart/form-data" class="lora-training-form" data-lora-training-form>
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+
+        <fieldset class="lora-form-section lora-profile-picker">
+          <legend><span>1</span><div><b>Базовая модель</b><small>LoRA будет совместима с выбранным семейством.</small></div></legend>
+          <div class="lora-profile-options">
+            {{range .Profiles}}
+            <label class="lora-profile-option ui-choice {{if not .Ready}}is-unavailable{{end}}">
+              <input type="radio" name="profile_id" value="{{.ID}}" data-family="{{.Family}}" {{if not .Ready}}disabled{{end}} {{if eq $.Form.ProfileID .ID}}checked{{end}} required>
+              <span><span class="lora-profile-heading"><b>{{.Name}}</b><em class="badge {{if .Ready}}ok{{else}}danger{{end}}">{{if .Ready}}готова{{else}}не готова{{end}}</em></span><small>{{.BaseModel}}</small><small>{{if .Ready}}{{.Description}}{{else}}{{.Detail}}{{end}}</small></span>
+            </label>
+            {{else}}
+            <div class="ui-empty-state lora-profile-empty"><div><h3>Профили не получены</h3><p>Проверьте локальный агент обучения и его файл моделей.</p></div></div>
+            {{end}}
+          </div>
+        </fieldset>
+
+        <fieldset class="lora-form-section">
+          <legend><span>2</span><div><b>Что обучаем</b><small>Название видно в истории, имя файла попадёт в ComfyUI.</small></div></legend>
+          <div class="lora-identity-grid">
+            <label class="ui-field"><span>Название</span><input name="name" value="{{.Form.Name}}" minlength="3" maxlength="80" required placeholder="Например, Портрет Анны"></label>
+            <label class="ui-field"><span>Имя файла</span><input name="output_name" value="{{.Form.OutputName}}" pattern="[A-Za-z0-9][A-Za-z0-9_-]{2,63}" maxlength="64" required placeholder="anna_portrait_v1"><small class="field-hint">Латиница, цифры, дефис и подчёркивание.</small></label>
+            <label class="ui-field"><span>Триггер</span><input name="trigger_word" value="{{.Form.TriggerWord}}" minlength="2" maxlength="80" required placeholder="anna_person"><small class="field-hint">Добавится к каждому описанию, если его там нет.</small></label>
+          </div>
+          <div class="ui-segmented lora-concept-picker" role="radiogroup" aria-label="Тип LoRA">
+            <label class="ui-choice"><input type="radio" name="concept_type" value="character" {{if eq .Form.ConceptType "character"}}checked{{end}}><span><b>Персонаж</b><small>Лицо и внешность</small></span></label>
+            <label class="ui-choice"><input type="radio" name="concept_type" value="style" {{if eq .Form.ConceptType "style"}}checked{{end}}><span><b>Стиль</b><small>Свет, цвет, подача</small></span></label>
+            <label class="ui-choice"><input type="radio" name="concept_type" value="object" {{if eq .Form.ConceptType "object"}}checked{{end}}><span><b>Объект</b><small>Предмет или одежда</small></span></label>
+            <label class="ui-choice"><input type="radio" name="concept_type" value="product" {{if eq .Form.ConceptType "product"}}checked{{end}}><span><b>Продукт</b><small>Товар и упаковка</small></span></label>
+          </div>
+        </fieldset>
+
+        <fieldset class="lora-form-section lora-dataset-section">
+          <legend><span>3</span><div><b>Датасет</b><small>Разные ракурсы и свет важнее почти одинаковых кадров.</small></div></legend>
+          <label class="lora-dataset-drop" data-lora-dropzone>
+            <input name="images" type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" multiple required data-lora-images>
+            <span class="lora-drop-add" aria-hidden="true">+</span>
+            <span><b>Выбрать изображения</b><small>PNG, JPG или WebP · до 24 МБ каждое · общий размер до 512 МБ</small></span>
+          </label>
+          <div class="lora-dataset-summary" data-lora-dataset-summary hidden><strong data-lora-image-count>0 изображений</strong><span data-lora-image-size>0 МБ</span><button type="button" class="button ghost" data-lora-clear-images>Очистить</button></div>
+          <label class="ui-field lora-global-caption"><span>Общее описание</span><textarea name="global_caption" rows="3" maxlength="1000" placeholder="Например: portrait photo of a woman, natural skin texture, indoor daylight">{{.Form.Caption}}</textarea><small class="field-hint">Используется там, где индивидуальное описание не заполнено. Нужен хотя бы один из вариантов.</small></label>
+          <div class="lora-dataset-grid" data-lora-dataset-grid aria-live="polite"></div>
+        </fieldset>
+
+        <fieldset class="lora-form-section">
+          <legend><span>4</span><div><b>Режим обучения</b><small>Первый запуск разумно делать на основном пресете.</small></div></legend>
+          <div class="lora-preset-grid">
+            {{range .Presets}}<label class="lora-preset-option ui-choice"><input type="radio" name="preset" value="{{.ID}}" {{if eq $.Form.Preset .ID}}checked{{end}}><span><b>{{.Name}}</b><small>{{.Description}}</small></span></label>{{end}}
+          </div>
+          <div class="lora-resolution-control"><span><b>Рабочее разрешение</b><small>Bucket сохранит пропорции исходников.</small></span><div class="ui-segmented"><label class="ui-choice"><input type="radio" name="resolution" value="512" {{if eq .Form.Resolution 512}}checked{{end}}><span>512</span></label><label class="ui-choice"><input type="radio" name="resolution" value="768" {{if eq .Form.Resolution 768}}checked{{end}}><span>768</span></label><label class="ui-choice"><input type="radio" name="resolution" value="1024" {{if eq .Form.Resolution 1024}}checked{{end}}><span>1024</span></label></div></div>
+        </fieldset>
+
+        <footer class="lora-submit-row"><p>Обучение использует GPU по очереди. Майнинг будет остановлен на время задачи и возвращён после завершения или отмены.</p><button type="submit" {{if eq .ReadyProfiles 0}}disabled{{end}} data-lora-submit>Запустить обучение</button></footer>
+      </form>
+    </section>
+
+    <aside class="lora-training-guide" aria-label="Памятка по датасету">
+      <section>
+        <p class="section-kicker">Перед запуском</p><h2>Проверьте набор</h2>
+        <ol><li><span>01</span><p><b>Один объект обучения</b><small>Не смешивайте разных людей или несвязанные стили в одной LoRA.</small></p></li><li><span>02</span><p><b>Разнообразные кадры</b><small>Меняйте планы, фон, одежду и освещение; уберите дубликаты.</small></p></li><li><span>03</span><p><b>Точные описания</b><small>Подписывайте то, что меняется. Постоянную внешность оставьте триггеру.</small></p></li><li><span>04</span><p><b>Проверка результата</b><small>Сначала протестируйте вес LoRA около 0.6–0.9 на нескольких сидах.</small></p></li></ol>
+      </section>
+      <section class="lora-stage-guide"><p class="section-kicker">Что произойдёт</p><h2>Этапы задачи</h2><div><span>Датасет</span><i></i><span>Латенты</span><i></i><span>Текст</span><i></i><span>LoRA</span></div><p>Кеши создаются отдельно, поэтому основной этап не держит VAE и text encoder в памяти одновременно.</p></section>
+    </aside>
+  </div>
+
+  <section class="lora-training-history" id="training-history" aria-labelledby="training-history-title">
+    <header class="lora-history-heading"><div><p class="section-kicker">История</p><h2 id="training-history-title">Мои LoRA</h2></div><span>{{len .Jobs}}</span></header>
+    <div class="lora-job-list" data-lora-job-list>
+      {{range .Jobs}}
+      <article class="lora-job {{.StateClass}}" data-lora-job data-job-id="{{.PublicID}}" data-job-state="{{.State}}">
+        <header><div><span class="lora-job-family">{{.FamilyLabel}}</span><h3>{{.Name}}</h3><small>{{.BaseModel}}</small></div><span class="badge lora-job-state">{{.StateLabel}}</span></header>
+        <div class="lora-job-facts"><span>{{.ConceptLabel}}</span><span>{{.SampleCount}} фото</span><span>{{.Resolution}} px</span><span>{{.PresetLabel}}</span><span>{{.MaxTrainSteps}} шагов</span></div>
+        <div class="lora-job-progress"><div><span data-job-stage>{{.Stage}}</span><b data-job-progress-label>{{.Progress}}%</b></div><progress max="100" value="{{.Progress}}" data-job-progress>{{.Progress}}%</progress><p data-job-message>{{.Message}}</p></div>
+        <p class="lora-job-error" data-job-error {{if not .ErrorMessage}}hidden{{end}}>{{.ErrorMessage}}</p>
+        <details class="lora-job-log" data-job-log-wrap {{if or (eq .State "queued") (eq .State "completed")}}hidden{{end}}><summary>Технический журнал</summary><pre data-job-log>Журнал появится после запуска локального процесса.</pre></details>
+        <footer><span>Создано {{formatTime .CreatedAt}}</span><div>{{if .CanCancel}}<form method="post" action="/train-lora/{{.PublicID}}/cancel"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger" type="submit" data-confirm="Остановить обучение LoRA?">Отменить</button></form>{{end}}{{if .CanDownload}}<a class="button" href="/train-lora/{{.PublicID}}/download">Скачать LoRA</a>{{end}}</div></footer>
+      </article>
+      {{else}}
+      <div class="ui-empty-state lora-history-empty"><span aria-hidden="true">+</span><div><h3>Обучений пока нет</h3><p>После запуска здесь появятся этапы, журнал и готовый файл LoRA.</p></div></div>
+      {{end}}
+    </div>
+  </section>
+</main>
+<script src="/static/lora-training.js?v={{.AssetVersion}}"></script>
+</body></html>
+{{end}}

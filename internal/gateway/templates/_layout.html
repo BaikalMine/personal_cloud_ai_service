@@ -62,6 +62,7 @@
       <a href="/app">Обзор</a>
       {{if .CurrentUser}}{{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseQuickGeneration}}<a href="/generate">Быстрая генерация</a>{{end}}{{end}}
       {{if .CurrentUser}}{{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseQuickGeneration}}<a href="/gallery">Галерея</a>{{end}}{{end}}
+      {{if .CurrentUser}}{{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanTrainImageLora}}<a href="/train-lora">Обучение LoRA</a>{{end}}{{end}}
       {{if .CurrentUser}}{{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseComfyUI}}<a href="/comfyui/" target="_blank" rel="noopener">ComfyUI</a>{{end}}{{end}}
       {{if .CurrentUser}}{{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseOpenWebUI}}<a href="/openwebui/" target="_blank" rel="noopener">OpenWebUI</a>{{end}}{{end}}
       <a href="/account/profile">Профиль</a>
@@ -96,6 +97,7 @@
     <a href="/admin/mining">Майнинг</a>
     <a href="/admin/updates">Обновления</a>
     <a href="/admin/workflows">Workflow</a>
+    <a href="/admin/lora-training">Обучение LoRA</a>
     <span class="nav-section">Доступ</span>
     <a href="/admin/users">Пользователи</a>
     <a href="/admin/invites">Приглашения</a>

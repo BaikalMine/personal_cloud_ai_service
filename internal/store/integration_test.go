@@ -72,7 +72,7 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 		TokenHash: security.HashToken("single-use-integration-invite"), CreatedByUserID: adminID, MaxUses: 1,
 		ExpiresAt: time.Now().Add(time.Hour), GrantComfyUI: true, GrantOpenWebUI: false,
 		GrantQuickGeneration: true, GrantTextToImage: true, GrantVideo: true,
-		GrantAdvancedGenerationSettings: true, PauseMiningForQuickGeneration: true,
+		GrantAdvancedGenerationSettings: true, GrantTrainImageLora: true, PauseMiningForQuickGeneration: true,
 		GenerationDailyLimit: 12, GenerationTotalLimit: 50,
 		VideoGenerationDailyLimit: 2, VideoGenerationTotalLimit: 8, MaxVideoGenerationQuality: 720,
 	})
@@ -123,12 +123,12 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !user.CanUseComfyUI || user.CanUseOpenWebUI || !user.CanUseQuickGeneration || !user.CanGenerateTextToImage || !user.CanGenerateVideo || !user.CanUseAdvancedGenerationSettings || !user.PauseMiningForQuickGeneration || user.GenerationDailyLimit != 12 || user.GenerationTotalLimit != 50 || user.VideoGenerationDailyLimit != 2 || user.VideoGenerationTotalLimit != 8 || user.MaxVideoGenerationQuality != 720 {
+	if !user.CanUseComfyUI || user.CanUseOpenWebUI || !user.CanUseQuickGeneration || !user.CanGenerateTextToImage || !user.CanGenerateVideo || !user.CanUseAdvancedGenerationSettings || !user.CanTrainImageLora || !user.PauseMiningForQuickGeneration || user.GenerationDailyLimit != 12 || user.GenerationTotalLimit != 50 || user.VideoGenerationDailyLimit != 2 || user.VideoGenerationTotalLimit != 8 || user.MaxVideoGenerationQuality != 720 {
 		t.Fatalf("invite permissions were not preserved: user=%+v", user)
 	}
 	updated, err := repository.SetServiceAccess(ctx, registeredUserID, store.SetServiceAccessParams{
 		OpenWebUI: true, QuickGeneration: true, ImageToImage: true, Video: true,
-		AdvancedGenerationSettings: false, PauseMiningForQuickGeneration: false,
+		AdvancedGenerationSettings: false, TrainImageLora: true, PauseMiningForQuickGeneration: false,
 		ImageDailyLimit: 4, ImageTotalLimit: 20, VideoDailyLimit: 1, VideoTotalLimit: 3, MaxVideoQuality: 480,
 	})
 	if err != nil || !updated {
@@ -138,7 +138,7 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if user.CanUseComfyUI || !user.CanUseOpenWebUI || user.CanGenerateTextToImage || !user.CanGenerateImageToImage || !user.CanGenerateVideo || user.CanUseAdvancedGenerationSettings || user.PauseMiningForQuickGeneration || user.GenerationDailyLimit != 4 || user.GenerationTotalLimit != 20 || user.VideoGenerationDailyLimit != 1 || user.VideoGenerationTotalLimit != 3 || user.MaxVideoGenerationQuality != 480 {
+	if user.CanUseComfyUI || !user.CanUseOpenWebUI || user.CanGenerateTextToImage || !user.CanGenerateImageToImage || !user.CanGenerateVideo || user.CanUseAdvancedGenerationSettings || !user.CanTrainImageLora || user.PauseMiningForQuickGeneration || user.GenerationDailyLimit != 4 || user.GenerationTotalLimit != 20 || user.VideoGenerationDailyLimit != 1 || user.VideoGenerationTotalLimit != 3 || user.MaxVideoGenerationQuality != 480 {
 		t.Fatalf("manual access update was not preserved: user=%+v", user)
 	}
 	byEmail, passwordHash, err := repository.FindUserWithPassword(ctx, strings.ToUpper(user.Email.String))
@@ -151,6 +151,7 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	assertContentMediaChunksLifecycle(t, ctx, db, repository, registeredUserID)
 	assertPromptAssistantQualityLifecycle(t, ctx, db, repository, registeredUserID)
 	assertFeatureSuggestionLifecycle(t, ctx, db, repository, registeredUserID, adminID)
+	assertLoraTrainingLifecycle(t, ctx, db, repository, registeredUserID)
 
 	sessionToken := "integration-session-token"
 	sessionHash := security.HashToken(sessionToken)
@@ -1428,6 +1429,99 @@ func assertFeatureSuggestionLifecycle(t *testing.T, ctx context.Context, db *sql
 	userRows, err := repository.ListFeatureSuggestionsByUser(ctx, userID, 20)
 	if err != nil || len(userRows) != 3 {
 		t.Fatalf("user suggestion list length=%d err=%v", len(userRows), err)
+	}
+}
+
+func assertLoraTrainingLifecycle(t *testing.T, ctx context.Context, db *sql.DB, repository *store.Store, userID int64) {
+	t.Helper()
+	newJob := func(publicID, outputName string) domain.CreateLoraTrainingJobParams {
+		return domain.CreateLoraTrainingJobParams{
+			PublicID: publicID, UserID: userID, UsernameSnapshot: "alice", RequestID: "request-" + publicID,
+			ProfileID: "krea2-integration", Family: "krea2", BaseModel: "krea2.safetensors",
+			Name: "Integration LoRA", OutputName: outputName, TriggerWord: "integration_subject",
+			ConceptType: "character", Preset: "quick", Resolution: 768, MaxTrainSteps: 800,
+			NetworkDim: 16, NetworkAlpha: 16, LearningRate: 0.0001, Seed: 42,
+			SampleCount: 5, DatasetBytes: 1024, DatasetPath: "/spool/" + publicID + "/dataset.zip",
+		}
+	}
+
+	first, err := repository.CreateLoraTrainingJob(ctx, newJob("integration-lora-job-0001", "integration_lora_1"))
+	if err != nil || first.State != domain.LoraTrainingQueued {
+		t.Fatalf("create LoRA training job: job=%+v err=%v", first, err)
+	}
+	if _, err := repository.CreateLoraTrainingJob(ctx, newJob("integration-lora-job-duplicate", "integration_lora_duplicate")); !errors.Is(err, store.ErrLoraTrainingAlreadyActive) {
+		t.Fatalf("second active LoRA job error=%v, want ErrLoraTrainingAlreadyActive", err)
+	}
+	claimed, err := repository.ClaimNextLoraTrainingJob(ctx)
+	if err != nil || claimed.ID != first.ID || claimed.State != domain.LoraTrainingUploading {
+		t.Fatalf("claim LoRA training job: job=%+v err=%v", claimed, err)
+	}
+	cancelling, err := repository.RequestLoraTrainingCancellation(ctx, first.PublicID, userID, false)
+	if err != nil || cancelling.CancellationRequestedAt == nil || cancelling.State != domain.LoraTrainingUploading {
+		t.Fatalf("request LoRA cancellation during upload: job=%+v err=%v", cancelling, err)
+	}
+	cancelled, err := repository.RequeueLoraTrainingJob(ctx, first.ID, "retry")
+	if err != nil || cancelled.State != domain.LoraTrainingCancelled || cancelled.FinishedAt == nil {
+		t.Fatalf("finalize concurrent LoRA cancellation: job=%+v err=%v", cancelled, err)
+	}
+
+	second, err := repository.CreateLoraTrainingJob(ctx, newJob("integration-lora-job-0002", "integration_lora_2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.ClaimNextLoraTrainingJob(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.RequestLoraTrainingCancellation(ctx, second.PublicID, userID, false); err != nil {
+		t.Fatal(err)
+	}
+	if recovered, err := repository.RecoverLoraTrainingJobs(ctx); err != nil || recovered != 1 {
+		t.Fatalf("recover cancelled LoRA upload: recovered=%d err=%v", recovered, err)
+	}
+	second, err = repository.LoraTrainingJobByID(ctx, second.ID)
+	if err != nil || second.State != domain.LoraTrainingCancelled || second.FinishedAt == nil {
+		t.Fatalf("recovered LoRA cancellation: job=%+v err=%v", second, err)
+	}
+
+	third, err := repository.CreateLoraTrainingJob(ctx, newJob("integration-lora-job-0003", "integration_lora_3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.ClaimNextLoraTrainingJob(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.AttachLoraTrainingAgentJob(ctx, third.ID, "agent-job-integration", "Подготовка", "Агент принял датасет", 5); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.UpdateLoraTrainingJob(ctx, third.ID, store.UpdateLoraTrainingJobParams{
+		State: domain.LoraTrainingCompleted, Stage: "Готово", Progress: 100,
+		Message: "LoRA готова", ArtifactName: "integration_lora_3.safetensors", ArtifactBytes: 4096,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	third, err = repository.LoraTrainingJobByPublicID(ctx, third.PublicID, userID, false)
+	if err != nil || third.State != domain.LoraTrainingCompleted || third.AgentJobID != "agent-job-integration" || third.ArtifactBytes != 4096 {
+		t.Fatalf("completed LoRA training job: job=%+v err=%v", third, err)
+	}
+
+	var minerID int64
+	var minerScript, minerProcess string
+	if err := db.QueryRowContext(ctx, `SELECT id,script_path,process_name FROM miners WHERE is_default`).Scan(&minerID, &minerScript, &minerProcess); err != nil {
+		t.Fatal(err)
+	}
+	lease := domain.QuickGenerationMiningLease{
+		ID: "integration-lora-lease", LoraTrainingJobID: third.ID, UserID: userID, MinerID: minerID,
+		ScriptPath: minerScript, ProcessName: minerProcess, ResumeMining: false,
+	}
+	if err := repository.CreateQuickGenerationMiningLease(ctx, lease); err != nil {
+		t.Fatal(err)
+	}
+	storedLease, err := repository.QuickGenerationMiningLeaseByLoraTrainingJobID(ctx, third.ID)
+	if err != nil || storedLease.LoraTrainingJobID != third.ID {
+		t.Fatalf("LoRA mining lease=%+v err=%v", storedLease, err)
+	}
+	if _, _, err := repository.DeleteQuickGenerationMiningLease(ctx, lease.ID); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -99,6 +99,37 @@ relative path. A running miner is stopped and restarted after the new version
 passes validation; if the restart fails, the previous directory is restored.
 The previous directory is retained as a timestamped backup for manual rollback.
 
+## Image LoRA training
+
+Users with the `Image LoRA training` permission can prepare a captioned image
+dataset and train a LoRA from `/train-lora`. Training is intentionally limited
+to image models. Jobs run one at a time through a Windows host agent on port
+`8095`; the agent pauses mining through the Gateway lease mechanism, streams
+progress and logs back to the UI, and installs completed adapters below
+`ComfyUI/models/loras/Trained`.
+
+Musubi Tuner must already be cloned locally. Build and install the agent from
+an elevated PowerShell session; the installer creates a separate Python venv,
+does not stop or restart ComfyUI, and writes the generated bearer token into
+the selected Gateway `.env` file.
+
+```powershell
+$env:GOOS = 'windows'
+$env:GOARCH = 'amd64'
+go build -trimpath -ldflags '-s -w' -o .\dist\lora-training-agent.exe .\cmd\lora-training-agent
+.\scripts\install-lora-training-agent.ps1 `
+  -Executable .\dist\lora-training-agent.exe `
+  -GatewayEnvPath C:\ai-access-gateway\.env `
+  -GenerateToken
+```
+
+The default profiles target a local Krea2 RAW checkpoint and a Flux.2 Klein
+9B base checkpoint. Krea2 requires `qwen3vl_4b_bf16.safetensors`; Flux.2 Klein
+9B requires `qwen3vl_8b_bf16.safetensors`. Quantized GGUF or scaled-FP8 text
+encoders used by ComfyUI are not accepted by the Musubi training loader. A
+profile with missing weights remains visible in the UI with the exact missing
+path, but cannot be selected.
+
 ## Managed updates
 
 The administrator page `/admin/updates` can check and install updates for the

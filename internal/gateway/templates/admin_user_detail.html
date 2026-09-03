@@ -51,7 +51,7 @@
       {{if eq .AccessStatus "changed"}}<p class="success-box">Права доступа обновлены.</p>{{end}}
 	  {{if eq .AccessStatus "invalid_limits"}}<p class="alert">Проверьте лимиты генераций: допустимы только неотрицательные числа.</p>{{end}}
       {{if eq .Profile.Role "admin"}}
-      <p class="access-note"><span class="account-indicator"></span>Администратору доступны оба сервиса.</p>
+      <p class="access-note"><span class="account-indicator"></span>Администратору доступны все сервисы и обучение LoRA.</p>
       {{else}}
       <form method="post" class="access-form">
         <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -64,6 +64,7 @@
         </fieldset>
         <label class="service-toggle ui-choice"><input name="can_use_comfyui" type="checkbox" {{if .Profile.CanUseComfyUI}}checked{{end}}><span><b>ComfyUI</b><small>{{if .Profile.CanUseComfyUI}}Доступ разрешён{{else}}Доступ закрыт{{end}}</small></span></label>
         <label class="service-toggle ui-choice"><input name="can_use_openwebui" type="checkbox" {{if .Profile.CanUseOpenWebUI}}checked{{end}}><span><b>OpenWebUI</b><small>{{if .Profile.CanUseOpenWebUI}}Доступ разрешён{{else}}Доступ закрыт{{end}}</small></span></label>
+		<label class="service-toggle ui-choice"><input name="can_train_image_lora" type="checkbox" {{if .Profile.CanTrainImageLora}}checked{{end}}><span><b>Обучение LoRA для изображений</b><small>Датасеты и обучение для разрешённых Krea2 и Flux.2 Klein. Видео не поддерживается.</small></span></label>
 		<label class="service-toggle ui-choice"><input name="can_manage_mining" type="checkbox" {{if .Profile.CanManageMining}}checked{{end}}><span><b>Доверенный доступ к майнингу</b><small>{{if .Profile.CanManageMining}}Видит состояние и может запускать или останавливать майнинг{{else}}Майнинг полностью скрыт{{end}}</small></span></label>
         <section class="account-generation-controls">
           <div class="invite-section-heading"><h3>Генерация и ресурсы</h3><p>Изображения и видео расходуют независимые квоты.</p></div>

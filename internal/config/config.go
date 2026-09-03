@@ -159,6 +159,8 @@ type Config struct {
 	SystemMonitorAgentToken             string
 	UpdateAgentURL                      *url.URL
 	UpdateAgentToken                    string
+	LoraTrainingAgentURL                *url.URL
+	LoraTrainingAgentToken              string
 	VirusTotalAPIKey                    string
 	FeatureSuggestionsEnabled           bool
 	TrustedProxies                      []*net.IPNet
@@ -249,6 +251,10 @@ func Load() (Config, error) {
 	updateAgentURL, err := parseBaseURL(env("UPDATE_AGENT_URL", "http://host.docker.internal:8093"))
 	if err != nil {
 		return Config{}, fmt.Errorf("UPDATE_AGENT_URL: %w", err)
+	}
+	loraTrainingAgentURL, err := parseBaseURL(env("LORA_TRAINING_AGENT_URL", "http://host.docker.internal:8095"))
+	if err != nil {
+		return Config{}, fmt.Errorf("LORA_TRAINING_AGENT_URL: %w", err)
 	}
 	trustedProxies, err := parseNetworks(env("TRUSTED_PROXIES", "127.0.0.1,::1"))
 	if err != nil {
@@ -366,6 +372,7 @@ func Load() (Config, error) {
 	miningAgentToken := requiredEnv("MINING_AGENT_TOKEN")
 	systemMonitorAgentToken := strings.TrimSpace(env("SYSTEM_MONITOR_AGENT_TOKEN", miningAgentToken))
 	updateAgentToken := requiredEnv("UPDATE_AGENT_TOKEN")
+	loraTrainingAgentToken := strings.TrimSpace(env("LORA_TRAINING_AGENT_TOKEN", ""))
 	virusTotalAPIKey := strings.TrimSpace(env("VIRUSTOTAL_API_KEY", ""))
 	featureSuggestionsEnabled := strings.EqualFold(env("FEATURE_SUGGESTIONS_ENABLED", "false"), "true")
 	if databaseURL == "" {
@@ -388,6 +395,9 @@ func Load() (Config, error) {
 	}
 	if updateAgentToken != "" && len(updateAgentToken) < 32 {
 		return Config{}, fmt.Errorf("UPDATE_AGENT_TOKEN must be at least 32 characters when configured")
+	}
+	if loraTrainingAgentToken != "" && len(loraTrainingAgentToken) < 32 {
+		return Config{}, fmt.Errorf("LORA_TRAINING_AGENT_TOKEN must be at least 32 characters when configured")
 	}
 
 	cookieSecure := strings.EqualFold(env("COOKIE_SECURE", "false"), "true")
@@ -435,6 +445,8 @@ func Load() (Config, error) {
 		SystemMonitorAgentToken:             systemMonitorAgentToken,
 		UpdateAgentURL:                      updateAgentURL,
 		UpdateAgentToken:                    updateAgentToken,
+		LoraTrainingAgentURL:                loraTrainingAgentURL,
+		LoraTrainingAgentToken:              loraTrainingAgentToken,
 		VirusTotalAPIKey:                    virusTotalAPIKey,
 		FeatureSuggestionsEnabled:           featureSuggestionsEnabled,
 		TrustedProxies:                      trustedProxies,

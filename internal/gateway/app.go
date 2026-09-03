@@ -21,6 +21,7 @@ import (
 	"ai-access-gateway/internal/config"
 	contentcrypto "ai-access-gateway/internal/content"
 	"ai-access-gateway/internal/database"
+	"ai-access-gateway/internal/loratraining"
 	"ai-access-gateway/internal/mining"
 	"ai-access-gateway/internal/moderation"
 	"ai-access-gateway/internal/promptassistant"
@@ -37,6 +38,7 @@ var staticJavaScriptAssetPaths = []string{
 	"static/app.js",
 	"static/dialog-focus.js",
 	"static/gallery.js",
+	"static/lora-training.js",
 	"static/generate.js",
 	"static/generation-assistant.js",
 	"static/generation-batch.js",
@@ -110,12 +112,16 @@ func Run() error {
 	}
 	deletedSessions, err := repository.DeleteExpiredSessions(startupCtx, cfg.SessionIdleTimeout)
 	deletedTemporaryUsers, temporaryCleanupErr := repository.DeleteExpiredTemporaryUsers(startupCtx)
+	recoveredLoraJobs, loraRecoveryErr := repository.RecoverLoraTrainingJobs(startupCtx)
 	cancelStartup()
 	if err != nil {
 		return err
 	}
 	if temporaryCleanupErr != nil {
 		return temporaryCleanupErr
+	}
+	if loraRecoveryErr != nil {
+		return loraRecoveryErr
 	}
 	if closedWebSockets > 0 {
 		log.Printf("closed %d stale websocket sessions", closedWebSockets)
@@ -125,6 +131,9 @@ func Run() error {
 	}
 	if deletedTemporaryUsers > 0 {
 		log.Printf("deleted %d expired temporary users", deletedTemporaryUsers)
+	}
+	if recoveredLoraJobs > 0 {
+		log.Printf("requeued %d interrupted LoRA training jobs", recoveredLoraJobs)
 	}
 
 	tpl, err := ParseTemplates()
@@ -156,6 +165,7 @@ func Run() error {
 		}),
 		contentModerator:     moderation.NewClient(cfg.ContentModeratorUpstream),
 		updates:              updates.NewClient(cfg.UpdateAgentURL, cfg.UpdateAgentToken),
+		loraTraining:         loratraining.NewClient(cfg.LoraTrainingAgentURL, cfg.LoraTrainingAgentToken),
 		virusTotal:           virustotal.NewClient(cfg.VirusTotalAPIKey),
 		contentCipher:        contentCipher,
 		mediaCaptureSlots:    make(chan struct{}, maxConcurrentMediaCaptures),
@@ -302,6 +312,7 @@ func (a *App) publicMux() http.Handler {
 	mux.Handle("/mining/icon/", a.requireAuth(http.HandlerFunc(a.handleMinerIcon)))
 	a.registerNotificationRoutes(mux)
 	a.registerGenerationRoutes(mux)
+	a.registerLoraTrainingRoutes(mux)
 	a.registerServiceRoutes(mux)
 	return mux
 }

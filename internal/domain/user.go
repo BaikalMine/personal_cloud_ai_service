@@ -18,6 +18,7 @@ type User struct {
 	CanGenerateImageToImage          bool
 	CanGenerateVideo                 bool
 	CanUseAdvancedGenerationSettings bool
+	CanTrainImageLora                bool
 	CanManageMining                  bool
 	PauseMiningForQuickGeneration    bool
 	GenerationDailyLimit             int
@@ -90,6 +91,7 @@ type UserRow struct {
 	CanGenerateImageToImage          bool
 	CanGenerateVideo                 bool
 	CanUseAdvancedGenerationSettings bool
+	CanTrainImageLora                bool
 	CanManageMining                  bool
 	PauseMiningForQuickGeneration    bool
 	GenerationDailyLimit             int

@@ -13,6 +13,7 @@ import (
 	"ai-access-gateway/internal/config"
 	contentcrypto "ai-access-gateway/internal/content"
 	"ai-access-gateway/internal/domain"
+	"ai-access-gateway/internal/loratraining"
 	"ai-access-gateway/internal/mining"
 	"ai-access-gateway/internal/moderation"
 	"ai-access-gateway/internal/promptassistant"
@@ -55,6 +56,7 @@ type App struct {
 	promptAssistant        *promptassistant.Client
 	contentModerator       *moderation.Client
 	updates                *updates.Client
+	loraTraining           *loratraining.Client
 	virusTotal             *virustotal.Client
 	contentCipher          *contentcrypto.Cipher
 	mediaCaptureSlots      chan struct{}
@@ -75,6 +77,7 @@ type App struct {
 	dependencyOnce         sync.Once
 	observabilityOnce      sync.Once
 	mediaObservabilityOnce sync.Once
+	loraTrainingMu         sync.Mutex
 	maintenanceWorkers     *maintenanceRegistry
 	maintenanceDone        chan struct{}
 	dependencyHealth       *dependencyMonitor

@@ -28,6 +28,11 @@
     <a class="button" href="/generate">Начать генерацию</a>
   </section>{{end}}
 
+  {{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanTrainImageLora}}<section class="generation-launch panel lora-launch">
+    <div><p class="section-kicker">Обучение изображений</p><h2>Создать LoRA</h2><p class="panel-intro">Загрузите 5–100 подписанных изображений, выберите Krea2 или Flux.2 Klein и следите за обучением в реальном времени.</p></div>
+    <a class="button" href="/train-lora">Открыть обучение</a>
+  </section>{{end}}
+
   {{if .CanAccessMining}}<section class="panel mining-control {{if .Mining.Running}}is-running{{end}}" aria-labelledby="mining-title">
     <div class="panel-heading mining-heading">
       <div><p class="section-kicker">Вычислительные ресурсы</p><h2 id="mining-title">Майнинг</h2></div>

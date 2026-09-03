@@ -87,6 +87,10 @@ func (a *App) handleAdminRoutes(w http.ResponseWriter, r *http.Request) {
 		a.handleAdminUpdates(w, r)
 	case path == "workflows":
 		a.handleAdminWorkflows(w, r)
+	case path == "lora-training":
+		a.handleAdminLoraTraining(w, r)
+	case strings.HasPrefix(path, "lora-training/"):
+		a.handleAdminLoraTrainingAction(w, r, strings.TrimPrefix(path, "lora-training/"))
 	case strings.HasPrefix(path, "content/media/"):
 		a.handleAdminContentMedia(w, r, strings.TrimPrefix(path, "content/media/"))
 	case path == "content/events":
@@ -799,6 +803,7 @@ func (a *App) handleAdminUserDetail(w http.ResponseWriter, r *http.Request, rest
 			video := quickGeneration && r.Form.Get("can_generate_video") == "on"
 			quickGeneration = quickGeneration && (textToImage || imageToImage || video)
 			advancedGenerationSettings := quickGeneration && r.Form.Get("can_use_advanced_generation_settings") == "on"
+			trainImageLora := r.Form.Get("can_train_image_lora") == "on"
 			manageMining := r.Form.Get("can_manage_mining") == "on"
 			pauseMiningForQuickGeneration := quickGeneration && r.Form.Get("pause_mining_for_quick_generation") == "on"
 			imageDailyLimit, imageTotalLimit, limitErr := parseGenerationLimits(r, "image_generation", "изображений")
@@ -819,7 +824,7 @@ func (a *App) handleAdminUserDetail(w http.ResponseWriter, r *http.Request, rest
 			updated, err := a.store.SetServiceAccess(r.Context(), id, store.SetServiceAccessParams{
 				ComfyUI: comfyUI, OpenWebUI: openWebUI, QuickGeneration: quickGeneration,
 				TextToImage: textToImage, ImageToImage: imageToImage, Video: video,
-				AdvancedGenerationSettings: advancedGenerationSettings, ManageMining: manageMining,
+				AdvancedGenerationSettings: advancedGenerationSettings, TrainImageLora: trainImageLora, ManageMining: manageMining,
 				PauseMiningForQuickGeneration: pauseMiningForQuickGeneration,
 				ImageDailyLimit:               imageDailyLimit, ImageTotalLimit: imageTotalLimit,
 				VideoDailyLimit: videoDailyLimit, VideoTotalLimit: videoTotalLimit, MaxVideoQuality: maxVideoQuality,
@@ -833,7 +838,7 @@ func (a *App) handleAdminUserDetail(w http.ResponseWriter, r *http.Request, rest
 				a.audit(r.Context(), &actor.ID, "user_service_access_updated", "user", &id, a.clientIP(r), r.UserAgent(), map[string]any{
 					"comfyui": comfyUI, "openwebui": openWebUI, "quick_generation": quickGeneration,
 					"text_to_image": textToImage, "image_to_image": imageToImage, "video": video,
-					"advanced_generation_settings": advancedGenerationSettings, "manage_mining": manageMining,
+					"advanced_generation_settings": advancedGenerationSettings, "train_image_lora": trainImageLora, "manage_mining": manageMining,
 					"pause_mining_for_quick_generation": pauseMiningForQuickGeneration,
 					"image_generation_daily_limit":      imageDailyLimit, "image_generation_total_limit": imageTotalLimit,
 					"video_generation_daily_limit": videoDailyLimit, "video_generation_total_limit": videoTotalLimit,
@@ -954,6 +959,7 @@ func (a *App) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
 		grantImageToImage := grantQuickGeneration && r.Form.Get("grant_image_to_image") == "on"
 		grantVideo := grantQuickGeneration && r.Form.Get("grant_video") == "on"
 		grantAdvancedGenerationSettings := grantQuickGeneration && r.Form.Get("grant_advanced_generation_settings") == "on"
+		grantTrainImageLora := r.Form.Get("grant_train_image_lora") == "on"
 		pauseMiningForQuickGeneration := grantQuickGeneration && r.Form.Get("pause_mining_for_quick_generation") == "on"
 		if grantQuickGeneration && !grantTextToImage && !grantImageToImage && !grantVideo {
 			invites, _ := a.store.ListInvites(r.Context(), 200)
@@ -978,7 +984,7 @@ func (a *App) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
 			a.render(w, r, "admin_invites", map[string]any{"Title": "Приглашения", "Invites": invites, "Error": qualityErr.Error()})
 			return
 		}
-		if !grantComfyUI && !grantOpenWebUI && !grantQuickGeneration {
+		if !grantComfyUI && !grantOpenWebUI && !grantQuickGeneration && !grantTrainImageLora {
 			invites, _ := a.store.ListInvites(r.Context(), 200)
 			a.render(w, r, "admin_invites", map[string]any{"Title": "Приглашения", "Invites": invites, "Error": "Выберите хотя бы один тип доступа."})
 			return
@@ -1000,6 +1006,7 @@ func (a *App) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
 			GrantImageToImage:               grantImageToImage,
 			GrantVideo:                      grantVideo,
 			GrantAdvancedGenerationSettings: grantAdvancedGenerationSettings,
+			GrantTrainImageLora:             grantTrainImageLora,
 			PauseMiningForQuickGeneration:   pauseMiningForQuickGeneration,
 			GenerationDailyLimit:            imageDailyLimit,
 			GenerationTotalLimit:            imageTotalLimit,
@@ -1015,7 +1022,7 @@ func (a *App) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
 		a.audit(r.Context(), &actor.ID, "invite_created", "invite", &id, a.clientIP(r), r.UserAgent(), map[string]any{
 			"max_uses": maxUses, "expires_at": expiresAt, "grant_comfyui": grantComfyUI, "grant_openwebui": grantOpenWebUI,
 			"grant_quick_generation": grantQuickGeneration, "text_to_image": grantTextToImage, "image_to_image": grantImageToImage, "video": grantVideo,
-			"advanced_generation_settings": grantAdvancedGenerationSettings, "pause_mining_for_quick_generation": pauseMiningForQuickGeneration,
+			"advanced_generation_settings": grantAdvancedGenerationSettings, "train_image_lora": grantTrainImageLora, "pause_mining_for_quick_generation": pauseMiningForQuickGeneration,
 			"image_generation_daily_limit": imageDailyLimit, "image_generation_total_limit": imageTotalLimit,
 			"video_generation_daily_limit": videoDailyLimit, "video_generation_total_limit": videoTotalLimit,
 			"max_video_generation_quality": maxVideoQuality, "account_lifetime_seconds": accountLifetimeSeconds,

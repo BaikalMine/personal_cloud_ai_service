@@ -20,6 +20,26 @@ func (a *App) pauseMiningForQuickGeneration(ctx context.Context, user *User, job
 	if user == nil || !user.PauseMiningForQuickGeneration {
 		return nil, "", nil
 	}
+	return a.reserveMiningForGPUWork(ctx, user, jobID, 0)
+}
+
+func (a *App) pauseMiningForLoraTraining(ctx context.Context, user *User, jobID int64) (*domain.QuickGenerationMiningLease, string, error) {
+	if user == nil {
+		return nil, "", nil
+	}
+	if jobID > 0 {
+		existing, err := a.store.QuickGenerationMiningLeaseByLoraTrainingJobID(ctx, jobID)
+		if err == nil {
+			return &existing, "", nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, "", fmt.Errorf("проверить резервирование GPU для LoRA: %w", err)
+		}
+	}
+	return a.reserveMiningForGPUWork(ctx, user, 0, jobID)
+}
+
+func (a *App) reserveMiningForGPUWork(ctx context.Context, user *User, generationJobID, loraTrainingJobID int64) (*domain.QuickGenerationMiningLease, string, error) {
 	a.miningPauseMu.Lock()
 	defer a.miningPauseMu.Unlock()
 
@@ -37,7 +57,7 @@ func (a *App) pauseMiningForQuickGeneration(ctx context.Context, user *User, job
 			}
 		}
 		lease := domain.QuickGenerationMiningLease{
-			ID: newRequestID(), CorrelationID: correlationIDFromContext(ctx), GenerationJobID: jobID, UserID: user.ID, MinerID: existing.MinerID,
+			ID: newRequestID(), CorrelationID: correlationIDFromContext(ctx), GenerationJobID: generationJobID, LoraTrainingJobID: loraTrainingJobID, UserID: user.ID, MinerID: existing.MinerID,
 			ScriptPath: existing.ScriptPath, ProcessName: existing.ProcessName, ResumeMining: existing.ResumeMining || wasRunning,
 		}
 		if err := a.store.CreateQuickGenerationMiningLease(ctx, lease); err != nil {
@@ -62,7 +82,7 @@ func (a *App) pauseMiningForQuickGeneration(ctx context.Context, user *User, job
 	}
 	wasRunning := overview.Available && overview.Running && overview.Active != nil
 	lease := domain.QuickGenerationMiningLease{
-		ID: newRequestID(), CorrelationID: correlationIDFromContext(ctx), GenerationJobID: jobID, UserID: user.ID, MinerID: target.ID,
+		ID: newRequestID(), CorrelationID: correlationIDFromContext(ctx), GenerationJobID: generationJobID, LoraTrainingJobID: loraTrainingJobID, UserID: user.ID, MinerID: target.ID,
 		ScriptPath: target.ScriptPath, ProcessName: target.ProcessName, ResumeMining: true,
 	}
 	if err := a.store.CreateQuickGenerationMiningLease(ctx, lease); err != nil {
@@ -150,6 +170,18 @@ func (a *App) releaseMiningPauseForJob(ctx context.Context, jobID int64) bool {
 	return a.releaseMiningPause(ctx, lease.ID)
 }
 
+func (a *App) releaseMiningPauseForLoraTraining(ctx context.Context, jobID int64) bool {
+	lease, err := a.store.QuickGenerationMiningLeaseByLoraTrainingJobID(ctx, jobID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true
+	}
+	if err != nil {
+		log.Printf("load mining-pause lease for LoRA training job %d: %v", jobID, err)
+		return false
+	}
+	return a.releaseMiningPause(ctx, lease.ID)
+}
+
 func (a *App) releaseMiningPause(ctx context.Context, leaseID string) bool {
 	a.miningPauseMu.Lock()
 	defer a.miningPauseMu.Unlock()
@@ -212,6 +244,19 @@ func (a *App) refreshQuickGenerationMiningLeases(ctx context.Context) (int64, er
 			return processed, errors.Join(append(refreshErrors, ctx.Err())...)
 		}
 		processed++
+		if lease.LoraTrainingJobID > 0 {
+			job, jobErr := a.store.LoraTrainingJobByID(ctx, lease.LoraTrainingJobID)
+			if jobErr != nil {
+				if !errors.Is(jobErr, sql.ErrNoRows) {
+					refreshErrors = append(refreshErrors, fmt.Errorf("lease %s LoRA training job: %w", lease.ID, jobErr))
+				}
+				continue
+			}
+			if job.State.Terminal() {
+				a.releaseMiningPauseForLoraTraining(ctx, job.ID)
+			}
+			continue
+		}
 		if lease.GenerationJobID > 0 {
 			job, jobErr := a.store.GenerationJobByID(ctx, lease.GenerationJobID)
 			if jobErr != nil {

@@ -1,0 +1,41 @@
+{{define "admin_lora_training"}}
+{{template "head" .}}
+{{template "admin_nav" .}}
+<main class="page admin-lora-page" id="main-content">
+  <section class="hero admin-lora-hero">
+    <div><p class="eyebrow">Вычислительные задачи</p><h1>Обучение LoRA</h1><p class="hero-copy">Профили моделей, очередь и результаты обучения изображений.</p></div>
+    <a class="button" href="{{.PublicBaseURL}}/train-lora">Создать обучение</a>
+  </section>
+
+  {{if .Cancelled}}<p class="success-box">Отмена задания запрошена.</p>{{end}}
+  {{if .AgentMessage}}<p class="ui-status-banner is-warning">{{.AgentMessage}}</p>{{end}}
+
+  <section class="admin-lora-metrics" aria-label="Состояние обучения">
+    <div><span>Профили готовы</span><strong>{{.ReadyProfiles}} / {{len .Profiles}}</strong></div>
+    <div><span>В очереди и работе</span><strong>{{.ActiveJobs}}</strong></div>
+    <div><span>Завершено</span><strong>{{.CompletedJobs}}</strong></div>
+    <div><span>С ошибкой</span><strong>{{.FailedJobs}}</strong></div>
+  </section>
+
+  <section class="panel admin-lora-profiles" aria-labelledby="admin-lora-profiles-title">
+    <div class="panel-heading"><div><p class="section-kicker">Локальный агент</p><h2 id="admin-lora-profiles-title">Профили моделей</h2><p class="panel-intro">Видеомодели намеренно не поддерживаются. Готовность проверяется по локальным весам и окружению Musubi Tuner.</p></div></div>
+    <div class="admin-lora-profile-list">
+      {{range .Profiles}}<article class="{{if .Ready}}is-ready{{else}}is-blocked{{end}}"><header><div><span>{{if eq .Family "flux2-klein"}}Flux.2 Klein{{else}}Krea2{{end}}</span><h3>{{.Name}}</h3></div><span class="badge {{if .Ready}}ok{{else}}danger{{end}}">{{if .Ready}}Готов{{else}}Недоступен{{end}}</span></header><p>{{if .Ready}}{{.Description}}{{else}}{{.Detail}}{{end}}</p><small>{{.BaseModel}}</small></article>{{else}}<p class="empty-state">Агент не вернул ни одного профиля.</p>{{end}}
+    </div>
+  </section>
+
+  <section class="admin-lora-queue" aria-labelledby="admin-lora-queue-title">
+    <header class="lora-history-heading"><div><p class="section-kicker">Последние 200</p><h2 id="admin-lora-queue-title">Задания пользователей</h2></div><span>{{len .Jobs}}</span></header>
+    <div class="table-scroll"><table class="admin-lora-table"><thead><tr><th>Состояние</th><th>Пользователь и задача</th><th>Параметры</th><th>Ход выполнения</th><th>Действия</th></tr></thead><tbody>
+      {{range .Jobs}}<tr>
+        <td data-label="Состояние"><span class="badge {{if eq .State "completed"}}ok{{else if eq .State "failed"}}danger{{end}}">{{.StateLabel}}</span></td>
+        <td data-label="Пользователь и задача"><strong>{{.Name}}</strong><small>{{.UsernameSnapshot}} · {{.FamilyLabel}}</small><code>{{.OutputName}}.safetensors</code></td>
+        <td data-label="Параметры"><span>{{.SampleCount}} фото · {{.Resolution}} px</span><small>{{.PresetLabel}} · rank {{.NetworkDim}} · {{.MaxTrainSteps}} шагов</small></td>
+        <td data-label="Ход выполнения"><div class="admin-lora-progress"><span>{{.Stage}} · {{.Progress}}%</span><progress max="100" value="{{.Progress}}">{{.Progress}}%</progress><small>{{if .ErrorMessage}}{{.ErrorMessage}}{{else}}{{.Message}}{{end}}</small></div></td>
+        <td data-label="Действия"><div class="table-actions">{{if .CanCancel}}<form method="post" action="/admin/lora-training/{{.PublicID}}/cancel"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="action-button danger" data-confirm="Остановить обучение LoRA пользователя {{.UsernameSnapshot}}?">Отменить</button></form>{{end}}{{if .CanDownload}}<a class="button action-button" href="/admin/lora-training/{{.PublicID}}/download">Скачать</a>{{end}}{{if and (not .CanCancel) (not .CanDownload)}}<span class="muted">Нет действий</span>{{end}}</div></td>
+      </tr>{{else}}<tr><td colspan="5" class="empty-state">Заданий обучения пока нет.</td></tr>{{end}}
+    </tbody></table></div>
+  </section>
+</main>
+</body></html>
+{{end}}
