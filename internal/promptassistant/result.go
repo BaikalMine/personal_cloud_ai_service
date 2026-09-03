@@ -63,6 +63,7 @@ type ReferenceUnderstanding struct {
 }
 
 type Result struct {
+	Model      string                   `json:"model,omitempty"`
 	Prompt     string                   `json:"prompt"`
 	References []ReferenceUnderstanding `json:"references"`
 	Usage      Usage                    `json:"usage"`

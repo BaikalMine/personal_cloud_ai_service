@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGenerateTemplateRenders(t *testing.T) {
@@ -1562,12 +1563,28 @@ func TestSubmitComfyPromptInjectsUserClientID(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := &App{cfg: Config{ComfyUIUpstream: upstream, SessionSecret: "01234567890123456789012345678901"}}
-	promptID, err := app.submitComfyPrompt(context.Background(), 17, "job_test_abcdef012345", map[string]any{"1": map[string]any{"class_type": "Test"}})
+	promptID, err := app.submitComfyPrompt(context.Background(), 17, "job_test_abcdef012345", false, map[string]any{"1": map[string]any{"class_type": "Test"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if promptID != "abcdef0123456789" {
 		t.Fatalf("prompt ID = %q", promptID)
+	}
+}
+
+func TestComfyPromptDocumentPlacesPriorityJobsAheadInFIFOOrder(t *testing.T) {
+	first := comfyPromptDocument("client", "job-1", true, map[string]any{})
+	firstNumber, firstOK := first["number"].(int64)
+	if !firstOK || firstNumber >= 0 {
+		t.Fatalf("priority queue number must be negative: %v", first["number"])
+	}
+	queuedAt := time.Date(2026, time.September, 3, 12, 0, 0, 0, time.UTC)
+	if older, newer := comfyPriorityQueueNumber(queuedAt), comfyPriorityQueueNumber(queuedAt.Add(time.Microsecond)); older >= newer {
+		t.Fatalf("priority queue must retain FIFO order: older=%d newer=%d", older, newer)
+	}
+	regular := comfyPromptDocument("client", "job-3", false, map[string]any{})
+	if _, exists := regular["number"]; exists {
+		t.Fatalf("regular job unexpectedly received queue priority: %#v", regular)
 	}
 }
 

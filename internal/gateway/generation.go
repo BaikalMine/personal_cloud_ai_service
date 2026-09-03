@@ -37,6 +37,7 @@ const (
 	maxGenerationHistory           = 32 << 20
 	maxArchivedGenerationMedia     = int64(512 << 20)
 	maxGenerationOutputFingerprint = int64(2 << 30)
+	comfyPriorityNumberBase        = int64(-8_000_000_000_000_000)
 )
 
 type generationOutput struct {
@@ -502,7 +503,7 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 		writeGenerationJobError(w, http.StatusServiceUnavailable, job, message+": "+err.Error())
 		return
 	}
-	promptID, err := a.submitComfyPrompt(jobCtx, user.ID, job.PublicID, prompt)
+	promptID, err := a.submitComfyPrompt(jobCtx, user.ID, job.PublicID, user.PauseMiningForQuickGeneration, prompt)
 	if err != nil {
 		job = a.failGenerationJob(jobCtx, job, "comfy_submission_failed", "ComfyUI не принял workflow", err)
 		writeGenerationJobError(w, http.StatusBadGateway, job, "ComfyUI не принял workflow: "+err.Error())
@@ -1137,7 +1138,7 @@ func (a *App) handleGenerationQueue(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, overview)
 }
 
-func (a *App) submitComfyPrompt(ctx context.Context, userID int64, jobPublicID string, prompt map[string]any) (promptID string, err error) {
+func (a *App) submitComfyPrompt(ctx context.Context, userID int64, jobPublicID string, priority bool, prompt map[string]any) (promptID string, err error) {
 	started := time.Now()
 	defer func() {
 		a.observeServiceCall(ctx, dependencyComfyUI, "submit_prompt", started, err, false, "comfy_submit_failed", "")
@@ -1147,7 +1148,7 @@ func (a *App) submitComfyPrompt(ctx context.Context, userID int64, jobPublicID s
 		return "", err
 	}
 	defer releaseAdmission()
-	document := comfyPromptDocument(a.comfyClientID(userID), jobPublicID, prompt)
+	document := comfyPromptDocument(a.comfyClientID(userID), jobPublicID, priority, prompt)
 	body, err := json.Marshal(document)
 	if err != nil {
 		return "", err
@@ -1196,7 +1197,7 @@ func (a *App) submitComfyPrompt(ctx context.Context, userID int64, jobPublicID s
 	return result.PromptID, nil
 }
 
-func comfyPromptDocument(clientID, jobPublicID string, prompt map[string]any) map[string]any {
+func comfyPromptDocument(clientID, jobPublicID string, priority bool, prompt map[string]any) map[string]any {
 	// ComfyUI extensions inspect this standard metadata before execution. A real
 	// workflow object prevents them from treating a missing extra_pnginfo entry
 	// as malformed while keeping the gateway API prompt independent of the UI.
@@ -1213,11 +1214,22 @@ func comfyPromptDocument(clientID, jobPublicID string, prompt map[string]any) ma
 	if jobPublicID = strings.TrimSpace(jobPublicID); jobPublicID != "" {
 		extraData["gateway_job_id"] = jobPublicID
 	}
-	return map[string]any{
+	document := map[string]any{
 		"prompt":     prompt,
 		"client_id":  clientID,
 		"extra_data": extraData,
 	}
+	if priority {
+		// ComfyUI executes lower queue numbers first. Epoch microseconds preserve
+		// FIFO among priority jobs while the negative band stays ahead of normal
+		// ComfyUI sequence numbers.
+		document["number"] = comfyPriorityQueueNumber(time.Now())
+	}
+	return document
+}
+
+func comfyPriorityQueueNumber(now time.Time) int64 {
+	return comfyPriorityNumberBase + now.UTC().UnixMicro()
 }
 
 func (a *App) fetchGenerationStatus(ctx context.Context, promptID string, userID int64) (status generationStatus, err error) {

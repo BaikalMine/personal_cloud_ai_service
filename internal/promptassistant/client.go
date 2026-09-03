@@ -23,10 +23,13 @@ const (
 var ErrUnsupportedImage = errors.New("изображение не поддерживается локальной vision-проверкой")
 
 type Client struct {
-	baseURL *url.URL
-	model   string
-	http    *http.Client
-	policy  ModelPolicy
+	baseURL         *url.URL
+	model           string
+	visionModel     string
+	visionTimeout   time.Duration
+	visionKeepAlive string
+	http            *http.Client
+	policy          ModelPolicy
 }
 
 type Message struct {
@@ -66,10 +69,14 @@ func NewClient(baseURL *url.URL, model string) *Client {
 
 func NewClientWithPolicy(baseURL *url.URL, model string, policy ModelPolicy) *Client {
 	policy = policy.normalized()
+	model = strings.TrimSpace(model)
 	return &Client{
-		baseURL: baseURL,
-		model:   strings.TrimSpace(model),
-		policy:  policy,
+		baseURL:         baseURL,
+		model:           model,
+		visionModel:     model,
+		visionTimeout:   policy.ImageTimeout,
+		visionKeepAlive: policy.KeepAlive,
+		policy:          policy,
 		http: &http.Client{
 			Transport: &http.Transport{
 				Proxy:                 http.ProxyFromEnvironment,
@@ -82,8 +89,42 @@ func NewClientWithPolicy(baseURL *url.URL, model string, policy ModelPolicy) *Cl
 	}
 }
 
+// WithVisionModel keeps fast text-only prompting independent from requests
+// that genuinely need a multimodal model. It is intended for application
+// startup, before the client is shared between handlers.
+func (c *Client) WithVisionModel(model string, timeout time.Duration, keepAlive string) *Client {
+	if c == nil {
+		return c
+	}
+	if model = strings.TrimSpace(model); model != "" {
+		c.visionModel = model
+	}
+	if timeout > 0 {
+		c.visionTimeout = timeout
+	}
+	if keepAlive = strings.TrimSpace(keepAlive); keepAlive != "" {
+		c.visionKeepAlive = keepAlive
+	}
+	return c
+}
+
 func (c *Client) Configured() bool {
 	return c != nil && c.baseURL != nil && c.model != ""
+}
+
+func (c *Client) VisionConfigured() bool {
+	return c != nil && c.baseURL != nil && c.visionModel != ""
+}
+
+func (c *Client) visionPolicy(policy RequestPolicy) RequestPolicy {
+	if c.visionTimeout > 0 {
+		policy.Timeout = c.visionTimeout
+		policy.TimeoutMS = c.visionTimeout.Milliseconds()
+	}
+	if c.visionKeepAlive != "" {
+		policy.KeepAlive = c.visionKeepAlive
+	}
+	return policy
 }
 
 func (c *Client) Enhance(ctx context.Context, mode Mode, profile Profile, prompt string, references []ImageReference, think bool) (string, error) {
@@ -111,6 +152,14 @@ func (c *Client) PolicyFor(mode Mode, profile Profile, think bool) RequestPolicy
 		return DefaultModelPolicy().request(mode, profile, think)
 	}
 	return c.policy.request(mode, profile, think)
+}
+
+func (c *Client) PolicyForRequest(mode Mode, profile Profile, think, hasImages bool) RequestPolicy {
+	policy := c.PolicyFor(mode, profile, think)
+	if hasImages && c != nil {
+		policy = c.visionPolicy(policy)
+	}
+	return policy
 }
 
 func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt string, references []ImageReference, video VideoContext, think bool) (Result, error) {
@@ -142,7 +191,7 @@ func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt
 		systemPrompt = SystemPromptWithVideoContextAndReferences(mode, profile, references, video)
 	}
 	systemPrompt += structuredResponseInstruction(mode, references, video)
-	requestPolicy := c.PolicyFor(mode, profile, think)
+	requestPolicy := c.PolicyForRequest(mode, profile, think, false)
 	payload := chatRequest{
 		Model: c.model,
 		Messages: []Message{
@@ -168,6 +217,14 @@ func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt
 		}
 		payload.Messages[1].Images = append(payload.Messages[1].Images, base64.StdEncoding.EncodeToString(reference.Image))
 	}
+	if len(payload.Messages[1].Images) > 0 {
+		if !c.VisionConfigured() {
+			return Result{}, errors.New("локальная vision-модель не настроена")
+		}
+		payload.Model = c.visionModel
+		requestPolicy = c.PolicyForRequest(mode, profile, think, true)
+		payload.KeepAlive = requestPolicy.KeepAlive
+	}
 	payload.Options.Temperature = 0.35
 	payload.Options.TopP = 0.9
 	payload.Options.NumPredict = requestPolicy.NumPredict
@@ -176,37 +233,38 @@ func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return Result{}, err
+		return Result{Model: payload.Model, Policy: requestPolicy}, err
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), bytes.NewReader(body))
 	if err != nil {
-		return Result{}, err
+		return Result{Model: payload.Model, Policy: requestPolicy}, err
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
 	response, err := c.httpClientFor(requestPolicy).Do(request)
 	if err != nil {
-		return Result{Policy: requestPolicy}, fmt.Errorf("локальная модель недоступна: %w", err)
+		return Result{Model: payload.Model, Policy: requestPolicy}, fmt.Errorf("локальная модель недоступна: %w", err)
 	}
 	defer response.Body.Close()
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil {
-		return Result{Policy: requestPolicy}, err
+		return Result{Model: payload.Model, Policy: requestPolicy}, err
 	}
 	if len(responseBody) > maxResponseBytes {
-		return Result{Policy: requestPolicy}, errors.New("локальная модель вернула слишком большой ответ")
+		return Result{Model: payload.Model, Policy: requestPolicy}, errors.New("локальная модель вернула слишком большой ответ")
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return Result{Policy: requestPolicy}, fmt.Errorf("локальная модель ответила HTTP %d", response.StatusCode)
+		return Result{Model: payload.Model, Policy: requestPolicy}, fmt.Errorf("локальная модель ответила HTTP %d", response.StatusCode)
 	}
 	var result chatResponse
 	if err := json.Unmarshal(responseBody, &result); err != nil {
-		return Result{Policy: requestPolicy}, fmt.Errorf("некорректный ответ локальной модели: %w", err)
+		return Result{Model: payload.Model, Policy: requestPolicy}, fmt.Errorf("некорректный ответ локальной модели: %w", err)
 	}
 	parsed, err := parseModelResult(result.Message.Content, mode, references, video)
 	if err != nil {
-		return Result{Policy: requestPolicy}, err
+		return Result{Model: payload.Model, Policy: requestPolicy}, err
 	}
+	parsed.Model = payload.Model
 	parsed.Policy = requestPolicy
 	parsed.Usage = Usage{
 		PromptTokens: result.PromptEvalCount, CompletionTokens: result.EvalCount,
@@ -239,7 +297,7 @@ func durationMilliseconds(value int64) int64 {
 // image should be hidden behind the privacy curtain. Media never leaves Ollama
 // on this host, and an uncertain response is returned as an error for retry.
 func (c *Client) ClassifyImage(ctx context.Context, image []byte, mimeType string) (bool, error) {
-	if !c.Configured() {
+	if !c.VisionConfigured() {
 		return false, errors.New("локальная vision-модель не настроена")
 	}
 	if len(image) == 0 || len(image) > maxImageBytes {
@@ -256,7 +314,7 @@ func (c *Client) ClassifyImage(ctx context.Context, image []byte, mimeType strin
 	target.RawQuery = ""
 	target.Fragment = ""
 	payload := chatRequest{
-		Model: c.model,
+		Model: c.visionModel,
 		Messages: []Message{
 			{Role: "system", Content: "You are a strict local 18+ privacy classifier. Reply with exactly one word: SENSITIVE or SAFE. The privacy curtain is not a moral judgement: choose SENSITIVE whenever the image visibly contains nudity, exposed breasts, buttocks or intimate body parts, explicit sexual activity, fetish context, erotic lingerie, an intentionally sexualized pose or framing, implied nudity, or clearly adult erotic imagery. Prefer SENSITIVE whenever the sexual intent is plausible from visible context; this protects viewers from accidental exposure. Reply SAFE only for clearly non-sexual content such as ordinary portraits, everyday clothing, neutral fashion, landscapes, ordinary beach or sport scenes, and non-erotic art. Do not infer age, identity, or sexual content from a person's appearance alone."},
 			{Role: "user", Content: "Classify this image.", Images: []string{base64.StdEncoding.EncodeToString(image)}},
@@ -278,7 +336,8 @@ func (c *Client) ClassifyImage(ctx context.Context, image []byte, mimeType strin
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
-	response, err := c.http.Do(request)
+	requestPolicy := c.PolicyForRequest(ModeImageToImage, ProfileWorkflowDefault, false, true)
+	response, err := c.httpClientFor(requestPolicy).Do(request)
 	if err != nil {
 		return false, fmt.Errorf("локальная vision-модель недоступна: %w", err)
 	}

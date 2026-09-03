@@ -149,7 +149,7 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	policy := a.promptAssistant.PolicyFor(mode, profile, think)
+	policy := a.promptAssistant.PolicyForRequest(mode, profile, think, len(references) > 0)
 	ctx, cancel := context.WithTimeout(r.Context(), policy.Timeout)
 	defer cancel()
 	correlation := correlationID(r)
@@ -180,8 +180,12 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.recordPromptAssistantEvent(r.Context(), user.ID, correlation, mode, profile, prompt, result, think, latency, "completed", "")
+	assistantModel := strings.TrimSpace(result.Model)
+	if assistantModel == "" {
+		assistantModel = a.cfg.PromptAssistantModel
+	}
 	response := map[string]any{
-		"prompt": result.Prompt, "references": result.References, "model": a.cfg.PromptAssistantModel,
+		"prompt": result.Prompt, "references": result.References, "model": assistantModel,
 		"correlation_id": correlation, "usage": result.Usage,
 	}
 	if miningWarning != "" {
@@ -212,9 +216,13 @@ func (a *App) recordPromptAssistantEvent(ctx context.Context, userID int64, corr
 		logGateway(ctx, slog.LevelError, "prompt_assistant_audit_encrypt_failed", "Prompt assistant audit encryption failed")
 		return
 	}
+	assistantModel := strings.TrimSpace(result.Model)
+	if assistantModel == "" {
+		assistantModel = a.cfg.PromptAssistantModel
+	}
 	eventID, err := a.store.InsertContentEvent(ctx, domain.ContentEventRecord{
 		UserID: userID, CorrelationID: correlation, Service: "ollama", Kind: "prompt_assistant", ExternalID: newRequestID(),
-		Model: a.cfg.PromptAssistantModel, GenerationState: status, PromptCipher: promptCipher,
+		Model: assistantModel, GenerationState: status, PromptCipher: promptCipher,
 		ResponseCipher: responseCipher, MetadataCipher: metadataCipher, ExpiresAt: time.Now().Add(a.retentionPolicy().AIContent),
 	})
 	if err != nil {
@@ -223,7 +231,7 @@ func (a *App) recordPromptAssistantEvent(ctx context.Context, userID int64, corr
 	}
 	if _, err := a.store.InsertPromptAssistantRun(ctx, domain.PromptAssistantRunRecord{
 		ContentEventID: eventID, UserID: userID, CorrelationID: correlation, Mode: string(mode), Profile: string(profile),
-		Model: a.cfg.PromptAssistantModel, Status: status, LatencyMS: latency.Milliseconds(),
+		Model: assistantModel, Status: status, LatencyMS: latency.Milliseconds(),
 		PromptTokens: result.Usage.PromptTokens, CompletionTokens: result.Usage.CompletionTokens,
 		TotalDurationMS: result.Usage.TotalDurationMS, LoadDurationMS: result.Usage.LoadDurationMS,
 		EvalDurationMS: result.Usage.CompletionTimeMS, NumPredict: result.Policy.NumPredict,

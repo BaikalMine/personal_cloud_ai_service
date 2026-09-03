@@ -1,5 +1,6 @@
 .env
 /gateway
+/node_modules/
 postgres-data/
 *.log
 backups/

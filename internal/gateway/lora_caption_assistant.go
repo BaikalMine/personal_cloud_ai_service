@@ -42,8 +42,8 @@ func (a *App) handleLoraTrainingCaption(w http.ResponseWriter, r *http.Request) 
 		writeGenerationError(w, http.StatusUnauthorized, "требуется вход")
 		return
 	}
-	if a.promptAssistant == nil || !a.promptAssistant.Configured() {
-		writeGenerationError(w, http.StatusServiceUnavailable, "локальный промт-ассистент не настроен")
+	if a.promptAssistant == nil || !a.promptAssistant.VisionConfigured() {
+		writeGenerationError(w, http.StatusServiceUnavailable, "локальная vision-модель не настроена")
 		return
 	}
 	releaseAssistant, acquired := acquireBoundedSlot(r.Context(), a.promptAssistantSlots, time.Second)
@@ -116,6 +116,7 @@ func (a *App) handleLoraTrainingCaption(w http.ResponseWriter, r *http.Request) 
 	}
 	a.audit(r.Context(), &user.ID, "lora_training_caption_generated", "lora_training_dataset", nil, a.clientIP(r), r.UserAgent(), map[string]any{
 		"concept_type":  submission.ConceptType,
+		"model":         result.Model,
 		"filename":      submission.Filename,
 		"image_bytes":   imageBytes,
 		"caption_chars": utf8.RuneCountInString(caption),
@@ -124,6 +125,7 @@ func (a *App) handleLoraTrainingCaption(w http.ResponseWriter, r *http.Request) 
 	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"caption": caption,
+		"model":   result.Model,
 		"warning": miningWarning,
 	})
 }

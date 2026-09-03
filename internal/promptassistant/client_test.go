@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func TestEnhanceSendsFlux2EditInstructionAndUnloadsModel(t *testing.T) {
+func TestEnhanceUsesDedicatedVisionModelForAttachedReferences(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/chat" || r.Method != http.MethodPost {
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
@@ -21,8 +21,11 @@ func TestEnhanceSendsFlux2EditInstructionAndUnloadsModel(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body.Model != "test:e4b" || body.Stream || body.Think || body.KeepAlive != "0" || body.Format != "json" || len(body.Messages) != 2 {
+		if body.Model != "test:vision" || body.Stream || body.Think || body.KeepAlive != "30s" || body.Format != "json" || len(body.Messages) != 2 {
 			t.Fatalf("unexpected body: %#v", body)
+		}
+		if len(body.Messages[1].Images) != 2 {
+			t.Fatalf("attached references were not sent to vision model: %#v", body.Messages[1])
 		}
 		if !strings.Contains(body.Messages[0].Content, "image editing") || !strings.Contains(body.Messages[0].Content, "image 1: the base scene") || !strings.Contains(body.Messages[0].Content, "image 2: the person") || body.Messages[1].Content != "change the jacket" {
 			t.Fatalf("wrong prompt-assistant context: %#v", body.Messages)
@@ -34,16 +37,16 @@ func TestEnhanceSendsFlux2EditInstructionAndUnloadsModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := NewClient(base, "test:e4b")
-	result, err := client.Enhance(context.Background(), ModeImageToImage, ProfileFluxEdit, "change the jacket", []ImageReference{
-		{Number: 1, Role: ImageReferenceBaseScene},
-		{Number: 2, Role: ImageReferenceIdentity},
+	client := NewClient(base, "test:e4b").WithVisionModel("test:vision", 75*time.Second, "30s")
+	result, err := client.EnhanceResult(context.Background(), ModeImageToImage, ProfileFluxEdit, "change the jacket", []ImageReference{
+		{Number: 1, Role: ImageReferenceBaseScene, Image: []byte("one"), MIMEType: "image/png"},
+		{Number: 2, Role: ImageReferenceIdentity, Image: []byte("two"), MIMEType: "image/jpeg"},
 	}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result != "Keep the same person in a red jacket." {
-		t.Fatalf("result = %q", result)
+	if result.Prompt != "Keep the same person in a red jacket." || result.Model != "test:vision" || result.Policy.Timeout != 75*time.Second {
+		t.Fatalf("result = %+v", result)
 	}
 }
 
@@ -127,14 +130,15 @@ func TestCaptionImageSendsExactlyOneImageWithDatasetMetadata(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if r.URL.Path != "/api/chat" || body.Model != "test:e4b" || body.Stream || body.Think || body.Format != "json" {
+		if r.URL.Path != "/api/chat" || body.Model != "test:vision" || body.Stream || body.Think || body.Format != "json" || body.KeepAlive != "30s" {
 			t.Fatalf("unexpected caption request: %#v", body)
 		}
 		if len(body.Messages) != 2 || len(body.Messages[1].Images) != 1 || body.Messages[1].Images[0] != "c2luZ2xlLWltYWdl" {
 			t.Fatalf("caption request must contain exactly one image: %#v", body.Messages)
 		}
 		if !strings.Contains(body.Messages[0].Content, "Analyze exactly the one attached image") ||
-			!strings.Contains(body.Messages[0].Content, "begin with the exact trigger_word") {
+			!strings.Contains(body.Messages[0].Content, "begin with the exact trigger_word") ||
+			!strings.Contains(body.Messages[0].Content, "compare roots, mid-lengths, ends, and highlights") {
 			t.Fatalf("missing LoRA caption constraints: %s", body.Messages[0].Content)
 		}
 		var metadata map[string]string
@@ -144,7 +148,7 @@ func TestCaptionImageSendsExactlyOneImageWithDatasetMetadata(t *testing.T) {
 		if metadata["trigger_word"] != "anna_person" || metadata["concept_type"] != "character" {
 			t.Fatalf("unexpected caption metadata: %#v", metadata)
 		}
-		if body.Options.NumPredict != DefaultLoraCaptionNumPredict || body.Options.Temperature != 0.15 {
+		if body.Options.NumPredict != DefaultLoraCaptionNumPredict || body.Options.Temperature != 0 {
 			t.Fatalf("unexpected caption policy: %#v", body.Options)
 		}
 		writeAssistantResponse(t, w, `{"caption":"anna_person, three-quarter portrait in soft window light"}`)
@@ -154,11 +158,11 @@ func TestCaptionImageSendsExactlyOneImageWithDatasetMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := NewClient(base, "test:e4b").CaptionImage(context.Background(), "anna_person", "character", []byte("single-image"), "image/png")
+	result, err := NewClient(base, "test:e4b").WithVisionModel("test:vision", 5*time.Minute, "30s").CaptionImage(context.Background(), "anna_person", "character", []byte("single-image"), "image/png")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Caption != "anna_person, three-quarter portrait in soft window light" || result.Policy.NumPredict != DefaultLoraCaptionNumPredict {
+	if result.Caption != "anna_person, three-quarter portrait in soft window light" || result.Model != "test:vision" || result.Policy.NumPredict != DefaultLoraCaptionNumPredict || result.Policy.Timeout != 5*time.Minute {
 		t.Fatalf("unexpected caption result: %+v", result)
 	}
 }

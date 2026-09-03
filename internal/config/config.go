@@ -144,6 +144,7 @@ type Config struct {
 	OllamaUpstream                      *url.URL
 	ContentModeratorUpstream            *url.URL
 	PromptAssistantModel                string
+	PromptAssistantVisionModel          string
 	PromptAssistantImageNumPredict      int
 	PromptAssistantImageThinkNumPredict int
 	PromptAssistantVideoNumPredict      int
@@ -151,6 +152,8 @@ type Config struct {
 	PromptAssistantImageTimeout         time.Duration
 	PromptAssistantVideoTimeout         time.Duration
 	PromptAssistantKeepAlive            string
+	PromptAssistantVisionTimeout        time.Duration
+	PromptAssistantVisionKeepAlive      string
 	ComfyUIUpstreamAuthHeader           string
 	OpenWebUIUpstreamAuth               string
 	MiningAgentURL                      *url.URL
@@ -211,6 +214,10 @@ func Load() (Config, error) {
 	if promptAssistantModel == "" || len(promptAssistantModel) > 256 {
 		return Config{}, fmt.Errorf("PROMPT_ASSISTANT_MODEL must contain between 1 and 256 characters")
 	}
+	promptAssistantVisionModel := strings.TrimSpace(env("PROMPT_ASSISTANT_VISION_MODEL", promptAssistantModel))
+	if promptAssistantVisionModel == "" || len(promptAssistantVisionModel) > 256 {
+		return Config{}, fmt.Errorf("PROMPT_ASSISTANT_VISION_MODEL must contain between 1 and 256 characters")
+	}
 	promptAssistantImageNumPredict, err := integerEnvBetween("PROMPT_ASSISTANT_IMAGE_NUM_PREDICT", 900, 128, 8192)
 	if err != nil {
 		return Config{}, err
@@ -239,6 +246,15 @@ func Load() (Config, error) {
 	keepAliveDuration, err := time.ParseDuration(promptAssistantKeepAlive)
 	if err != nil || keepAliveDuration < 0 || keepAliveDuration > time.Hour {
 		return Config{}, fmt.Errorf("PROMPT_ASSISTANT_KEEP_ALIVE must be a duration between 0 and 1h")
+	}
+	promptAssistantVisionTimeout, err := durationEnvBetween("PROMPT_ASSISTANT_VISION_TIMEOUT", 5*time.Minute, 15*time.Second, 15*time.Minute)
+	if err != nil {
+		return Config{}, err
+	}
+	promptAssistantVisionKeepAlive := strings.TrimSpace(env("PROMPT_ASSISTANT_VISION_KEEP_ALIVE", "30s"))
+	visionKeepAliveDuration, err := time.ParseDuration(promptAssistantVisionKeepAlive)
+	if err != nil || visionKeepAliveDuration < 0 || visionKeepAliveDuration > time.Hour {
+		return Config{}, fmt.Errorf("PROMPT_ASSISTANT_VISION_KEEP_ALIVE must be a duration between 0 and 1h")
 	}
 	miningAgentURL, err := parseBaseURL(env("MINING_AGENT_URL", "http://host.docker.internal:8092"))
 	if err != nil {
@@ -430,6 +446,7 @@ func Load() (Config, error) {
 		OllamaUpstream:                      ollama,
 		ContentModeratorUpstream:            contentModerator,
 		PromptAssistantModel:                promptAssistantModel,
+		PromptAssistantVisionModel:          promptAssistantVisionModel,
 		PromptAssistantImageNumPredict:      promptAssistantImageNumPredict,
 		PromptAssistantImageThinkNumPredict: promptAssistantImageThinkNumPredict,
 		PromptAssistantVideoNumPredict:      promptAssistantVideoNumPredict,
@@ -437,6 +454,8 @@ func Load() (Config, error) {
 		PromptAssistantImageTimeout:         promptAssistantImageTimeout,
 		PromptAssistantVideoTimeout:         promptAssistantVideoTimeout,
 		PromptAssistantKeepAlive:            promptAssistantKeepAlive,
+		PromptAssistantVisionTimeout:        promptAssistantVisionTimeout,
+		PromptAssistantVisionKeepAlive:      promptAssistantVisionKeepAlive,
 		ComfyUIUpstreamAuthHeader:           comfyAuth,
 		OpenWebUIUpstreamAuth:               openWebUIAuth,
 		MiningAgentURL:                      miningAgentURL,

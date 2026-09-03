@@ -98,9 +98,11 @@ func (s *Store) ClaimNextLoraTrainingJob(ctx context.Context) (domain.LoraTraini
 	defer tx.Rollback()
 	var id int64
 	err = tx.QueryRowContext(ctx, `
-		SELECT id FROM lora_training_jobs
-		WHERE state='queued' AND cancellation_requested_at IS NULL
-		ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1
+		SELECT job.id FROM lora_training_jobs job
+		LEFT JOIN users owner ON owner.id=job.user_id
+		WHERE job.state='queued' AND job.cancellation_requested_at IS NULL
+		ORDER BY COALESCE(owner.pause_mining_for_quick_generation,FALSE) DESC,job.created_at,job.id
+		FOR UPDATE OF job SKIP LOCKED LIMIT 1
 	`).Scan(&id)
 	if err != nil {
 		return domain.LoraTrainingJob{}, err

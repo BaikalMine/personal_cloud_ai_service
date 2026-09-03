@@ -162,7 +162,7 @@ func Run() error {
 			VideoNumPredict: cfg.PromptAssistantVideoNumPredict, VideoThinkNumPredict: cfg.PromptAssistantVideoThinkNumPredict,
 			ImageTimeout: cfg.PromptAssistantImageTimeout, VideoTimeout: cfg.PromptAssistantVideoTimeout,
 			KeepAlive: cfg.PromptAssistantKeepAlive,
-		}),
+		}).WithVisionModel(cfg.PromptAssistantVisionModel, cfg.PromptAssistantVisionTimeout, cfg.PromptAssistantVisionKeepAlive),
 		contentModerator:     moderation.NewClient(cfg.ContentModeratorUpstream),
 		updates:              updates.NewClient(cfg.UpdateAgentURL, cfg.UpdateAgentToken),
 		loraTraining:         loratraining.NewClient(cfg.LoraTrainingAgentURL, cfg.LoraTrainingAgentToken),
