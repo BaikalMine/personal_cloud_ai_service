@@ -2,6 +2,10 @@ package loratraining
 
 import "time"
 
+// MaxNumpySeed is the largest seed accepted by NumPy's legacy MT19937
+// initializer, which is used by the local musubi training scripts.
+const MaxNumpySeed int64 = 1<<32 - 1
+
 type Profile struct {
 	ID          string `json:"id"`
 	Family      string `json:"family"`

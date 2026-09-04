@@ -643,7 +643,7 @@ func (controller *Controller) validateSpec(spec loratraining.JobSpec) (ProfileCo
 	if spec.MaxSteps < 100 || spec.MaxSteps > 5000 || (spec.NetworkDim != 8 && spec.NetworkDim != 16 && spec.NetworkDim != 32 && spec.NetworkDim != 64) || spec.NetworkAlpha < 1 || spec.NetworkAlpha > 64 {
 		return ProfileConfig{}, errors.New("параметры обучения вне допустимого диапазона")
 	}
-	if spec.LearningRate < 0.000001 || spec.LearningRate > 0.001 || spec.Seed < 0 || spec.SampleCount < 5 || spec.SampleCount > 100 {
+	if spec.LearningRate < 0.000001 || spec.LearningRate > 0.001 || spec.Seed < 0 || spec.Seed > loratraining.MaxNumpySeed || spec.SampleCount < 5 || spec.SampleCount > 100 {
 		return ProfileConfig{}, errors.New("параметры датасета вне допустимого диапазона")
 	}
 	if strings.TrimSpace(spec.GatewayJobID) == "" || len(spec.GatewayJobID) > 96 {

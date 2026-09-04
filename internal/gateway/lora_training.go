@@ -1035,11 +1035,11 @@ func parseIntDefault(value string, fallback int) int {
 }
 
 func randomTrainingSeed() int64 {
-	var data [8]byte
+	var data [4]byte
 	if _, err := cryptorand.Read(data[:]); err != nil {
-		return time.Now().UnixNano() & int64(^uint64(0)>>1)
+		return time.Now().UnixNano() & loratraining.MaxNumpySeed
 	}
-	return int64(binary.LittleEndian.Uint64(data[:]) & uint64(^uint64(0)>>1))
+	return int64(binary.LittleEndian.Uint32(data[:]))
 }
 
 func clampLoraProgress(progress int) int {

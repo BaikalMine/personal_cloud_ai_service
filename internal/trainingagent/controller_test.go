@@ -25,6 +25,18 @@ func TestTrainingArgsUseFamilySpecificMusubiScripts(t *testing.T) {
 	}
 }
 
+func TestValidateSpecRejectsSeedOutsideNumPyRange(t *testing.T) {
+	controller := &Controller{config: Config{Profiles: []ProfileConfig{{ID: "krea2-test", Family: "krea2", Name: "Krea", BaseModel: "krea.safetensors"}}}}
+	spec := loratraining.JobSpec{
+		GatewayJobID: "gateway-job-012345", ProfileID: "krea2-test", Owner: "tester", Name: "Portrait", OutputName: "portrait_v1",
+		TriggerWord: "subject_token", ConceptType: "character", Resolution: 1024, MaxSteps: 800, NetworkDim: 32,
+		NetworkAlpha: 32, LearningRate: 0.0001, Seed: loratraining.MaxNumpySeed + 1, SampleCount: 12,
+	}
+	if _, err := controller.validateSpec(spec); err == nil {
+		t.Fatal("seed outside the NumPy range was accepted")
+	}
+}
+
 func TestExtractDatasetRequiresPairedCaptionsAndRejectsTraversal(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()

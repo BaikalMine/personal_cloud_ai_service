@@ -94,6 +94,15 @@ func TestTrainingCaptionsRequireTriggerAtTheBeginning(t *testing.T) {
 	}
 }
 
+func TestRandomTrainingSeedFitsNumPyRange(t *testing.T) {
+	for range 32 {
+		seed := randomTrainingSeed()
+		if seed < 0 || seed > loratraining.MaxNumpySeed {
+			t.Fatalf("randomTrainingSeed() = %d, outside NumPy range", seed)
+		}
+	}
+}
+
 func TestReadLoraCaptionSubmissionAcceptsOnlyOneImage(t *testing.T) {
 	const sessionToken = "lora-caption-session"
 	app := &App{csrfSigner: security.NewCSRFSigner("lora-caption-secret")}
