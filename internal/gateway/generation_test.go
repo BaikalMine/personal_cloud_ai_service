@@ -1528,6 +1528,27 @@ func TestParseGenerationOutputs(t *testing.T) {
 	}
 }
 
+func TestAttachGenerationOutputPrefixesKeepsOutputsUnique(t *testing.T) {
+	prompt := map[string]any{
+		"image": map[string]any{"inputs": map[string]any{"filename_prefix": "AI-Gateway-Krea2"}},
+		"video": map[string]any{"inputs": map[string]any{"filename_prefix": "AI-Gateway-MiniMaxH3"}},
+		"other": map[string]any{"inputs": map[string]any{"seed": int64(42)}},
+	}
+	attachGenerationOutputPrefixes(prompt, "job_output_123")
+	wants := map[string]string{"image": "AI-Gateway-Krea2-job_output_123", "video": "AI-Gateway-MiniMaxH3-job_output_123"}
+	for nodeID, want := range wants {
+		inputs := prompt[nodeID].(map[string]any)["inputs"].(map[string]any)
+		if got := inputs["filename_prefix"]; got != want {
+			t.Fatalf("%s filename prefix = %q, want %q", nodeID, got, want)
+		}
+	}
+	attachGenerationOutputPrefixes(prompt, "job_output_123")
+	inputs := prompt["image"].(map[string]any)["inputs"].(map[string]any)
+	if got, want := inputs["filename_prefix"], "AI-Gateway-Krea2-job_output_123"; got != want {
+		t.Fatalf("repeated filename prefix = %q, want %q", got, want)
+	}
+}
+
 func TestSubmitComfyPromptInjectsUserClientID(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/prompt" {

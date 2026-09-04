@@ -1148,6 +1148,7 @@ func (a *App) submitComfyPrompt(ctx context.Context, userID int64, jobPublicID s
 		return "", err
 	}
 	defer releaseAdmission()
+	attachGenerationOutputPrefixes(prompt, jobPublicID)
 	document := comfyPromptDocument(a.comfyClientID(userID), jobPublicID, priority, prompt)
 	body, err := json.Marshal(document)
 	if err != nil {
@@ -1195,6 +1196,38 @@ func (a *App) submitComfyPrompt(ctx context.Context, userID int64, jobPublicID s
 		return "", errors.New("ComfyUI вернул некорректный prompt_id")
 	}
 	return result.PromptID, nil
+}
+
+// attachGenerationOutputPrefixes keeps ComfyUI filenames unique across service
+// restarts. A reused name could otherwise point a cleanup tombstone at a newer,
+// unrelated output with different bytes.
+func attachGenerationOutputPrefixes(prompt map[string]any, jobPublicID string) {
+	jobPublicID = strings.TrimSpace(jobPublicID)
+	if jobPublicID == "" {
+		return
+	}
+	suffix := "-" + jobPublicID
+	for _, rawNode := range prompt {
+		node, ok := rawNode.(map[string]any)
+		if !ok {
+			continue
+		}
+		inputs, ok := node["inputs"].(map[string]any)
+		if !ok {
+			continue
+		}
+		prefix, ok := inputs["filename_prefix"].(string)
+		if !ok {
+			continue
+		}
+		prefix = strings.TrimSpace(prefix)
+		if prefix == "" {
+			prefix = "AI-Gateway"
+		}
+		if !strings.HasSuffix(prefix, suffix) {
+			inputs["filename_prefix"] = strings.TrimRight(prefix, "-_") + suffix
+		}
+	}
 }
 
 func comfyPromptDocument(clientID, jobPublicID string, priority bool, prompt map[string]any) map[string]any {
