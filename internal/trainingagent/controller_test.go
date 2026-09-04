@@ -37,6 +37,12 @@ func TestValidateSpecRejectsSeedOutsideNumPyRange(t *testing.T) {
 	}
 }
 
+func TestNormalizeLegacyTrainingSeed(t *testing.T) {
+	if actual := normalizeTrainingSeed(1226991759110583725); actual != 136197549 {
+		t.Fatalf("normalized seed = %d, want 136197549", actual)
+	}
+}
+
 func TestExtractDatasetRequiresPairedCaptionsAndRejectsTraversal(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()

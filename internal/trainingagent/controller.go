@@ -93,6 +93,9 @@ func (controller *Controller) Profiles() []loratraining.Profile {
 }
 
 func (controller *Controller) Submit(ctx context.Context, spec loratraining.JobSpec, dataset io.Reader) (loratraining.JobStatus, error) {
+	// Older Gateway releases generated 63-bit seeds, while musubi uses NumPy's
+	// legacy 32-bit seed range. Keep the local agent compatible during rollout.
+	spec.Seed = normalizeTrainingSeed(spec.Seed)
 	profile, err := controller.validateSpec(spec)
 	if err != nil {
 		return loratraining.JobStatus{}, err
@@ -409,6 +412,13 @@ func (controller *Controller) textCacheArgs(profile ProfileConfig, datasetConfig
 		}
 	}
 	return args
+}
+
+func normalizeTrainingSeed(seed int64) int64 {
+	if seed > loratraining.MaxNumpySeed {
+		return seed % (loratraining.MaxNumpySeed + 1)
+	}
+	return seed
 }
 
 func (controller *Controller) trainingArgs(profile ProfileConfig, spec loratraining.JobSpec, modelPath, datasetConfig, outputDir string) []string {
