@@ -2,11 +2,13 @@ package trainingagent
 
 import (
 	"archive/zip"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"ai-access-gateway/internal/loratraining"
 )
@@ -40,6 +42,89 @@ func TestValidateSpecRejectsSeedOutsideNumPyRange(t *testing.T) {
 func TestNormalizeLegacyTrainingSeed(t *testing.T) {
 	if actual := normalizeTrainingSeed(1226991759110583725); actual != 136197549 {
 		t.Fatalf("normalized seed = %d, want 136197549", actual)
+	}
+}
+
+func TestDeleteTerminalJobRemovesArtifactAndJobFiles(t *testing.T) {
+	root := t.TempDir()
+	comfyRoot := t.TempDir()
+	controller := &Controller{
+		config: Config{RootDir: root, ComfyLoraDir: comfyRoot},
+		jobs:   make(map[string]*jobRecord), byGateway: make(map[string]string),
+	}
+	id := "agent-job-012345"
+	gatewayID := "gateway-job-012345"
+	jobDir := filepath.Join(root, "jobs", id)
+	artifactPath := filepath.Join(comfyRoot, "Trained", "Krea2", "owner", "portrait.safetensors")
+	if err := os.MkdirAll(jobDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(artifactPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(jobDir, "status.json"), []byte("{}"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(artifactPath, []byte("trained LoRA"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	record := &jobRecord{
+		Spec: loratraining.JobSpec{GatewayJobID: gatewayID}, ArtifactPath: artifactPath,
+		Status: loratraining.JobStatus{ID: id, GatewayJobID: gatewayID, State: "completed", ArtifactName: "portrait.safetensors", FinishedAt: time.Now()},
+	}
+	controller.jobs[id] = record
+	controller.byGateway[gatewayID] = id
+
+	status, err := controller.Delete(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.State != "completed" {
+		t.Fatalf("deleted status = %q, want completed", status.State)
+	}
+	if _, err := os.Stat(artifactPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("artifact still exists or stat failed unexpectedly: %v", err)
+	}
+	if _, err := os.Stat(jobDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("job directory still exists or stat failed unexpectedly: %v", err)
+	}
+	if _, err := controller.Status(id); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("deleted job remains in controller: %v", err)
+	}
+	if controller.byGateway[gatewayID] != "" {
+		t.Fatal("deleted job remains in gateway index")
+	}
+}
+
+func TestDeleteRejectsActiveJob(t *testing.T) {
+	controller := &Controller{
+		config:    Config{RootDir: t.TempDir(), ComfyLoraDir: t.TempDir()},
+		jobs:      map[string]*jobRecord{"active-job": {Status: loratraining.JobStatus{ID: "active-job", State: "running"}}},
+		byGateway: make(map[string]string),
+	}
+	if _, err := controller.Delete("active-job"); !errors.Is(err, ErrJobNotTerminal) {
+		t.Fatalf("Delete(active) error = %v, want ErrJobNotTerminal", err)
+	}
+	if _, err := controller.Status("active-job"); err != nil {
+		t.Fatalf("active job was removed: %v", err)
+	}
+}
+
+func TestExpiredFailedJobCleanupKeepsRecentFailures(t *testing.T) {
+	root := t.TempDir()
+	controller := &Controller{
+		config: Config{RootDir: root, ComfyLoraDir: t.TempDir()},
+		jobs:   make(map[string]*jobRecord), byGateway: make(map[string]string),
+	}
+	now := time.Now()
+	controller.jobs["expired"] = &jobRecord{Status: loratraining.JobStatus{ID: "expired", State: "failed", FinishedAt: now.Add(-25 * time.Hour)}}
+	controller.jobs["recent"] = &jobRecord{Status: loratraining.JobStatus{ID: "recent", State: "failed", FinishedAt: now.Add(-23 * time.Hour)}}
+	controller.deleteExpiredFailedJobs(now)
+	if _, err := controller.Status("expired"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expired failure remains: %v", err)
+	}
+	if _, err := controller.Status("recent"); err != nil {
+		t.Fatalf("recent failure was removed: %v", err)
 	}
 }
 

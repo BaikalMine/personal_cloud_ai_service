@@ -8,6 +8,7 @@
   </section>
 
   {{if .Cancelled}}<p class="success-box">Отмена задания запрошена.</p>{{end}}
+  {{if .Deleted}}<p class="success-box">LoRA и запись задания удалены.</p>{{end}}
   {{if .AgentMessage}}<p class="ui-status-banner is-warning">{{.AgentMessage}}</p>{{end}}
 
   <section class="admin-lora-metrics" aria-label="Состояние обучения">
@@ -32,7 +33,7 @@
         <td data-label="Пользователь и задача"><strong>{{.Name}}</strong><small>{{.UsernameSnapshot}} · {{.FamilyLabel}}</small><code>{{.OutputName}}.safetensors</code></td>
         <td data-label="Параметры"><span>{{.SampleCount}} фото · {{.Resolution}} px</span><small>{{.PresetLabel}} · rank {{.NetworkDim}} · {{.MaxTrainSteps}} шагов</small></td>
         <td data-label="Ход выполнения"><div class="admin-lora-progress"><span>{{.Stage}} · {{.Progress}}%</span><progress max="100" value="{{.Progress}}">{{.Progress}}%</progress><small>{{if .ErrorMessage}}{{.ErrorMessage}}{{else}}{{.Message}}{{end}}</small></div></td>
-        <td data-label="Действия"><div class="table-actions">{{if .CanCancel}}<form method="post" action="/admin/lora-training/{{.PublicID}}/cancel"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="action-button danger" data-confirm="Остановить обучение LoRA пользователя {{.UsernameSnapshot}}?">Отменить</button></form>{{end}}{{if .CanDownload}}<a class="button action-button" href="/admin/lora-training/{{.PublicID}}/download">Скачать</a>{{end}}{{if and (not .CanCancel) (not .CanDownload)}}<span class="muted">Нет действий</span>{{end}}</div></td>
+        <td data-label="Действия"><div class="table-actions">{{if .CanCancel}}<form method="post" action="/admin/lora-training/{{.PublicID}}/cancel"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="action-button danger" data-confirm="Остановить обучение LoRA пользователя {{.UsernameSnapshot}}?">Отменить</button></form>{{end}}{{if .CanDownload}}<a class="button action-button" href="/admin/lora-training/{{.PublicID}}/download">Скачать</a>{{end}}{{if .CanDelete}}<form method="post" action="/admin/lora-training/{{.PublicID}}/delete"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="action-button danger" data-confirm="Удалить LoRA «{{.Name}}» пользователя {{.UsernameSnapshot}}? Файл будет удалён из ComfyUI без возможности восстановления.">Удалить</button></form>{{end}}{{if and (not .CanCancel) (not .CanDownload) (not .CanDelete)}}<span class="muted">Нет действий</span>{{end}}</div></td>
       </tr>{{else}}<tr><td colspan="5" class="empty-state">Заданий обучения пока нет.</td></tr>{{end}}
     </tbody></table></div>
   </section>

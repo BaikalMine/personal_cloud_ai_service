@@ -218,6 +218,7 @@ func databaseTablePolicies() map[string]databaseTablePolicy {
 		"quick_generation_mining_leases":   {Label: "Аренды ресурсов", Owner: "Координатор майнинга", Retention: fixed("До завершения или восстановления")},
 		"quick_generation_recipes":         {Label: "Сохранённые рецепты", Owner: "Пользователь", Retention: fixed("До ручного удаления")},
 		"quick_generation_access_policies": {Label: "Ограничения моделей", Owner: "Управление доступом", Retention: fixed("До удаления аккаунта")},
+		"lora_training_jobs":               {Label: "Задания обучения LoRA", Owner: "Обучение LoRA", Retention: fixed("Ошибки — 24 часа; остальные — до ручного удаления"), Managed: true},
 		"feature_suggestions":              {Label: "Предложения пользователей", Owner: "Администратор", Retention: fixed("До ручного решения")},
 		"feature_suggestion_scans":         {Label: "Проверки предложений", Owner: "VirusTotal", Retention: fixed("Вместе с предложением")},
 		"comfy_output_cleanup_tombstones":  {Label: "Очередь удаления результатов", Owner: "Очистка файлов", Retention: fixed("До подтверждения агента")},

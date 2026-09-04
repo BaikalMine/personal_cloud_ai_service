@@ -34,6 +34,20 @@ func TestLoraTrainingJSONUsesLiveAgentState(t *testing.T) {
 	}
 }
 
+func TestLoraTrainingJSONExposesDeleteOnlyForTerminalJobs(t *testing.T) {
+	t.Parallel()
+	active := loraTrainingJSON(domain.LoraTrainingJob{PublicID: "lora-active-012345", State: domain.LoraTrainingRunning}, nil, false)
+	if active.CanDelete || active.DeleteURL != "" {
+		t.Fatalf("active LoRA job exposes deletion: %+v", active)
+	}
+	completed := loraTrainingJSON(domain.LoraTrainingJob{
+		PublicID: "lora-completed-012345", State: domain.LoraTrainingCompleted, ArtifactName: "portrait.safetensors",
+	}, nil, false)
+	if !completed.CanDelete || completed.DeleteURL != "/train-lora/lora-completed-012345/delete" {
+		t.Fatalf("terminal LoRA job does not expose deletion: %+v", completed)
+	}
+}
+
 func TestEnsureLoraCaptionTriggerAlwaysUsesExactLeadingTrigger(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

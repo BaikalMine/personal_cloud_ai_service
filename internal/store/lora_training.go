@@ -223,12 +223,24 @@ func (s *Store) RecoverLoraTrainingJobs(ctx context.Context) (int64, error) {
 	return result.RowsAffected()
 }
 
-func (s *Store) DeleteOldLoraTrainingJobs(ctx context.Context, before time.Time) (int64, error) {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM lora_training_jobs WHERE state IN ('completed','failed','cancelled') AND finished_at < $1`, before)
-	if err != nil {
-		return 0, err
+func (s *Store) FailedLoraTrainingJobsBefore(ctx context.Context, before time.Time, limit int) ([]domain.LoraTrainingJob, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
 	}
-	return result.RowsAffected()
+	return s.listLoraTrainingJobs(ctx, `
+		SELECT `+loraTrainingColumns+` FROM lora_training_jobs
+		WHERE state='failed' AND COALESCE(finished_at,updated_at) < $1
+		ORDER BY COALESCE(finished_at,updated_at),id LIMIT $2
+	`, before, limit)
+}
+
+func (s *Store) DeleteTerminalLoraTrainingJob(ctx context.Context, id int64) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM lora_training_jobs WHERE id=$1 AND state IN ('completed','failed','cancelled')`, id)
+	if err != nil {
+		return false, err
+	}
+	deleted, err := result.RowsAffected()
+	return deleted == 1, err
 }
 
 type loraTrainingScanner interface {

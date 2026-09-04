@@ -22,6 +22,7 @@ var ErrUnavailable = errors.New("LoRA training agent is unavailable")
 
 type HTTPError struct {
 	StatusCode int
+	Code       string
 	Message    string
 }
 
@@ -112,6 +113,12 @@ func (c *Client) Cancel(ctx context.Context, id string) (JobStatus, error) {
 	return response, err
 }
 
+func (c *Client) Delete(ctx context.Context, id string) (JobStatus, error) {
+	var response JobStatus
+	err := c.doJSON(c.http, ctx, http.MethodDelete, "/v1/jobs/"+url.PathEscape(id), nil, "", &response)
+	return response, err
+}
+
 func (c *Client) Artifact(ctx context.Context, id string) (io.ReadCloser, string, int64, error) {
 	if !c.Configured() {
 		return nil, "", 0, ErrUnavailable
@@ -176,6 +183,7 @@ func (c *Client) authorize(request *http.Request) {
 
 func decodeHTTPError(response *http.Response) error {
 	var payload struct {
+		Code    string `json:"code"`
 		Message string `json:"message"`
 		Error   string `json:"error"`
 	}
@@ -184,5 +192,5 @@ func decodeHTTPError(response *http.Response) error {
 	if message == "" {
 		message = strings.TrimSpace(payload.Error)
 	}
-	return &HTTPError{StatusCode: response.StatusCode, Message: message}
+	return &HTTPError{StatusCode: response.StatusCode, Code: strings.TrimSpace(payload.Code), Message: message}
 }

@@ -451,7 +451,11 @@
       node?.remove();
       return;
     }
-    if (node) return;
+    if (node) {
+      if (node instanceof HTMLAnchorElement) node.href = job.download_url;
+      if (node instanceof HTMLFormElement) node.action = kind === "delete" ? job.delete_url : job.cancel_url;
+      return;
+    }
     if (kind === "download") {
       node = document.createElement("a");
       node.className = "button";
@@ -460,9 +464,10 @@
       node.textContent = "Скачать LoRA";
     } else {
       node = document.createElement("form");
-      node.dataset.jobCancel = "";
+      if (kind === "delete") node.dataset.jobDelete = "";
+      else node.dataset.jobCancel = "";
       node.method = "post";
-      node.action = job.cancel_url;
+      node.action = kind === "delete" ? job.delete_url : job.cancel_url;
       const token = document.createElement("input");
       token.type = "hidden";
       token.name = "csrf";
@@ -470,8 +475,10 @@
       const button = document.createElement("button");
       button.type = "submit";
       button.className = "danger";
-      button.dataset.confirm = "Остановить обучение LoRA?";
-      button.textContent = "Отменить";
+      button.dataset.confirm = kind === "delete"
+        ? `Удалить LoRA «${job.name}»? Файл будет удалён из ComfyUI без возможности восстановления.`
+        : "Остановить обучение LoRA?";
+      button.textContent = kind === "delete" ? "Удалить" : "Отменить";
       node.append(token, button);
     }
     container.append(node);
@@ -499,8 +506,9 @@
     }
     const actions = card.querySelector("footer > div");
     if (actions) {
-      setAction(actions, "[data-job-cancel], form", job.can_cancel, "cancel", job);
-      setAction(actions, "[data-job-download], a", job.can_download, "download", job);
+      setAction(actions, "[data-job-cancel]", job.can_cancel, "cancel", job);
+      setAction(actions, "[data-job-download]", job.can_download, "download", job);
+      setAction(actions, "[data-job-delete]", job.can_delete, "delete", job);
     }
     const logWrap = card.querySelector("[data-job-log-wrap]");
     const log = card.querySelector("[data-job-log]");
@@ -553,6 +561,21 @@
     updateCard(card, job);
     return card;
   };
+  const buildEmptyState = () => {
+    const empty = document.createElement("div");
+    empty.className = "ui-empty-state lora-history-empty";
+    const mark = document.createElement("span");
+    mark.setAttribute("aria-hidden", "true");
+    mark.textContent = "+";
+    const copy = document.createElement("div");
+    const title = document.createElement("h3");
+    title.textContent = "Обучений пока нет";
+    const message = document.createElement("p");
+    message.textContent = "После запуска здесь появятся этапы, журнал и готовый файл LoRA.";
+    copy.append(title, message);
+    empty.append(mark, copy);
+    return empty;
+  };
   const refreshJobs = async () => {
     if (!historyList || document.hidden) return;
     try {
@@ -562,6 +585,10 @@
       const jobs = Array.isArray(payload.jobs) ? payload.jobs : [];
       if (historyCount) historyCount.textContent = String(jobs.length);
       if (jobs.length) historyList.querySelector(".lora-history-empty")?.remove();
+      const currentIDs = new Set(jobs.map((job) => job.id));
+      historyList.querySelectorAll("[data-lora-job]").forEach((card) => {
+        if (!currentIDs.has(card.dataset.jobId)) card.remove();
+      });
       for (const summaryJob of jobs) {
         let card = historyList.querySelector(`[data-job-id="${CSS.escape(summaryJob.id)}"]`);
         if (!card) {
@@ -575,6 +602,7 @@
         }
         updateCard(card, job);
       }
+      if (!jobs.length && !historyList.querySelector(".lora-history-empty")) historyList.append(buildEmptyState());
       page.classList.remove("is-poll-stale");
     } catch (_) {
       page.classList.add("is-poll-stale");

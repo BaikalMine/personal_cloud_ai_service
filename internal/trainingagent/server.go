@@ -130,14 +130,37 @@ func (server *Server) handleJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := parts[0]
-	if len(parts) == 1 && r.Method == http.MethodGet {
-		status, err := server.controller.Status(id)
-		if err != nil {
-			http.NotFound(w, r)
+	if len(parts) == 1 {
+		switch r.Method {
+		case http.MethodGet:
+			status, err := server.controller.Status(id)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			writeJSON(w, http.StatusOK, status)
+			return
+		case http.MethodDelete:
+			status, err := server.controller.Delete(id)
+			if errors.Is(err, os.ErrNotExist) {
+				writeCodedError(w, http.StatusNotFound, "job_not_found", "Задание не найдено.")
+				return
+			}
+			if errors.Is(err, ErrJobNotTerminal) {
+				writeError(w, http.StatusConflict, "Сначала отмените активное обучение.")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "Не удалось удалить файлы задания.")
+				return
+			}
+			writeJSON(w, http.StatusOK, status)
+			return
+		default:
+			w.Header().Set("Allow", "GET, DELETE")
+			writeError(w, http.StatusMethodNotAllowed, "Метод не поддерживается.")
 			return
 		}
-		writeJSON(w, http.StatusOK, status)
-		return
 	}
 	if len(parts) == 2 && parts[1] == "cancel" && r.Method == http.MethodPost {
 		status, err := server.controller.Cancel(id)
@@ -211,6 +234,10 @@ func methodNotAllowed(w http.ResponseWriter, allowed string) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"message": message})
+}
+
+func writeCodedError(w http.ResponseWriter, status int, code, message string) {
+	writeJSON(w, status, map[string]string{"code": code, "message": message})
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

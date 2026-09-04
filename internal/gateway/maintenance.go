@@ -25,6 +25,10 @@ func (a *App) maintenanceWorkerSpecs() []maintenanceWorkerSpec {
 			RetryDelay: 10 * time.Second, MaxBackoff: 2 * time.Minute, Run: a.refreshLoraTrainingJobs,
 		},
 		{
+			Key: "lora_training_failed_cleanup", Name: "Очистка ошибок обучения LoRA", Interval: maintenanceInterval, Timeout: 2 * time.Minute, InitialDelay: 4 * time.Second,
+			RetryDelay: 30 * time.Second, MaxBackoff: 5 * time.Minute, Run: a.deleteExpiredFailedLoraTrainingJobs,
+		},
+		{
 			Key: "generation_batches", Name: "Пакеты вариантов", Interval: 2 * time.Second, Timeout: 45 * time.Second,
 			RetryDelay: 5 * time.Second, MaxBackoff: time.Minute, Run: a.dispatchGenerationBatchJobs,
 		},

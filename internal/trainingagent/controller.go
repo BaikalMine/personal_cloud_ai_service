@@ -31,7 +31,10 @@ var (
 	outputNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$`)
 	ownerPattern      = regexp.MustCompile(`[^A-Za-z0-9_-]+`)
 	progressPattern   = regexp.MustCompile(`(?i)(\d{1,6})\s*/\s*(\d{1,6})`)
+	ErrJobNotTerminal = errors.New("LoRA training job is not terminal")
 )
+
+const failedJobRetention = 24 * time.Hour
 
 type jobRecord struct {
 	Spec         loratraining.JobSpec   `json:"spec"`
@@ -70,8 +73,9 @@ func NewController(config Config) (*Controller, error) {
 		cancel()
 		return nil, err
 	}
-	controller.wg.Add(1)
+	controller.wg.Add(2)
 	go controller.worker()
+	go controller.failedJobCleanupWorker()
 	return controller, nil
 }
 
@@ -212,6 +216,38 @@ func (controller *Controller) Cancel(id string) (loratraining.JobStatus, error) 
 	return status, nil
 }
 
+func (controller *Controller) Delete(id string) (loratraining.JobStatus, error) {
+	controller.mu.RLock()
+	record := controller.jobs[id]
+	if record == nil {
+		controller.mu.RUnlock()
+		return loratraining.JobStatus{}, os.ErrNotExist
+	}
+	if !record.Status.Terminal() {
+		controller.mu.RUnlock()
+		return loratraining.JobStatus{}, ErrJobNotTerminal
+	}
+	copyRecord := cloneRecord(record)
+	status := cloneStatus(record.Status)
+	controller.mu.RUnlock()
+
+	if err := controller.deleteRecordFiles(copyRecord); err != nil {
+		return loratraining.JobStatus{}, err
+	}
+
+	controller.mu.Lock()
+	if current := controller.jobs[id]; current != nil {
+		if !current.Status.Terminal() {
+			controller.mu.Unlock()
+			return loratraining.JobStatus{}, ErrJobNotTerminal
+		}
+		delete(controller.byGateway, current.Spec.GatewayJobID)
+		delete(controller.jobs, id)
+	}
+	controller.mu.Unlock()
+	return status, nil
+}
+
 func (controller *Controller) Artifact(id string) (string, string, int64, error) {
 	controller.mu.RLock()
 	record := controller.jobs[id]
@@ -242,6 +278,89 @@ func (controller *Controller) worker() {
 			controller.execute(id)
 		}
 	}
+}
+
+func (controller *Controller) failedJobCleanupWorker() {
+	defer controller.wg.Done()
+	controller.deleteExpiredFailedJobs(time.Now())
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-controller.ctx.Done():
+			return
+		case now := <-ticker.C:
+			controller.deleteExpiredFailedJobs(now)
+		}
+	}
+}
+
+func (controller *Controller) deleteExpiredFailedJobs(now time.Time) {
+	cutoff := now.Add(-failedJobRetention)
+	controller.mu.RLock()
+	ids := make([]string, 0)
+	for id, record := range controller.jobs {
+		if record == nil || record.Status.State != "failed" {
+			continue
+		}
+		finishedAt := record.Status.FinishedAt
+		if finishedAt.IsZero() {
+			finishedAt = record.Status.CreatedAt
+		}
+		if !finishedAt.IsZero() && finishedAt.Before(cutoff) {
+			ids = append(ids, id)
+		}
+	}
+	controller.mu.RUnlock()
+	for _, id := range ids {
+		if _, err := controller.Delete(id); err != nil && !errors.Is(err, os.ErrNotExist) {
+			log.Printf("delete expired failed LoRA training job %s: %v", id, err)
+		}
+	}
+}
+
+func (controller *Controller) deleteRecordFiles(record *jobRecord) error {
+	if record == nil {
+		return nil
+	}
+	if record.ArtifactPath != "" {
+		trainedRoot := filepath.Join(controller.config.ComfyLoraDir, "Trained")
+		if !pathWithinDirectory(trainedRoot, record.ArtifactPath, false) {
+			return fmt.Errorf("refusing to remove LoRA artifact outside trained directory: %s", record.ArtifactPath)
+		}
+		info, err := os.Lstat(record.ArtifactPath)
+		if err == nil {
+			if !info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 {
+				return fmt.Errorf("refusing to remove non-file LoRA artifact: %s", record.ArtifactPath)
+			}
+			if err := os.Remove(record.ArtifactPath); err != nil {
+				return fmt.Errorf("remove LoRA artifact: %w", err)
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect LoRA artifact: %w", err)
+		}
+	}
+
+	jobsRoot := filepath.Join(controller.config.RootDir, "jobs")
+	jobDir := controller.jobDir(record.Status.ID)
+	if !pathWithinDirectory(jobsRoot, jobDir, false) {
+		return fmt.Errorf("refusing to remove LoRA job outside jobs directory: %s", jobDir)
+	}
+	if err := os.RemoveAll(jobDir); err != nil {
+		return fmt.Errorf("remove LoRA job files: %w", err)
+	}
+	return nil
+}
+
+func pathWithinDirectory(root, target string, allowRoot bool) bool {
+	relative, err := filepath.Rel(filepath.Clean(root), filepath.Clean(target))
+	if err != nil || filepath.IsAbs(relative) {
+		return false
+	}
+	if relative == "." {
+		return allowRoot
+	}
+	return relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 func (controller *Controller) execute(id string) {

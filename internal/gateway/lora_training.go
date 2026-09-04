@@ -74,6 +74,7 @@ type loraTrainingJobView struct {
 	StateClass   string
 	CanCancel    bool
 	CanDownload  bool
+	CanDelete    bool
 }
 
 type loraTrainingJobJSON struct {
@@ -99,8 +100,10 @@ type loraTrainingJobJSON struct {
 	MaxTrainSteps int      `json:"max_train_steps"`
 	CanCancel     bool     `json:"can_cancel"`
 	CanDownload   bool     `json:"can_download"`
+	CanDelete     bool     `json:"can_delete"`
 	DownloadURL   string   `json:"download_url,omitempty"`
 	CancelURL     string   `json:"cancel_url,omitempty"`
+	DeleteURL     string   `json:"delete_url,omitempty"`
 	CreatedAt     int64    `json:"created_at"`
 	UpdatedAt     int64    `json:"updated_at"`
 	ArtifactName  string   `json:"artifact_name,omitempty"`
@@ -194,6 +197,7 @@ func (a *App) handleAdminLoraTraining(w http.ResponseWriter, r *http.Request) {
 		"Title": "Обучение LoRA", "Profiles": profiles, "ReadyProfiles": readyProfiles,
 		"AgentMessage": agentMessage, "Jobs": views, "ActiveJobs": activeJobs,
 		"CompletedJobs": completedJobs, "FailedJobs": failedJobs, "Cancelled": r.URL.Query().Get("cancelled") == "1",
+		"Deleted": r.URL.Query().Get("deleted") == "1",
 	})
 }
 
@@ -243,6 +247,28 @@ func (a *App) handleAdminLoraTrainingAction(w http.ResponseWriter, r *http.Reque
 		}
 		a.audit(r.Context(), &admin.ID, "lora_training_cancel_requested", "lora_training_job", &job.ID, a.clientIP(r), r.UserAgent(), map[string]any{"public_id": job.PublicID, "owner": job.UsernameSnapshot})
 		http.Redirect(w, r, "/admin/lora-training?cancelled=1", http.StatusFound)
+	case "delete":
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+			return
+		}
+		if !a.validCSRF(r) {
+			http.Error(w, "неверный защитный токен", http.StatusForbidden)
+			return
+		}
+		if !job.State.Terminal() {
+			http.Error(w, "сначала отмените активное обучение", http.StatusConflict)
+			return
+		}
+		admin := a.currentUser(r)
+		if err := a.deleteLoraTrainingJob(r.Context(), job); err != nil {
+			log.Printf("admin delete LoRA training %s: %v", job.PublicID, err)
+			http.Error(w, "не удалось удалить LoRA и файлы задания", http.StatusBadGateway)
+			return
+		}
+		a.audit(r.Context(), &admin.ID, "lora_training_deleted", "lora_training_job", &job.ID, a.clientIP(r), r.UserAgent(), map[string]any{"public_id": job.PublicID, "owner": job.UsernameSnapshot, "artifact": job.ArtifactName})
+		http.Redirect(w, r, "/admin/lora-training?deleted=1", http.StatusFound)
 	default:
 		http.NotFound(w, r)
 	}
@@ -296,6 +322,27 @@ func (a *App) handleLoraTrainingAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a.downloadLoraTrainingArtifact(w, r, job)
+	case "delete":
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+			return
+		}
+		if !a.validCSRF(r) {
+			http.Error(w, "неверный защитный токен", http.StatusForbidden)
+			return
+		}
+		if !job.State.Terminal() {
+			http.Error(w, "сначала отмените активное обучение", http.StatusConflict)
+			return
+		}
+		if err := a.deleteLoraTrainingJob(r.Context(), job); err != nil {
+			log.Printf("delete LoRA training %s: %v", job.PublicID, err)
+			http.Error(w, "не удалось удалить LoRA и файлы задания", http.StatusBadGateway)
+			return
+		}
+		a.audit(r.Context(), &user.ID, "lora_training_deleted", "lora_training_job", &job.ID, a.clientIP(r), r.UserAgent(), map[string]any{"public_id": job.PublicID, "artifact": job.ArtifactName})
+		http.Redirect(w, r, "/train-lora?deleted=1#training-history", http.StatusFound)
 	default:
 		http.NotFound(w, r)
 	}
@@ -731,6 +778,55 @@ func (a *App) downloadLoraTrainingArtifact(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+func (a *App) deleteLoraTrainingJob(ctx context.Context, job domain.LoraTrainingJob) error {
+	if !job.State.Terminal() {
+		return errors.New("LoRA training job is still active")
+	}
+	if job.AgentJobID != "" {
+		if a.loraTraining == nil || !a.loraTraining.Configured() {
+			return loratraining.ErrUnavailable
+		}
+		requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		_, err := a.loraTraining.Delete(requestCtx, job.AgentJobID)
+		cancel()
+		var httpErr *loratraining.HTTPError
+		agentAlreadyDeleted := errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound && httpErr.Code == "job_not_found"
+		if err != nil && !agentAlreadyDeleted {
+			return fmt.Errorf("delete LoRA training agent job: %w", err)
+		}
+	} else if job.State == domain.LoraTrainingCompleted {
+		return errors.New("completed LoRA training job has no agent reference")
+	}
+
+	a.removeLoraTrainingDataset(job)
+	a.releaseMiningPauseForLoraTraining(ctx, job.ID)
+	deleted, err := a.store.DeleteTerminalLoraTrainingJob(ctx, job.ID)
+	if err != nil {
+		return err
+	}
+	if !deleted {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (a *App) deleteExpiredFailedLoraTrainingJobs(ctx context.Context) (int64, error) {
+	jobs, err := a.store.FailedLoraTrainingJobsBefore(ctx, time.Now().Add(-24*time.Hour), 100)
+	if err != nil {
+		return 0, err
+	}
+	var deleted int64
+	cleanupErrors := make([]error, 0)
+	for _, job := range jobs {
+		if err := a.deleteLoraTrainingJob(ctx, job); err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("delete expired LoRA training %s: %w", job.PublicID, err))
+			continue
+		}
+		deleted++
+	}
+	return deleted, errors.Join(cleanupErrors...)
+}
+
 func (a *App) refreshLoraTrainingJobs(ctx context.Context) (int64, error) {
 	if a.loraTraining == nil || !a.loraTraining.Configured() {
 		return 0, nil
@@ -902,7 +998,7 @@ func loraTrainingJSON(job domain.LoraTrainingJob, agent *loratraining.JobStatus,
 		Stage: job.Stage, Progress: job.Progress, Message: job.Message, Error: job.ErrorMessage,
 		SampleCount: job.SampleCount, ConceptLabel: view.ConceptLabel, PresetLabel: view.PresetLabel,
 		Resolution: job.Resolution, MaxTrainSteps: job.MaxTrainSteps, CanCancel: view.CanCancel,
-		CanDownload: view.CanDownload, CreatedAt: job.CreatedAt.UnixMilli(), UpdatedAt: job.UpdatedAt.UnixMilli(),
+		CanDownload: view.CanDownload, CanDelete: view.CanDelete, CreatedAt: job.CreatedAt.UnixMilli(), UpdatedAt: job.UpdatedAt.UnixMilli(),
 		ArtifactName: job.ArtifactName, ArtifactBytes: job.ArtifactBytes,
 	}
 	if agent != nil {
@@ -919,6 +1015,9 @@ func loraTrainingJSON(job domain.LoraTrainingJob, agent *loratraining.JobStatus,
 	if result.CanCancel {
 		result.CancelURL = "/train-lora/" + job.PublicID + "/cancel"
 	}
+	if result.CanDelete {
+		result.DeleteURL = "/train-lora/" + job.PublicID + "/delete"
+	}
 	if includeUsername {
 		result.Username = job.UsernameSnapshot
 	}
@@ -929,7 +1028,7 @@ func newLoraTrainingJobView(job domain.LoraTrainingJob) loraTrainingJobView {
 	return loraTrainingJobView{
 		LoraTrainingJob: job, FamilyLabel: loraTrainingFamilyLabel(job.Family), ConceptLabel: loraConceptLabel(job.ConceptType),
 		PresetLabel: loraPresetLabel(job.Preset), StateLabel: loraTrainingStateLabel(job.State), StateClass: loraTrainingStateClass(job.State),
-		CanCancel: job.State.Cancellable(), CanDownload: job.State == domain.LoraTrainingCompleted && job.ArtifactName != "",
+		CanCancel: job.State.Cancellable(), CanDownload: job.State == domain.LoraTrainingCompleted && job.ArtifactName != "", CanDelete: job.State.Terminal(),
 	}
 }
 
@@ -1015,6 +1114,9 @@ func loraTrainingPageMessage(r *http.Request) string {
 	}
 	if r.URL.Query().Get("cancelled") == "1" {
 		return "Отмена запрошена. Активный процесс будет остановлен безопасно."
+	}
+	if r.URL.Query().Get("deleted") == "1" {
+		return "LoRA и запись задания удалены."
 	}
 	return ""
 }

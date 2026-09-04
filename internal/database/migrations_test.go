@@ -363,6 +363,25 @@ func TestImageLoraTrainingMigration(t *testing.T) {
 	}
 }
 
+func TestFailedLoraTrainingRetentionMigration(t *testing.T) {
+	var retentionMigration *migration
+	for index := range migrationCatalog {
+		if migrationCatalog[index].version == 52 {
+			retentionMigration = &migrationCatalog[index]
+			break
+		}
+	}
+	if retentionMigration == nil || retentionMigration.name != "failed_lora_training_retention" {
+		t.Fatal("failed LoRA training retention migration is missing")
+	}
+	sql := strings.Join(retentionMigration.statements, "\n")
+	for _, expected := range []string{"lora_training_jobs_failed_cleanup_idx", "COALESCE(finished_at,updated_at)", "state='failed'"} {
+		if !strings.Contains(sql, expected) {
+			t.Fatalf("failed LoRA training retention migration does not contain %q: %s", expected, sql)
+		}
+	}
+}
+
 func TestQuickGenerationRequestTelemetryMigration(t *testing.T) {
 	var telemetryMigration *migration
 	for index := range migrationCatalog {

@@ -1281,6 +1281,13 @@ var migrationCatalog = []migration{
 			`CREATE INDEX IF NOT EXISTS quick_generation_mining_leases_lora_training_idx ON quick_generation_mining_leases(lora_training_job_id) WHERE lora_training_job_id IS NOT NULL`,
 		},
 	},
+	{
+		version: 52,
+		name:    "failed_lora_training_retention",
+		statements: []string{
+			`CREATE INDEX IF NOT EXISTS lora_training_jobs_failed_cleanup_idx ON lora_training_jobs((COALESCE(finished_at,updated_at)),id) WHERE state='failed'`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
