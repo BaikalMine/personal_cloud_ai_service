@@ -356,7 +356,7 @@ func main() {
 		}
 	}
 	loraProfiles := []map[string]any{
-		{"ID": "krea2-moody-v7-bf16", "Family": "krea2", "Name": "Krea2 Moody v7 RAW", "BaseModel": "moodyKrea2Mix_v70BF16.safetensors", "Description": "Персонажи, стили, объекты и продукты на базе Krea2 RAW.", "Ready": true},
+		{"ID": "krea2-raw-official-bf16", "Family": "krea2", "Name": "Krea 2 Raw Official", "BaseModel": "krea2Raw_v10.safetensors", "Description": "Рекомендуемая база: обучение на Raw, использование LoRA в Krea 2 Turbo или Raw.", "Ready": true},
 		{"ID": "flux2-klein-9b-pornmaster-v4-base", "Family": "flux2-klein", "Name": "Flux.2 Klein 9B PornMaster v4 Base", "BaseModel": "pornmasterFlux2Klein_v4BaseBf16.safetensors", "Description": "Обучаемая base-модель Flux.2 Klein 9B.", "Ready": true},
 	}
 	loraPresets := []map[string]any{
@@ -366,7 +366,7 @@ func main() {
 	}
 	loraJobs := []map[string]any{
 		{
-			"PublicID": "lora-preview-running", "UsernameSnapshot": "admin", "Family": "krea2", "FamilyLabel": "Krea2", "Name": "Редакционный портрет", "OutputName": "editorial_portrait_v1", "BaseModel": "moodyKrea2Mix_v70BF16.safetensors",
+			"PublicID": "lora-preview-running", "UsernameSnapshot": "admin", "Family": "krea2", "FamilyLabel": "Krea2", "Name": "Редакционный портрет", "OutputName": "editorial_portrait_v1", "BaseModel": "krea2Raw_v10.safetensors",
 			"State": "running", "StateLabel": "Обучение", "StateClass": "is-active", "ConceptLabel": "Персонаж", "SampleCount": 24, "Resolution": 768, "PresetLabel": "Основной", "NetworkDim": 32, "MaxTrainSteps": 1600,
 			"Stage": "Обучаем LoRA", "Progress": 61, "Message": "Шаг 976 из 1600. Задание использует GPU, майнинг приостановлен.", "CanCancel": true, "CanDownload": false, "CreatedAt": now.Add(-46 * time.Minute),
 		},
@@ -377,7 +377,7 @@ func main() {
 		},
 	}
 	loraAPIJobs := []map[string]any{
-		{"id": "lora-preview-running", "name": "Редакционный портрет", "output_name": "editorial_portrait_v1", "profile_id": "krea2-moody-v7-bf16", "family": "krea2", "family_label": "Krea2", "base_model": "moodyKrea2Mix_v70BF16.safetensors", "state": "running", "state_label": "Обучение", "state_class": "is-active", "stage": "Обучаем LoRA", "progress": 61, "message": "Шаг 976 из 1600. Задание использует GPU, майнинг приостановлен.", "sample_count": 24, "concept_label": "Персонаж", "preset_label": "Основной", "resolution": 768, "max_train_steps": 1600, "can_cancel": true, "cancel_url": "/train-lora/lora-preview-running/cancel", "created_at": now.Add(-46 * time.Minute).UnixMilli(), "updated_at": now.Add(-4 * time.Second).UnixMilli()},
+		{"id": "lora-preview-running", "name": "Редакционный портрет", "output_name": "editorial_portrait_v1", "profile_id": "krea2-raw-official-bf16", "family": "krea2", "family_label": "Krea2", "base_model": "krea2Raw_v10.safetensors", "state": "running", "state_label": "Обучение", "state_class": "is-active", "stage": "Обучаем LoRA", "progress": 61, "message": "Шаг 976 из 1600. Задание использует GPU, майнинг приостановлен.", "sample_count": 24, "concept_label": "Персонаж", "preset_label": "Основной", "resolution": 768, "max_train_steps": 1600, "can_cancel": true, "cancel_url": "/train-lora/lora-preview-running/cancel", "created_at": now.Add(-46 * time.Minute).UnixMilli(), "updated_at": now.Add(-4 * time.Second).UnixMilli()},
 		{"id": "lora-preview-complete", "name": "Свет предметной съёмки", "output_name": "product_light_v2", "profile_id": "flux2-klein-9b-pornmaster-v4-base", "family": "flux2-klein", "family_label": "Flux.2 Klein", "base_model": "pornmasterFlux2Klein_v4BaseBf16.safetensors", "state": "completed", "state_label": "Готово", "state_class": "is-complete", "stage": "Готово", "progress": 100, "message": "LoRA установлена в ComfyUI и готова к использованию.", "sample_count": 38, "concept_label": "Стиль", "preset_label": "Детальный", "resolution": 1024, "max_train_steps": 2800, "can_download": true, "download_url": "/train-lora/lora-preview-complete/download", "artifact_name": "product_light_v2.safetensors", "created_at": now.Add(-7 * time.Hour).UnixMilli(), "updated_at": now.Add(-6 * time.Hour).UnixMilli()},
 	}
 	mux.HandleFunc("/api/lora-training/caption", func(w http.ResponseWriter, r *http.Request) {
@@ -421,7 +421,7 @@ func main() {
 	})
 	mux.HandleFunc("/preview/lora-training", render("lora_training", "Обучение LoRA", map[string]any{
 		"Profiles": loraProfiles, "ReadyProfiles": 2, "Presets": loraPresets,
-		"Form": map[string]any{"ProfileID": "krea2-moody-v7-bf16", "ConceptType": "character", "Preset": "balanced", "Resolution": 768},
+		"Form": map[string]any{"ProfileID": "krea2-raw-official-bf16", "ConceptType": "character", "Preset": "balanced", "Resolution": 768},
 		"Jobs": loraJobs,
 	}))
 	mux.HandleFunc("/preview/admin-lora-training", render("admin_lora_training", "Обучение LoRA", map[string]any{
