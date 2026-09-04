@@ -42,6 +42,14 @@ func (a *App) serviceCompatibilityRouter(comfyUI, openWebUI http.Handler) http.H
 
 func (a *App) rootOrServices(services http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The selection cookie is required for OpenWebUI's root-relative API and
+		// asset requests, but it must never turn the Gateway home page into the
+		// last opened service. The selector's explicit query remains the only
+		// way to proxy an upstream root document.
+		if r.URL.Path == "/" && r.URL.Query().Get("gateway_service") == "" {
+			a.handleRoot(w, r)
+			return
+		}
 		if _, ok := requestedService(r); ok {
 			services.ServeHTTP(w, r)
 			return

@@ -71,3 +71,30 @@ func TestRootOrServices(t *testing.T) {
 		t.Fatalf("X-Service = %q, want selected", got)
 	}
 }
+
+func TestRootOrServicesKeepsGatewayHomeIndependentOfServiceCookie(t *testing.T) {
+	app := &App{}
+	services := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Service", "selected")
+	})
+	handler := app.rootOrServices(services)
+
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.AddCookie(&http.Cookie{Name: serviceCookieName, Value: "openwebui"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusFound || response.Header().Get("Location") != "/login" {
+		t.Fatalf("Gateway home was redirected by a stale service selection: status=%d location=%q", response.Code, response.Header().Get("Location"))
+	}
+	if got := response.Header().Get("X-Service"); got != "" {
+		t.Fatalf("Gateway home unexpectedly proxied a service: %q", got)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/?gateway_service=openwebui", nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if got := response.Header().Get("X-Service"); got != "selected" {
+		t.Fatalf("explicit service selector was not proxied: %q", got)
+	}
+}
