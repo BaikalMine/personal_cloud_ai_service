@@ -81,25 +81,25 @@
       </section>
       <section class="lora-stage-guide"><p class="section-kicker">Что произойдёт</p><h2>Этапы задачи</h2><div><span>Датасет</span><i></i><span>Латенты</span><i></i><span>Текст</span><i></i><span>LoRA</span></div><p>Кеши создаются отдельно, поэтому основной этап не держит VAE и text encoder в памяти одновременно.</p></section>
     </aside>
-  </div>
 
-  <section class="lora-training-history" id="training-history" aria-labelledby="training-history-title">
-    <header class="lora-history-heading"><div><p class="section-kicker">История</p><h2 id="training-history-title">Мои LoRA</h2></div><span>{{len .Jobs}}</span></header>
-    <div class="lora-job-list" data-lora-job-list>
-      {{range .Jobs}}
-      <article class="lora-job {{.StateClass}}" data-lora-job data-job-id="{{.PublicID}}" data-job-state="{{.State}}">
-        <header><div><span class="lora-job-family">{{.FamilyLabel}}</span><h3>{{.Name}}</h3><small>{{.BaseModel}}</small></div><span class="badge lora-job-state">{{.StateLabel}}</span></header>
-        <div class="lora-job-facts"><span>{{.ConceptLabel}}</span><span>{{.SampleCount}} фото</span><span>{{.Resolution}} px</span><span>{{.PresetLabel}}</span><span>{{.MaxTrainSteps}} шагов</span></div>
-        <div class="lora-job-progress"><div><span data-job-stage>{{.Stage}}</span><b data-job-progress-label>{{.Progress}}%</b></div><progress max="100" value="{{.Progress}}" data-job-progress>{{.Progress}}%</progress><p data-job-message>{{.Message}}</p></div>
-        <p class="lora-job-error" data-job-error {{if not .ErrorMessage}}hidden{{end}}>{{.ErrorMessage}}</p>
-        <details class="lora-job-log" data-job-log-wrap {{if or (eq .State "queued") (eq .State "completed")}}hidden{{end}}><summary>Технический журнал</summary><pre data-job-log>Журнал появится после запуска локального процесса.</pre></details>
-        <footer><span>Создано {{formatTime .CreatedAt}}</span><div>{{if .CanCancel}}<form method="post" action="/train-lora/{{.PublicID}}/cancel" data-job-cancel><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger" type="submit" data-confirm="Остановить обучение LoRA?">Отменить</button></form>{{end}}{{if .CanDownload}}<a class="button" href="/train-lora/{{.PublicID}}/download" data-job-download>Скачать LoRA</a>{{end}}{{if .CanDelete}}<form method="post" action="/train-lora/{{.PublicID}}/delete" data-job-delete><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger" type="submit" data-confirm="Удалить LoRA «{{.Name}}»? Файл будет удалён из ComfyUI без возможности восстановления.">Удалить</button></form>{{end}}</div></footer>
-      </article>
-      {{else}}
-      <div class="ui-empty-state lora-history-empty"><span aria-hidden="true">+</span><div><h3>Обучений пока нет</h3><p>После запуска здесь появятся этапы, журнал и готовый файл LoRA.</p></div></div>
-      {{end}}
-    </div>
-  </section>
+    <section class="lora-training-history" id="training-history" aria-labelledby="training-history-title">
+      <header class="lora-history-heading"><div><p class="section-kicker">История</p><h2 id="training-history-title">Мои LoRA</h2></div><span>{{len .Jobs}}</span></header>
+      <div class="lora-job-list" data-lora-job-list>
+        {{range .Jobs}}
+        <article class="lora-job {{.StateClass}}" data-lora-job data-job-id="{{.PublicID}}" data-job-state="{{.State}}">
+          <header><div><span class="lora-job-family">{{.FamilyLabel}}</span><h3>{{.Name}}</h3><small>{{.BaseModel}}</small></div><span class="badge lora-job-state">{{.StateLabel}}</span></header>
+          <div class="lora-job-facts"><span>{{.ConceptLabel}}</span><span>{{.SampleCount}} фото</span><span>{{.Resolution}} px</span><span>{{.PresetLabel}}</span><span>{{.MaxTrainSteps}} шагов</span></div>
+          <div class="lora-job-progress"><div><span data-job-stage>{{.Stage}}</span><b data-job-progress-label>{{.Progress}}%</b></div><progress max="100" value="{{.Progress}}" data-job-progress>{{.Progress}}%</progress><p data-job-message>{{.Message}}</p></div>
+          <p class="lora-job-error" data-job-error {{if not .ErrorMessage}}hidden{{end}}>{{.ErrorMessage}}</p>
+          <details class="lora-job-log" data-job-log-wrap {{if or (eq .State "queued") (eq .State "completed")}}hidden{{end}}><summary>Технический журнал</summary><pre data-job-log>Журнал появится после запуска локального процесса.</pre></details>
+          <footer><span>Создано {{formatTime .CreatedAt}}</span><div>{{if .CanCancel}}<form method="post" action="/train-lora/{{.PublicID}}/cancel" data-job-cancel><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger" type="submit" data-confirm="Остановить обучение LoRA?">Отменить</button></form>{{end}}{{if .CanDownload}}<a class="button" href="/train-lora/{{.PublicID}}/download" data-job-download>Скачать LoRA</a>{{end}}{{if .CanDelete}}<form method="post" action="/train-lora/{{.PublicID}}/delete" data-job-delete><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger" type="submit" data-confirm="Удалить LoRA «{{.Name}}»? Файл будет удалён из ComfyUI без возможности восстановления.">Удалить</button></form>{{end}}</div></footer>
+        </article>
+        {{else}}
+        <div class="ui-empty-state lora-history-empty"><span aria-hidden="true">+</span><div><h3>Обучений пока нет</h3><p>После запуска здесь появятся этапы, журнал и готовый файл LoRA.</p></div></div>
+        {{end}}
+      </div>
+    </section>
+  </div>
 </main>
 <script src="/static/lora-training.js?v={{.AssetVersion}}"></script>
 </body></html>

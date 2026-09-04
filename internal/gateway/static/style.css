@@ -2378,8 +2378,8 @@ body.show-sensitive-content .sensitive-media-cover, .sensitive-media.is-revealed
 .lora-agent-state small { color: var(--muted); }
 .lora-agent-state.is-ready { border-color: #2d785f; background: #142a22; }
 .lora-agent-state.is-ready > span { background: var(--mint); box-shadow: 0 0 0 4px rgba(105, 223, 185, .1); }
-.lora-training-workspace { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 310px; align-items: start; gap: 24px; }
-.lora-training-composer { margin: 0; padding: 0; overflow: hidden; box-shadow: none; }
+.lora-training-workspace { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 310px; grid-template-areas: "composer guide" "history guide"; align-items: start; gap: 24px; }
+.lora-training-composer { grid-area: composer; margin: 0; padding: 0; overflow: hidden; box-shadow: none; }
 .lora-section-heading, .lora-history-heading { min-height: 78px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; }
 .lora-section-heading h2, .lora-history-heading h2 { margin: 0; font-size: 18px; }
 .lora-section-heading > span { padding: 5px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--muted); font-size: var(--font-size-utility); font-weight: 800; white-space: nowrap; }
@@ -2467,7 +2467,7 @@ body.show-sensitive-content .sensitive-media-cover, .sensitive-media.is-revealed
 .lora-submit-row p { max-width: 660px; margin: 0; color: var(--muted); font-size: 12px; }
 .lora-submit-row button { flex: 0 0 auto; min-width: 190px; }
 .lora-training-form.is-submitting { pointer-events: none; opacity: .72; }
-.lora-training-guide { position: sticky; top: 94px; min-width: 0; border-top: 3px solid var(--cyan); border-bottom: 1px solid var(--line); background: var(--canvas-soft); }
+.lora-training-guide { grid-area: guide; position: sticky; top: 94px; min-width: 0; border-top: 3px solid var(--cyan); border-bottom: 1px solid var(--line); background: var(--canvas-soft); }
 .lora-training-guide > section { padding: 18px 16px; border-right: 1px solid var(--line); border-left: 1px solid var(--line); }
 .lora-training-guide > section + section { border-top: 1px solid var(--line); }
 .lora-training-guide h2 { margin: 0; font-size: 16px; }
@@ -2481,7 +2481,7 @@ body.show-sensitive-content .sensitive-media-cover, .sensitive-media.is-revealed
 .lora-stage-guide > div span { color: var(--text-soft); font-size: var(--font-size-utility); font-weight: 800; }
 .lora-stage-guide > div i { height: 1px; background: var(--line-strong); }
 .lora-stage-guide > p { margin: 0; color: var(--muted); font-size: var(--font-size-utility); line-height: 1.45; }
-.lora-training-history { min-width: 0; margin-top: 26px; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); }
+.lora-training-history { grid-area: history; min-width: 0; margin: 0; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); }
 .lora-training-history > .lora-history-heading { border-bottom: 1px solid var(--line); }
 .lora-history-heading > span { min-width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--canvas-soft); color: var(--text-soft); font-size: 12px; font-weight: 850; }
 .lora-job-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -2521,7 +2521,7 @@ body.show-sensitive-content .sensitive-media-cover, .sensitive-media.is-revealed
 .lora-training-page.is-poll-stale .lora-history-heading::after { content: "Обновление приостановлено"; color: var(--amber); font-size: var(--font-size-utility); }
 
 @media (max-width: 1180px) {
-  .lora-training-workspace { grid-template-columns: 1fr; }
+  .lora-training-workspace { grid-template-columns: 1fr; grid-template-areas: "composer" "guide" "history"; }
   .lora-training-guide { position: static; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top-width: 1px; }
   .lora-training-guide > section + section { border-top: 0; border-left: 0; }
 }
