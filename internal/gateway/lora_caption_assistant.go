@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -17,6 +19,12 @@ import (
 )
 
 const maxLoraCaptionRequestBytes = maxLoraTrainingImageBytes + (512 << 10)
+
+const (
+	maxQueuedLoraCaptionJobsPerUser = 4
+	loraCaptionJobRetention         = 20 * time.Minute
+	loraCaptionWorkerOverhead       = 2 * time.Minute
+)
 
 var (
 	errLoraCaptionCSRF     = errors.New("проверка безопасности не пройдена")
@@ -29,6 +37,127 @@ type loraCaptionSubmission struct {
 	Filename    string
 	MIMEType    string
 	Image       []byte
+}
+
+type loraCaptionJobState string
+
+const (
+	loraCaptionQueued    loraCaptionJobState = "queued"
+	loraCaptionRunning   loraCaptionJobState = "running"
+	loraCaptionCompleted loraCaptionJobState = "completed"
+	loraCaptionFailed    loraCaptionJobState = "failed"
+)
+
+type loraCaptionJob struct {
+	ID        string
+	UserID    int64
+	State     loraCaptionJobState
+	Status    string
+	Caption   string
+	Model     string
+	Warning   string
+	Error     string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	ExpiresAt time.Time
+}
+
+type loraCaptionJobRegistry struct {
+	mu   sync.Mutex
+	jobs map[string]*loraCaptionJob
+}
+
+func newLoraCaptionJobRegistry() *loraCaptionJobRegistry {
+	return &loraCaptionJobRegistry{jobs: make(map[string]*loraCaptionJob)}
+}
+
+func (a *App) loraCaptionJobRegistry() *loraCaptionJobRegistry {
+	a.loraCaptionMu.Lock()
+	defer a.loraCaptionMu.Unlock()
+	if a.loraCaptionJobs == nil {
+		a.loraCaptionJobs = newLoraCaptionJobRegistry()
+	}
+	return a.loraCaptionJobs
+}
+
+func (registry *loraCaptionJobRegistry) enqueue(userID int64) (loraCaptionJob, bool) {
+	now := time.Now().UTC()
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	for id, job := range registry.jobs {
+		if job.ExpiresAt.Before(now) {
+			delete(registry.jobs, id)
+		}
+	}
+	pending := 0
+	for _, job := range registry.jobs {
+		if job.UserID == userID && (job.State == loraCaptionQueued || job.State == loraCaptionRunning) {
+			pending++
+		}
+	}
+	if pending >= maxQueuedLoraCaptionJobsPerUser {
+		return loraCaptionJob{}, false
+	}
+	job := &loraCaptionJob{
+		ID:        newRequestID(),
+		UserID:    userID,
+		State:     loraCaptionQueued,
+		Status:    "Описание поставлено в очередь ассистента",
+		CreatedAt: now,
+		UpdatedAt: now,
+		ExpiresAt: now.Add(loraCaptionJobRetention),
+	}
+	registry.jobs[job.ID] = job
+	return *job, true
+}
+
+func (registry *loraCaptionJobRegistry) get(userID int64, id string) (loraCaptionJob, bool) {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	job, ok := registry.jobs[id]
+	if !ok || job.UserID != userID || job.ExpiresAt.Before(time.Now().UTC()) {
+		return loraCaptionJob{}, false
+	}
+	return *job, true
+}
+
+func (registry *loraCaptionJobRegistry) update(id string, state loraCaptionJobState, status string) {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if job := registry.jobs[id]; job != nil {
+		job.State = state
+		job.Status = status
+		job.UpdatedAt = time.Now().UTC()
+	}
+}
+
+func (registry *loraCaptionJobRegistry) complete(id, caption, model, warning string) {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if job := registry.jobs[id]; job != nil {
+		now := time.Now().UTC()
+		job.State = loraCaptionCompleted
+		job.Status = "Описание готово"
+		job.Caption = caption
+		job.Model = model
+		job.Warning = warning
+		job.Error = ""
+		job.UpdatedAt = now
+		job.ExpiresAt = now.Add(loraCaptionJobRetention)
+	}
+}
+
+func (registry *loraCaptionJobRegistry) fail(id, message string) {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if job := registry.jobs[id]; job != nil {
+		now := time.Now().UTC()
+		job.State = loraCaptionFailed
+		job.Status = "Описание не удалось подготовить"
+		job.Error = message
+		job.UpdatedAt = now
+		job.ExpiresAt = now.Add(loraCaptionJobRetention)
+	}
 }
 
 func (a *App) handleLoraTrainingCaption(w http.ResponseWriter, r *http.Request) {
@@ -46,19 +175,6 @@ func (a *App) handleLoraTrainingCaption(w http.ResponseWriter, r *http.Request) 
 		writeGenerationError(w, http.StatusServiceUnavailable, "локальная vision-модель не настроена")
 		return
 	}
-	releaseAssistant, acquired := acquireBoundedSlot(r.Context(), a.promptAssistantSlots, time.Second)
-	if !acquired {
-		writeGenerationError(w, http.StatusTooManyRequests, "промт-ассистент уже обрабатывает другой запрос")
-		return
-	}
-	defer releaseAssistant()
-	releaseMedia, acquired := a.mediaByteLimiter().tryAcquire(promptAssistantMemoryReservation)
-	if !acquired {
-		writeGenerationError(w, http.StatusTooManyRequests, "обработка изображений уже заняла доступную память; повторите позже")
-		return
-	}
-	defer releaseMedia()
-
 	submission, err := a.readLoraCaptionSubmission(w, r)
 	if err != nil {
 		clear(submission.Image)
@@ -73,6 +189,36 @@ func (a *App) handleLoraTrainingCaption(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	imageBytes := len(submission.Image)
+	if err := validateLoraTriggerWord(submission.TriggerWord); err != nil {
+		clear(submission.Image)
+		submission.Image = nil
+		writeGenerationError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !validLoraConceptType(submission.ConceptType) {
+		clear(submission.Image)
+		submission.Image = nil
+		writeGenerationError(w, http.StatusBadRequest, "выберите тип LoRA")
+		return
+	}
+	job, queued := a.loraCaptionJobRegistry().enqueue(user.ID)
+	if !queued {
+		clear(submission.Image)
+		submission.Image = nil
+		writeGenerationError(w, http.StatusTooManyRequests, "уже ожидают обработки несколько описаний; дождитесь завершения или повторите позже")
+		return
+	}
+	userCopy := *user
+	go a.runLoraCaptionJob(job.ID, userCopy, submission, imageBytes, a.clientIP(r), r.UserAgent())
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"job_id":  job.ID,
+		"state":   job.State,
+		"status":  job.Status,
+		"expires": job.ExpiresAt.Unix(),
+	})
+}
+
+func (a *App) runLoraCaptionJob(jobID string, user User, submission loraCaptionSubmission, imageBytes int, clientIP, userAgent string) {
 	defer func() {
 		clear(submission.Image)
 		submission.Image = nil
@@ -80,18 +226,29 @@ func (a *App) handleLoraTrainingCaption(w http.ResponseWriter, r *http.Request) 
 			debug.FreeOSMemory()
 		}
 	}()
-	if err := validateLoraTriggerWord(submission.TriggerWord); err != nil {
-		writeGenerationError(w, http.StatusBadRequest, err.Error())
+	policy := a.promptAssistant.PolicyForRequest(promptassistant.ModeImageToImage, promptassistant.ProfileWorkflowDefault, false, true)
+	ctx, cancel := context.WithTimeout(context.Background(), policy.Timeout+loraCaptionWorkerOverhead)
+	defer cancel()
+	registry := a.loraCaptionJobRegistry()
+	registry.update(jobID, loraCaptionRunning, "Ожидаем доступ к vision-модели")
+	releaseAssistant, acquired := acquireBoundedSlot(ctx, a.promptAssistantSlots, policy.Timeout+loraCaptionWorkerOverhead)
+	if !acquired {
+		registry.fail(jobID, "ассистент не освободился вовремя; повторите описание")
 		return
 	}
-	if !validLoraConceptType(submission.ConceptType) {
-		writeGenerationError(w, http.StatusBadRequest, "выберите тип LoRA")
+	defer releaseAssistant()
+	releaseMedia, acquired := a.mediaByteLimiter().tryAcquire(promptAssistantMemoryReservation)
+	if !acquired {
+		registry.fail(jobID, "обработка изображений уже заняла доступную память; повторите позже")
 		return
 	}
+	defer releaseMedia()
 
-	miningLease, miningWarning, err := a.pauseMiningForQuickGeneration(r.Context(), user, 0)
+	registry.update(jobID, loraCaptionRunning, "Подготавливаем vision-модель")
+	miningLease, miningWarning, err := a.pauseMiningForQuickGeneration(ctx, &user, 0)
 	if err != nil {
-		writeGenerationError(w, http.StatusServiceUnavailable, "не удалось освободить ресурсы для промт-ассистента: "+err.Error())
+		registry.fail(jobID, "не удалось освободить ресурсы для ассистента")
+		log.Printf("LoRA caption job %s could not pause mining: %v", jobID, err)
 		return
 	}
 	if miningLease != nil {
@@ -102,19 +259,21 @@ func (a *App) handleLoraTrainingCaption(w http.ResponseWriter, r *http.Request) 
 		}()
 	}
 
+	registry.update(jobID, loraCaptionRunning, "Ассистент анализирует кадр")
 	started := time.Now()
-	result, err := a.promptAssistant.CaptionImage(r.Context(), submission.TriggerWord, submission.ConceptType, submission.Image, submission.MIMEType)
-	a.observeServiceCall(r.Context(), dependencyOllama, "caption_lora_image", started, err, false, "assistant_request_failed", "")
+	result, err := a.promptAssistant.CaptionImage(ctx, submission.TriggerWord, submission.ConceptType, submission.Image, submission.MIMEType)
+	a.observeServiceCall(ctx, dependencyOllama, "caption_lora_image", started, err, false, "assistant_request_failed", "")
 	if err != nil {
-		writeGenerationError(w, http.StatusBadGateway, "не удалось описать изображение локальной моделью")
+		registry.fail(jobID, "локальная модель не смогла подготовить описание; повторите позже")
+		log.Printf("LoRA caption job %s failed: %v", jobID, err)
 		return
 	}
 	caption := truncateLoraText(ensureLoraCaptionTrigger(submission.TriggerWord, result.Caption), promptassistant.MaxLoraCaptionCharacters)
 	if caption == "" {
-		writeGenerationError(w, http.StatusBadGateway, "локальная модель вернула пустое описание")
+		registry.fail(jobID, "локальная модель вернула пустое описание")
 		return
 	}
-	a.audit(r.Context(), &user.ID, "lora_training_caption_generated", "lora_training_dataset", nil, a.clientIP(r), r.UserAgent(), map[string]any{
+	a.audit(ctx, &user.ID, "lora_training_caption_generated", "lora_training_dataset", nil, clientIP, userAgent, map[string]any{
 		"concept_type":  submission.ConceptType,
 		"model":         result.Model,
 		"filename":      submission.Filename,
@@ -123,10 +282,39 @@ func (a *App) handleLoraTrainingCaption(w http.ResponseWriter, r *http.Request) 
 		"usage":         result.Usage,
 		"policy":        result.Policy,
 	})
+	registry.complete(jobID, caption, result.Model, miningWarning)
+}
+
+func (a *App) handleLoraTrainingCaptionStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeGenerationError(w, http.StatusMethodNotAllowed, "метод не поддерживается")
+		return
+	}
+	user := a.currentUser(r)
+	if user == nil {
+		writeGenerationError(w, http.StatusUnauthorized, "требуется вход")
+		return
+	}
+	jobID := strings.TrimPrefix(r.URL.Path, "/api/lora-training/caption/")
+	if jobID == "" || strings.Contains(jobID, "/") {
+		writeGenerationError(w, http.StatusNotFound, "описание не найдено")
+		return
+	}
+	job, ok := a.loraCaptionJobRegistry().get(user.ID, jobID)
+	if !ok {
+		writeGenerationError(w, http.StatusNotFound, "описание не найдено или срок ожидания истёк")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"caption": caption,
-		"model":   result.Model,
-		"warning": miningWarning,
+		"job_id":  job.ID,
+		"state":   job.State,
+		"status":  job.Status,
+		"caption": job.Caption,
+		"model":   job.Model,
+		"warning": job.Warning,
+		"error":   job.Error,
+		"expires": job.ExpiresAt.Unix(),
 	})
 }
 

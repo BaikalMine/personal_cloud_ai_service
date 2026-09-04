@@ -130,6 +130,41 @@
     error.status = response.status;
     throw error;
   };
+  const waitForCaptionPoll = (signal) => new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    }, 1200);
+    const abort = () => {
+      window.clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      reject(new DOMException("Описание остановлено", "AbortError"));
+    };
+    if (signal?.aborted) {
+      abort();
+      return;
+    }
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+  const waitForCaptionJob = async (jobID, key, signal) => {
+    for (;;) {
+      const response = await fetch(`/api/lora-training/caption/${encodeURIComponent(jobID)}`, {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        signal,
+      });
+      if (!response.ok) await responseError(response);
+      const payload = await response.json();
+      if (payload.state === "completed") return payload;
+      if (payload.state === "failed") {
+        const error = new Error(payload.error || "Ассистент не смог подготовить описание.");
+        error.status = 502;
+        throw error;
+      }
+      setCaptionState(key, "loading", payload.status || "Ассистент анализирует этот кадр");
+      await waitForCaptionPoll(signal);
+    }
+  };
   const renderFiles = (captions = collectCaptions()) => {
     previewURLs.forEach((url) => URL.revokeObjectURL(url));
     previewURLs = [];
@@ -225,7 +260,13 @@
       signal,
     });
     if (!response.ok) await responseError(response);
-    const payload = await response.json();
+    let payload = await response.json();
+    if (response.status === 202) {
+      const jobID = typeof payload.job_id === "string" ? payload.job_id : "";
+      if (!jobID) throw new Error("Сервис не вернул идентификатор задачи описания.");
+      setCaptionState(key, "loading", payload.status || "Описание поставлено в очередь ассистента");
+      payload = await waitForCaptionJob(jobID, key, signal);
+    }
     const captionValue = typeof payload.caption === "string" ? payload.caption.trim() : "";
     if (!captionValue) throw new Error("Ассистент вернул пустое описание.");
     const card = grid?.querySelector(`[data-file-key="${CSS.escape(key)}"]`);

@@ -123,6 +123,7 @@ func (a *App) registerLoraTrainingRoutes(mux *http.ServeMux) {
 	mux.Handle("/train-lora", access(http.HandlerFunc(a.handleLoraTraining)))
 	mux.Handle("/train-lora/", access(http.HandlerFunc(a.handleLoraTrainingAction)))
 	mux.Handle("/api/lora-training/caption", access(http.HandlerFunc(a.handleLoraTrainingCaption)))
+	mux.Handle("/api/lora-training/caption/", access(http.HandlerFunc(a.handleLoraTrainingCaptionStatus)))
 	mux.Handle("/api/lora-training/jobs", access(http.HandlerFunc(a.handleLoraTrainingJobsAPI)))
 	mux.Handle("/api/lora-training/jobs/", access(http.HandlerFunc(a.handleLoraTrainingJobAPI)))
 }

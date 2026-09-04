@@ -183,6 +183,7 @@ func Run() error {
 		maintenanceDone:      make(chan struct{}),
 		serviceLatencies:     newServiceLatencyRegistry(),
 		mediaOperations:      newMediaOperationRegistry(),
+		loraCaptionJobs:      newLoraCaptionJobRegistry(),
 		mediaBytes:           newWeightedByteLimiter(cfg.MediaInFlightLimitBytes),
 		proxyCounts:          map[string]int64{},
 	}
