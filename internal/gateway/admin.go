@@ -806,6 +806,7 @@ func (a *App) handleAdminUserDetail(w http.ResponseWriter, r *http.Request, rest
 			trainImageLora := r.Form.Get("can_train_image_lora") == "on"
 			manageMining := r.Form.Get("can_manage_mining") == "on"
 			pauseMiningForQuickGeneration := quickGeneration && r.Form.Get("pause_mining_for_quick_generation") == "on"
+			queuePriority := parseQueuePriority(r, quickGeneration || trainImageLora, pauseMiningForQuickGeneration)
 			imageDailyLimit, imageTotalLimit, limitErr := parseGenerationLimits(r, "image_generation", "изображений")
 			if limitErr != nil {
 				http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?access=invalid_limits", id), http.StatusFound)
@@ -826,6 +827,7 @@ func (a *App) handleAdminUserDetail(w http.ResponseWriter, r *http.Request, rest
 				TextToImage: textToImage, ImageToImage: imageToImage, Video: video,
 				AdvancedGenerationSettings: advancedGenerationSettings, TrainImageLora: trainImageLora, ManageMining: manageMining,
 				PauseMiningForQuickGeneration: pauseMiningForQuickGeneration,
+				QueuePriority:                 queuePriority,
 				ImageDailyLimit:               imageDailyLimit, ImageTotalLimit: imageTotalLimit,
 				VideoDailyLimit: videoDailyLimit, VideoTotalLimit: videoTotalLimit, MaxVideoQuality: maxVideoQuality,
 			})
@@ -840,6 +842,7 @@ func (a *App) handleAdminUserDetail(w http.ResponseWriter, r *http.Request, rest
 					"text_to_image": textToImage, "image_to_image": imageToImage, "video": video,
 					"advanced_generation_settings": advancedGenerationSettings, "train_image_lora": trainImageLora, "manage_mining": manageMining,
 					"pause_mining_for_quick_generation": pauseMiningForQuickGeneration,
+					"queue_priority":                    queuePriority,
 					"image_generation_daily_limit":      imageDailyLimit, "image_generation_total_limit": imageTotalLimit,
 					"video_generation_daily_limit": videoDailyLimit, "video_generation_total_limit": videoTotalLimit,
 					"max_video_generation_quality": maxVideoQuality,
@@ -961,6 +964,7 @@ func (a *App) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
 		grantAdvancedGenerationSettings := grantQuickGeneration && r.Form.Get("grant_advanced_generation_settings") == "on"
 		grantTrainImageLora := r.Form.Get("grant_train_image_lora") == "on"
 		pauseMiningForQuickGeneration := grantQuickGeneration && r.Form.Get("pause_mining_for_quick_generation") == "on"
+		queuePriority := parseQueuePriority(r, grantQuickGeneration || grantTrainImageLora, pauseMiningForQuickGeneration)
 		if grantQuickGeneration && !grantTextToImage && !grantImageToImage && !grantVideo {
 			invites, _ := a.store.ListInvites(r.Context(), 200)
 			a.render(w, r, "admin_invites", map[string]any{"Title": "Приглашения", "Invites": invites, "Error": "Для быстрой генерации выберите хотя бы один сценарий."})
@@ -1008,6 +1012,7 @@ func (a *App) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
 			GrantAdvancedGenerationSettings: grantAdvancedGenerationSettings,
 			GrantTrainImageLora:             grantTrainImageLora,
 			PauseMiningForQuickGeneration:   pauseMiningForQuickGeneration,
+			QueuePriority:                   queuePriority,
 			GenerationDailyLimit:            imageDailyLimit,
 			GenerationTotalLimit:            imageTotalLimit,
 			VideoGenerationDailyLimit:       videoDailyLimit,
@@ -1023,6 +1028,7 @@ func (a *App) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
 			"max_uses": maxUses, "expires_at": expiresAt, "grant_comfyui": grantComfyUI, "grant_openwebui": grantOpenWebUI,
 			"grant_quick_generation": grantQuickGeneration, "text_to_image": grantTextToImage, "image_to_image": grantImageToImage, "video": grantVideo,
 			"advanced_generation_settings": grantAdvancedGenerationSettings, "train_image_lora": grantTrainImageLora, "pause_mining_for_quick_generation": pauseMiningForQuickGeneration,
+			"queue_priority":               queuePriority,
 			"image_generation_daily_limit": imageDailyLimit, "image_generation_total_limit": imageTotalLimit,
 			"video_generation_daily_limit": videoDailyLimit, "video_generation_total_limit": videoTotalLimit,
 			"max_video_generation_quality": maxVideoQuality, "account_lifetime_seconds": accountLifetimeSeconds,
@@ -1041,6 +1047,17 @@ func (a *App) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.render(w, r, "admin_invites", map[string]any{"Title": "Приглашения", "Invites": invites})
+}
+
+func parseQueuePriority(r *http.Request, allowed, legacyPriority bool) bool {
+	if !allowed {
+		return false
+	}
+	// Forms opened before the split still submit the former combined flag.
+	if r.Form.Get("queue_policy_version") != "2" {
+		return legacyPriority
+	}
+	return r.Form.Get("queue_priority") == "on"
 }
 
 func parseGenerationLimits(r *http.Request, prefix, label string) (int, int64, error) {

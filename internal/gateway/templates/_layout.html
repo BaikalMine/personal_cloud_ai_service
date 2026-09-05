@@ -24,9 +24,9 @@
     <a class="brand" href="/app"><b>AI Gateway</b><span>Рабочее пространство</span></a>
   </div>
   {{if .CurrentUser}}{{if eq .CurrentUser.Role "admin"}}
-  <form method="post" action="/account/quick-generation-priority" class="header-priority-form" data-quick-generation-priority title="Ставит задания перед обычной очередью, освобождает ресурсы и автоматически возобновляет майнинг после завершения или отмены.">
+  <form method="post" action="/account/quick-generation-priority" class="header-priority-form" data-quick-generation-priority title="Повышает приоритет новых заданий. Уже выполняющаяся работа не прерывается.">
 	<input type="hidden" name="csrf" value="{{.CSRF}}">
-	<label class="header-priority-toggle"><input name="enabled" type="checkbox" value="on" {{if .CurrentUser.PauseMiningForQuickGeneration}}checked{{end}}><span class="header-priority-switch" aria-hidden="true"></span><span>Приоритет</span></label>
+	<label class="header-priority-toggle"><input name="enabled" type="checkbox" value="on" {{if .CurrentUser.QueuePriority}}checked{{end}}><span class="header-priority-switch" aria-hidden="true"></span><span>Приоритет</span></label>
   </form>
   {{end}}{{end}}
   <label class="header-sensitive-toggle" title="По умолчанию чувствительные результаты скрыты блюром. Включите, чтобы показывать их в галереях."><input type="checkbox" data-sensitive-toggle><span class="header-sensitive-switch" aria-hidden="true"></span><span>18+</span></label>

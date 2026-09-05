@@ -768,7 +768,7 @@ func (a *App) dispatchGenerationBatchJobs(ctx context.Context) (int64, error) {
 	if miningWarning != "" {
 		log.Printf("batch generation %s mining priority: %s", job.PublicID, miningWarning)
 	}
-	promptID, err := a.submitComfyPrompt(jobCtx, user.ID, job.PublicID, user.PauseMiningForQuickGeneration, prompt)
+	promptID, err := a.submitComfyPrompt(jobCtx, user.ID, job.PublicID, user.QueuePriority, prompt)
 	if err != nil {
 		a.failGenerationJob(jobCtx, job, "comfy_submission_failed", "ComfyUI не принял вариант", err)
 		return 1, nil

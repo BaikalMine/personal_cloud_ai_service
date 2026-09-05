@@ -1412,6 +1412,14 @@ var migrationCatalog = []migration{
 			`UPDATE lora_training_jobs SET agent_submission_started_at=updated_at WHERE state='uploading' AND agent_job_id=''`,
 		},
 	},
+	{
+		version: 58, name: "independent_queue_priority", statements: []string{
+			`ALTER TABLE users ADD COLUMN queue_priority BOOLEAN NOT NULL DEFAULT FALSE`,
+			`ALTER TABLE invites ADD COLUMN queue_priority BOOLEAN NOT NULL DEFAULT FALSE`,
+			`UPDATE users SET queue_priority=pause_mining_for_quick_generation`,
+			`UPDATE invites SET queue_priority=pause_mining_for_quick_generation`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

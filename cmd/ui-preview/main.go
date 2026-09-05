@@ -531,6 +531,7 @@ func main() {
 			GrantVideo:                      true,
 			GrantAdvancedGenerationSettings: true,
 			PauseMiningForQuickGeneration:   true,
+			QueuePriority:                   true,
 			GenerationDailyLimit:            12,
 			GenerationTotalLimit:            50,
 			VideoGenerationDailyLimit:       2,
@@ -757,7 +758,7 @@ func main() {
 	}))
 	users := []domain.UserRow{
 		{ID: 1, Username: "admin", Email: "admin@example.local", Role: "admin", CanUseComfyUI: true, CanUseOpenWebUI: true, Requests: 96, LastLoginAt: sql.NullTime{Time: now.Add(-time.Hour), Valid: true}},
-		{ID: 2, Username: "rayka", Email: "rayka@example.local", Role: "user", CanUseComfyUI: true, CanUseOpenWebUI: true, CanUseQuickGeneration: true, CanGenerateTextToImage: true, CanGenerateVideo: true, CanUseAdvancedGenerationSettings: true, PauseMiningForQuickGeneration: true, GenerationDailyLimit: 12, GenerationTotalLimit: 50, GenerationTotalUsed: 17, VideoGenerationDailyLimit: 2, VideoGenerationTotalLimit: 8, VideoGenerationTotalUsed: 3, MaxVideoGenerationQuality: 720, Requests: 302, LastLoginAt: sql.NullTime{Time: now.Add(-8 * time.Minute), Valid: true}, AccountExpiresAt: sql.NullTime{Time: now.Add(5*time.Hour + 43*time.Minute + 18*time.Second), Valid: true}},
+		{ID: 2, Username: "rayka", Email: "rayka@example.local", Role: "user", CanUseComfyUI: true, CanUseOpenWebUI: true, CanUseQuickGeneration: true, CanGenerateTextToImage: true, CanGenerateVideo: true, CanUseAdvancedGenerationSettings: true, PauseMiningForQuickGeneration: true, QueuePriority: true, GenerationDailyLimit: 12, GenerationTotalLimit: 50, GenerationTotalUsed: 17, VideoGenerationDailyLimit: 2, VideoGenerationTotalLimit: 8, VideoGenerationTotalUsed: 3, MaxVideoGenerationQuality: 720, Requests: 302, LastLoginAt: sql.NullTime{Time: now.Add(-8 * time.Minute), Valid: true}, AccountExpiresAt: sql.NullTime{Time: now.Add(5*time.Hour + 43*time.Minute + 18*time.Second), Valid: true}},
 		{ID: 3, Username: "demo4518", Role: "user", CanUseOpenWebUI: true, Requests: 188, LastLoginAt: sql.NullTime{Time: now.Add(-24 * time.Hour), Valid: true}},
 		{ID: 4, Username: "disabled-user-with-long-name", Email: "long.address@example.local", Role: "user", Disabled: true, CanUseComfyUI: true, Requests: 4, AccountExpiresAt: sql.NullTime{Time: now.Add(-2 * time.Minute), Valid: true}},
 	}
@@ -773,12 +774,12 @@ func main() {
 	}
 	mux.HandleFunc("/preview/audit", render("admin_audit", "Журнал аудита", map[string]any{"Audits": audits}))
 	invites := []domain.InviteRow{
-		{ID: 48, CreatedBy: "admin", MaxUses: 1, ExpiresAt: now.Add(48 * time.Hour), GrantQuickGeneration: true, GrantTextToImage: true, GrantVideo: true, GrantAdvancedGenerationSettings: true, PauseMiningForQuickGeneration: true, GenerationDailyLimit: 12, GenerationTotalLimit: 50, VideoGenerationDailyLimit: 2, VideoGenerationTotalLimit: 8, MaxVideoGenerationQuality: 720, Status: "active", CreatedAt: now.Add(-time.Hour)},
+		{ID: 48, CreatedBy: "admin", MaxUses: 1, ExpiresAt: now.Add(48 * time.Hour), GrantQuickGeneration: true, GrantTextToImage: true, GrantVideo: true, GrantAdvancedGenerationSettings: true, PauseMiningForQuickGeneration: true, QueuePriority: true, GenerationDailyLimit: 12, GenerationTotalLimit: 50, VideoGenerationDailyLimit: 2, VideoGenerationTotalLimit: 8, MaxVideoGenerationQuality: 720, Status: "active", CreatedAt: now.Add(-time.Hour)},
 		{ID: 47, CreatedBy: "admin", MaxUses: 3, UsedCount: 1, ExpiresAt: now.Add(24 * time.Hour), Revoked: true, GrantOpenWebUI: true, Status: "revoked", CreatedAt: now.Add(-4 * time.Hour)},
 		{ID: 46, CreatedBy: "admin", MaxUses: 1, UsedCount: 1, ExpiresAt: now.Add(-24 * time.Hour), GrantComfyUI: true, Status: "used", CreatedAt: now.Add(-72 * time.Hour)},
 	}
 	mux.HandleFunc("/preview/invites", render("admin_invites", "Invites UI preview", map[string]any{"Invites": invites, "InviteLink": "https://ai.example.test/invite/preview-token"}))
-	profile := domain.User{ID: 2, Username: "rayka", Email: sql.NullString{String: "rayka@example.local", Valid: true}, Role: "user", CanUseComfyUI: true, CanUseOpenWebUI: true, CanUseQuickGeneration: true, CanGenerateTextToImage: true, CanGenerateVideo: true, CanUseAdvancedGenerationSettings: true, PauseMiningForQuickGeneration: true, GenerationDailyLimit: 12, GenerationTotalLimit: 50, GenerationTotalUsed: 17, VideoGenerationDailyLimit: 2, VideoGenerationTotalLimit: 8, VideoGenerationTotalUsed: 3, MaxVideoGenerationQuality: 720, CreatedAt: now.Add(-720 * time.Hour), LastLoginAt: sql.NullTime{Time: now.Add(-8 * time.Minute), Valid: true}, AccountExpiresAt: sql.NullTime{Time: now.Add(5*time.Hour + 43*time.Minute + 18*time.Second), Valid: true}}
+	profile := domain.User{ID: 2, Username: "rayka", Email: sql.NullString{String: "rayka@example.local", Valid: true}, Role: "user", CanUseComfyUI: true, CanUseOpenWebUI: true, CanUseQuickGeneration: true, CanGenerateTextToImage: true, CanGenerateVideo: true, CanUseAdvancedGenerationSettings: true, PauseMiningForQuickGeneration: true, QueuePriority: true, GenerationDailyLimit: 12, GenerationTotalLimit: 50, GenerationTotalUsed: 17, VideoGenerationDailyLimit: 2, VideoGenerationTotalLimit: 8, VideoGenerationTotalUsed: 3, MaxVideoGenerationQuality: 720, CreatedAt: now.Add(-720 * time.Hour), LastLoginAt: sql.NullTime{Time: now.Add(-8 * time.Minute), Valid: true}, AccountExpiresAt: sql.NullTime{Time: now.Add(5*time.Hour + 43*time.Minute + 18*time.Second), Valid: true}}
 	mux.HandleFunc("/preview/user", render("admin_user_detail", "Пользователь rayka", map[string]any{
 		"Profile": profile, "Stats": domain.UserStats{TotalRequests: 302, TotalBytesOut: 4200000000, LastService: "ComfyUI", Chart: chart, ByService: []domain.ServiceUsage{{Service: "comfyui", Requests: 210, Bytes: 4100000000, Errors: 1}, {Service: "openwebui", Requests: 92, Bytes: 8700000}}}, "Activities": activities,
 		"PasswordStatus": "", "AccessStatus": "", "SecurityStatus": "", "AccountLocked": false,

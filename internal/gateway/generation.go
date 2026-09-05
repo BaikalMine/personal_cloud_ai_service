@@ -503,7 +503,7 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 		writeGenerationJobError(w, http.StatusServiceUnavailable, job, message+": "+err.Error())
 		return
 	}
-	promptID, err := a.submitComfyPrompt(jobCtx, user.ID, job.PublicID, user.PauseMiningForQuickGeneration, prompt)
+	promptID, err := a.submitComfyPrompt(jobCtx, user.ID, job.PublicID, user.QueuePriority, prompt)
 	if err != nil {
 		job = a.failGenerationJob(jobCtx, job, "comfy_submission_failed", "ComfyUI не принял workflow", err)
 		writeGenerationJobError(w, http.StatusBadGateway, job, "ComfyUI не принял workflow: "+err.Error())

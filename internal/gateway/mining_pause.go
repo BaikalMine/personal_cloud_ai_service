@@ -14,7 +14,7 @@ import (
 )
 
 // pauseMiningForQuickGeneration reserves the active mining profile before a
-// priority-pool user submits work to ComfyUI. Multiple leases keep the miner
+// user with this mining policy submits work to ComfyUI. Multiple leases keep the miner
 // paused until the final related generation finishes.
 func (a *App) pauseMiningForQuickGeneration(ctx context.Context, user *User, jobID int64) (*domain.QuickGenerationMiningLease, string, error) {
 	if user == nil || !user.PauseMiningForQuickGeneration {
@@ -125,7 +125,7 @@ func miningPriorityDegradationWarning(overview MiningOverview) string {
 	if detail == "" {
 		detail = "Windows-agent не отвечает"
 	}
-	warning := "Приоритет включён, но остановка майнинга не подтверждена. Генерация продолжена, а автоматический запуск майнинга после завершения или отмены сохранён. Причина: " + detail
+	warning := "Остановка майнинга не подтверждена. Генерация продолжена, а автоматический запуск майнинга после завершения или отмены сохранён. Причина: " + detail
 	if overview.Agent.RetryInSeconds > 0 {
 		warning += fmt.Sprintf(" Следующая проверка через %d сек.", overview.Agent.RetryInSeconds)
 	}

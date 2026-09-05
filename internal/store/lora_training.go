@@ -133,9 +133,10 @@ func (s *Store) ClaimNextLoraTrainingJob(ctx context.Context) (domain.LoraTraini
 		LEFT JOIN users owner ON owner.id=job.user_id
 		WHERE job.state='queued' AND job.cancellation_requested_at IS NULL
 		AND NOT EXISTS (SELECT 1 FROM lora_training_jobs active WHERE active.state IN ('uploading','preparing','caching','running','installing'))
-		ORDER BY COALESCE(owner.pause_mining_for_quick_generation,FALSE) DESC,job.created_at,job.id
+		ORDER BY job.created_at-CASE WHEN COALESCE(owner.queue_priority,FALSE)
+			THEN ($1::bigint*interval '1 second') ELSE interval '0 seconds' END,job.id
 		FOR UPDATE OF job SKIP LOCKED LIMIT 1
-	`).Scan(&id)
+	`, int64(domain.GPUPriorityHeadStart.Seconds())).Scan(&id)
 	if err != nil {
 		return domain.LoraTrainingJob{}, err
 	}

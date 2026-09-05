@@ -21,6 +21,7 @@ type User struct {
 	CanTrainImageLora                bool
 	CanManageMining                  bool
 	PauseMiningForQuickGeneration    bool
+	QueuePriority                    bool
 	GenerationDailyLimit             int
 	GenerationTotalLimit             int64
 	GenerationTotalUsed              int64
@@ -94,6 +95,7 @@ type UserRow struct {
 	CanTrainImageLora                bool
 	CanManageMining                  bool
 	PauseMiningForQuickGeneration    bool
+	QueuePriority                    bool
 	GenerationDailyLimit             int
 	GenerationTotalLimit             int64
 	GenerationTotalUsed              int64

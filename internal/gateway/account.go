@@ -29,6 +29,7 @@ func (a *App) handleAccountProfile(w http.ResponseWriter, r *http.Request) {
 			"Title": "Профиль", "ProfileUsername": username, "ProfileEmail": email,
 			"CanChangeUsername": user.Role == "admin", "Error": errorMessage, "Success": successMessage,
 			"NotificationSummary": notificationSummary, "NotificationPreferences": notificationSummary.Preferences,
+			"MiningPolicyUpdated": r.URL.Query().Get("mining_updated") == "1",
 		})
 	}
 
@@ -208,7 +209,7 @@ func (a *App) handleAccountQuickGenerationPriority(w http.ResponseWriter, r *htt
 		return
 	}
 	enabled := r.Form.Get("enabled") == "on"
-	updated, err := a.store.SetAdminQuickGenerationMiningPriority(r.Context(), user.ID, enabled)
+	updated, err := a.store.SetAdminQueuePriority(r.Context(), user.ID, enabled)
 	if err != nil {
 		http.Error(w, "не удалось изменить режим приоритетной генерации", http.StatusInternalServerError)
 		return
@@ -223,6 +224,36 @@ func (a *App) handleAccountQuickGenerationPriority(w http.ResponseWriter, r *htt
 		return
 	}
 	http.Redirect(w, r, "/app", http.StatusSeeOther)
+}
+
+func (a *App) handleAccountGenerationMining(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+		return
+	}
+	user := a.currentUser(r)
+	if user == nil || user.Role != "admin" {
+		http.Error(w, "доступ запрещён", http.StatusForbidden)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if !a.validCSRF(r) {
+		http.Error(w, "неверный защитный токен", http.StatusForbidden)
+		return
+	}
+	enabled := r.Form.Get("pause_mining_for_quick_generation") == "on"
+	updated, err := a.store.SetAdminGenerationMiningPolicy(r.Context(), user.ID, enabled)
+	if err != nil {
+		http.Error(w, "не удалось сохранить настройку майнинга", http.StatusInternalServerError)
+		return
+	}
+	if !updated {
+		http.Error(w, "доступ запрещён", http.StatusForbidden)
+		return
+	}
+	a.audit(r.Context(), &user.ID, "admin_generation_mining_policy_updated", "user", &user.ID, a.clientIP(r), r.UserAgent(), map[string]any{"enabled": enabled})
+	http.Redirect(w, r, "/account/profile?mining_updated=1#generation-resources", http.StatusSeeOther)
 }
 
 func (a *App) updateUserPassword(ctx context.Context, userID int64, password string) error {

@@ -19,6 +19,20 @@
       <button type="submit">Сохранить профиль</button>
     </form>
   </section>
+  {{if .CanChangeUsername}}
+  <section class="panel narrow form-panel" id="generation-resources">
+    <div class="panel-heading"><h2>Ресурсы моих генераций</h2></div>
+    {{if .MiningPolicyUpdated}}<p class="success-box" role="status">Настройка майнинга сохранена.</p>{{end}}
+    <form method="post" action="/account/generation-mining">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <label class="notification-setting-row">
+        <input name="pause_mining_for_quick_generation" type="checkbox" {{if .CurrentUser.PauseMiningForQuickGeneration}}checked{{end}}>
+        <span><strong>Приостанавливать майнинг</strong><small>Во время генерации и работы ассистента.</small></span>
+      </label>
+      <button type="submit">Сохранить настройку майнинга</button>
+    </form>
+  </section>
+  {{end}}
   <section class="panel narrow form-panel notification-settings" id="notification-settings">
     <div class="panel-heading"><div><p class="section-kicker">Задачи</p><h2>Уведомления</h2><p class="panel-intro">Получайте статус любой генерации: Krea2, Flux2 и MiniMax H3.</p></div></div>
     <form method="post" action="/account/notifications" data-notification-settings>

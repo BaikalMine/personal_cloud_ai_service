@@ -13,6 +13,7 @@ type InviteAccess struct {
 	GrantAdvancedGenerationSettings bool
 	GrantTrainImageLora             bool
 	PauseMiningForQuickGeneration   bool
+	QueuePriority                   bool
 	GenerationDailyLimit            int
 	GenerationTotalLimit            int64
 	VideoGenerationDailyLimit       int
@@ -37,6 +38,7 @@ type InviteRow struct {
 	GrantAdvancedGenerationSettings bool
 	GrantTrainImageLora             bool
 	PauseMiningForQuickGeneration   bool
+	QueuePriority                   bool
 	GenerationDailyLimit            int
 	GenerationTotalLimit            int64
 	VideoGenerationDailyLimit       int

@@ -312,6 +312,7 @@ func (a *App) publicMux() http.Handler {
 	mux.Handle("/account/profile", a.requireAuth(http.HandlerFunc(a.handleAccountProfile)))
 	mux.Handle("/account/password", a.requireAuth(http.HandlerFunc(a.handleAccountPassword)))
 	mux.Handle("/account/quick-generation-priority", a.requireAuth(http.HandlerFunc(a.handleAccountQuickGenerationPriority)))
+	mux.Handle("/account/generation-mining", a.requireAuth(http.HandlerFunc(a.handleAccountGenerationMining)))
 	mux.Handle("/account/sessions", a.requireAuth(http.HandlerFunc(a.handleAccountSessions)))
 	mux.Handle("/mining/toggle", a.requireAuth(http.HandlerFunc(a.handleMiningToggle)))
 	mux.Handle("/mining/icon/", a.requireAuth(http.HandlerFunc(a.handleMinerIcon)))
