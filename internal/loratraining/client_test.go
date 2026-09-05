@@ -1,12 +1,65 @@
 package loratraining
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
+
+func TestStatusByGatewayIDClientPreservesIDAndAuthentication(t *testing.T) {
+	id := "opaque +/#?% ID"
+	token := strings.Repeat("t", 32)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" || r.URL.Path != "/v1/gateway-jobs" || r.URL.Query().Get("gateway_job_id") != id || r.Header.Get("Authorization") != "Bearer "+token {
+			t.Errorf("unexpected lookup request: %s %s", r.Method, r.URL)
+		}
+		_ = json.NewEncoder(w).Encode(JobStatus{ID: "agent-id", GatewayJobID: id, State: "running"})
+	}))
+	defer server.Close()
+	baseURL, _ := url.Parse(server.URL)
+	status, err := NewClient(baseURL, token).StatusByGatewayID(context.Background(), id)
+	if err != nil || status.ID != "agent-id" {
+		t.Fatalf("lookup: %+v %v", status, err)
+	}
+}
+
+func TestStatusByGatewayIDClientRejectsUnprovenResponses(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		code int
+		body string
+	}{
+		{"old agent", 404, "404 page not found"},
+		{"missing record", 404, `{"code":"job_not_found"}`},
+		{"agent error", 503, `{"message":"unavailable"}`},
+		{"invalid JSON", 200, "{"},
+		{"wrong job", 200, `{"id":"agent","gateway_job_id":"other"}`},
+		{"no agent ID", 200, `{"gateway_job_id":"requested"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.code)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer server.Close()
+			baseURL, _ := url.Parse(server.URL)
+			status, err := NewClient(baseURL, strings.Repeat("t", 32)).StatusByGatewayID(context.Background(), "requested")
+			if err == nil || status.ID != "" {
+				t.Fatalf("unproven response accepted: %+v %v", status, err)
+			}
+		})
+	}
+	var client *Client
+	if _, err := client.StatusByGatewayID(context.Background(), "requested"); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("unconfigured client: %v", err)
+	}
+}
 
 func TestDecodeHTTPErrorPreservesMachineCode(t *testing.T) {
 	response := &http.Response{

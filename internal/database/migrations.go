@@ -1376,6 +1376,36 @@ var migrationCatalog = []migration{
 			`CREATE UNIQUE INDEX lora_dataset_caption_asset_idx ON lora_dataset_asset_refs(caption_job_id,asset_id) WHERE caption_job_id IS NOT NULL`,
 		},
 	},
+	{
+		version: 56, name: "gpu_admission_and_evidence", statements: []string{
+			`CREATE TABLE gpu_resources (
+				id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 64), revision BIGINT NOT NULL DEFAULT 1,
+				observation TEXT NOT NULL DEFAULT 'unknown' CHECK(observation IN ('idle','busy','unknown')),
+				message TEXT NOT NULL DEFAULT '' CHECK(length(message)<=1000),
+				observed_at TIMESTAMPTZ NOT NULL DEFAULT now(), valid_until TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`CREATE TABLE gpu_work (
+				id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 96), resource_id TEXT NOT NULL REFERENCES gpu_resources(id),
+				kind TEXT NOT NULL CHECK(kind IN ('generation','lora_training','lora_caption','prompt_assistant')),
+				job_key TEXT NOT NULL CHECK(length(job_key) BETWEEN 1 AND 96), user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+				priority BOOLEAN NOT NULL DEFAULT false, state TEXT NOT NULL DEFAULT 'waiting' CHECK(state IN ('waiting','held','uncertain','released','cancelled')),
+				phase TEXT NOT NULL DEFAULT 'reserved' CHECK(phase IN ('reserved','dispatching','running')),
+				lease_token TEXT NOT NULL DEFAULT '', lease_until TIMESTAMPTZ, external_id TEXT NOT NULL DEFAULT '' CHECK(length(external_id)<=200),
+				cancellation_requested BOOLEAN NOT NULL DEFAULT false, ready_until TIMESTAMPTZ NOT NULL DEFAULT now()+interval '5 minutes',
+				queued_at TIMESTAMPTZ NOT NULL DEFAULT now(), created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				held_at TIMESTAMPTZ, released_at TIMESTAMPTZ, UNIQUE(kind,job_key),
+				CHECK((state IN ('held','uncertain') AND lease_token<>'' AND lease_until IS NOT NULL) OR (state NOT IN ('held','uncertain') AND lease_token='' AND lease_until IS NULL))
+			)`,
+			`CREATE UNIQUE INDEX gpu_work_one_holder_idx ON gpu_work(resource_id) WHERE state IN ('held','uncertain')`,
+			`CREATE INDEX gpu_work_queue_idx ON gpu_work(resource_id,queued_at,id) WHERE state='waiting'`,
+			`CREATE INDEX gpu_work_owner_idx ON gpu_work(user_id,created_at)`,
+			`CREATE TABLE gpu_work_events (
+				id BIGSERIAL PRIMARY KEY, work_id TEXT NOT NULL REFERENCES gpu_work(id) ON DELETE CASCADE,
+				state TEXT NOT NULL, code TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '' CHECK(length(detail)<=1000), created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`CREATE INDEX gpu_work_events_work_idx ON gpu_work_events(work_id,id)`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

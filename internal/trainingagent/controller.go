@@ -184,6 +184,18 @@ func (controller *Controller) Status(id string) (loratraining.JobStatus, error) 
 	return cloneStatus(record.Status), nil
 }
 
+// Lookup also finds accepted jobs when the caller lost the Submit response.
+// Absence in this index does not prove that an earlier executor stopped.
+func (controller *Controller) StatusByGatewayID(id string) (loratraining.JobStatus, error) {
+	controller.mu.RLock()
+	defer controller.mu.RUnlock()
+	record := controller.jobs[controller.byGateway[id]]
+	if record == nil {
+		return loratraining.JobStatus{}, os.ErrNotExist
+	}
+	return cloneStatus(record.Status), nil
+}
+
 func (controller *Controller) Cancel(id string) (loratraining.JobStatus, error) {
 	controller.mu.Lock()
 	record := controller.jobs[id]

@@ -38,6 +38,7 @@ func (server *Server) Handler() http.Handler {
 	mux.Handle("/v1/profiles", server.authenticate(http.HandlerFunc(server.handleProfiles)))
 	mux.Handle("/v1/jobs", server.authenticate(http.HandlerFunc(server.handleJobs)))
 	mux.Handle("/v1/jobs/", server.authenticate(http.HandlerFunc(server.handleJob)))
+	mux.Handle("/v1/gateway-jobs", server.authenticate(http.HandlerFunc(server.handleGatewayJob)))
 	return agentSecurityHeaders(mux)
 }
 
@@ -180,6 +181,28 @@ func (server *Server) handleJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.NotFound(w, r)
+}
+
+func (server *Server) handleGatewayJob(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	ids := r.URL.Query()["gateway_job_id"]
+	if len(ids) != 1 || strings.TrimSpace(ids[0]) == "" || len(ids[0]) > 96 {
+		writeError(w, http.StatusBadRequest, "Некорректный идентификатор Gateway.")
+		return
+	}
+	status, err := server.controller.StatusByGatewayID(ids[0])
+	if errors.Is(err, os.ErrNotExist) {
+		writeCodedError(w, http.StatusNotFound, "job_not_found", "Задание не найдено.")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Не удалось проверить задание.")
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
 }
 
 func (server *Server) handleArtifact(w http.ResponseWriter, r *http.Request, id string) {

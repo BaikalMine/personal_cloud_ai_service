@@ -107,6 +107,27 @@ func (c *Client) Status(ctx context.Context, id string) (JobStatus, error) {
 	return response, err
 }
 
+// StatusByGatewayID is read-only: an unavailable/old agent or missing record
+// must not be interpreted as permission to release a GPU resource lease.
+func (c *Client) StatusByGatewayID(ctx context.Context, id string) (JobStatus, error) {
+	if !c.Configured() {
+		return JobStatus{}, ErrUnavailable
+	}
+	if strings.TrimSpace(id) == "" || len(id) > 96 {
+		return JobStatus{}, errors.New("invalid Gateway job ID")
+	}
+	target := c.endpoint("/v1/gateway-jobs") + "?" + url.Values{"gateway_job_id": {id}}.Encode()
+	var response JobStatus
+	err := c.doJSONURL(c.http, ctx, http.MethodGet, target, nil, "", &response)
+	if err != nil {
+		return JobStatus{}, err
+	}
+	if response.ID == "" || response.GatewayJobID != id {
+		return JobStatus{}, errors.New("LoRA training agent returned a mismatched job")
+	}
+	return response, nil
+}
+
 func (c *Client) Cancel(ctx context.Context, id string) (JobStatus, error) {
 	var response JobStatus
 	err := c.doJSON(c.http, ctx, http.MethodPost, "/v1/jobs/"+url.PathEscape(id)+"/cancel", bytes.NewReader([]byte("{}")), "application/json", &response)
@@ -146,7 +167,11 @@ func (c *Client) doJSON(client *http.Client, ctx context.Context, method, endpoi
 	if !c.Configured() {
 		return ErrUnavailable
 	}
-	request, err := http.NewRequestWithContext(ctx, method, c.endpoint(endpoint), body)
+	return c.doJSONURL(client, ctx, method, c.endpoint(endpoint), body, contentType, result)
+}
+
+func (c *Client) doJSONURL(client *http.Client, ctx context.Context, method, target string, body io.Reader, contentType string, result any) error {
+	request, err := http.NewRequestWithContext(ctx, method, target, body)
 	if err != nil {
 		return err
 	}
