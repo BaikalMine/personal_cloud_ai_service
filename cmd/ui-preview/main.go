@@ -146,6 +146,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	registerDraftPreview(mux, now)
+	datasets := registerDatasetPreview(mux, now)
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("internal/gateway/static"))))
 	mux.HandleFunc("/preview/result.svg", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "image/svg+xml")
@@ -398,9 +399,9 @@ func main() {
 			"caption": fmt.Sprintf("%s, three-quarter portrait from %s with a relaxed pose, neutral studio background, and soft directional light", trigger, header.Filename),
 		})
 	})
-	mux.HandleFunc("/api/lora-training/jobs", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/api/lora-training/jobs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_ = json.NewEncoder(w).Encode(map[string]any{"jobs": loraAPIJobs, "server_time": now.UnixMilli()})
+		_ = json.NewEncoder(w).Encode(map[string]any{"jobs": append(datasets.jobs(r), loraAPIJobs...), "server_time": now.UnixMilli()})
 	})
 	mux.HandleFunc("/api/lora-training/jobs/", func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(r.URL.Path, "/api/lora-training/jobs/")

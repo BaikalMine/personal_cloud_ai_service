@@ -22,6 +22,7 @@ const loraDatasetManifestBytes = 512 << 10
 var loraDatasetIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,96}$`)
 
 type loraDatasetRequest struct {
+	ClientID string                     `json:"client_id"`
 	Revision int64                      `json:"revision"`
 	Manifest domain.LoraDatasetManifest `json:"manifest"`
 	MediaID  int64                      `json:"media_id"`
@@ -181,6 +182,27 @@ func (a *App) handleLoraDatasets(w http.ResponseWriter, r *http.Request) {
 	}
 	parts = parts[1:]
 	userID := a.currentUser(r).ID
+	if len(parts) > 0 && parts[0] == "gallery" && r.Method == http.MethodGet {
+		if len(parts) == 1 {
+			items, err := a.generationLibraryImageViews(r.Context(), userID, "/api/lora-datasets/gallery/")
+			if err != nil {
+				writeLoraDatasetError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"images": items})
+			return
+		}
+		if len(parts) == 2 {
+			request := r.Clone(r.Context())
+			target := *r.URL
+			target.Path = "/generate/library/" + parts[1]
+			request.URL = &target
+			a.handleGenerationLibraryMedia(w, request)
+			return
+		}
+		http.NotFound(w, r)
+		return
+	}
 	if len(parts) == 0 {
 		if r.Method == http.MethodGet {
 			rows, err := a.store.ListLoraDatasets(r.Context(), userID)
@@ -209,7 +231,17 @@ func (a *App) handleLoraDatasets(w http.ResponseWriter, r *http.Request) {
 			writeLoraDatasetError(w, err)
 			return
 		}
-		row, err := a.store.CreateLoraDataset(r.Context(), userID, newRequestID(), request.Manifest.Settings.Name, cipher)
+		id := newRequestID()
+		if request.ClientID != "" {
+			if !loraDatasetIDPattern.MatchString(request.ClientID) {
+				writeLoraDatasetError(w, datasetInputError("Некорректный идентификатор нового набора."))
+				return
+			}
+			key, _ := json.Marshal([]any{userID, request.ClientID})
+			hash := sha256.Sum256(key)
+			id = hex.EncodeToString(hash[:16])
+		}
+		row, err := a.store.CreateLoraDataset(r.Context(), userID, id, request.Manifest.Settings.Name, cipher)
 		if err != nil {
 			writeLoraDatasetError(w, err)
 			return
@@ -251,12 +283,20 @@ func (a *App) handleLoraDatasets(w http.ResponseWriter, r *http.Request) {
 		a.writeLoraDatasetView(w, r, row, http.StatusOK)
 		return
 	}
+	if len(parts) == 2 && parts[1] == "export" && r.Method == http.MethodGet {
+		a.handleLoraDatasetExport(w, r, row)
+		return
+	}
 	if len(parts) != 2 || r.Method != http.MethodPost {
 		http.NotFound(w, r)
 		return
 	}
 	if parts[1] == "assets" {
 		a.handleLoraDatasetUpload(w, r)
+		return
+	}
+	if parts[1] == "import" {
+		a.handleLoraDatasetImport(w, r, row)
 		return
 	}
 	var request loraDatasetRequest
@@ -407,6 +447,19 @@ func (a *App) handleLoraDatasetVersions(w http.ResponseWriter, r *http.Request, 
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+		return
+	}
+	if len(parts) == 2 && parts[1] == "restore" && r.Method == http.MethodPost {
+		row, err := a.store.RestoreLoraDatasetSnapshot(r.Context(), userID, snapshot.ID, newRequestID())
+		if err != nil {
+			writeLoraDatasetError(w, err)
+			return
+		}
+		a.writeLoraDatasetView(w, r, row, http.StatusCreated)
+		return
+	}
+	if len(parts) == 2 && parts[1] == "export" && r.Method == http.MethodGet {
+		a.handleLoraDatasetExport(w, r, domain.LoraDatasetRow{ID: snapshot.ID, UserID: snapshot.UserID, Name: snapshot.Name, ManifestCipher: snapshot.ManifestCipher, UpdatedAt: snapshot.CreatedAt})
 		return
 	}
 	http.NotFound(w, r)

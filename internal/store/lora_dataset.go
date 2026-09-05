@@ -46,6 +46,14 @@ func (s *Store) CreateLoraDataset(ctx context.Context, userID int64, id, name st
 	if err := tx.QueryRowContext(ctx, `SELECT id FROM users WHERE id=$1 FOR UPDATE`, userID).Scan(&owner); err != nil {
 		return domain.LoraDatasetRow{}, err
 	}
+	// Repeating a create after a lost HTTP response must not consume another slot.
+	existing, err := scanDataset(tx.QueryRowContext(ctx, `SELECT `+datasetColumns+` FROM lora_datasets WHERE id=$1 AND user_id=$2 AND expires_at>now()`, id, userID))
+	if err == nil {
+		return existing, tx.Commit()
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return existing, err
+	}
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM lora_datasets WHERE user_id=$1 AND expires_at>now()`, userID).Scan(&count); err != nil {
 		return domain.LoraDatasetRow{}, err
 	}
@@ -288,6 +296,36 @@ func (s *Store) CreateLoraDatasetSnapshot(ctx context.Context, userID int64, id 
 
 func (s *Store) LoraDatasetSnapshot(ctx context.Context, userID int64, id string) (domain.LoraDatasetSnapshot, error) {
 	return scanDatasetSnapshot(s.db.QueryRowContext(ctx, `SELECT `+datasetSnapshotColumns+` FROM lora_dataset_snapshots WHERE id=$1 AND user_id=$2`, id, userID))
+}
+
+func (s *Store) RestoreLoraDatasetSnapshot(ctx context.Context, userID int64, snapshotID, id string) (domain.LoraDatasetRow, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.LoraDatasetRow{}, err
+	}
+	defer tx.Rollback()
+	var owner, count int64
+	if err = tx.QueryRowContext(ctx, `SELECT id FROM users WHERE id=$1 FOR UPDATE`, userID).Scan(&owner); err != nil {
+		return domain.LoraDatasetRow{}, err
+	}
+	snapshot, err := scanDatasetSnapshot(tx.QueryRowContext(ctx, `SELECT `+datasetSnapshotColumns+` FROM lora_dataset_snapshots WHERE id=$1 AND user_id=$2 FOR SHARE`, snapshotID, userID))
+	if err != nil {
+		return domain.LoraDatasetRow{}, err
+	}
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM lora_datasets WHERE user_id=$1 AND expires_at>now()`, userID).Scan(&count); err != nil {
+		return domain.LoraDatasetRow{}, err
+	}
+	if count >= domain.LoraDatasetMaxCount {
+		return domain.LoraDatasetRow{}, ErrLoraDatasetQuota
+	}
+	row, err := scanDataset(tx.QueryRowContext(ctx, `INSERT INTO lora_datasets(id,user_id,name,manifest_cipher,image_count,size_bytes) VALUES($1,$2,$3,$4,$5,$6) RETURNING `+datasetColumns, id, userID, snapshot.Name, snapshot.ManifestCipher, snapshot.ImageCount, snapshot.SizeBytes))
+	if err != nil {
+		return row, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO lora_dataset_asset_refs(asset_id,dataset_id) SELECT asset_id,$2 FROM lora_dataset_asset_refs WHERE snapshot_id=$1`, snapshotID, id); err != nil {
+		return row, err
+	}
+	return row, tx.Commit()
 }
 
 func (s *Store) ListLoraDatasetSnapshots(ctx context.Context, userID int64, datasetID string) ([]domain.LoraDatasetSnapshot, error) {

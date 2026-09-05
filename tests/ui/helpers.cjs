@@ -29,6 +29,9 @@ const settlePage = async (page) => {
   if (await page.locator("#generation-draft-bar").count()) {
     await expect(page.locator("#generation-draft-bar")).not.toHaveAttribute("data-state", /^(loading|dirty|saving)$/);
   }
+  if (await page.locator("[data-dataset-save-state]").count()) {
+    await expect(page.locator("[data-dataset-save-state]")).not.toHaveAttribute("data-state", /^(loading|dirty|saving)$/);
+  }
   await page.evaluate(async () => {
     if (document.fonts?.ready) await document.fonts.ready;
   });

@@ -153,21 +153,29 @@ func (a *App) handleGenerationLibraryImages(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	user := a.currentUser(r)
-	media, err := a.store.ListUserGenerationImages(r.Context(), user.ID, 100)
+	items, err := a.generationLibraryImageViews(r.Context(), user.ID, "/generate/library/")
 	if err != nil {
 		writeGenerationError(w, http.StatusInternalServerError, "не удалось загрузить изображения")
 		return
 	}
+	writeJSON(w, http.StatusOK, map[string]any{"images": items})
+}
+
+func (a *App) generationLibraryImageViews(ctx context.Context, userID int64, prefix string) ([]generationPickerImageView, error) {
+	media, err := a.store.ListUserGenerationImages(ctx, userID, 100)
+	if err != nil {
+		return nil, err
+	}
 	items := make([]generationPickerImageView, 0, len(media))
 	for _, item := range media {
 		items = append(items, generationPickerImageView{
-			ID: item.ID, URL: "/generate/library/" + strconv.FormatInt(item.ID, 10), Filename: item.OriginalName,
+			ID: item.ID, URL: prefix + strconv.FormatInt(item.ID, 10), Filename: item.OriginalName,
 			ModelName: generationModelLabel(item.ModelName), CreatedUnix: item.CreatedAt.UnixMilli(),
 			ExpiresUnix: item.ExpiresAt.UnixMilli(), Sensitive: item.Sensitive || item.VisualPending,
 			Pinned: item.Pinned, Favorite: item.Favorite,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"images": items})
+	return items, nil
 }
 
 func (a *App) handlePinGenerationLibraryMedia(w http.ResponseWriter, r *http.Request) {

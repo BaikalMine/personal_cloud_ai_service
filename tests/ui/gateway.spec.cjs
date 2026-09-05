@@ -1,4 +1,5 @@
 const path = require("node:path");
+const fs = require("node:fs");
 const { test, expect } = require("@playwright/test");
 const AxeBuilder = require("@axe-core/playwright").default;
 const { installPreviewClock, settlePage, assertNoViewportOverflow, expectFocusInside } = require("./helpers.cjs");
@@ -20,6 +21,7 @@ const responsiveRoutes = [
 
 const open = async (page, route) => {
   await page.context().clearCookies({ name: "preview_generation_draft" });
+  await page.context().clearCookies({ name: "preview_lora_datasets" });
   await installPreviewClock(page);
   const discardPreviousFixture = (dialog) => dialog.type() === "beforeunload" ? dialog.accept() : dialog.dismiss();
   page.on("dialog", discardPreviousFixture);
@@ -55,9 +57,9 @@ test("LoRA training surfaces fit every supported viewport", async ({ page }, tes
 test("LoRA dataset composer keeps files and captions together", async ({ page }, testInfo) => {
   desktopOnly(testInfo);
   await open(page, "/preview/lora-training");
-  const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+  const pixel = fs.readFileSync(path.join(__dirname, "../../docs/frontend/prototype/assets/portrait.jpg"));
   await page.locator("[data-lora-images]").setInputFiles(Array.from({ length: 5 }, (_, index) => ({
-    name: `portrait-${index + 1}.png`, mimeType: "image/png", buffer: pixel,
+    name: `portrait-${index + 1}.jpg`, mimeType: "image/jpeg", buffer: pixel,
   })));
   await expect(page.locator("[data-lora-dataset-grid] .lora-dataset-item")).toHaveCount(5);
   await expect(page.locator("[data-lora-image-count]")).toHaveText("5 изображений");
@@ -90,9 +92,9 @@ test("LoRA caption assistant sends every dataset image separately", async ({ pag
   });
 
   await open(page, "/preview/lora-training");
-  const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+  const pixel = fs.readFileSync(path.join(__dirname, "../../docs/frontend/prototype/assets/portrait.jpg"));
   await page.locator("[data-lora-images]").setInputFiles(Array.from({ length: 5 }, (_, index) => ({
-    name: `assistant-${index + 1}.png`, mimeType: "image/png", buffer: pixel,
+    name: `assistant-${index + 1}.jpg`, mimeType: "image/jpeg", buffer: pixel,
   })));
   await page.locator('input[name="trigger_word"]').fill("subject_token");
   await page.getByRole("button", { name: "Описать пустые" }).click();

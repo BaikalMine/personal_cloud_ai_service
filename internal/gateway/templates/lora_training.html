@@ -3,7 +3,7 @@
 {{template "nav" .}}
 <main class="page lora-training-page" id="main-content" data-lora-training-page data-csrf="{{.CSRF}}">
   <section class="hero lora-training-hero">
-    <div><p class="eyebrow">Изображения</p><h1>Обучение LoRA</h1><p class="hero-copy">Соберите подписанный датасет, выберите совместимую базовую модель и следите за обучением без входа в консоль.</p></div>
+    <div><p class="eyebrow">Изображения</p><h1>Обучение LoRA</h1></div>
     <div class="lora-agent-state {{if gt .ReadyProfiles 0}}is-ready{{else}}is-blocked{{end}}"><span aria-hidden="true"></span><div><strong>{{if gt .ReadyProfiles 0}}Агент готов{{else}}Запуск недоступен{{end}}</strong><small>Профилей доступно: {{.ReadyProfiles}}</small></div></div>
   </section>
 
@@ -12,8 +12,22 @@
   {{if .AgentMessage}}<p class="ui-status-banner is-warning" role="status">{{.AgentMessage}}</p>{{end}}
 
   <div class="lora-training-workspace">
-    <section class="panel lora-training-composer" aria-labelledby="lora-training-title">
-      <header class="lora-section-heading"><div><p class="section-kicker">Новое задание</p><h2 id="lora-training-title">Подготовить датасет</h2></div><span>5–100 изображений</span></header>
+    <section class="lora-training-composer" aria-labelledby="lora-training-title">
+      <header class="lora-section-heading"><div><p class="section-kicker">Подготовка</p><h2 id="lora-training-title">Датасет</h2></div><span>5–100 изображений</span></header>
+      <div class="dataset-toolbar" data-dataset-toolbar>
+        <div class="dataset-selection"><label class="ui-field"><span>Сохранённый набор</span><select data-dataset-select aria-label="Сохранённый набор" disabled><option>Загрузка…</option></select></label><button type="button" class="ghost dataset-icon" data-dataset-new title="Новый набор" aria-label="Новый набор" disabled><i data-lucide="plus" aria-hidden="true"></i></button></div>
+        <div class="dataset-actions" aria-label="Действия с набором">
+          <button type="button" class="ghost dataset-icon" data-dataset-save title="Сохранить" aria-label="Сохранить" disabled><i data-lucide="save" aria-hidden="true"></i></button>
+          <button type="button" class="ghost dataset-icon" data-dataset-versions title="Версии набора" aria-label="Версии набора" disabled><i data-lucide="history" aria-hidden="true"></i></button>
+          <button type="button" class="ghost dataset-icon" data-dataset-import title="Импорт ZIP" aria-label="Импорт ZIP" disabled><i data-lucide="upload" aria-hidden="true"></i></button>
+          <button type="button" class="ghost dataset-icon" data-dataset-export title="Экспорт ZIP" aria-label="Экспорт ZIP" disabled><i data-lucide="download" aria-hidden="true"></i></button>
+          <button type="button" class="danger dataset-icon" data-dataset-delete title="Удалить набор" aria-label="Удалить набор" disabled><i data-lucide="trash-2" aria-hidden="true"></i></button>
+        </div>
+        <input type="file" accept=".zip,application/zip" data-dataset-zip hidden>
+        <div class="dataset-save-state" data-dataset-save-state role="status" aria-live="polite"><strong data-dataset-status>Загружаем наборы…</strong><small data-dataset-retention></small></div>
+      </div>
+      <div class="dataset-conflict ui-status-banner is-warning" data-dataset-conflict hidden><p>В другой вкладке или на другом устройстве набор изменился. Ваши правки пока не сохранены.</p><div><button type="button" class="ghost" data-dataset-reload>Загрузить с сервера</button><button type="button" data-dataset-fork>Сохранить отдельно</button></div></div>
+      <p class="dataset-feedback ui-status-banner" data-dataset-feedback role="status" hidden></p>
       <form method="post" action="/train-lora" enctype="multipart/form-data" class="lora-training-form" data-lora-training-form>
         <input type="hidden" name="csrf" value="{{.CSRF}}">
 
@@ -48,18 +62,19 @@
 
         <fieldset class="lora-form-section lora-dataset-section">
           <legend><span>3</span><div><b>Датасет</b><small>Разные ракурсы и свет важнее почти одинаковых кадров.</small></div></legend>
-          <label class="lora-dataset-drop" data-lora-dropzone>
-            <input name="images" type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" multiple required data-lora-images>
+          <div class="dataset-sources"><label class="lora-dataset-drop" data-lora-dropzone>
+            <input name="images" type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" multiple data-lora-images>
             <span class="lora-drop-add" aria-hidden="true">+</span>
             <span><b>Выбрать изображения</b><small>PNG, JPG или WebP · до 24 МБ каждое · общий размер до 512 МБ</small></span>
-          </label>
+          </label><button type="button" class="ghost dataset-gallery-button" data-dataset-gallery><i data-lucide="images" aria-hidden="true"></i><span>Из моих генераций</span></button></div>
           <div class="lora-dataset-summary" data-lora-dataset-summary hidden><strong data-lora-image-count>0 изображений</strong><span data-lora-image-size>0 МБ</span><button type="button" class="button ghost" data-lora-clear-images>Очистить</button></div>
           <div class="lora-caption-assistant" data-lora-caption-assistant aria-busy="false">
             <div><span aria-hidden="true">AI</span><p><b>Подписи промт-ассистентом</b><small>Каждый кадр анализируется отдельно; заполненные подписи остаются без изменений.</small></p></div>
             <div><small data-lora-caption-status role="status" aria-live="polite">Добавьте изображения и укажите триггер.</small><button type="button" class="button ghost" data-lora-caption-all disabled>Описать пустые</button></div>
           </div>
           <label class="ui-field lora-global-caption"><span>Общее описание · запасной вариант</span><textarea name="global_caption" rows="3" maxlength="1000" placeholder="Например: portrait photo of a woman, natural skin texture, indoor daylight">{{.Form.Caption}}</textarea><small class="field-hint">Подставляется только вместо оставшихся пустых подписей.</small></label>
-          <div class="lora-dataset-grid" data-lora-dataset-grid aria-live="polite"></div>
+          <div class="lora-dataset-grid" data-lora-dataset-grid></div>
+          <p class="dataset-empty" data-dataset-empty>В наборе пока нет фотографий.</p>
         </fieldset>
 
         <fieldset class="lora-form-section">
@@ -70,7 +85,7 @@
           <div class="lora-resolution-control"><span><b>Рабочее разрешение</b><small>Bucket сохранит пропорции исходников.</small></span><div class="ui-segmented"><label class="ui-choice"><input type="radio" name="resolution" value="512" {{if eq .Form.Resolution 512}}checked{{end}}><span>512</span></label><label class="ui-choice"><input type="radio" name="resolution" value="768" {{if eq .Form.Resolution 768}}checked{{end}}><span>768</span></label><label class="ui-choice"><input type="radio" name="resolution" value="1024" {{if eq .Form.Resolution 1024}}checked{{end}}><span>1024</span></label></div></div>
         </fieldset>
 
-        <footer class="lora-submit-row"><p>Обучение использует GPU по очереди. Майнинг будет остановлен на время задачи и возвращён после завершения или отмены.</p><button type="submit" {{if eq .ReadyProfiles 0}}disabled{{end}} data-lora-submit>Запустить обучение</button></footer>
+        <footer class="lora-submit-row"><p>Обучение использует GPU по очереди. Майнинг будет остановлен на время задачи и возвращён после завершения или отмены.</p><button type="submit" data-agent-ready="{{if gt .ReadyProfiles 0}}true{{else}}false{{end}}" disabled data-lora-submit>Запустить обучение</button></footer>
       </form>
     </section>
 
@@ -100,7 +115,11 @@
       </div>
     </section>
   </div>
+  <dialog class="ui-dialog dataset-dialog" data-dataset-dialog aria-labelledby="dataset-dialog-title"><header><h2 id="dataset-dialog-title" data-dataset-dialog-title>Версии</h2><button type="button" class="ghost dataset-icon" data-dataset-dialog-close aria-label="Закрыть" title="Закрыть"><i data-lucide="x" aria-hidden="true"></i></button></header><div class="dataset-dialog-content" data-dataset-dialog-content></div></dialog>
 </main>
+<script src="/static/vendor/lucide.js?v={{.AssetVersion}}"></script>
+<script src="/static/lora-dataset-state.js?v={{.AssetVersion}}"></script>
+<script src="/static/lora-dataset-editor.js?v={{.AssetVersion}}"></script>
 <script src="/static/lora-training.js?v={{.AssetVersion}}"></script>
 </body></html>
 {{end}}

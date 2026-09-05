@@ -107,7 +107,11 @@ func assertLoraDatasetAPI(t *testing.T, ctx context.Context, db *sql.DB, app *Ap
 	}
 	manifest := domain.LoraDatasetManifest{Version: 1, Settings: domain.LoraDatasetSettings{Name: "Portrait dataset", TriggerWord: "test_person", ConceptType: "character", Resolution: 1024}, Images: []domain.LoraDatasetImage{}}
 	request(userID, http.MethodPost, "/api/lora-datasets", []byte(`{}`), "application/json", "", http.StatusForbidden)
-	view := decodeView(post(userID, "/api/lora-datasets", loraDatasetRequest{Manifest: manifest}, http.StatusCreated))
+	view := decodeView(post(userID, "/api/lora-datasets", loraDatasetRequest{ClientID: "create-retry", Manifest: manifest}, http.StatusCreated))
+	retry := decodeView(post(userID, "/api/lora-datasets", loraDatasetRequest{ClientID: "create-retry", Manifest: manifest}, http.StatusCreated))
+	if retry.Dataset.ID != view.Dataset.ID || retry.Dataset.Revision != view.Dataset.Revision {
+		t.Fatal("repeated creation duplicated or changed the dataset")
+	}
 	base := "/api/lora-datasets/" + view.Dataset.ID
 	request(foreignID, http.MethodGet, base, nil, "", "", http.StatusNotFound)
 	imageBytes := datasetTestPNG(t, 768, 768)
@@ -165,6 +169,7 @@ func assertLoraDatasetAPI(t *testing.T, ctx context.Context, db *sql.DB, app *Ap
 	if reloaded.Manifest.Images[0].Caption != manifest.Images[0].Caption || !reloaded.Manifest.Images[1].Excluded {
 		t.Fatalf("reload changed manual state: %+v", reloaded.Manifest)
 	}
+	assertLoraDatasetZIPRoundTrip(t, ctx, app, userID, foreignID, reloaded, session, csrf)
 	var encrypted []byte
 	if err := db.QueryRowContext(ctx, `SELECT payload_cipher FROM lora_dataset_asset_chunks WHERE asset_id=$1 AND chunk_index=0`, asset.ID).Scan(&encrypted); err != nil {
 		t.Fatal(err)
@@ -199,6 +204,14 @@ func assertLoraDatasetAPI(t *testing.T, ctx context.Context, db *sql.DB, app *Ap
 	post(userID, base+"/delete", loraDatasetRequest{Revision: view.Dataset.Revision}, http.StatusOK)
 	request(userID, http.MethodGet, base, nil, "", "", http.StatusNotFound)
 	request(userID, http.MethodGet, "/api/lora-datasets/versions/"+snapshot.ID, nil, "", "", http.StatusOK)
+	post(foreignID, "/api/lora-datasets/versions/"+snapshot.ID+"/restore", nil, http.StatusNotFound)
+	restored := decodeView(post(userID, "/api/lora-datasets/versions/"+snapshot.ID+"/restore", nil, http.StatusCreated))
+	if restored.Dataset.ID == snapshot.DatasetID || restored.Manifest.Images[0].Caption != versionView.Manifest.Images[0].Caption || len(restored.Assets) != 1 {
+		t.Fatalf("version restoration changed content: %+v", restored)
+	}
+	request(foreignID, http.MethodGet, "/api/lora-datasets/versions/"+snapshot.ID+"/export", nil, "", "", http.StatusNotFound)
+	request(userID, http.MethodGet, "/api/lora-datasets/versions/"+snapshot.ID+"/export", nil, "", "", http.StatusOK)
+	post(userID, "/api/lora-datasets/"+restored.Dataset.ID+"/delete", loraDatasetRequest{Revision: restored.Dataset.Revision}, http.StatusOK)
 	post(foreignID, "/api/lora-datasets/versions/"+snapshot.ID+"/delete", nil, http.StatusNotFound)
 	post(userID, "/api/lora-datasets/versions/"+snapshot.ID+"/delete", nil, http.StatusOK)
 	if entries, err := os.ReadDir(app.mediaSpoolDir()); err != nil || len(entries) != 0 {
