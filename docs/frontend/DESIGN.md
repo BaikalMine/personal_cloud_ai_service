@@ -13,9 +13,14 @@ not a raw ComfyUI graph editor.
 
 **Quiet technical workbench.** Dense enough for repeated work, with restrained
 contrast, clear state colors and one consistent spacing rhythm. The interface
-uses dark neutral surfaces, mint only for committed actions and active states,
+uses neutral white/gray or graphite surfaces, teal/mint for committed actions and active states,
 cyan for informational focus, amber for warnings and coral for destructive or
 failed states.
+
+Light, dark and system preferences use the shared palette in `static/theme.css`.
+The user's manual choice persists across pages and reloads; system changes apply
+only in system mode. Auth screens expose the same control. Media keeps its actual
+colors, and ComfyUI/OpenWebUI retain their own independent themes.
 
 ## Layout Rules
 

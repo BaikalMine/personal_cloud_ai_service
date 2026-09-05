@@ -1,20 +1,37 @@
 {{define "head"}}
 <!doctype html>
-<html lang="ru">
+<html lang="ru" data-theme-preference="{{or .ThemePreference "system"}}"{{if eq .ThemePreference "light"}} data-theme="light"{{else if eq .ThemePreference "dark"}} data-theme="dark"{{end}}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>{{.Title}} - AI Access Gateway</title>
+  <script src="/static/theme.js?v={{.AssetVersion}}"></script>
   <link rel="preload" href="/static/fonts/manrope-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/static/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/static/theme.css?v={{.AssetVersion}}">
   <link rel="stylesheet" href="/static/style.css?v={{.AssetVersion}}">
   <link rel="stylesheet" href="/static/notifications.css?v={{.AssetVersion}}">
   <script src="/static/dialog-focus.js?v={{.AssetVersion}}" defer></script>
+  <script src="/static/vendor/lucide.js?v={{.AssetVersion}}" defer></script>
   <script src="/static/app.js?v={{.AssetVersion}}" defer></script>
   <script src="/static/notifications.js?v={{.AssetVersion}}" defer></script>
 </head>
 <body>
 <a class="skip-link" href="#main-content">К содержимому</a>
+{{if not .CurrentUser}}<div class="auth-theme">{{template "theme_picker" .}}</div>{{end}}
+{{end}}
+
+{{define "theme_picker"}}
+<label class="theme-picker" data-theme-picker hidden>
+  <i data-lucide="sun-moon" aria-hidden="true"></i>
+  <span class="visually-hidden">Цветовая тема</span>
+  <select aria-label="Цветовая тема" data-theme-preference-control>
+    <option value="system">Системная</option>
+    <option value="light">Светлая</option>
+    <option value="dark">Тёмная</option>
+  </select>
+</label>
 {{end}}
 
 {{define "nav"}}
@@ -71,6 +88,7 @@
       {{if .CurrentUser}}{{if eq .CurrentUser.Role "admin"}}<a href="{{.AdminBaseURL}}/admin">Администрирование</a>{{end}}{{end}}
     </nav>
     <div class="user-menu">
+      {{template "theme_picker" .}}
       {{if .CurrentUser}}<a class="account-chip" href="/account/profile"><span class="account-indicator"></span><span><b>{{.CurrentUser.Username}}</b><small>{{roleLabel .CurrentUser.Role}}</small></span></a>{{end}}
       <form method="post" action="/logout" class="nav-form"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit" class="nav-button nav-button-logout" aria-label="Выйти из аккаунта">Выйти</button></form>
     </div>
@@ -108,6 +126,7 @@
     <a href="/admin/audit">Журнал аудита</a>
   </nav>
   <div class="admin-actions">
+    {{template "theme_picker" .}}
     {{if .CurrentUser}}<div class="admin-account"><span class="account-indicator"></span><span><b>{{.CurrentUser.Username}}</b><small>{{roleLabel .CurrentUser.Role}}</small></span></div>{{end}}
     <label class="admin-sensitive-toggle"><input type="checkbox" data-sensitive-toggle><span class="header-sensitive-switch" aria-hidden="true"></span><span>Показывать 18+</span></label>
     <a href="{{.PublicBaseURL}}/app">Режим пользователя</a>

@@ -35,6 +35,7 @@ import (
 var embeddedFS embed.FS
 
 var staticJavaScriptAssetPaths = []string{
+	"static/theme.js",
 	"static/app.js",
 	"static/dialog-focus.js",
 	"static/gallery.js",
@@ -69,11 +70,12 @@ var staticJavaScriptAssets = func() map[string]string {
 }()
 
 var staticCSSAssets = map[string]string{
+	"/static/theme.css":         "static/theme.css",
 	"/static/style.css":         "static/style.css",
 	"/static/notifications.css": "static/notifications.css",
 }
 
-var frontendAssetPaths = append([]string{"static/style.css", "static/notifications.css"}, staticJavaScriptAssetPaths...)
+var frontendAssetPaths = append([]string{"static/theme.css", "static/style.css", "static/notifications.css"}, staticJavaScriptAssetPaths...)
 
 type Templates struct {
 	*template.Template
@@ -571,6 +573,7 @@ func (a *App) renderStatus(w http.ResponseWriter, r *http.Request, status int, n
 	data["AdminBaseURL"] = a.cfg.AdminBaseURL
 	data["RequestID"] = requestID(r)
 	data["AssetVersion"] = a.tpl.AssetVersion
+	data["ThemePreference"] = ThemePreference(r)
 	data["FeatureSuggestionsEnabled"] = a.cfg.FeatureSuggestionsEnabled
 	data["Retention"] = newRetentionPolicyView(a.retentionPolicy())
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

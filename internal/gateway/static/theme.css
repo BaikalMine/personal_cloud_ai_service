@@ -1,0 +1,105 @@
+:root {
+  color-scheme: light dark;
+  --color-bg: light-dark(#f5f6f8, #17191d);
+  --color-bg-soft: light-dark(#eef0f3, #1b1e23);
+  --color-surface: light-dark(#ffffff, #202328);
+  --color-surface-raised: light-dark(#f0f2f5, #292d34);
+  --color-surface-active: light-dark(#e4e8ee, #333943);
+  --color-input: light-dark(#ffffff, #1b1e23);
+  --color-text: light-dark(#20242a, #eef0f4);
+  --color-text-soft: light-dark(#414954, #c9d0dc);
+  --color-text-secondary: light-dark(#59616c, #abb2be);
+  --color-text-muted: light-dark(#626c78, #a0aabb);
+  --color-border: light-dark(#dce0e6, #3b414b);
+  --color-border-control: light-dark(#868f9b, #727d8d);
+  --color-action: light-dark(#087f73, #62ddbf);
+  --color-action-hover: light-dark(#066d63, #84e8cf);
+  --color-action-text: light-dark(#ffffff, #112721);
+  --color-focus: light-dark(#2463c8, #8db8ff);
+  --color-success: light-dark(#0d7056, #91e2c3);
+  --color-success-bg: light-dark(#eaf6f1, #19372e);
+  --color-success-border: light-dark(#5b9b86, #458571);
+  --color-info: light-dark(#245cb6, #a9c9ff);
+  --color-info-bg: light-dark(#edf3ff, #202e45);
+  --color-info-border: light-dark(#7293c4, #5276a5);
+  --color-warning: light-dark(#875900, #f2c66d);
+  --color-warning-bg: light-dark(#fff5dd, #352c1b);
+  --color-warning-border: light-dark(#ae8640, #a18346);
+  --color-danger: light-dark(#b42338, #ff9ca6);
+  --color-danger-bg: light-dark(#fff0f1, #3b242a);
+  --color-danger-border: light-dark(#c26a75, #b86c79);
+  --color-accent: light-dark(#6846a5, #c8b4f2);
+  --color-accent-bg: light-dark(#f3eefa, #30293e);
+  --color-accent-border: light-dark(#9b85bd, #847099);
+  --color-media-bg: #101215;
+  --color-media-text: #ffffff;
+  --color-media-border: #737983;
+  --color-switch-off: light-dark(#788390, #727d8d);
+  --color-switch-on: #087f73;
+  --color-switch-thumb: #ffffff;
+  --color-overlay: rgb(0 0 0 / .65);
+  --color-chart-cpu: light-dark(#086f91, #67cad9);
+  --color-chart-memory: light-dark(#087f73, #62ddbf);
+  --color-chart-gpu: light-dark(#875900, #f2c66d);
+  --color-chart-vram: light-dark(#6846a5, #c8b4f2);
+
+  /* Compatibility aliases belong here until component migration is complete. */
+  --canvas: var(--color-bg);
+  --canvas-soft: var(--color-bg-soft);
+  --surface: var(--color-surface);
+  --surface-raised: var(--color-surface-raised);
+  --surface-active: var(--color-surface-active);
+  --surface-input: var(--color-input);
+  --text: var(--color-text);
+  --text-soft: var(--color-text-soft);
+  --muted: var(--color-text-secondary);
+  --faint: var(--color-text-muted);
+  --line: var(--color-border);
+  --line-strong: var(--color-border-control);
+  --mint: var(--color-action);
+  --mint-soft: var(--color-success-bg);
+  --cyan: var(--color-focus);
+  --blue: var(--color-info);
+  --amber: var(--color-warning);
+  --coral: var(--color-danger);
+  --violet: var(--color-accent);
+  --shadow: 0 12px 30px light-dark(rgb(27 36 48 / .08), rgb(0 0 0 / .24));
+  --shadow-dialog: 0 28px 90px light-dark(rgb(27 36 48 / .22), rgb(0 0 0 / .58));
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--color-focus) 25%, transparent);
+}
+
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+.theme-picker {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 8px;
+  border: 1px solid var(--color-border-control);
+  border-radius: 6px;
+  background: var(--color-input);
+  color: var(--color-text-secondary);
+}
+.theme-picker svg { flex: 0 0 18px; width: 18px; height: 18px; }
+.theme-picker select {
+  width: auto;
+  min-width: 100px;
+  min-height: 42px;
+  margin: 0;
+  padding: 0 22px 0 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 500;
+}
+.theme-picker:focus-within { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.theme-picker select:focus-visible { outline: none; box-shadow: none; }
+.auth-theme { position: absolute; z-index: 2; top: 16px; right: 16px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }

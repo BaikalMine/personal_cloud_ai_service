@@ -4,6 +4,12 @@
   transition: none !important;
 }
 
+/* Keep the header at its document position in full-height component captures. */
+.user-topbar {
+  position: relative !important;
+  top: auto !important;
+}
+
 #generation-result,
 body:not(.visualize-generation-batches) #generation-variants {
   display: none !important;

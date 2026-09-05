@@ -6,8 +6,10 @@ status styles.
 
 ## Tokens
 
-Use the role-based variables declared in the single `:root` block of
-`internal/gateway/static/style.css`:
+Use `internal/gateway/static/theme.css` as the single color source. Its role
+tokens use `light-dark()` and the root `color-scheme` for light, dark and system
+preferences. Legacy color names below are aliases, not independent palettes.
+Typography, rhythm and dimensions stay in `internal/gateway/static/style.css`:
 
 - surfaces and text: `--canvas`, `--surface*`, `--text*`, `--muted`, `--faint`;
 - actions and states: `--mint`, `--cyan`, `--amber`, `--coral`, `--violet`;
@@ -16,6 +18,11 @@ Use the role-based variables declared in the single `:root` block of
 - rhythm: `--space-1` through `--space-6`, `--control-height`,
   `--control-height-compact`;
 - shape and interaction: `--radius-*`, `--focus-ring`, `--transition-fast`.
+
+New color consumers use `--color-*` roles. Fixed media colors and overlays also
+belong in theme.css. Never invert media or override a proxied application's theme.
+The blocking same-origin theme.js resolves the preference before styles paint;
+the validated cookie supplies the server fallback when JavaScript is unavailable.
 
 Normal explanatory and utility text is at least 12 px. The only smaller token
 is `--font-size-badge`, reserved for short badges. Letter spacing remains zero.

@@ -342,7 +342,7 @@ func main() {
 		]}`))
 	})
 	render := func(name, title string, values map[string]any) http.HandlerFunc {
-		return func(w http.ResponseWriter, _ *http.Request) {
+		return func(w http.ResponseWriter, r *http.Request) {
 			data := make(map[string]any, len(common)+len(values)+1)
 			for key, value := range common {
 				data[key] = value
@@ -351,6 +351,7 @@ func main() {
 				data[key] = value
 			}
 			data["Title"] = title
+			data["ThemePreference"] = gateway.ThemePreference(r)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			if err := templates.ExecuteTemplate(w, name, data); err != nil {
 				log.Printf("render %s: %v", name, err)

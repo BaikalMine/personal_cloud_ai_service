@@ -18,6 +18,8 @@ const suggestionStorePath = path.join(projectRoot, "internal/store/feature_sugge
 const templateRoot = path.join(projectRoot, "internal/gateway/templates");
 const previewPath = path.join(projectRoot, "cmd/ui-preview/main.go");
 const css = fs.readFileSync(stylePath, "utf8");
+const themeCSS = fs.readFileSync(path.join(projectRoot, "internal/gateway/static/theme.css"), "utf8");
+const notificationCSS = fs.readFileSync(path.join(projectRoot, "internal/gateway/static/notifications.css"), "utf8");
 const generateScript = fs.readFileSync(generatePath, "utf8");
 const batchScript = fs.readFileSync(batchPath, "utf8");
 const generateTemplate = fs.readFileSync(generateTemplatePath, "utf8");
@@ -84,12 +86,25 @@ function selectorInventory(source) {
 
 test("frontend tokens have one source of truth", () => {
   assert.equal((css.match(/:root\s*\{/g) || []).length, 1);
+  assert.equal((themeCSS.match(/:root\s*\{/g) || []).length, 1);
   for (const token of [
     "--font-size-utility", "--font-size-badge", "--control-height",
-    "--radius-control", "--radius-panel", "--focus-ring", "--transition-fast",
+    "--radius-control", "--radius-panel", "--transition-fast",
   ]) {
     assert.match(css, new RegExp(`${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:`));
   }
+  const combined = `${themeCSS}\n${css}\n${notificationCSS}`;
+  const definitions = [...combined.matchAll(/(--[\w-]+)\s*:/g)].map(match => match[1]);
+  for (const token of [...themeCSS.matchAll(/(--[\w-]+)\s*:/g)].map(match => match[1])) {
+    assert.equal(definitions.filter(name => name === token).length, 1, `duplicate palette token ${token}`);
+  }
+  for (const token of ["--focus-ring", "--color-bg", "--color-text", "--color-action", "--color-danger"]) {
+    assert.ok(themeCSS.includes(`${token}:`), `missing palette token ${token}`);
+  }
+  for (const match of combined.matchAll(/var\((--color-[\w-]+)/g)) {
+    assert.ok(definitions.includes(match[1]), `undefined color ${match[1]}`);
+  }
+  assert.doesNotMatch(`${css}\n${notificationCSS}`, /#[\da-f]{3,8}\b/i, "literal palette colors belong in theme.css");
 });
 
 test("service copy never falls below 12px outside the short badge token", () => {

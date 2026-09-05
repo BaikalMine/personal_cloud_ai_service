@@ -402,10 +402,10 @@
       });
     };
     const historySeries = [
-      { key: "cpu", label: "ЦП", color: "#56d6ea", value: (metric) => metric.cpu_percent },
-      { key: "memory", label: "ОЗУ", color: "#62ddb5", value: (metric) => metric.memory_total_bytes ? metric.memory_used_bytes * 100 / metric.memory_total_bytes : 0 },
-      { key: "gpu", label: "GPU", color: "#e5b75d", value: (metric) => metric.gpu_available ? metric.gpu_percent : null },
-      { key: "gpu-memory", label: "VRAM", color: "#a78bfa", value: (metric) => metric.gpu_memory_total_bytes ? metric.gpu_memory_used_bytes * 100 / metric.gpu_memory_total_bytes : null },
+      { key: "cpu", label: "ЦП", color: "var(--color-chart-cpu)", value: (metric) => metric.cpu_percent },
+      { key: "memory", label: "ОЗУ", color: "var(--color-chart-memory)", value: (metric) => metric.memory_total_bytes ? metric.memory_used_bytes * 100 / metric.memory_total_bytes : 0 },
+      { key: "gpu", label: "GPU", color: "var(--color-chart-gpu)", value: (metric) => metric.gpu_available ? metric.gpu_percent : null },
+      { key: "gpu-memory", label: "VRAM", color: "var(--color-chart-vram)", value: (metric) => metric.gpu_memory_total_bytes ? metric.gpu_memory_used_bytes * 100 / metric.gpu_memory_total_bytes : null },
     ];
     const activeHistorySeries = new Set(historySeries.map(({ key }) => key));
     const initialHistory = [...systemMonitoring.querySelectorAll("[data-history-point]")].map((node) => ({
@@ -555,7 +555,7 @@
         const nearbyMarkers = visibleMarkers.filter((marker) => Math.abs(Date.parse(marker.created_at) - Date.parse(metric.recorded_at)) <= 90000);
         if (nearbyMarkers.length) {
           const row = document.createElement("span");
-          row.innerHTML = `<i style="--series-color:#69dfb9"></i>Запуски<b>${nearbyMarkers.length}</b>`;
+          row.innerHTML = `<i style="--series-color:var(--color-chart-memory)"></i>Запуски<b>${nearbyMarkers.length}</b>`;
           tooltip.append(row);
         }
         tooltip.hidden = false;

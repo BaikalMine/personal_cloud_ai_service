@@ -27,7 +27,7 @@
 }
 
 .notification-trigger.has-unread {
-  border-color: #456f63;
+  border-color: var(--color-success-border);
   color: var(--text);
 }
 
@@ -37,18 +37,18 @@
   display: inline-grid;
   place-items: center;
   padding: 0 5px;
-  border: 1px solid #3a6871;
+  border: 1px solid var(--color-info-border);
   border-radius: 999px;
-  background: #15282c;
-  color: #b3e6ec;
+  background: var(--color-surface);
+  color: var(--color-info);
   font-size: var(--font-size-badge);
   font-variant-numeric: tabular-nums;
 }
 
 .notification-count.is-unread {
-  border-color: #7c484b;
-  background: #321d1f;
-  color: #ffc0bb;
+  border-color: var(--color-danger-border);
+  background: var(--color-surface);
+  color: var(--color-danger);
 }
 
 .notification-panel {
@@ -61,7 +61,7 @@
   overflow: hidden;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-panel);
-  background: #111615;
+  background: var(--color-input);
   box-shadow: 0 22px 55px rgba(0, 0, 0, .48);
 }
 
@@ -156,7 +156,7 @@
 
 .notification-item:hover,
 .notification-item:focus-visible { background: var(--surface-raised); outline: none; }
-.notification-item.is-unread { background: rgba(41, 103, 83, .09); }
+.notification-item.is-unread { background: color-mix(in srgb, var(--color-success) 9%, transparent); }
 
 .notification-item-marker {
   width: 8px;
@@ -164,12 +164,12 @@
   margin-top: 5px;
   border-radius: 50%;
   background: var(--mint);
-  box-shadow: 0 0 0 3px rgba(98, 221, 181, .09);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-success) 9%, transparent);
 }
 
 .notification-item.is-failed .notification-item-marker {
   background: var(--coral);
-  box-shadow: 0 0 0 3px rgba(255, 124, 116, .09);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-danger) 9%, transparent);
 }
 
 .notification-item-copy {
@@ -225,8 +225,8 @@
 .notification-setting-row small { color: var(--muted); font-size: var(--font-size-utility); font-weight: 600; line-height: 1.45; }
 
 .generation-job.is-notification-target {
-  border-color: #4f927c;
-  box-shadow: 0 0 0 2px rgba(98, 221, 181, .15);
+  border-color: var(--color-success-border);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-success) 15%, transparent);
 }
 
 @media (max-width: 760px) {

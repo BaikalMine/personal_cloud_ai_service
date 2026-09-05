@@ -37,7 +37,7 @@ func TestGatewayTemplatesHaveRussianDocumentLanguage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(body), `<html lang="ru">`) {
+	if !strings.Contains(string(body), `<html lang="ru"`) {
 		t.Fatal("gateway document language must be Russian")
 	}
 }
