@@ -2,12 +2,14 @@
   const center = document.querySelector("[data-notification-center]");
   if (center) {
     const trigger = center.querySelector(".notification-trigger");
+    const triggers = [...document.querySelectorAll('[data-notification-open]')];
+    const shellCounts = [...document.querySelectorAll('[data-shell-active-count]')];
+    let openedBy = trigger;
     const panel = center.querySelector(".notification-panel");
     const closeButton = center.querySelector("[data-notification-close]");
     const list = center.querySelector("[data-notification-list]");
     const readAll = center.querySelector("[data-notification-read-all]");
     const connection = center.querySelector("[data-notification-connection]");
-    const activeCount = center.querySelector("[data-notification-active-count]");
     const unreadCount = center.querySelector("[data-notification-unread-count]");
     const activeTotal = center.querySelector("[data-notification-active-total]");
     const unreadTotal = center.querySelector("[data-notification-unread-total]");
@@ -34,6 +36,7 @@
       node.textContent = String(count);
       node.hidden = count === 0;
     };
+    shellCounts.forEach(node => setCount(node, activeTotal?.textContent));
 
     const formatTime = (value) => {
       const date = new Date(value);
@@ -72,7 +75,7 @@
     const render = (items, summary) => {
       const active = Math.max(0, Number(summary?.active_count) || 0);
       const unread = Math.max(0, Number(summary?.unread_count) || 0);
-      setCount(activeCount, active);
+      shellCounts.forEach(node => setCount(node, active));
       setCount(unreadCount, unread);
       if (activeTotal) activeTotal.textContent = String(active);
       if (unreadTotal) unreadTotal.textContent = String(unread);
@@ -170,23 +173,29 @@
       if (!panel || panel.hidden) return;
       panel.hidden = true;
       trigger?.setAttribute("aria-expanded", "false");
+      triggers.forEach(button => button.setAttribute('aria-expanded', 'false'));
       if (focusTrap) focusTrap.deactivate({ restore });
-      else if (restore) trigger?.focus({ preventScroll: true });
+      else if (restore) openedBy?.focus({ preventScroll: true });
     };
 
-    const open = () => {
+    const open = (button = trigger) => {
       if (!panel) return;
+      document.dispatchEvent(new CustomEvent('workspace-overlay', { detail: 'notifications' }));
+      openedBy = button?.getClientRects().length ? button : trigger;
       panel.hidden = false;
-      trigger?.setAttribute("aria-expanded", "true");
-      if (focusTrap) focusTrap.activate({ trigger, initialFocus: closeButton, onEscape: () => close() });
+      triggers.forEach(button => button.setAttribute('aria-expanded', 'true'));
+      if (focusTrap) focusTrap.activate({ trigger: openedBy, initialFocus: closeButton, onEscape: () => close() });
       else closeButton?.focus({ preventScroll: true });
       load();
     };
 
-    trigger?.addEventListener("click", () => panel?.hidden ? open() : close());
+    triggers.forEach(button => button.addEventListener('click', () => panel?.hidden ? open(button) : close()));
     closeButton?.addEventListener("click", close);
+    document.addEventListener('workspace-overlay', event => {
+      if (event.detail !== 'notifications') close({ restore: false });
+    });
     document.addEventListener("click", (event) => {
-      if (panel && !panel.hidden && !center.contains(event.target)) close({ restore: false });
+      if (panel && !panel.hidden && !center.contains(event.target) && !event.target.closest('[data-notification-open]')) close({ restore: false });
     });
     if (!focusTrap) document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") close();

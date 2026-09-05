@@ -13,7 +13,7 @@
   {{if .Message}}<p class="success-box">{{.Message}}</p>{{end}}
   <section class="panel">
     <div class="panel-heading"><div><p class="section-kicker">Устройства и подключения</p><h2>Ваши сессии</h2></div></div>
-    <table>
+    <div class="table-scroll"><table>
       <thead><tr><th>Сессия</th><th>IP</th><th>Создана</th><th>Последняя активность</th><th>Истекает</th><th>Устройство</th><th></th></tr></thead>
       <tbody>
       {{range .Sessions}}
@@ -28,7 +28,7 @@
         </tr>
       {{else}}<tr><td colspan="7" class="muted">Активных сессий нет.</td></tr>{{end}}
       </tbody>
-    </table>
+    </table></div>
   </section>
 </main>
 </body></html>

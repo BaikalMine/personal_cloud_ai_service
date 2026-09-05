@@ -20,6 +20,7 @@ const previewPath = path.join(projectRoot, "cmd/ui-preview/main.go");
 const css = fs.readFileSync(stylePath, "utf8");
 const themeCSS = fs.readFileSync(path.join(projectRoot, "internal/gateway/static/theme.css"), "utf8");
 const notificationCSS = fs.readFileSync(path.join(projectRoot, "internal/gateway/static/notifications.css"), "utf8");
+const shellCSS = fs.readFileSync(path.join(projectRoot, "internal/gateway/static/shell.css"), "utf8");
 const generateScript = fs.readFileSync(generatePath, "utf8");
 const batchScript = fs.readFileSync(batchPath, "utf8");
 const generateTemplate = fs.readFileSync(generateTemplatePath, "utf8");
@@ -93,7 +94,7 @@ test("frontend tokens have one source of truth", () => {
   ]) {
     assert.match(css, new RegExp(`${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:`));
   }
-  const combined = `${themeCSS}\n${css}\n${notificationCSS}`;
+  const combined = `${themeCSS}\n${css}\n${notificationCSS}\n${shellCSS}`;
   const definitions = [...combined.matchAll(/(--[\w-]+)\s*:/g)].map(match => match[1]);
   for (const token of [...themeCSS.matchAll(/(--[\w-]+)\s*:/g)].map(match => match[1])) {
     assert.equal(definitions.filter(name => name === token).length, 1, `duplicate palette token ${token}`);
@@ -104,7 +105,7 @@ test("frontend tokens have one source of truth", () => {
   for (const match of combined.matchAll(/var\((--color-[\w-]+)/g)) {
     assert.ok(definitions.includes(match[1]), `undefined color ${match[1]}`);
   }
-  assert.doesNotMatch(`${css}\n${notificationCSS}`, /#[\da-f]{3,8}\b/i, "literal palette colors belong in theme.css");
+  assert.doesNotMatch(`${css}\n${notificationCSS}\n${shellCSS}`, /#[\da-f]{3,8}\b/i, "literal palette colors belong in theme.css");
 });
 
 test("service copy never falls below 12px outside the short badge token", () => {
@@ -213,6 +214,6 @@ test("suggestions keep public intake hidden without hiding the admin review queu
   assert.match(appSource, /mux\.Handle\("\/suggestions\/"/);
   assert.match(suggestionStore, /status IN \('review','accepted'\)/);
   assert.match(suggestionStore, /scan\.status='completed' AND scan\.malicious=0 AND scan\.suspicious=0/);
-  const adminNavLine = layoutTemplate.split(/\r?\n/).find((line) => line.includes('href="/admin/suggestions"'));
-  assert.ok(adminNavLine && !adminNavLine.includes("FeatureSuggestionsEnabled"), adminNavLine);
+  // Permission/feature-flag combinations are exercised by navigation_test.go.
+  assert.match(layoutTemplate, /workspaceShell \. true/);
 });

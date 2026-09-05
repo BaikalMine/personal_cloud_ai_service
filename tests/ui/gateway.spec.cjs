@@ -6,6 +6,7 @@ const { installPreviewClock, settlePage, assertNoViewportOverflow, expectFocusIn
 const { installCaptionFixture } = require("./caption-fixture.cjs");
 
 const visualStyle = path.join(__dirname, "visual-stability.css");
+const componentVisualStyle = [visualStyle, path.join(__dirname, "component-visual-stability.css")];
 const responsiveRoutes = [
   { route: "/preview/generate", snapshot: "generation-step-1.png" },
   { route: "/preview/gallery", snapshot: "gallery.png" },
@@ -203,7 +204,7 @@ test("video reference sources use equal tiles at every viewport", async ({ page 
   await open(page, "/preview/generate");
   await page.getByRole("button", { name: /Видео Создаёт/ }).click();
   await settlePage(page);
-  await expect(page.locator("#minimax-video-mode")).toHaveScreenshot("generation-video-modes.png", { stylePath: visualStyle });
+  await expect(page.locator("#minimax-video-mode")).toHaveScreenshot("generation-video-modes.png", { stylePath: componentVisualStyle });
 
   const visibleSlots = page.locator(".source-image-card:visible");
   await expect(visibleSlots).toHaveCount(2);
@@ -218,7 +219,7 @@ test("video reference sources use equal tiles at every viewport", async ({ page 
     expect(Math.abs(tileBox.width - tileBoxes[0].width), `tile ${index + 1} width`).toBeLessThanOrEqual(1);
     expect(Math.abs(tileBox.height - tileBoxes[0].height), `tile ${index + 1} height`).toBeLessThanOrEqual(1);
   }
-  await expect(page.locator("#image-source-fields")).toHaveScreenshot("generation-video-reference-sources.png", { stylePath: visualStyle });
+  await expect(page.locator("#image-source-fields")).toHaveScreenshot("generation-video-reference-sources.png", { stylePath: componentVisualStyle });
 });
 
 test("MiniMax H3 v5 memory modules stay usable at every viewport", async ({ page }, testInfo) => {
@@ -272,7 +273,7 @@ test("Krea2 exposes the PhotoFlow processing branches as independent modules", a
   const overflow = await processing.locator(".krea-module").evaluateAll((modules) => modules.map((module) => module.scrollWidth - module.clientWidth));
   expect(overflow.every((difference) => difference <= 1), `module overflow: ${overflow.join(", ")}`).toBeTruthy();
   await settlePage(page);
-  await expect(processing).toHaveScreenshot("generation-krea-processing.png", { stylePath: visualStyle });
+  await expect(processing).toHaveScreenshot("generation-krea-processing.png", { stylePath: componentVisualStyle });
 });
 
 test("repeat restores the active workflow LoRA stack and strengths", async ({ page }, testInfo) => {
@@ -319,7 +320,7 @@ test("controlled generation batches stay clear and usable at every viewport", as
   await expect(group.locator(".generation-batch-progress")).toContainText("2 из 3");
   await expect(group.getByRole("button", { name: "Новая ветка" })).toBeVisible();
   await settlePage(page);
-  await expect(group).toHaveScreenshot("generation-batch-group.png", { stylePath: visualStyle });
+  await expect(group).toHaveScreenshot("generation-batch-group.png", { stylePath: componentVisualStyle });
   await assertNoViewportOverflow(page, `${testInfo.project.name} generation batch workbench`);
   await page.evaluate(() => window.scrollTo(0, 0));
   await settlePage(page);
@@ -498,9 +499,11 @@ test("AI content updates only the changed task after an SSE revision", async ({ 
 
   await page.addInitScript(() => {
     class PreviewEventSource {
-      constructor() {
+      constructor(url) {
         this.listeners = new Map();
-        window.__previewContentEvents = this;
+        const path = new URL(url, location.href).pathname;
+        if (path === '/admin/content/events') window.__previewContentEvents = this;
+        if (path === '/notifications/events') window.__previewNotificationEvents = this;
       }
       addEventListener(type, listener) {
         const listeners = this.listeners.get(type) || [];
@@ -525,6 +528,7 @@ test("AI content updates only the changed task after an SSE revision", async ({ 
 
   await open(page, "/preview/content");
   const unchangedTask = page.locator("[data-content-task-key]").nth(1);
+  expect(await page.evaluate(() => Boolean(window.__previewContentEvents && window.__previewNotificationEvents && window.__previewContentEvents !== window.__previewNotificationEvents))).toBe(true);
   await unchangedTask.evaluate((element) => { element.dataset.domSentinel = "preserved"; });
   await page.evaluate(() => window.__previewContentEvents.emit("content", "46"));
 

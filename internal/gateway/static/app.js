@@ -1,16 +1,4 @@
 (() => {
-  const currentPath = window.location.pathname.replace(/\/$/, "") || "/";
-  const navigationLinks = [...document.querySelectorAll(".admin-nav a[href], .primary-nav a[href]")];
-  const matching = navigationLinks
-    .filter((link) => {
-      const path = new URL(link.href, window.location.origin).pathname.replace(/\/$/, "") || "/";
-      return currentPath === path || (path !== "/admin" && currentPath.startsWith(`${path}/`));
-    })
-    .sort((a, b) => b.getAttribute("href").length - a.getAttribute("href").length)[0];
-  if (matching) {
-    matching.setAttribute("aria-current", "page");
-    window.requestAnimationFrame(() => matching.scrollIntoView({ block: "nearest", inline: "center" }));
-  }
 
   const accountExpiryNodes = [...document.querySelectorAll("[data-account-expiry]")];
   if (accountExpiryNodes.length) {
@@ -38,34 +26,6 @@
     window.setInterval(refreshAccountExpiry, 1000);
   }
 
-  document.querySelectorAll(".menu-toggle[aria-controls]").forEach((button) => {
-    const target = document.getElementById(button.getAttribute("aria-controls"));
-    if (!target) return;
-    const isAdmin = target.classList.contains("admin-sidebar");
-    const container = isAdmin ? target : button.closest(".user-topbar");
-    const close = () => {
-      container?.classList.remove("menu-open");
-      button.setAttribute("aria-expanded", "false");
-      if (isAdmin) document.body.classList.remove("admin-nav-open");
-    };
-    button.addEventListener("click", () => {
-      const opened = !container?.classList.contains("menu-open");
-      container?.classList.toggle("menu-open", opened);
-      button.setAttribute("aria-expanded", String(opened));
-      if (isAdmin) document.body.classList.toggle("admin-nav-open", opened);
-    });
-    target.addEventListener("click", (event) => {
-      if (event.target.closest("a[href]")) close();
-    });
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") close();
-    });
-    if (isAdmin) {
-      document.addEventListener("click", (event) => {
-        if (document.body.classList.contains("admin-nav-open") && !target.contains(event.target) && !button.contains(event.target)) close();
-      });
-    }
-  });
 
   document.querySelectorAll('input[type="password"]').forEach((input) => {
     const wrapper = document.createElement("span");

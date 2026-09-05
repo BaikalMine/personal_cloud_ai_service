@@ -36,6 +36,7 @@ var embeddedFS embed.FS
 
 var staticJavaScriptAssetPaths = []string{
 	"static/theme.js",
+	"static/shell.js",
 	"static/app.js",
 	"static/dialog-focus.js",
 	"static/gallery.js",
@@ -72,10 +73,11 @@ var staticJavaScriptAssets = func() map[string]string {
 var staticCSSAssets = map[string]string{
 	"/static/theme.css":         "static/theme.css",
 	"/static/style.css":         "static/style.css",
+	"/static/shell.css":         "static/shell.css",
 	"/static/notifications.css": "static/notifications.css",
 }
 
-var frontendAssetPaths = append([]string{"static/theme.css", "static/style.css", "static/notifications.css"}, staticJavaScriptAssetPaths...)
+var frontendAssetPaths = append([]string{"static/theme.css", "static/style.css", "static/shell.css", "static/notifications.css"}, staticJavaScriptAssetPaths...)
 
 type Templates struct {
 	*template.Template
@@ -273,6 +275,7 @@ func ParseTemplates() (*Templates, error) {
 		"componentLabel":       observabilityComponentLabel,
 		"operationLabel":       observabilityOperationLabel,
 		"hasString":            hasString,
+		"workspaceShell":       workspaceShell,
 	}).ParseFS(embeddedFS, "templates/*.html")
 	if err != nil {
 		return nil, err
@@ -347,6 +350,8 @@ func (a *App) adminMux() http.Handler {
 	mux.HandleFunc("/login", a.handleLogin)
 	mux.HandleFunc("/logout", a.handleLogout)
 	mux.Handle("/account/profile", a.requireAuth(http.HandlerFunc(a.handleAccountProfile)))
+	mux.Handle("/account/quick-generation-priority", a.requireAuth(http.HandlerFunc(a.handleAccountQuickGenerationPriority)))
+	mux.Handle("/account/generation-mining", a.requireAuth(http.HandlerFunc(a.handleAccountGenerationMining)))
 	mux.Handle("/account/password", a.requireAuth(http.HandlerFunc(a.handleAccountPassword)))
 	mux.Handle("/account/sessions", a.requireAuth(http.HandlerFunc(a.handleAccountSessions)))
 	mux.Handle("/mining/toggle", a.requireAuth(http.HandlerFunc(a.handleMiningToggle)))
@@ -359,7 +364,7 @@ func (a *App) adminMux() http.Handler {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin", http.StatusFound)
 	})
-	return mux
+	return withAdminWorkspace(mux)
 }
 
 func (a *App) registerStaticRoutes(mux *http.ServeMux) {
@@ -574,6 +579,8 @@ func (a *App) renderStatus(w http.ResponseWriter, r *http.Request, status int, n
 	data["RequestID"] = requestID(r)
 	data["AssetVersion"] = a.tpl.AssetVersion
 	data["ThemePreference"] = ThemePreference(r)
+	data["NavigationPath"] = r.URL.Path
+	data["AdminWorkspace"], _ = r.Context().Value(adminWorkspaceKey).(bool)
 	data["FeatureSuggestionsEnabled"] = a.cfg.FeatureSuggestionsEnabled
 	data["Retention"] = newRetentionPolicyView(a.retentionPolicy())
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

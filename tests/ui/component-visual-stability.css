@@ -1,0 +1,7 @@
+/* Long component captures exclude fixed chrome, which has separate shell tests. */
+.workspace-topbar,
+.workspace-sidebar,
+.workspace-mobile-nav,
+.skip-link {
+  visibility: hidden !important;
+}

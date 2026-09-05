@@ -1,0 +1,67 @@
+{{define "workspace_link"}}
+{{if .Task}}
+<button class="workspace-link" type="button" data-notification-open aria-controls="notification-panel" aria-expanded="false" aria-label="Задачи" title="Задачи"><i data-lucide="{{.Icon}}" aria-hidden="true"></i><span class="workspace-link-label">{{.Label}}</span><span class="workspace-task-count" data-shell-active-count hidden>0</span></button>
+{{else}}
+<a class="workspace-link" href="{{.Href}}" title="{{.Label}}" aria-label="{{.Label}}{{if .External}} (в новой вкладке){{end}}"{{if .External}} target="_blank" rel="noopener"{{end}}><i data-lucide="{{.Icon}}" aria-hidden="true"></i><span class="workspace-link-label">{{.Label}}</span>{{if .External}}<i class="workspace-external" data-lucide="arrow-up-right" aria-hidden="true"></i>{{end}}</a>
+{{end}}
+{{end}}
+
+{{define "workspace_shell"}}
+<header class="workspace-topbar{{if not .Admin}} user-topbar{{end}}">
+  <button class="workspace-menu-toggle" type="button" data-navigation-toggle aria-label="Открыть меню" aria-controls="workspace-navigation" aria-expanded="false"><i data-lucide="menu" aria-hidden="true"></i><span>Меню</span></button>
+  <a class="workspace-context" href="{{.Navigation.Home}}">{{.Navigation.Context}}</a>
+  <div class="workspace-topbar-actions">
+    {{template "theme_picker" .Data}}
+    {{template "workspace_notifications" .Data}}
+    <button class="workspace-account-toggle" type="button" data-account-toggle aria-label="Настройки аккаунта" aria-controls="workspace-account" aria-expanded="false" title="Настройки аккаунта"><i data-lucide="user-round" aria-hidden="true"></i><span>{{.Data.CurrentUser.Username}}</span><i class="workspace-account-chevron" data-lucide="chevron-down" aria-hidden="true"></i></button>
+  </div>
+</header>
+<aside class="workspace-sidebar" id="workspace-navigation" aria-label="{{if .Admin}}Административная навигация{{else}}Основная навигация{{end}}" data-workspace-sidebar data-navigation-path="{{.Data.NavigationPath}}">
+  <div class="workspace-brand-row">
+    <a class="brand-cluster" href="{{.Navigation.Home}}" aria-label="AI Gateway: {{.Navigation.Context}}"><span class="brand-mark">AI</span><span class="brand"><b>AI Gateway</b><span>{{.Navigation.Context}}</span></span></a>
+    <button class="workspace-drawer-close" type="button" data-navigation-close aria-label="Закрыть меню"><i data-lucide="x" aria-hidden="true"></i></button>
+  </div>
+  <nav class="workspace-navigation" aria-label="Разделы">
+    {{range .Navigation.Groups}}
+    <div class="workspace-nav-group">
+      {{if .Label}}<span class="workspace-nav-heading">{{.Label}}</span>{{end}}
+      {{range .Items}}{{template "workspace_link" .}}{{end}}
+    </div>
+    {{end}}
+  </nav>
+  <a class="workspace-sidebar-profile workspace-link" href="/account/profile" title="Профиль" aria-label="Профиль"><i data-lucide="circle-user-round" aria-hidden="true"></i><span class="workspace-link-label">Профиль</span></a>
+</aside>
+<div class="workspace-backdrop" data-navigation-backdrop hidden></div>
+<noscript><div class="workspace-noscript"><a href="/account/profile">Профиль и настройки</a><form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.Data.CSRF}}"><button type="submit">Выйти из аккаунта</button></form></div></noscript>
+{{if not .Admin}}
+<nav class="workspace-mobile-nav" aria-label="Быстрый переход">
+  {{range .Navigation.Mobile}}{{template "workspace_link" .}}{{end}}
+  <button class="workspace-link" type="button" data-navigation-toggle aria-label="Ещё" aria-controls="workspace-navigation" aria-expanded="false"><i data-lucide="menu" aria-hidden="true"></i><span>Ещё</span></button>
+</nav>
+{{end}}
+<section class="workspace-account" id="workspace-account" role="dialog" aria-modal="true" aria-label="Настройки аккаунта" hidden>
+  <header class="workspace-account-heading"><div><strong>{{.Data.CurrentUser.Username}}</strong><span>{{roleLabel (or .Data.CurrentUser.Role "user")}}</span></div><button class="workspace-icon-button" type="button" data-account-close aria-label="Закрыть настройки аккаунта"><i data-lucide="x" aria-hidden="true"></i></button></header>
+  {{with .Data}}
+  <a class="workspace-link" href="/account/profile"><i data-lucide="user-round" aria-hidden="true"></i><span>Профиль и настройки</span></a>
+  <a class="workspace-link" href="/account/sessions"><i data-lucide="monitor-smartphone" aria-hidden="true"></i><span>Мои сессии</span></a>
+  <a class="workspace-link" href="/account/password"><i data-lucide="key-round" aria-hidden="true"></i><span>Сменить пароль</span></a>
+  <div class="workspace-preferences">
+    <label class="workspace-preference"><input type="checkbox" data-sensitive-toggle><span>Показывать 18+</span></label>
+    {{if eq .CurrentUser.Role "admin"}}<form method="post" action="/account/quick-generation-priority" class="header-priority-form" data-quick-generation-priority title="Повышает приоритет новых заданий. Уже выполняющаяся работа не прерывается."><input type="hidden" name="csrf" value="{{.CSRF}}"><label class="workspace-preference header-priority-toggle"><input type="checkbox" name="enabled" value="on" {{if .CurrentUser.QueuePriority}}checked{{end}}><span>Приоритет моих заданий</span></label></form>{{end}}
+  </div>
+  <form method="post" action="/logout" class="nav-form"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit" class="workspace-link nav-button-logout" aria-label="Выйти из аккаунта"><i data-lucide="log-out" aria-hidden="true"></i><span>Выйти</span></button></form>
+  {{end}}
+</section>
+{{end}}
+
+{{define "workspace_notifications"}}
+<div class="notification-center" data-notification-center data-notification-revision="{{or .NotificationSummary.Revision 0}}" data-notification-csrf="{{.CSRF}}">
+  <button class="notification-trigger" type="button" data-notification-open aria-expanded="false" aria-controls="notification-panel" aria-label="Задачи: активных {{or .NotificationSummary.ActiveCount 0}}, непрочитанных {{or .NotificationSummary.UnreadCount 0}}" title="Задачи и уведомления"><i data-lucide="bell" aria-hidden="true"></i><span class="notification-count is-unread" data-notification-unread-count {{if not .NotificationSummary.UnreadCount}}hidden{{end}}>{{or .NotificationSummary.UnreadCount 0}}</span></button>
+  <section class="notification-panel" id="notification-panel" role="dialog" aria-modal="true" aria-label="Задачи и уведомления" hidden>
+    <header class="notification-panel-header"><div><strong>Задачи и уведомления</strong><span data-notification-connection>Подключаем обновления...</span></div><button class="notification-close" type="button" data-notification-close aria-label="Закрыть уведомления"><i data-lucide="x" aria-hidden="true"></i></button></header>
+    <dl class="notification-overview"><div><dt>В работе</dt><dd data-notification-active-total>{{or .NotificationSummary.ActiveCount 0}}</dd></div><div><dt>Новые</dt><dd data-notification-unread-total>{{or .NotificationSummary.UnreadCount 0}}</dd></div></dl>
+    <div class="notification-list" data-notification-list aria-live="polite"><p class="notification-empty">Загружаем последние события...</p></div>
+    <footer class="notification-panel-footer"><button class="button ghost" type="button" data-notification-read-all {{if not .NotificationSummary.UnreadCount}}disabled{{end}}>Прочитать все</button><a href="/account/profile#notification-settings">Настроить</a></footer>
+  </section>
+</div>
+{{end}}

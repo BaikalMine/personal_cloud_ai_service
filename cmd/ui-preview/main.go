@@ -352,6 +352,13 @@ func main() {
 			}
 			data["Title"] = title
 			data["ThemePreference"] = gateway.ThemePreference(r)
+			data["NavigationPath"] = map[string]string{
+				"generate": "/generate", "gallery": "/gallery", "lora_training": "/train-lora",
+				"admin_dashboard": "/admin", "admin_users": "/admin/users", "admin_user_detail": "/admin/users/2",
+				"admin_invites": "/admin/invites", "admin_content": "/admin/content", "admin_workflows": "/admin/workflows",
+				"admin_lora_training": "/admin/lora-training", "admin_metrics": "/admin/metrics", "admin_storage": "/admin/storage",
+				"admin_updates": "/admin/updates", "admin_mining": "/admin/mining", "admin_audit": "/admin/audit",
+			}[name]
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			if err := templates.ExecuteTemplate(w, name, data); err != nil {
 				log.Printf("render %s: %v", name, err)
@@ -515,6 +522,7 @@ func main() {
 		http.Redirect(w, r, "/preview/profile", http.StatusFound)
 	})
 	mux.HandleFunc("/preview/password", render("account_password", "Смена пароля", map[string]any{}))
+	mux.HandleFunc("/preview/admin-password", render("account_password", "Смена пароля", map[string]any{"AdminWorkspace": true}))
 	accountSessions := []domain.AccountSession{
 		{ID: 71, Current: true, IP: "192.168.1.86", UserAgent: "Chrome 139 · Windows 11", CreatedAt: now.Add(-8 * time.Hour), LastSeenAt: now.Add(-time.Minute), ExpiresAt: now.Add(22 * time.Hour)},
 		{ID: 68, IP: "192.168.1.24", UserAgent: "Chrome Mobile · Android 15 with a deliberately long device description", CreatedAt: now.Add(-36 * time.Hour), LastSeenAt: now.Add(-3 * time.Hour), ExpiresAt: now.Add(12 * time.Hour)},

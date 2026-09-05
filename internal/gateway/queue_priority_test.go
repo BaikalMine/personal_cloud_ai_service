@@ -101,6 +101,11 @@ func TestQueuePriorityHandlersIntegration(t *testing.T) {
 	post(admin, "/account/generation-mining", url.Values{"pause_mining_for_quick_generation": {"on"}}, app.handleAccountGenerationMining, http.StatusSeeOther)
 	assertUser(adminID, false, true)
 	post(&User{ID: userID, Role: "user"}, "/account/generation-mining", url.Values{}, app.handleAccountGenerationMining, http.StatusForbidden)
+	post(admin, "/account/quick-generation-priority", url.Values{"enabled": {"on"}}, app.adminMux().ServeHTTP, http.StatusOK)
+	assertUser(adminID, true, true)
+	post(admin, "/account/generation-mining", url.Values{}, app.adminMux().ServeHTTP, http.StatusSeeOther)
+	assertUser(adminID, true, false)
+	post(&User{ID: userID, Role: "user"}, "/account/quick-generation-priority", url.Values{}, app.adminMux().ServeHTTP, http.StatusForbidden)
 	for _, tc := range []struct {
 		version, priority, pause string
 		wantPriority, wantPause  bool

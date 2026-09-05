@@ -136,9 +136,9 @@
 
     <section class="panel span-two">
       <div class="panel-heading"><div><p class="section-kicker">Распределение</p><h2>Использование сервисов</h2></div></div>
-      <table><thead><tr><th>Сервис</th><th>Запросы</th><th>Передано</th><th>Ошибки</th></tr></thead><tbody>
+      <div class="table-scroll"><table><thead><tr><th>Сервис</th><th>Запросы</th><th>Передано</th><th>Ошибки</th></tr></thead><tbody>
       {{range .Stats.ByService}}<tr><td data-label="Сервис"><a class="service-link" href="/admin/services/{{.Service}}"><i class="service-icon {{.Service}}"></i>{{.Service}}</a></td><td data-label="Запросы" class="numeric">{{formatNumber .Requests}}</td><td data-label="Передано">{{formatBytes .Bytes}}</td><td data-label="Ошибки"><span class="error-count {{if gt .Errors 0}}has-errors{{end}}">{{formatNumber .Errors}}</span></td></tr>{{else}}<tr><td colspan="4" class="muted">Сервисами ещё не пользовались.</td></tr>{{end}}
-      </tbody></table>
+      </tbody></table></div>
     </section>
 
     <section class="panel span-two">

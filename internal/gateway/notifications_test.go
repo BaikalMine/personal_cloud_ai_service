@@ -26,7 +26,7 @@ func TestAccountProfileRendersNotificationCenterAndPreferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"data-notification-center", "Задачи и уведомления", "data-notification-active-count", "data-notification-unread-count",
+		"data-notification-center", "Задачи и уведомления", "data-shell-active-count", "data-notification-unread-count",
 		"Krea2, Flux2 и MiniMax H3", "data-notification-settings", "В интерфейсе", "Успешные генерации", "В браузере",
 		"/static/notifications.css", "/static/notifications.js",
 	} {

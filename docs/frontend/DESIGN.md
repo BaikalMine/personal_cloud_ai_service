@@ -24,6 +24,10 @@ colors, and ComfyUI/OpenWebUI retain their own independent themes.
 
 ## Layout Rules
 
+- One shared navigation shell surrounds creator and administrator routes:
+  persistent sidebar on desktop, icon rail on tablet, labelled drawer and
+  primary bottom actions on phones. Account preferences do not compete with
+  creation controls. Sidebar and mobile entries use the same permission model.
 - A page is a sequence of full-width working sections, not a stack of nested
   cards.
 - A panel frames a complete task or repeated data collection. Do not place

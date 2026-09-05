@@ -11,9 +11,11 @@
   <link rel="preload" href="/static/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/static/theme.css?v={{.AssetVersion}}">
   <link rel="stylesheet" href="/static/style.css?v={{.AssetVersion}}">
+  <link rel="stylesheet" href="/static/shell.css?v={{.AssetVersion}}">
   <link rel="stylesheet" href="/static/notifications.css?v={{.AssetVersion}}">
   <script src="/static/dialog-focus.js?v={{.AssetVersion}}" defer></script>
   <script src="/static/vendor/lucide.js?v={{.AssetVersion}}" defer></script>
+  <script src="/static/shell.js?v={{.AssetVersion}}" defer></script>
   <script src="/static/app.js?v={{.AssetVersion}}" defer></script>
   <script src="/static/notifications.js?v={{.AssetVersion}}" defer></script>
 </head>
@@ -34,108 +36,8 @@
 </label>
 {{end}}
 
-{{define "nav"}}
-<header class="topbar user-topbar">
-  <div class="brand-cluster">
-    <a class="brand-mark" href="/app" aria-label="Главная AI Gateway">AI</a>
-    <a class="brand" href="/app"><b>AI Gateway</b><span>Рабочее пространство</span></a>
-  </div>
-  {{if .CurrentUser}}{{if eq .CurrentUser.Role "admin"}}
-  <form method="post" action="/account/quick-generation-priority" class="header-priority-form" data-quick-generation-priority title="Повышает приоритет новых заданий. Уже выполняющаяся работа не прерывается.">
-	<input type="hidden" name="csrf" value="{{.CSRF}}">
-	<label class="header-priority-toggle"><input name="enabled" type="checkbox" value="on" {{if .CurrentUser.QueuePriority}}checked{{end}}><span class="header-priority-switch" aria-hidden="true"></span><span>Приоритет</span></label>
-  </form>
-  {{end}}{{end}}
-  <label class="header-sensitive-toggle" title="По умолчанию чувствительные результаты скрыты блюром. Включите, чтобы показывать их в галереях."><input type="checkbox" data-sensitive-toggle><span class="header-sensitive-switch" aria-hidden="true"></span><span>18+</span></label>
-  {{with .NotificationSummary}}
-  <div class="notification-center" data-notification-center data-notification-revision="{{.Revision}}" data-notification-csrf="{{$.CSRF}}">
-    <button class="notification-trigger{{if gt .UnreadCount 0}} has-unread{{end}}" type="button" aria-expanded="false" aria-controls="notification-panel" aria-label="Задачи: активных {{.ActiveCount}}, непрочитанных {{.UnreadCount}}">
-      <span class="notification-trigger-label">Задачи</span>
-      <span class="notification-count is-active" data-notification-active-count {{if eq .ActiveCount 0}}hidden{{end}}>{{.ActiveCount}}</span>
-      <span class="notification-count is-unread" data-notification-unread-count {{if eq .UnreadCount 0}}hidden{{end}}>{{.UnreadCount}}</span>
-    </button>
-    <section class="notification-panel" id="notification-panel" role="dialog" aria-modal="true" aria-label="Задачи и уведомления" hidden>
-      <header class="notification-panel-header">
-        <div><strong>Задачи и уведомления</strong><span data-notification-connection>Подключаем обновления...</span></div>
-        <button class="notification-close" type="button" data-notification-close aria-label="Закрыть уведомления">×</button>
-      </header>
-      <dl class="notification-overview">
-        <div><dt>В работе</dt><dd data-notification-active-total>{{.ActiveCount}}</dd></div>
-        <div><dt>Новые</dt><dd data-notification-unread-total>{{.UnreadCount}}</dd></div>
-      </dl>
-      <div class="notification-list" data-notification-list aria-live="polite">
-        <p class="notification-empty">Загружаем последние события...</p>
-      </div>
-      <footer class="notification-panel-footer">
-        <button class="button ghost" type="button" data-notification-read-all {{if eq .UnreadCount 0}}disabled{{end}}>Прочитать все</button>
-        <a href="/account/profile#notification-settings">Настроить</a>
-      </footer>
-    </section>
-  </div>
-  {{end}}
-  <button class="menu-toggle" type="button" aria-label="Открыть меню" aria-controls="user-navigation" aria-expanded="false"><i></i><i></i><i></i></button>
-  <div class="topbar-menu" id="user-navigation">
-    <nav class="primary-nav" aria-label="Основная навигация">
-      <a href="/app">Обзор</a>
-      {{if .CurrentUser}}{{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseQuickGeneration}}<a href="/generate">Быстрая генерация</a>{{end}}{{end}}
-      {{if .CurrentUser}}{{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseQuickGeneration}}<a href="/gallery">Галерея</a>{{end}}{{end}}
-      {{if .CurrentUser}}{{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanTrainImageLora}}<a href="/train-lora">Обучение LoRA</a>{{end}}{{end}}
-      {{if .CurrentUser}}{{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseComfyUI}}<a href="/comfyui/" target="_blank" rel="noopener">ComfyUI</a>{{end}}{{end}}
-      {{if .CurrentUser}}{{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseOpenWebUI}}<a href="/openwebui/" target="_blank" rel="noopener">OpenWebUI</a>{{end}}{{end}}
-      <a href="/account/profile">Профиль</a>
-      <a href="/account/sessions">Сессии</a>
-      {{if .FeatureSuggestionsEnabled}}<a href="/suggestions">Предложить улучшение</a>{{end}}
-      {{if .CurrentUser}}{{if eq .CurrentUser.Role "admin"}}<a href="{{.AdminBaseURL}}/admin">Администрирование</a>{{end}}{{end}}
-    </nav>
-    <div class="user-menu">
-      {{template "theme_picker" .}}
-      {{if .CurrentUser}}<a class="account-chip" href="/account/profile"><span class="account-indicator"></span><span><b>{{.CurrentUser.Username}}</b><small>{{roleLabel .CurrentUser.Role}}</small></span></a>{{end}}
-      <form method="post" action="/logout" class="nav-form"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit" class="nav-button nav-button-logout" aria-label="Выйти из аккаунта">Выйти</button></form>
-    </div>
-  </div>
-</header>
-{{end}}
-
-{{define "admin_nav"}}
-<header class="admin-mobilebar">
-  <a class="brand-cluster" href="/admin"><span class="brand-mark">AI</span><span class="brand"><b>AI Gateway</b><span>Администрирование</span></span></a>
-  <button class="menu-toggle" type="button" aria-label="Открыть меню" aria-controls="admin-navigation" aria-expanded="false"><i></i><i></i><i></i></button>
-</header>
-<aside class="admin-sidebar" id="admin-navigation">
-  <div class="admin-brand">
-    <a class="brand-mark" href="/admin" aria-label="Главная админки">AI</a>
-    <div><a class="brand" href="/admin"><b>AI Gateway</b><span>Администрирование</span></a></div>
-  </div>
-  <nav class="admin-nav" aria-label="Административная навигация">
-    <span class="nav-section">Система</span>
-    <a href="/admin">Операции</a>
-    <a href="/admin/metrics">Наблюдаемость</a>
-    <a href="/admin/storage">Хранилище</a>
-    <a href="/admin/services/comfyui">Сервисы</a>
-    <a href="/admin/mining">Майнинг</a>
-    <a href="/admin/updates">Обновления</a>
-    <a href="/admin/workflows">Workflow</a>
-    <a href="/admin/lora-training">Обучение LoRA</a>
-    <span class="nav-section">Доступ</span>
-    <a href="/admin/users">Пользователи</a>
-    <a href="/admin/invites">Приглашения</a>
-    <a href="/admin/sessions">Сессии</a>
-    <span class="nav-section">Контроль</span>
-    <a href="/admin/content">AI-контент</a>
-    <a href="/admin/suggestions">Предложения</a>
-    <a href="/admin/audit">Журнал аудита</a>
-  </nav>
-  <div class="admin-actions">
-    {{template "theme_picker" .}}
-    {{if .CurrentUser}}<div class="admin-account"><span class="account-indicator"></span><span><b>{{.CurrentUser.Username}}</b><small>{{roleLabel .CurrentUser.Role}}</small></span></div>{{end}}
-    <label class="admin-sensitive-toggle"><input type="checkbox" data-sensitive-toggle><span class="header-sensitive-switch" aria-hidden="true"></span><span>Показывать 18+</span></label>
-    <a href="{{.PublicBaseURL}}/app">Режим пользователя</a>
-    <a href="/account/profile">Профиль</a>
-    <a href="/account/password">Сменить пароль</a>
-    <form method="post" action="/logout" class="nav-form"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit" class="nav-button nav-button-logout" aria-label="Выйти из аккаунта">Выйти</button></form>
-  </div>
-</aside>
-{{end}}
+{{define "nav"}}{{template "workspace_shell" (workspaceShell . false)}}{{end}}
+{{define "admin_nav"}}{{template "workspace_shell" (workspaceShell . true)}}{{end}}
 
 {{define "metric_cards"}}
 <section class="grid cards metric-strip">

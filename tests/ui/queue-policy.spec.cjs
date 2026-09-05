@@ -47,6 +47,7 @@ test("admin priority save leaves mining policy untouched and rolls back on error
   const mining = page.locator('#generation-resources input[name="pause_mining_for_quick_generation"]');
   const originalMining = await mining.isChecked();
   const originalPriority = await priority.isChecked();
+  await page.getByRole('button', { name: 'Настройки аккаунта', exact: true }).click();
   await page.locator(".header-priority-toggle").click();
   await expect.poll(() => requests.length).toBe(1);
   await expect(priority).toBeEnabled();
@@ -61,6 +62,7 @@ test("admin priority save leaves mining policy untouched and rolls back on error
   await expect(priority).toBeEnabled();
   expect(await priority.isChecked()).toBe(!originalPriority);
   expect(await mining.isChecked()).toBe(originalMining);
+  await page.keyboard.press('Escape');
   await mining.setChecked(!originalMining);
   expect(await priority.isChecked()).toBe(!originalPriority);
   const form = mining.locator("xpath=ancestor::form");

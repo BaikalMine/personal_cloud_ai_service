@@ -45,13 +45,31 @@ redefine the shared focus, disabled, loading or semantic state language.
 
 ## Responsive Contract
 
-- Full user navigation is used above 1540 px. At and below 1540 px it moves
-  behind the labelled menu button before it can force horizontal overflow.
-- The admin sidebar becomes a drawer at 980 px.
+- The shared user/admin shell uses a 224 px sidebar from 1100 px upward;
+  primary routes never disappear into a menu at 1280 or 1440 px.
+- At 760-1099 px the sidebar is a 72 px icon rail with accessible names and
+  a labelled menu button. Below 760 px, user routes have bottom shortcuts
+  for Create, Results, Tasks and More. Permission filtering applies to both.
+- Navigation comes from `navigation.go`, renders through `_shell.html`, and
+  is owned by `shell.css`/`shell.js`. Do not restore old topbar/sidebar owners
+  in style.css or app.js. Shared page controls still use the classes above.
+- Account pages keep the admin workspace on the admin listener. This server
+  context only selects navigation; it does not grant permissions. Return links
+  to the studio use the public base URL.
+- The drawer traps focus, makes the background inert, closes with Escape or
+  its backdrop, and clears its state when the layout breakpoint changes.
+- The topbar groups the theme, notifications and account controls. Sensitive
+  media and administrator priority preferences live in the account dialog;
+  moving them must not change their persistence, permissions or mining policy.
+- Tasks shortcuts open the existing notification panel and share live counts.
+  This shell does not yet implement the cross-job workspace planned in F07/D06.
 - Task surfaces become a single primary column at 760 px or earlier when their
   content needs it.
-- Touch actions are at least 44 px high. Logout remains visible in the open
-  menu on every supported viewport.
+- Touch actions are at least 44 px high. Logout remains available in the account
+  dialog and in the no-JavaScript fallback on every supported viewport.
+- Tables use `.table-scroll`; never let an unframed minimum-width table expand
+  the page. Mobile selection actions stay above bottom navigation using
+  `--workspace-bottom-offset`.
 - Supported visual widths are 390, 768, 1280, 1440 and 1920 px.
 
 ## Generation Wizard Contract

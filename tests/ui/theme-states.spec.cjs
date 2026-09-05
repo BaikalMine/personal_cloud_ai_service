@@ -31,13 +31,13 @@ for (const theme of ['light', 'dark']) {
       await button.focus();
       await assertContrast(page, '.ui-toolbar');
     }
-    await page.getByRole('button', { name: 'Открыть меню' }).click();
     const picker = page.getByRole('combobox', { name: 'Цветовая тема' });
     await picker.focus();
     await expect(page.locator('.theme-picker')).toHaveCSS('outline-style', 'solid');
     await expect(page.locator('.theme-picker')).toHaveCSS('outline-width', '2px');
+    await page.getByRole('button', { name: 'Настройки аккаунта', exact: true }).click();
     await page.getByRole('button', { name: 'Выйти из аккаунта' }).hover();
-    await assertContrast(page, '.topbar-menu');
+    await assertContrast(page, '#workspace-account');
     await page.screenshot({ path: testInfo.outputPath(`menu-${theme}.png`) });
 
     await page.goto('/preview/generate');
@@ -61,7 +61,6 @@ for (const theme of ['light', 'dark']) {
     const media = trigger.locator('img').first();
     await page.locator('h1').click();
     const before = await mediaPixels(page, media, testInfo.outputPath('media-before.png'));
-    await page.getByRole('button', { name: 'Открыть меню' }).click();
     await page.getByRole('combobox', { name: 'Цветовая тема' }).selectOption(theme === 'light' ? 'dark' : 'light');
     await page.keyboard.press('Escape');
     await page.locator('h1').click();
@@ -78,8 +77,6 @@ for (const theme of ['light', 'dark']) {
       for (const route of ['login', 'generate', 'users']) {
         await page.goto(`/preview/${route}`);
         await settlePage(page);
-        const menu = page.getByRole('button', { name: 'Открыть меню' });
-        if (await menu.isVisible()) await menu.click();
         const picker = page.getByRole('combobox', { name: 'Цветовая тема' });
         await picker.scrollIntoViewIfNeeded();
         await expect(picker).toBeVisible();

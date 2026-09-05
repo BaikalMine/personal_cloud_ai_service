@@ -4,7 +4,7 @@
 }
 
 .notification-trigger {
-  min-height: 40px;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -239,13 +239,11 @@
     max-height: calc(100vh - 76px);
   }
 
-  .notification-list { max-height: calc(100vh - 253px); }
+  .notification-list { max-height: calc(100dvh - 320px); }
   .notification-trigger { min-height: 44px; }
 }
 
 @media (max-width: 520px) {
-  .user-topbar { gap: 6px; padding-inline: 8px; }
-  .user-topbar .header-priority-toggle > span:last-child { display: none; }
   .notification-trigger { padding-inline: 8px; }
-  .notification-trigger-label { font-size: var(--font-size-utility); }
+  .notification-trigger .notification-count { position: absolute; top: -2px; right: -3px; }
 }
