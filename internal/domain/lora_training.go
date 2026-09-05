@@ -57,6 +57,8 @@ type LoraTrainingJob struct {
 	SampleCount             int
 	DatasetBytes            int64
 	DatasetPath             string
+	DatasetSnapshotID       string
+	DatasetSnapshotHash     string
 	State                   LoraTrainingState
 	Stage                   string
 	Progress                int
@@ -73,25 +75,27 @@ type LoraTrainingJob struct {
 }
 
 type CreateLoraTrainingJobParams struct {
-	PublicID         string
-	UserID           int64
-	UsernameSnapshot string
-	RequestID        string
-	ProfileID        string
-	Family           string
-	BaseModel        string
-	Name             string
-	OutputName       string
-	TriggerWord      string
-	ConceptType      string
-	Preset           string
-	Resolution       int
-	MaxTrainSteps    int
-	NetworkDim       int
-	NetworkAlpha     int
-	LearningRate     float64
-	Seed             int64
-	SampleCount      int
-	DatasetBytes     int64
-	DatasetPath      string
+	PublicID            string
+	UserID              int64
+	UsernameSnapshot    string
+	RequestID           string
+	ProfileID           string
+	Family              string
+	BaseModel           string
+	Name                string
+	OutputName          string
+	TriggerWord         string
+	ConceptType         string
+	Preset              string
+	Resolution          int
+	MaxTrainSteps       int
+	NetworkDim          int
+	NetworkAlpha        int
+	LearningRate        float64
+	Seed                int64
+	SampleCount         int
+	DatasetBytes        int64
+	DatasetPath         string
+	DatasetSnapshotID   string
+	DatasetSnapshotHash string
 }

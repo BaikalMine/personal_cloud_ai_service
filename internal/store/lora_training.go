@@ -18,27 +18,55 @@ const loraTrainingColumns = `
 	name, output_name, trigger_word, concept_type, preset, resolution, max_train_steps,
 	network_dim, network_alpha, learning_rate, seed, sample_count, dataset_bytes, dataset_path,
 	state, stage, progress, message, error_message, agent_job_id, artifact_name, artifact_bytes,
-	cancellation_requested_at, started_at, finished_at, created_at, updated_at`
+	cancellation_requested_at, started_at, finished_at, created_at, updated_at,
+	COALESCE(dataset_snapshot_id,''), dataset_snapshot_hash`
 
 func (s *Store) CreateLoraTrainingJob(ctx context.Context, params domain.CreateLoraTrainingJobParams) (domain.LoraTrainingJob, error) {
-	row := s.db.QueryRowContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.LoraTrainingJob{}, err
+	}
+	defer tx.Rollback()
+	if params.DatasetSnapshotID != "" {
+		var owner int64
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM users WHERE id=$1 FOR KEY SHARE`, params.UserID).Scan(&owner); err != nil {
+			return domain.LoraTrainingJob{}, err
+		}
+		var id string
+		err = tx.QueryRowContext(ctx, `SELECT id FROM lora_dataset_snapshots
+			WHERE id=$1 AND user_id=$2 AND manifest_hash=$3 FOR KEY SHARE`,
+			params.DatasetSnapshotID, params.UserID, params.DatasetSnapshotHash).Scan(&id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.LoraTrainingJob{}, ErrLoraDatasetAsset
+		}
+		if err != nil {
+			return domain.LoraTrainingJob{}, err
+		}
+	} else if params.DatasetSnapshotHash != "" {
+		return domain.LoraTrainingJob{}, ErrLoraDatasetAsset
+	}
+	row := tx.QueryRowContext(ctx, `
 		INSERT INTO lora_training_jobs (
 			public_id,user_id,username_snapshot,request_id,profile_id,family,base_model,name,output_name,
 			trigger_word,concept_type,preset,resolution,max_train_steps,network_dim,network_alpha,
-			learning_rate,seed,sample_count,dataset_bytes,dataset_path
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+			learning_rate,seed,sample_count,dataset_bytes,dataset_path,dataset_snapshot_id,dataset_snapshot_hash
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,NULLIF($22,''),$23)
 		RETURNING `+loraTrainingColumns,
 		params.PublicID, params.UserID, params.UsernameSnapshot, params.RequestID, params.ProfileID,
 		params.Family, params.BaseModel, params.Name, params.OutputName, params.TriggerWord,
 		params.ConceptType, params.Preset, params.Resolution, params.MaxTrainSteps, params.NetworkDim,
 		params.NetworkAlpha, params.LearningRate, params.Seed, params.SampleCount, params.DatasetBytes, params.DatasetPath,
+		params.DatasetSnapshotID, params.DatasetSnapshotHash,
 	)
 	job, err := scanLoraTrainingJob(row)
 	var pqErr *pq.Error
 	if errors.As(err, &pqErr) && pqErr.Code == "23505" && pqErr.Constraint == "lora_training_jobs_user_active_idx" {
 		return domain.LoraTrainingJob{}, ErrLoraTrainingAlreadyActive
 	}
-	return job, err
+	if err != nil {
+		return job, err
+	}
+	return job, tx.Commit()
 }
 
 func (s *Store) LoraTrainingJobByPublicID(ctx context.Context, publicID string, userID int64, admin bool) (domain.LoraTrainingJob, error) {
@@ -257,6 +285,7 @@ func scanLoraTrainingJob(scanner loraTrainingScanner) (domain.LoraTrainingJob, e
 		&job.NetworkDim, &job.NetworkAlpha, &job.LearningRate, &job.Seed, &job.SampleCount, &job.DatasetBytes, &job.DatasetPath,
 		&state, &job.Stage, &job.Progress, &job.Message, &job.ErrorMessage, &job.AgentJobID, &job.ArtifactName, &job.ArtifactBytes,
 		&cancellationRequestedAt, &startedAt, &finishedAt, &job.CreatedAt, &job.UpdatedAt,
+		&job.DatasetSnapshotID, &job.DatasetSnapshotHash,
 	)
 	if err != nil {
 		return domain.LoraTrainingJob{}, err

@@ -78,37 +78,39 @@ type loraTrainingJobView struct {
 }
 
 type loraTrainingJobJSON struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	OutputName    string   `json:"output_name"`
-	ProfileID     string   `json:"profile_id"`
-	Family        string   `json:"family"`
-	FamilyLabel   string   `json:"family_label"`
-	BaseModel     string   `json:"base_model"`
-	State         string   `json:"state"`
-	StateLabel    string   `json:"state_label"`
-	StateClass    string   `json:"state_class"`
-	Stage         string   `json:"stage"`
-	Progress      int      `json:"progress"`
-	Message       string   `json:"message"`
-	Error         string   `json:"error,omitempty"`
-	LogTail       []string `json:"log_tail,omitempty"`
-	SampleCount   int      `json:"sample_count"`
-	ConceptLabel  string   `json:"concept_label"`
-	PresetLabel   string   `json:"preset_label"`
-	Resolution    int      `json:"resolution"`
-	MaxTrainSteps int      `json:"max_train_steps"`
-	CanCancel     bool     `json:"can_cancel"`
-	CanDownload   bool     `json:"can_download"`
-	CanDelete     bool     `json:"can_delete"`
-	DownloadURL   string   `json:"download_url,omitempty"`
-	CancelURL     string   `json:"cancel_url,omitempty"`
-	DeleteURL     string   `json:"delete_url,omitempty"`
-	CreatedAt     int64    `json:"created_at"`
-	UpdatedAt     int64    `json:"updated_at"`
-	ArtifactName  string   `json:"artifact_name,omitempty"`
-	ArtifactBytes int64    `json:"artifact_bytes,omitempty"`
-	Username      string   `json:"username,omitempty"`
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	OutputName          string   `json:"output_name"`
+	ProfileID           string   `json:"profile_id"`
+	Family              string   `json:"family"`
+	FamilyLabel         string   `json:"family_label"`
+	BaseModel           string   `json:"base_model"`
+	State               string   `json:"state"`
+	StateLabel          string   `json:"state_label"`
+	StateClass          string   `json:"state_class"`
+	Stage               string   `json:"stage"`
+	Progress            int      `json:"progress"`
+	Message             string   `json:"message"`
+	Error               string   `json:"error,omitempty"`
+	LogTail             []string `json:"log_tail,omitempty"`
+	SampleCount         int      `json:"sample_count"`
+	ConceptLabel        string   `json:"concept_label"`
+	PresetLabel         string   `json:"preset_label"`
+	Resolution          int      `json:"resolution"`
+	MaxTrainSteps       int      `json:"max_train_steps"`
+	CanCancel           bool     `json:"can_cancel"`
+	CanDownload         bool     `json:"can_download"`
+	CanDelete           bool     `json:"can_delete"`
+	DownloadURL         string   `json:"download_url,omitempty"`
+	CancelURL           string   `json:"cancel_url,omitempty"`
+	DeleteURL           string   `json:"delete_url,omitempty"`
+	CreatedAt           int64    `json:"created_at"`
+	UpdatedAt           int64    `json:"updated_at"`
+	ArtifactName        string   `json:"artifact_name,omitempty"`
+	ArtifactBytes       int64    `json:"artifact_bytes,omitempty"`
+	Username            string   `json:"username,omitempty"`
+	DatasetSnapshotID   string   `json:"dataset_snapshot_id,omitempty"`
+	DatasetSnapshotHash string   `json:"dataset_snapshot_hash,omitempty"`
 }
 
 type uploadedTrainingImage struct {
@@ -129,6 +131,8 @@ func (a *App) registerLoraTrainingRoutes(mux *http.ServeMux) {
 	mux.Handle("/api/lora-training/caption/", access(http.HandlerFunc(a.handleLoraTrainingCaptionStatus)))
 	mux.Handle("/api/lora-training/jobs", access(http.HandlerFunc(a.handleLoraTrainingJobsAPI)))
 	mux.Handle("/api/lora-training/jobs/", access(http.HandlerFunc(a.handleLoraTrainingJobAPI)))
+	mux.Handle("/api/lora-datasets", access(http.HandlerFunc(a.handleLoraDatasets)))
+	mux.Handle("/api/lora-datasets/", access(http.HandlerFunc(a.handleLoraDatasets)))
 }
 
 func (a *App) requireLoraTrainingAccess(next http.Handler) http.Handler {
@@ -1000,6 +1004,7 @@ func loraTrainingJSON(job domain.LoraTrainingJob, agent *loratraining.JobStatus,
 		Resolution: job.Resolution, MaxTrainSteps: job.MaxTrainSteps, CanCancel: view.CanCancel,
 		CanDownload: view.CanDownload, CanDelete: view.CanDelete, CreatedAt: job.CreatedAt.UnixMilli(), UpdatedAt: job.UpdatedAt.UnixMilli(),
 		ArtifactName: job.ArtifactName, ArtifactBytes: job.ArtifactBytes,
+		DatasetSnapshotID: job.DatasetSnapshotID, DatasetSnapshotHash: job.DatasetSnapshotHash,
 	}
 	if agent != nil {
 		agentState := loraTrainingStateFromAgent(agent.State)

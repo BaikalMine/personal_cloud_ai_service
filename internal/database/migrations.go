@@ -1304,6 +1304,54 @@ var migrationCatalog = []migration{
 			`CREATE INDEX comfy_input_assets_owner_path_idx ON comfy_input_assets(user_id,subfolder,filename) WHERE state='stored'`,
 		},
 	},
+	{
+		version: 54,
+		name:    "lora_datasets",
+		statements: []string{
+			`CREATE SEQUENCE lora_dataset_revision_seq`,
+			`CREATE TABLE lora_datasets (
+				id TEXT PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				name TEXT NOT NULL DEFAULT '', revision BIGINT NOT NULL DEFAULT nextval('lora_dataset_revision_seq'),
+				manifest_cipher BYTEA NOT NULL CHECK(octet_length(manifest_cipher) BETWEEN 1 AND 524352),
+				image_count INTEGER NOT NULL DEFAULT 0 CHECK(image_count BETWEEN 0 AND 100),
+				size_bytes BIGINT NOT NULL DEFAULT 0 CHECK(size_bytes BETWEEN 0 AND 536870912),
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				expires_at TIMESTAMPTZ NOT NULL DEFAULT now()+interval '30 days'
+			)`,
+			`CREATE INDEX lora_datasets_owner_idx ON lora_datasets(user_id,updated_at DESC)`,
+			`CREATE TABLE lora_dataset_assets (
+				id TEXT PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				name TEXT NOT NULL, content_hash TEXT NOT NULL CHECK(length(content_hash)=64), mime_type TEXT NOT NULL,
+				size_bytes BIGINT NOT NULL CHECK(size_bytes BETWEEN 1 AND 25165824),
+				width INTEGER NOT NULL CHECK(width BETWEEN 256 AND 16384), height INTEGER NOT NULL CHECK(height BETWEEN 256 AND 16384),
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(), last_used_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE(user_id,content_hash)
+			)`,
+			`CREATE TABLE lora_dataset_asset_chunks (
+				asset_id TEXT NOT NULL REFERENCES lora_dataset_assets(id) ON DELETE CASCADE,
+				chunk_index INTEGER NOT NULL CHECK(chunk_index>=0), plain_size INTEGER NOT NULL CHECK(plain_size BETWEEN 1 AND 1048576),
+				payload_cipher BYTEA NOT NULL CHECK(octet_length(payload_cipher) BETWEEN 1 AND 1048640), PRIMARY KEY(asset_id,chunk_index)
+			)`,
+			`CREATE TABLE lora_dataset_snapshots (
+				id TEXT PRIMARY KEY, dataset_id TEXT REFERENCES lora_datasets(id) ON DELETE SET NULL,
+				user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL, revision BIGINT NOT NULL,
+				manifest_cipher BYTEA NOT NULL CHECK(octet_length(manifest_cipher) BETWEEN 1 AND 524352),
+				manifest_hash TEXT NOT NULL CHECK(length(manifest_hash)=64), image_count INTEGER NOT NULL, size_bytes BIGINT NOT NULL,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(), expires_at TIMESTAMPTZ NOT NULL DEFAULT now()+interval '30 days',
+				UNIQUE(dataset_id,revision)
+			)`,
+			`CREATE INDEX lora_dataset_snapshots_owner_idx ON lora_dataset_snapshots(user_id,created_at DESC)`,
+			`CREATE TABLE lora_dataset_asset_refs (
+				asset_id TEXT NOT NULL REFERENCES lora_dataset_assets(id) ON DELETE CASCADE,
+				dataset_id TEXT REFERENCES lora_datasets(id) ON DELETE CASCADE,
+				snapshot_id TEXT REFERENCES lora_dataset_snapshots(id) ON DELETE CASCADE,
+				CHECK(num_nonnulls(dataset_id,snapshot_id)=1), UNIQUE(dataset_id,asset_id), UNIQUE(snapshot_id,asset_id)
+			)`,
+			`CREATE INDEX lora_dataset_asset_refs_asset_idx ON lora_dataset_asset_refs(asset_id)`,
+			`ALTER TABLE lora_training_jobs ADD COLUMN dataset_snapshot_id TEXT REFERENCES lora_dataset_snapshots(id) ON DELETE SET NULL`,
+			`ALTER TABLE lora_training_jobs ADD COLUMN dataset_snapshot_hash TEXT NOT NULL DEFAULT ''`,
+			`CREATE INDEX lora_training_jobs_snapshot_idx ON lora_training_jobs(dataset_snapshot_id) WHERE dataset_snapshot_id IS NOT NULL`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

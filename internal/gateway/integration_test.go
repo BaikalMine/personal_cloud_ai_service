@@ -115,6 +115,7 @@ func TestGatewayIntegrationComfyOwnership(t *testing.T) {
 	assertChunkedMediaRoundTrip(t, ctx, db, app, eventID, userID, spoolDir)
 	assertPriorityMiningResume(t, ctx, repository, userID)
 	assertGenerationDraftAPI(t, ctx, db, app, userID, adminID)
+	assertLoraDatasetAPI(t, ctx, db, app, userID, adminID)
 }
 
 func assertPriorityMiningResume(t *testing.T, ctx context.Context, repository *store.Store, userID int64) {
