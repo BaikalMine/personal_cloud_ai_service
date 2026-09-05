@@ -87,11 +87,16 @@ unframed option row for processing modules, not a nested card.
   `--workspace-bottom-offset`.
 - Supported visual widths are 390, 768, 1280, 1440 and 1920 px.
 
-## Generation Wizard Contract
+## Generation Studio Contract
 
-- Generation simplification is project-wide. The shared intent-first wizard covers Krea2 text generation, Krea2 and Flux2 image editing, and MiniMax video; never describe the whole workflow as a MiniMax-only feature.
-- Family-specific controls appear only after the user selects a compatible workflow. Video modes, audio/video references, RIFE, RTX and other video postprocessing remain MiniMax-specific without changing the shared three-step structure.
+- Generation simplification is project-wide. The one-workspace studio covers Krea2 text generation, Krea2 and Flux2 image editing, and MiniMax video; never describe the whole workflow as a MiniMax-only feature.
+- The first allowed scenario and compatible recipe are selected without an extra step. Drafts, repeats and library links still override that initial selection.
+- Desktop keeps a 340-420 px editor beside the result. The editor scrolls independently; the launch summary and actions occupy a separate row and never overlay its controls. Below 900 px, Configure and Result are two views of the same draft, not separate pages.
+- Family-specific controls appear only for a compatible workflow. Video modes, audio/video references, RIFE, RTX and other video postprocessing remain MiniMax-specific. Exact settings use a native dialog while retaining the same form ownership, rights and field names.
 - Device upload and personal-library selection are two sources for the same reference slot. Slot count, roles and exact settings come from workflow capabilities rather than duplicated model-specific UI.
+- A mode change retains inactive media and its role in the draft with a visible notice. It must exclude that media from generation, preflight and assistant payloads. Only an explicit remove action clears a source.
+- Preflight, assistant and launch share coalesced media uploads. A changed selection invalidates an in-flight preparation or preflight. Repeated submit events may not create duplicate jobs.
+- The previous result remains visible while preparing the next job. The complete cross-job task workspace and the compact recent-results strip remain separate roadmap work, not implied by the existing generation history.
 - The primary path uses user-facing intent and result language. Internal branch and node names belong in exact settings or diagnostics, not in the main decision flow.
 
 ## Media Library Contract

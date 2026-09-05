@@ -58,6 +58,7 @@ var staticJavaScriptAssetPaths = []string{
 	"static/generation-summary.js",
 	"static/generation-video.js",
 	"static/generation-wizard.js",
+	"static/generation-studio.js",
 	"static/notifications.js",
 	"static/suggestions.js",
 }
@@ -74,11 +75,12 @@ var staticCSSAssets = map[string]string{
 	"/static/theme.css":         "static/theme.css",
 	"/static/style.css":         "static/style.css",
 	"/static/controls.css":      "static/controls.css",
+	"/static/studio.css":        "static/studio.css",
 	"/static/shell.css":         "static/shell.css",
 	"/static/notifications.css": "static/notifications.css",
 }
 
-var frontendAssetPaths = append([]string{"static/theme.css", "static/style.css", "static/controls.css", "static/shell.css", "static/notifications.css"}, staticJavaScriptAssetPaths...)
+var frontendAssetPaths = append([]string{"static/theme.css", "static/style.css", "static/controls.css", "static/studio.css", "static/shell.css", "static/notifications.css"}, staticJavaScriptAssetPaths...)
 
 type Templates struct {
 	*template.Template

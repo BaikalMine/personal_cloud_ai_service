@@ -148,6 +148,9 @@ func main() {
 	registerDraftPreview(mux, now)
 	datasets := registerDatasetPreview(mux, now)
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("internal/gateway/static"))))
+	mux.HandleFunc("/preview/studio-result.jpg", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "docs/frontend/prototype/assets/portrait.jpg")
+	})
 	mux.HandleFunc("/preview/result.svg", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "image/svg+xml")
 		_, _ = w.Write([]byte(previewSVG))
@@ -486,7 +489,7 @@ func main() {
 				{"Name": "MiniMaxH3\\VBVR_H3_attn_only.safetensors", "DisplayName": "VBVR H3", "DefaultStrength": 1.0},
 			}},
 		},
-		"ComfyOnline": true, "ModelsAvailable": true, "SelectedWorkflow": "", "PreviewOutputURL": "/preview/result.svg",
+		"ComfyOnline": true, "ModelsAvailable": true, "SelectedWorkflow": "", "PreviewOutputURL": "/preview/studio-result.jpg",
 		"GenerationQuota": map[string]any{
 			"HasLimits": true,
 			"Image":     map[string]any{"DailyLimit": 12, "DailyRemaining": 7, "TotalLimit": int64(100), "TotalRemaining": int64(73)},

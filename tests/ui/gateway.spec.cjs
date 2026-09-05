@@ -127,21 +127,19 @@ test("generation wizard covers Krea2, Flux2 and MiniMax", async ({ page }, testI
   desktopOnly(testInfo);
 
   await open(page, "/preview/generate");
-  await page.getByRole("button", { name: /Текст в изображение/ }).click();
+  await page.getByRole("button", { name: /^Изображение$/ }).click();
   await expect(page.locator(".generation-workflow-choice.is-selected")).toContainText("PhotoFlow Krea2");
   await expect(page.locator("#generation-model")).toHaveValue("krea2:test");
-  await page.getByRole("button", { name: "Продолжить" }).click();
   await expect(page.locator("#generation-summary")).toContainText("Текст в изображение");
 
   await open(page, "/preview/generate");
-  await page.getByRole("button", { name: /Фото и промт/ }).click();
+  await page.getByRole("button", { name: /^Редактировать фото$/ }).click();
   await page.getByRole("button", { name: /Flux2 Редактирование/ }).click();
   await expect(page.locator("#generation-model")).toHaveValue("flux2:test");
   const primaryGallery = page.locator('[data-image-slot="1"] [data-gallery-image-picker-open]');
   await primaryGallery.click();
   await page.getByRole("button", { name: "Выбрать AI-Gateway-Krea2-portrait.png" }).click();
   await expect(page.locator('[data-image-slot="1"] [data-image-name]')).toHaveText("AI-Gateway-Krea2-portrait.png");
-  await page.locator("#workflow-next").click();
   await expect(page.locator("#generation-summary")).toContainText("Flux 2 / Klein 9B");
   await expect(page.locator("#generation-summary")).toContainText("1 фото (1 из галереи)");
   await settlePage(page);
@@ -151,7 +149,7 @@ test("generation wizard covers Krea2, Flux2 and MiniMax", async ({ page }, testI
   await expect(page).toHaveScreenshot("generation-flux-summary.png", { fullPage: true, stylePath: visualStyle });
 
   await open(page, "/preview/generate");
-  await page.getByRole("button", { name: /Видео Создаёт/ }).click();
+  await page.getByRole("button", { name: /^Видео$/ }).click();
   await expect(page.locator("#generation-model option:checked")).toContainText("FL2VA + REF2VA");
   await expect(page.locator("#prompt-assistant-template")).toHaveValue("minimax-h3-fl2va");
   await expect(page.locator("#positive-prompt")).toHaveAttribute("maxlength", "7000");
@@ -169,7 +167,7 @@ test("generation wizard covers Krea2, Flux2 and MiniMax", async ({ page }, testI
   await expect(page.locator("#prompt-assistant-description")).toContainText("FL2VA-ассистент");
   await expect(page.locator("#generation-mode-guide-eyebrow")).toHaveText("FL2VA · первый и последний кадры");
   await expect(page.locator("#generation-mode-guide-title")).toHaveText("Переход между двумя точными кадрами");
-  await page.locator("#minimax-video-mode label").filter({ hasText: "Промт + свободные референсы" }).click();
+  await page.locator("#minimax-video-mode label").filter({ hasText: "По референсам" }).click();
   await expect(page.locator("#prompt-assistant-template")).toHaveValue("minimax-h3-ref2va");
   await expect(page.locator("#prompt-assistant-description")).toContainText("REF2VA-ассистент");
   await expect(page.locator("#generation-mode-guide-eyebrow")).toHaveText("REF2VA · свободные референсы");
@@ -177,7 +175,6 @@ test("generation wizard covers Krea2, Flux2 and MiniMax", async ({ page }, testI
   await expect(page.locator(".source-image-card:visible")).toHaveCount(4);
   await expect(page.locator("#minimax-audio-reference")).toBeVisible();
   await expect(page.locator("#minimax-video-reference")).toBeVisible();
-  await page.locator("#workflow-next").click();
   await expect(page.locator("#minimax-video-model-profile")).toContainText("REF2VA · MiniMax_H3_Ref2VA");
   await expect(page.locator("#generation-summary")).toContainText("REF2VA · свободные референсы");
 });
@@ -186,10 +183,9 @@ test("video prompt assistant can derive an I2VA prompt from the opening frame", 
   desktopOnly(testInfo);
 
   await open(page, "/preview/generate");
-  await page.getByRole("button", { name: /Видео Создаёт/ }).click();
+  await page.getByRole("button", { name: /^Видео$/ }).click();
   await page.locator('[data-image-slot="1"] [data-gallery-image-picker-open]').click();
   await page.getByRole("button", { name: "Выбрать AI-Gateway-Krea2-portrait.png" }).click();
-  await page.locator("#workflow-next").click();
   await expect(page.locator("#positive-prompt")).toHaveValue("");
   await page.locator("#prompt-assistant-enabled").check();
   await page.locator("#prompt-assistant-improve").click();
@@ -202,7 +198,7 @@ test("video prompt assistant can derive an I2VA prompt from the opening frame", 
 
 test("video reference sources use equal tiles at every viewport", async ({ page }) => {
   await open(page, "/preview/generate");
-  await page.getByRole("button", { name: /Видео Создаёт/ }).click();
+  await page.getByRole("button", { name: /^Видео$/ }).click();
   await settlePage(page);
   await expect(page.locator("#minimax-video-mode")).toHaveScreenshot("generation-video-modes.png", { stylePath: componentVisualStyle });
 
@@ -211,8 +207,9 @@ test("video reference sources use equal tiles at every viewport", async ({ page 
   const tileBoxes = [];
   for (let index = 0; index < 2; index += 1) {
     const slot = visibleSlots.nth(index);
-    const uploadBox = await slot.locator(".upload-zone").boundingBox();
-    const galleryBox = await slot.locator(".source-gallery-button").boundingBox();
+    const uploadBox = await slot.locator(".studio-device").boundingBox();
+    const galleryBox = await slot.locator("[data-gallery-image-picker-open]").boundingBox();
+    expect(Math.abs(uploadBox.y - galleryBox.y), `slot ${index + 1} action alignment`).toBeLessThanOrEqual(1);
     tileBoxes.push(uploadBox, galleryBox);
   }
   for (const [index, tileBox] of tileBoxes.entries()) {
@@ -224,9 +221,8 @@ test("video reference sources use equal tiles at every viewport", async ({ page 
 
 test("MiniMax H3 v5 memory modules stay usable at every viewport", async ({ page }, testInfo) => {
   await open(page, "/preview/generate");
-  await page.getByRole("button", { name: /Видео Создаёт/ }).click();
-  await page.locator("#workflow-next").click();
-  await page.locator("#generation-open-exact").click();
+  await page.getByRole("button", { name: /^Видео$/ }).click();
+  await page.locator("#studio-settings-open").click();
 
   const modules = page.locator(".minimax-optimizations");
   const lowVRAM = modules.locator('input[name="video_low_vram_attention"]');
@@ -245,9 +241,8 @@ test("MiniMax H3 v5 memory modules stay usable at every viewport", async ({ page
 
 test("Krea2 exposes the PhotoFlow processing branches as independent modules", async ({ page }) => {
   await open(page, "/preview/generate");
-  await page.getByRole("button", { name: /Текст в изображение/ }).click();
-  await page.getByRole("button", { name: "Продолжить" }).click();
-  await page.locator("#generation-open-exact").click();
+  await page.getByRole("button", { name: /^Изображение$/ }).click();
+  await page.locator("#studio-settings-open").click();
 
   const processing = page.locator(".krea-processing");
   const sage = processing.locator('input[name="krea_sage_enabled"]');
@@ -287,7 +282,7 @@ test("repeat restores the active workflow LoRA stack and strengths", async ({ pa
   await expect(page.locator('.krea-lora-row select[name="lora_2"]')).toHaveValue("Krea2-realism-V2.safetensors");
   await expect(page.locator('.krea-lora-row input[name="lora_model_strength_2"]')).toHaveValue("1.15");
   await expect(page.locator('.krea-lora-row input[name="lora_clip_strength_2"]')).toHaveValue("0.84");
-  await page.locator("details.generation-advanced > summary").click();
+  await page.locator("#studio-settings-open").click();
   await expect(page.locator('.krea-lora-row[data-lora-slots="krea"]').nth(1)).toBeVisible();
   await expect(page.locator('input[name="krea_sage_enabled"]')).toBeChecked();
   await expect(page.locator('select[name="krea_sage_mode"]')).toHaveValue("sageattn_qk_int8_pv_fp16_triton");
@@ -301,8 +296,7 @@ test("repeat restores the active workflow LoRA stack and strengths", async ({ pa
 
 test("controlled generation batches stay clear and usable at every viewport", async ({ page }, testInfo) => {
   await open(page, "/preview/generate");
-  await page.getByRole("button", { name: /Текст в изображение/ }).click();
-  await page.getByRole("button", { name: "Продолжить" }).click();
+  await page.getByRole("button", { name: /^Изображение$/ }).click();
 
   await page.locator("#generation-batch-enabled").check();
   await page.locator(".generation-batch-mode .ui-segment").filter({ hasText: "Один параметр" }).click();
@@ -315,6 +309,7 @@ test("controlled generation batches stay clear and usable at every viewport", as
   await page.locator("body").evaluate((body) => body.classList.add("visualize-generation-batches"));
 
   const group = page.locator('section.generation-batch-group[data-batch-id="batch-krea-steps"]');
+  if (page.viewportSize().width < 900) await page.locator("#studio-result-tab").click();
   await expect(group).toBeVisible();
   await expect(group.locator(".generation-job--batch")).toHaveCount(3);
   await expect(group.locator(".generation-batch-progress")).toContainText("2 из 3");
@@ -343,7 +338,6 @@ test("prompt assistant review stays readable at every viewport", async ({ page }
   await open(page, "/preview/generate?template=image-to-image&workflow=photoflow-flux2-edit&media=1&slot=1&role=identity");
   await expect(page.locator('.generation-workflow-choice.is-selected[data-preset-id="photoflow-flux2-edit"]')).toBeVisible();
   await expect(page.locator('[data-image-slot="1"] [data-image-name]')).toHaveText("AI-Gateway-Krea2-portrait.png");
-  await page.locator("#workflow-next").click();
   await page.locator("#positive-prompt").fill("Сохранить внешность и композицию, заменить куртку на красную кожаную.");
   await page.locator("#prompt-assistant-enabled").check();
   await page.locator("#prompt-assistant-improve").click();
@@ -537,17 +531,20 @@ test("AI content updates only the changed task after an SSE revision", async ({ 
   await expect(page.locator("[data-content-task-key]")).toHaveCount(4);
 });
 
-test("wizard, image picker and lightbox work from the keyboard", async ({ page }, testInfo) => {
+test("studio, image picker and lightbox work from the keyboard", async ({ page }, testInfo) => {
   desktopOnly(testInfo);
 
   await open(page, "/preview/generate");
-  const imageScenario = page.getByRole("button", { name: /Фото и промт/ });
+  const imageScenario = page.getByRole("button", { name: /^Редактировать фото$/ });
   await imageScenario.focus();
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: "Выберите workflow и модель" })).toBeVisible();
+  await expect(imageScenario).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#positive-prompt")).toBeVisible();
   const fluxWorkflow = page.getByRole("button", { name: /Flux2 Редактирование/ });
   await fluxWorkflow.focus();
   await page.keyboard.press("Enter");
+  await page.locator("#source-image").focus();
+  await expect(page.locator(".studio-device").first()).toHaveCSS("outline-style", "solid");
   const pickerTrigger = page.locator('[data-image-slot="1"] [data-gallery-image-picker-open]');
   await pickerTrigger.focus();
   await page.keyboard.press("Enter");

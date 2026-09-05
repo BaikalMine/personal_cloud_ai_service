@@ -7,7 +7,7 @@ const projectRoot = path.resolve(__dirname, "../../../..");
 const stylePath = path.join(projectRoot, "internal/gateway/static/style.css");
 const generatePath = path.join(projectRoot, "internal/gateway/static/generate.js");
 const batchPath = path.join(projectRoot, "internal/gateway/static/generation-batch.js");
-const generateTemplatePath = path.join(projectRoot, "internal/gateway/templates/generate.html");
+const generateTemplatePath = path.join(projectRoot, "internal/gateway/templates/_generation_sections.html");
 const gatewayRoutesPath = path.join(projectRoot, "internal/gateway/generation.go");
 const galleryPath = path.join(projectRoot, "internal/gateway/templates/gallery.html");
 const suggestionsPath = path.join(projectRoot, "internal/gateway/templates/suggestions.html");
@@ -153,8 +153,8 @@ test("ui preview exposes every supported reference slot", () => {
   assert.match(preview, /"ID": "minimax-h3-video"[^\n]+"AllowsImages": true, "MaxInputImages": 4/);
 });
 
-test("a sole compatible workflow is selected automatically", () => {
-  assert.match(generateScript, /compatibleWorkflows\.length === 1\) chooseGenerationWorkflow\(compatibleWorkflows\[0\]\)/);
+test("a compatible workflow is selected automatically", () => {
+  assert.match(generateScript, /compatibleWorkflows\.length\) chooseGenerationWorkflow\(compatibleWorkflows\[0\]\)/);
 });
 
 test("the media library reuses an image across every compatible workflow", () => {
@@ -175,7 +175,7 @@ test("controlled generation batches are wired through the form, job center, and 
   ]) {
     assert.ok(generateTemplate.includes(`id="${id}"`), `missing batch control ${id}`);
   }
-  assert.match(generateTemplate, /generation-batch\.js/);
+  assert.match(fs.readFileSync(path.join(templateRoot, "generate.html"), "utf8"), /generation-batch\.js/);
   assert.match(generateScript, /fetch\("\/generate\/batches"/);
   assert.match(generateScript, /renderGenerationBatch/);
   assert.match(generateScript, /openBatchComparison/);
@@ -192,7 +192,7 @@ test("fields and native control states have one shared owner", () => {
   assert.match(controlsCSS, /font-size:\s*16px/);
   assert.match(layoutTemplate, /\/static\/controls\.css/);
   assert.match(appSource, /"\/static\/controls\.css":\s*"static\/controls\.css"/);
-  for (const file of ["generate.html", "lora_training.html", "admin_invites.html", "admin_user_detail.html"]) {
+  for (const file of ["_generation_sections.html", "lora_training.html", "admin_invites.html", "admin_user_detail.html"]) {
     const source = fs.readFileSync(path.join(templateRoot, file), "utf8");
     assert.ok(source.includes("ui-field-grid"), `${file} does not use aligned fields`);
     assert.ok(source.includes("ui-field-label"), `${file} does not separate labels and controls`);

@@ -1,0 +1,141 @@
+/* Studio layout; native controls and semantic states stay in controls.css. */
+.generation-page { max-width: 1600px; }
+.studio-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 20px; }
+.studio-heading h1 { margin: 0; font-size: 24px; }
+.studio-workspace { display: grid; grid-template-columns: minmax(340px, 420px) minmax(0, 1fr); align-items: start; gap: 32px; }
+.studio-editor, .studio-result-pane, #studio-editor { min-width: 0; }
+#studio-editor { display: grid; gap: 20px; }
+.studio-editor { position: sticky; top: 88px; display: grid; grid-template-rows: minmax(0, 1fr) auto; height: calc(100dvh - 164px); margin: 0; }
+#studio-editor { overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding-right: 8px; padding-bottom: 8px; }
+.studio-section-label { font-size: 13px; font-weight: 600; }
+.studio-mobile-tabs { display: none; }
+.studio-tasks { display: grid; grid-template-columns: 1fr 1.4fr .7fr; }
+.studio-tasks .scenario-choice { min-width: 0; padding: 8px; font-size: 13px; white-space: normal; }
+.studio-tasks .scenario-choice strong { font-weight: 600; }
+.studio-tasks .is-selected { color: var(--text); background: var(--surface-active); box-shadow: inset 0 -2px var(--mint); }
+.studio-workflows { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.studio-workflows .workflow-choice { display: flex; min-height: 44px; padding: 10px; font-size: 12px; }
+.studio-workflows .workflow-choice:only-child { grid-column: 1 / -1; }
+.studio-models { display: grid; gap: 12px; }
+.studio-models .generation-model-picker { display: block; margin: 0; padding: 0; border: 0; }
+.studio-editor .generation-prompt-fields { grid-template-columns: minmax(0, 1fr); margin: 0; }
+.studio-editor .generation-prompt-fields textarea { min-height: 160px; resize: vertical; }
+.studio-editor .prompt-assistant { margin: -8px 0 0; padding: 0 0 16px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; }
+.studio-editor .prompt-assistant-toggle { padding: 0; border: 0; background: transparent; }
+.studio-editor .prompt-assistant-toggle small { display: none; }
+.studio-editor .prompt-assistant-controls { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
+.studio-editor .prompt-assistant-diff-grid { grid-template-columns: minmax(0, 1fr); }
+.studio-editor .prompt-assistant-actions { flex-wrap: wrap; }
+.studio-editor .generation-profile-picker { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.studio-editor .generation-profile-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; }
+.studio-editor .generation-profile-button { min-height: 44px; padding: 8px; }
+.studio-editor .generation-primary-fields { margin: 0; }
+.studio-editor .generation-primary-fields > label { margin: 0; }
+.studio-editor .minimax-video-mode { margin: 0; padding: 0; border: 0; gap: 8px; }
+.studio-editor .minimax-mode-option { min-height: 86px; padding: 10px; gap: 6px; }
+.studio-editor .minimax-mode-option > small { min-height: 0; }
+.studio-editor .minimax-mode-option-head b { font-size: 13px; font-weight: 600; }
+.studio-editor .minimax-mode-segments > label > input { z-index: 1; inset: 0; width: 100%; height: 100%; margin: 0; pointer-events: auto; cursor: pointer; }
+.studio-editor .minimax-reference-media-grid { grid-template-columns: minmax(0, 1fr); }
+.studio-editor .minimax-media-card { padding: 12px 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; }
+.studio-editor .minimax-media-card .upload-zone { min-height: 92px; }
+.studio-editor .minimax-media-card .upload-icon { display: none; }
+.studio-editor .minimax-primary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.studio-editor > #studio-editor > .workflow-settings-section { padding: 0; border: 0; }
+.studio-editor .minimax-aspect-controls { grid-template-columns: minmax(0, 1fr); }
+.studio-editor .minimax-model-profile { font-size: 12px; }
+.studio-editor .workflow-settings-heading { flex-wrap: wrap; }
+.studio-editor .source-image-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.studio-source { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.studio-source .studio-source-label { grid-column: 1 / -1; color: var(--text); font-size: 13px; font-weight: 600; }
+.studio-source-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.studio-source-actions .button { width: 100%; height: 100%; margin: 0; padding-inline: 8px; font-size: 12px; white-space: normal; }
+.studio-device { position: relative; }
+.studio-device input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.studio-device:focus-within { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.studio-source.has-image .upload-preview { display: grid; grid-template-columns: 80px minmax(0, 1fr) 44px; min-height: 96px; padding: 0; border: 0; background: transparent; overflow: visible; }
+.studio-source.has-image .upload-preview img { width: 80px; height: 96px; object-fit: contain; border-radius: 4px; background: var(--canvas); }
+.studio-source.has-image .upload-preview > span { padding: 0; }
+.studio-source.has-image .upload-remove { position: static; width: 44px; height: 44px; }
+.studio-source .image-reference-role { margin: 0; }
+.studio-held-media { margin: 0; padding: 12px; border-left: 3px solid var(--amber); background: var(--color-warning-bg); font-size: 12px; line-height: 1.5; }
+.studio-settings-button { width: 100%; }
+.studio-editor .generation-batch-builder { margin: 0; padding: 12px 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; }
+.studio-editor .generation-batch-controls { grid-template-columns: minmax(0, 1fr); }
+.studio-editor .generation-batch-range { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.studio-editor .generation-batch-toggle { border: 0; padding: 0; background: transparent; }
+.studio-help, .studio-saved, .studio-server { border-width: 0 0 1px; border-radius: 0; background: transparent; }
+.studio-help > summary, .studio-saved > summary, .studio-server > summary { padding-inline: 0; }
+.studio-help .generation-mode-guide { grid-template-columns: minmax(0, 1fr); padding: 12px 0; margin: 0; border: 0; background: transparent; }
+.studio-help .workflow-mini-guide-grid { grid-template-columns: minmax(0, 1fr); }
+.studio-help .workflow-mini-guide > summary small { display: none; }
+.studio-help .workflow-guides { margin: 0; }
+.studio-saved .generation-draft-bar { display: grid; padding: 12px 0; border: 0; border-radius: 0; background: transparent; }
+.studio-saved .generation-draft-actions { display: flex; flex-wrap: wrap; }
+.studio-saved .generation-recipe-bar { grid-template-columns: minmax(0, 1fr); padding: 12px 0; }
+.studio-settings { width: min(1100px, calc(100vw - 32px)); max-width: none; max-height: calc(100dvh - 32px); padding: 0; overflow-y: auto; overscroll-behavior: contain; background: var(--surface); color: var(--text); border: 1px solid var(--line-strong); border-radius: 8px; }
+.studio-settings::backdrop { background: var(--color-overlay); }
+.studio-settings-heading { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 20px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.studio-settings-heading h2 { margin: 0; font-size: 18px; }
+.studio-settings .generation-advanced { margin: 0; border: 0; border-radius: 0; }
+.studio-settings .generation-advanced > summary { display: none; }
+.studio-settings .workflow-settings-section { padding: 20px; }
+.studio-settings .workflow-settings-heading { flex-wrap: nowrap; }
+.studio-settings .minimax-parameter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.studio-result-surface { min-height: 440px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.studio-result-empty { min-height: 440px; display: grid; place-content: center; justify-items: center; gap: 10px; color: var(--muted); }
+.studio-result-empty > svg { width: 40px; height: 40px; stroke-width: 1; }
+.studio-result-empty h2 { margin: 0; color: var(--text); font-size: 18px; }
+.studio-result-empty p { margin: 0; font-size: 13px; }
+.studio-result-pane .generation-result { margin: 0; padding: 20px; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.studio-result-pane .generation-result h2 { font-size: 18px; }
+.studio-result-pane .generation-output-grid { grid-template-columns: minmax(0, 1fr); }
+.studio-result-pane .generation-output { margin: 0; }
+.studio-result-pane .generation-output-preview img, .studio-result-pane .generation-output-preview video { max-height: 62dvh; object-fit: contain; }
+.studio-result-pane .generation-variants { border: 0; padding: 16px 0; margin: 0; background: transparent; box-shadow: none; }
+.studio-result-pane .generation-history-toolbar { display: flex; flex-wrap: wrap; }
+.studio-result-pane .generation-variants { grid-template-columns: minmax(0, 1fr); }
+.studio-result-pane .generation-queue { grid-template-columns: minmax(0, 1fr); }
+.studio-result-pane .generation-quota, .studio-result-pane .generation-quota-types { flex-direction: column; align-items: stretch; }
+.studio-editor .generation-run-dock { position: static; z-index: 3; grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 12px 0 0; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); box-shadow: none; }
+.studio-summary > summary { display: flex; flex-direction: row; align-items: center; justify-content: space-between; min-height: 32px; cursor: pointer; list-style: none; }
+.studio-summary > summary::-webkit-details-marker { display: none; }
+.studio-summary[open] > summary { margin-bottom: 12px; }
+.studio-editor .generation-summary { margin: 0; padding: 0; border: 0; background: transparent; }
+.studio-editor .generation-summary-head > div > span { display: none; }
+.studio-editor .generation-summary-head strong { font-size: 12px; }
+.studio-editor .generation-summary-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.studio-editor .generation-summary-impact { font-size: 12px; }
+.studio-editor .generation-actions { display: grid; grid-template-columns: auto minmax(0, 1fr); margin-top: 10px; }
+.studio-editor .generation-actions .button { min-width: 0; }
+.studio-editor .generation-summary-head .button { display: none; }
+.studio-result-pane .generation-batch-jobs { grid-template-columns: minmax(0, 1fr); }
+.studio-result-pane .generation-batch-compare-toggle { flex-shrink: 0; min-width: 128px; }
+.studio-editor .generation-batch-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.studio-editor .generation-batch-parameter-field { grid-column: 1 / -1; }
+@media (max-width: 1099px) {
+  .studio-workspace { gap: 20px; grid-template-columns: minmax(340px, 400px) minmax(0, 1fr); }
+}
+@media (max-width: 899px) {
+  .studio-heading { margin-bottom: 12px; }
+  .studio-heading h1 { font-size: 22px; }
+  .studio-mobile-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 16px; }
+  .studio-workspace { display: block; }
+  .studio-editor { position: static; height: calc(100dvh - 260px); min-height: 340px; }
+  .studio-workspace[data-studio-view="configure"] > .studio-result-pane, .studio-workspace[data-studio-view="result"] > .studio-editor { display: none; }
+  .studio-result-surface { position: static; min-height: 360px; }
+  .studio-editor .generation-run-dock { bottom: calc(var(--workspace-bottom-offset, 0px) + 8px); }
+  .studio-settings { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  .studio-settings .workflow-settings-section { padding: 16px; }
+  .studio-settings .minimax-parameter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .studio-keyboard-open .studio-editor { height: auto; }
+  .studio-keyboard-open #studio-editor { overflow: visible; }
+}
+@media (max-width: 599px) {
+  .studio-editor { height: calc(100dvh - 284px); }
+  .studio-settings .minimax-parameter-grid { grid-template-columns: minmax(0, 1fr); }
+  .studio-tasks .scenario-choice { font-size: 12px; }
+  .studio-editor .generation-summary-facts, .studio-editor .generation-summary-impact { display: none; }
+  .studio-editor .generation-run-dock:has(.studio-summary[open]) .generation-summary-facts { display: grid; }
+  .studio-editor .generation-run-dock:has(.studio-summary[open]) .generation-summary-impact { display: block; }
+}

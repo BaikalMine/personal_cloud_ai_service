@@ -88,11 +88,11 @@ test("shared fields align wrapped labels and messages in both themes", async ({ 
 });
 
 const workflows = [
-  { id: "krea-text", scenario: /Текст в изображение/ },
-  { id: "krea-edit", scenario: /Фото и промт/, preset: /Krea 2: редактирование/, image: true },
-  { id: "flux-edit", scenario: /Фото и промт/, preset: /Flux2 Редактирование/, image: true },
-  { id: "minimax-frames", scenario: /Видео Создаёт/ },
-  { id: "minimax-references", scenario: /Видео Создаёт/, references: true },
+  { id: "krea-text", scenario: /^Изображение$/ },
+  { id: "krea-edit", scenario: /^Редактировать фото$/, preset: /Krea 2: редактирование/, image: true },
+  { id: "flux-edit", scenario: /^Редактировать фото$/, preset: /Flux2 Редактирование/, image: true },
+  { id: "minimax-frames", scenario: /^Видео$/ },
+  { id: "minimax-references", scenario: /^Видео$/, references: true },
 ];
 
 for (const workflow of workflows) {
@@ -103,14 +103,13 @@ for (const workflow of workflows) {
       await page.getByRole("button", { name: workflow.scenario }).click();
       if (workflow.preset) await page.getByRole("button", { name: workflow.preset }).click();
       if (workflow.references) {
-        await page.locator("#minimax-video-mode label").filter({ hasText: "Промт + свободные референсы" }).click();
+        await page.locator("#minimax-video-mode label").filter({ hasText: "По референсам" }).click();
       }
       if (workflow.image) {
         await page.locator('[data-image-slot="1"] [data-gallery-image-picker-open]').click();
         await page.getByRole("button", { name: "Выбрать AI-Gateway-Krea2-portrait.png" }).click();
       }
-      await page.locator("#workflow-next").click();
-      await page.locator("#generation-open-exact").click();
+      await page.locator("#studio-settings-open").click();
       if (workflow.image) {
         const lut = page.locator('[data-lut-enabled]:visible');
         await expect(lut).not.toBeChecked();

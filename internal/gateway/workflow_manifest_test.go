@@ -39,7 +39,7 @@ func TestWorkflowManifestCatalogIsValid(t *testing.T) {
 }
 
 func TestMiniMaxManifestCoversEveryVideoControl(t *testing.T) {
-	body, err := embeddedFS.ReadFile("templates/generate.html")
+	body, err := embeddedFS.ReadFile("templates/_generation_sections.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestMiniMaxManifestCoversEveryVideoControl(t *testing.T) {
 }
 
 func TestWorkflowManifestParametersHaveFormControls(t *testing.T) {
-	body, err := embeddedFS.ReadFile("templates/generate.html")
+	body, err := embeddedFS.ReadFile("templates/_generation_sections.html")
 	if err != nil {
 		t.Fatal(err)
 	}

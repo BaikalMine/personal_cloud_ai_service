@@ -65,7 +65,7 @@
     galleryChoice: slot.querySelector("[data-gallery-image-picker-choice]"),
     galleryButton: slot.querySelector("[data-gallery-image-picker-open]"),
   }));
-  const workflowNext = document.getElementById("workflow-next");
+  const studio = generationModules.studio?.bindUI?.({ root, window, document });
   const generationModelField = document.getElementById("generation-model-field");
   const imageSourceFields = document.getElementById("image-source-fields");
   const imageSourceGrid = root.querySelector(".source-image-grid");
@@ -247,8 +247,6 @@
   const imagePickerSlot = document.getElementById("generation-image-picker-slot");
   const imagePickerRefresh = document.getElementById("generation-image-picker-refresh");
   const fieldHelps = [...root.querySelectorAll(".field-help[data-tooltip]")];
-  const panels = [...root.querySelectorAll("[data-step]")];
-  const progress = [...root.querySelectorAll("[data-progress]")];
   const previewURLs = new Map();
   const selectedImages = new Map();
   const gallerySelections = new Map();
@@ -262,7 +260,10 @@
   let draftAdvancedOpen = Boolean(generationAdvanced?.open);
   const imageDraftField = (index) => index === 1 ? "input_image" : `input_image_${index}`;
   const markDraftDirty = () => { if (!restoringDraft) draftController?.markDirty(); };
-  const hasMissingDraftAssets = () => [...draftAssets.values()].some((asset) => !asset.available);
+  const draftFieldIsActive = (field) => field === "input_audio" || field === "input_video"
+    ? miniMaxReferencesAreAvailable()
+    : imageSlots.some((item) => imageDraftField(item.index) === field && item.index <= activeMaxInputImages());
+  const hasMissingDraftAssets = () => [...draftAssets.entries()].some(([field, asset]) => draftFieldIsActive(field) && !asset.available);
   let uploadedAudio = "";
   let uploadedVideo = "";
   let videoPreviewURL = "";
@@ -651,6 +652,7 @@
   const applyOriginalResolution = () => {
     if (!preserveOriginalSize?.checked || !primaryImageSize) return;
     const selected = selectedGenerationWorkflow();
+    if (selected?.dataset.templateId !== "image-to-image") return;
     const isKreaEdit = selected?.dataset.family === "krea2" && selected?.dataset.templateId === "image-to-image";
     const isFluxEdit = selected?.dataset.family === "flux2" && selected?.dataset.templateId === "image-to-image";
     const minimumDimension = isKreaEdit || isFluxEdit ? 16 : 256;
@@ -952,26 +954,19 @@
   };
 
   const showStep = (step) => {
-    const next = wizardSlice.dispatch({ type: "SHOW_STEP", step }, (state) => ({ ...state, step: Math.max(1, Math.min(3, Number(step) || 1)) }));
-    step = next.step;
-    panels.forEach((panel) => panel.classList.toggle("is-visible", Number(panel.dataset.step) === step));
-    progress.forEach((item) => {
-      const number = Number(item.dataset.progress);
-      item.classList.toggle("is-active", number === step);
-      item.classList.toggle("is-complete", number < step);
-    });
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    // Older saved drafts contain a step number; the studio has one editor now.
+    wizardSlice.dispatch({ type: "SHOW_STEP", step });
+    studio?.show("configure");
   };
 
   const selectedChoice = () => root.querySelector(".scenario-choice.is-selected");
   const selectedGenerationWorkflow = () => root.querySelector(".generation-workflow-choice.is-selected");
   const isMiniMaxSelected = () => selectedGenerationWorkflow()?.dataset.family === "minimax_h3" || templateID.value === "minimax-h3-video";
   const maxInputImages = () => Math.max(1, Number(selectedGenerationWorkflow()?.dataset.maxInputImages || (templateID.value === "minimax-h3-video" ? 4 : 1)));
-  const activeMaxInputImages = () => generationModules.video?.activeImageLimit?.({
-    isMiniMax: isMiniMaxSelected(),
-    mode: miniMaxMode(),
-    maxInputImages: maxInputImages(),
-  }) || (isMiniMaxSelected() && miniMaxMode() === "frames" ? Math.min(2, maxInputImages()) : maxInputImages());
+  const activeMaxInputImages = () => generationModules.studio.activeImageLimit({
+    requiresImage: wizardSlice.get().requiresImage, allowsImages: wizardSlice.get().allowsImages,
+    isVideo: isMiniMaxSelected(), videoMode: miniMaxMode(), maximum: maxInputImages(),
+  });
 
   const miniMaxReferencesAreAvailable = () => generationModules.video?.referencesAvailable?.({
     isMiniMax: isMiniMaxSelected(),
@@ -1109,7 +1104,7 @@
     imageSlots.forEach((item) => {
       const visible = item.index <= maximum;
       item.slot.hidden = !visible;
-      if (!visible) clearImageSlot(item);
+      if (inputImages[item.index - 1]) inputImages[item.index - 1].value = visible ? (uploadedImages.get(item.index) || "") : "";
       if (item.galleryChoice) item.galleryChoice.hidden = !(wizard.requiresImage || wizard.allowsImages);
       if (!item.label) return;
       if (isMiniMax && referenceMode) item.label.textContent = `Референс ${item.index} · необязательно`;
@@ -1120,10 +1115,26 @@
       if (roleControl) roleControl.hidden = !(isImageEdit || (isMiniMax && referenceMode));
       if (item.role) {
         const locksBaseScene = isImageEdit && item.index === 1;
-        if (locksBaseScene) item.role.value = "base_scene";
+        if (locksBaseScene) {
+          if (item.savedReferenceRole === undefined) item.savedReferenceRole = item.role.value;
+          item.role.value = "base_scene";
+        } else if (!locksBaseScene && item.savedReferenceRole !== undefined) {
+          item.role.value = item.savedReferenceRole;
+          delete item.savedReferenceRole;
+        }
         item.role.disabled = !(isImageEdit || (isMiniMax && referenceMode)) || locksBaseScene;
       }
     });
+    const held = imageSlots.filter((item) => item.index > maximum && (hasSelectedImage(item) || draftAssets.has(imageDraftField(item.index)))).map((item) => `Фото ${item.index}`);
+    if (!miniMaxReferencesAreAvailable()) {
+      if (uploadedAudio || miniMaxAudioFile?.files?.length || draftAssets.has("input_audio")) held.push("аудио");
+      if (uploadedVideo || miniMaxVideoFile?.files?.length || draftAssets.has("input_video")) held.push("видео");
+    }
+    const heldNotice = root.querySelector("#studio-held-media");
+    if (heldNotice) {
+      heldNotice.hidden = held.length === 0;
+      heldNotice.textContent = `${held.join(", ")} сохранены в черновике, но не участвуют в этом режиме. Вернитесь к совместимому режиму, чтобы использовать или удалить их.`;
+    }
     const note = document.getElementById("image-source-note");
     if (isMiniMax && note) {
       note.textContent = referenceMode
@@ -1145,9 +1156,10 @@
   };
 
   const chooseScenario = (button) => {
-    if (button.disabled) return;
-    root.querySelectorAll(".scenario-choice").forEach((item) => item.classList.remove("is-selected"));
+    if (button.disabled || button === selectedChoice()) return;
+    root.querySelectorAll(".scenario-choice").forEach((item) => { item.classList.remove("is-selected"); item.setAttribute("aria-pressed", "false"); });
     button.classList.add("is-selected");
+    button.setAttribute("aria-pressed", "true");
     templateID.value = button.dataset.workflowId;
     const requiresImage = button.dataset.requiresImage === "true";
     const allowsImages = button.dataset.allowsImages === "true";
@@ -1162,12 +1174,11 @@
     root.querySelectorAll(".generation-workflow-choice").forEach((item) => item.classList.remove("is-selected"));
     updateWorkflowCompatibility();
     const compatibleWorkflows = [...root.querySelectorAll(".generation-workflow-choice")].filter((item) => !item.hidden && !item.disabled);
-    if (compatibleWorkflows.length === 1) chooseGenerationWorkflow(compatibleWorkflows[0]);
+    if (compatibleWorkflows.length) chooseGenerationWorkflow(compatibleWorkflows[0]);
     showStep(2);
   };
 
-  const updateWorkflowNext = () => {
-    if (!workflowNext) return;
+  const syncStudioSelection = () => {
     const selected = selectedGenerationWorkflow();
     const hasWorkflow = Boolean(selected && selected.dataset.available === "true");
     const selectedModel = model?.selectedOptions?.[0];
@@ -1180,21 +1191,13 @@
       && hasSelectedImage(item)
       && !uploadedImages.get(item.index)
     )) || hasPendingMiniMaxAudio() || hasPendingMiniMaxVideo();
-    const wizard = wizardSlice.dispatch({
+    wizardSlice.dispatch({
       type: "SET_SELECTIONS",
       selectedCount: imageSlots.filter((item) => item.index <= activeMaxInputImages() && hasSelectedImage(item)).length,
       primarySelected: hasImage,
       pendingUploads: hasPendingUploads ? 1 : 0,
     }, (state) => ({ ...state, selectedCount: hasImage ? 1 : 0, primarySelected: hasImage, pendingUploads: hasPendingUploads ? 1 : 0 }));
-    const canContinue = generationModules.wizard?.canContinue?.({ ...wizard, workflowAvailable: hasWorkflow && hasModel }) ?? (hasWorkflow && hasModel && (!needsImage || hasImage));
-    workflowNext.disabled = !canContinue;
-    if (!needsImage && !hasPendingUploads) {
-      workflowNext.textContent = "Продолжить";
-    } else if (hasPendingUploads) {
-      workflowNext.textContent = "Загрузить в ComfyUI и продолжить";
-    } else {
-      workflowNext.textContent = "Продолжить к промту";
-    }
+    root.dataset.studioReady = String(hasWorkflow && hasModel && (!needsImage || hasImage));
     syncGenerationSummary();
   };
 
@@ -1211,7 +1214,7 @@
     if (imageSourceFields) imageSourceFields.hidden = !(wizard.requiresImage || wizard.allowsImages);
     if (workflowNote) workflowNote.hidden = visible > 0;
     syncImageSlots();
-    updateWorkflowNext();
+    syncStudioSelection();
   };
 
   const chooseGenerationWorkflow = (button) => {
@@ -1229,7 +1232,7 @@
     applyQuality();
     if (button.dataset.family === "minimax_h3") syncMiniMaxVideoProfile({ applyModelDefaults: true });
     syncImageSlots();
-    updateWorkflowNext();
+    syncStudioSelection();
   };
 
   const kreaModules = [...root.querySelectorAll("[data-krea-module]")];
@@ -1572,7 +1575,7 @@
     batchBuilder.classList.toggle("has-error", enabled && !validation.valid);
     if (generationSubmit) {
       generationSubmit.dataset.batchInvalid = enabled && !validation.valid ? "true" : "false";
-      generationSubmit.textContent = enabled ? `Запустить ${batchVariantCountLabel(validation.count)}` : "Запустить генерацию";
+      generationSubmit.textContent = enabled ? `Запустить ${batchVariantCountLabel(validation.count)}` : "Создать";
       if (!generationSubmit.classList.contains("is-loading")) generationSubmit.disabled = enabled && !validation.valid;
     }
     return validation;
@@ -1652,7 +1655,7 @@
     const { preset, selectedModel, family, references, hasAudio, hasVideo } = currentGenerationContext();
     if (!preset || !selectedModel?.value) {
       if (generationSummaryTitle) generationSummaryTitle.textContent = "Выберите workflow и модель";
-      renderDefinitionList(generationSummaryFacts, [{ label: "Следующий шаг", value: "Вернитесь к шагу 2 и завершите выбор" }]);
+      renderDefinitionList(generationSummaryFacts, [{ label: "Настройки", value: "Выберите способ обработки и доступную модель" }]);
       if (generationSummaryImpact) {
         generationSummaryImpact.dataset.load = "normal";
         generationSummaryImpact.textContent = "Сводка обновится автоматически после выбора параметров.";
@@ -2059,7 +2062,7 @@
       syncMiniMaxVideoProfile({ applyModelDefaults: true });
       syncWorkflowFields();
     }
-    updateWorkflowNext();
+    syncStudioSelection();
   });
   quality?.addEventListener("change", applyQuality);
   [aspect, outputMegapixels, dimensionMultiple, maxSide].forEach((input) => input?.addEventListener("change", calculateResolution));
@@ -2134,11 +2137,6 @@
 	});
 
   promptAssistantImprove?.addEventListener("click", async () => {
-    if (hasMissingDraftAssets() || pendingDraftFiles().length) {
-      setPromptAssistantState("Сначала загрузите или замените недоступные материалы черновика.", "error");
-      showStep(2);
-      return;
-    }
     const original = positive?.value.trim() || "";
     const mode = templateID.value;
     const canUseVisualOnlyVideo = mode === "minimax-h3-video" && selectedReferenceMetadata().length > 0;
@@ -2164,6 +2162,7 @@
     }));
     setPromptAssistantState(promptAssistantThink?.checked ? "Локальная модель e4b обдумывает и дорабатывает промт..." : "Локальная модель e4b дорабатывает промт...", "loading");
     try {
+      await prepareActiveMedia();
       const body = new URLSearchParams({
         csrf: form.elements.csrf?.value || "",
         prompt: original,
@@ -2178,7 +2177,7 @@
         body.set("video_has_video", miniMaxReferencesAreAvailable() && uploadedVideo ? "true" : "false");
       }
       inputImages.forEach((input, index) => {
-        const value = uploadedImages.get(index + 1) || input?.value || "";
+        const value = index < activeMaxInputImages() ? (uploadedImages.get(index + 1) || "") : "";
         if (value) body.set(index === 0 ? "input_image" : `input_image_${index + 1}`, value);
       });
       promptAssistantReferences().forEach((reference) => {
@@ -2274,9 +2273,6 @@
     button.addEventListener("click", () => chooseGenerationWorkflow(button));
   });
 
-  root.querySelectorAll(".generation-back").forEach((button) => {
-    button.addEventListener("click", () => showStep(Math.max(1, wizardSlice.get().step - 1)));
-  });
   const handleMiniMaxModeChange = () => {
     const referenceOnly = model?.selectedOptions?.[0]?.dataset.videoReferenceOnly === "true";
     if (referenceOnly && miniMaxMode() !== "references") setMiniMaxMode("references");
@@ -2284,7 +2280,7 @@
     syncMiniMaxBranchCopy();
     syncImageSlots();
     syncMiniMaxAudioReference();
-    updateWorkflowNext();
+    syncStudioSelection();
     syncWorkflowFields();
   };
   miniMaxVideoModeInputs.forEach((input) => input.addEventListener("change", handleMiniMaxModeChange));
@@ -2296,24 +2292,24 @@
     if (inputAudio) inputAudio.value = "";
     if (!file) {
       if (miniMaxAudioPreview) miniMaxAudioPreview.hidden = true;
-      updateWorkflowNext();
+      syncStudioSelection();
       return;
     }
     if (file.size > 32 * 1024 * 1024) {
       clearMiniMaxAudio();
       if (miniMaxAudioState) miniMaxAudioState.textContent = "Аудиофайл должен быть не больше 32 МБ";
       if (miniMaxAudioPreview) miniMaxAudioPreview.hidden = false;
-      updateWorkflowNext();
+      syncStudioSelection();
       return;
     }
     if (miniMaxAudioName) miniMaxAudioName.textContent = file.name;
     if (miniMaxAudioState) miniMaxAudioState.textContent = "Аудио выбрано. Оно загрузится вместе с фото.";
     if (miniMaxAudioPreview) miniMaxAudioPreview.hidden = false;
-    updateWorkflowNext();
+    syncStudioSelection();
   });
   miniMaxAudioRemove?.addEventListener("click", () => {
     clearMiniMaxAudio();
-    updateWorkflowNext();
+    syncStudioSelection();
   });
   miniMaxVideoFile?.addEventListener("change", () => {
     draftAssets.delete("input_video");
@@ -2325,13 +2321,13 @@
     if (miniMaxVideoPreviewMedia) miniMaxVideoPreviewMedia.removeAttribute("src");
     if (!file) {
       if (miniMaxVideoPreview) miniMaxVideoPreview.hidden = true;
-      updateWorkflowNext();
+      syncStudioSelection();
       return;
     }
     if (file.size > 512 * 1024 * 1024) {
       if (miniMaxVideoState) miniMaxVideoState.textContent = "Видеофайл должен быть не больше 512 МБ";
       if (miniMaxVideoPreview) miniMaxVideoPreview.hidden = false;
-      updateWorkflowNext();
+      syncStudioSelection();
       return;
     }
     try {
@@ -2341,11 +2337,11 @@
     if (miniMaxVideoName) miniMaxVideoName.textContent = file.name;
     if (miniMaxVideoState) miniMaxVideoState.textContent = "Видео выбрано. Оно загрузится перед продолжением.";
     if (miniMaxVideoPreview) miniMaxVideoPreview.hidden = false;
-    updateWorkflowNext();
+    syncStudioSelection();
   });
   miniMaxVideoRemove?.addEventListener("click", () => {
     clearMiniMaxVideo();
-    updateWorkflowNext();
+    syncStudioSelection();
   });
   miniMaxVideoQuality?.addEventListener("change", () => {
     syncMiniMaxVideoProfile();
@@ -2509,7 +2505,7 @@
     syncSelectedImageSummary();
     syncReferenceMap();
     syncPromptAssistant();
-    updateWorkflowNext();
+    syncStudioSelection();
   };
 
   const selectGalleryImage = (item, entry) => {
@@ -2608,7 +2604,7 @@
     if (inputImages[item.index - 1]) inputImages[item.index - 1].value = "";
     if (!file) {
       clearImageSlot(item);
-      updateWorkflowNext();
+      syncStudioSelection();
       return;
     }
     selectedImages.set(item.index, file);
@@ -2635,7 +2631,7 @@
     item.input?.addEventListener("input", () => handleImageSelection(item));
     item.remove?.addEventListener("click", () => {
       clearImageSlot(item);
-      updateWorkflowNext();
+      syncStudioSelection();
     });
     item.galleryButton?.addEventListener("click", () => openGalleryImagePicker(item));
     item.role?.addEventListener("change", () => {
@@ -2697,7 +2693,7 @@
       return payload;
     }).finally(() => {
       if (pendingMediaUploads.get(field)?.promise === promise) pendingMediaUploads.delete(field);
-      updateWorkflowNext();
+      syncStudioSelection();
     });
     pendingMediaUploads.set(field, { source, promise });
     return promise;
@@ -2728,76 +2724,37 @@
       return value;
     })().finally(() => {
       if (pendingMediaUploads.get(field)?.promise === promise) pendingMediaUploads.delete(field);
-      updateWorkflowNext();
+      syncStudioSelection();
     });
     pendingMediaUploads.set(field, { source, promise });
     return promise;
   };
 
-  workflowNext?.addEventListener("click", async () => {
-    if (!generationWorkflowID.value) return;
-    const requiresPrimary = wizardSlice.get().requiresImage;
-    const selectedSlots = imageSlots.filter((item) => item.index <= activeMaxInputImages() && hasSelectedImage(item));
-    if (!selectedSlots.length && !requiresPrimary && !hasPendingMiniMaxAudio() && !hasPendingMiniMaxVideo()) {
-      showStep(3);
-      positive?.focus({ preventScroll: true });
-      return;
-    }
-    if ((requiresPrimary && !selectedSlots.some((item) => item.index === 1)) || wizardSlice.get().uploadInFlight) return;
-    const pendingSlots = selectedSlots.filter((item) => !uploadedImages.get(item.index));
-    const pendingAudio = hasPendingMiniMaxAudio();
-    const pendingVideo = hasPendingMiniMaxVideo();
-    if (!pendingSlots.length && !pendingAudio && !pendingVideo) {
-      showStep(3);
-      positive?.focus({ preventScroll: true });
-      return;
-    }
-    wizardSlice.dispatch({ type: "UPLOAD_START" }, (state) => ({ ...state, uploadInFlight: true }));
-    mediaSlice.dispatch({ type: "UPLOAD_START" }, (state) => ({ ...state, uploading: true, error: "" }));
-    workflowNext.disabled = true;
-    workflowNext.classList.add("is-loading");
-    try {
-      for (const item of pendingSlots) {
-        const file = selectedImageFile(item);
-        const galleryImage = gallerySelections.get(item.index);
-        if (!file && !galleryImage) throw new Error("Не удалось прочитать выбранное фото");
-        if (item.state) item.state.textContent = galleryImage ? "Передаём ранее созданное фото в ComfyUI..." : "Загружаем фото с устройства...";
-        const payload = await uploadSelectedImage(item);
-        const value = payload.value;
-        uploadedImages.set(item.index, value);
-        mediaSlice.dispatch({ type: "UPLOAD_SUCCESS", slot: item.index, value }, (state) => ({
-          ...state,
-          uploading: false,
-          uploaded: { ...state.uploaded, [String(item.index)]: value },
-          error: "",
-        }));
-        if (inputImages[item.index - 1]) inputImages[item.index - 1].value = value;
-        if (item.state) item.state.textContent = "Загружено в вашу сессию";
+  let preparingMedia = null;
+  const prepareActiveMedia = async () => {
+    if (preparingMedia) return preparingMedia;
+    const selection = () => [templateID.value, generationWorkflowID.value, model?.value, miniMaxMode()].join("|");
+    const expected = selection();
+    preparingMedia = (async () => {
+      if (hasMissingDraftAssets()) throw new Error("Материал черновика недоступен. Замените его или удалите.");
+      if (wizardSlice.get().requiresImage && !hasSelectedImage(imageSlots[0]) && !uploadedImages.get(1)) {
+        studio?.revealField(imageSlots[0]?.input);
+        throw new Error("Добавьте основное фото для редактирования.");
       }
-      if (pendingAudio && miniMaxAudioFile?.files?.[0]) {
-        if (miniMaxAudioState) miniMaxAudioState.textContent = "Загружаем аудио в вашу сессию...";
-        await uploadSelectedAV("audio");
+      for (const item of pendingDraftFiles()) {
+        if (item.state) item.state.textContent = "Загружаем материал...";
+        try { await item.upload(); }
+        catch (error) {
+          if (item.state) item.state.textContent = error.message || "Загрузка не удалась";
+          throw error;
+        }
       }
-      if (pendingVideo && miniMaxVideoFile?.files?.[0]) {
-        if (miniMaxVideoState) miniMaxVideoState.textContent = "Загружаем видео в вашу сессию...";
-        await uploadSelectedAV("video");
-      }
-      showStep(3);
-      positive?.focus({ preventScroll: true });
-    } catch (error) {
-      mediaSlice.dispatch({ type: "UPLOAD_ERROR", error: error.message }, (state) => ({ ...state, uploading: false, error: error.message || "Upload failed" }));
-      const failed = pendingSlots.find((item) => !uploadedImages.get(item.index));
-      if (failed?.state) failed.state.textContent = error.message || "Не удалось загрузить фото";
-      if (pendingAudio && miniMaxAudioState && !uploadedAudio) miniMaxAudioState.textContent = error.message || "Не удалось загрузить аудио";
-      if (pendingVideo && miniMaxVideoState && !uploadedVideo) miniMaxVideoState.textContent = error.message || "Не удалось загрузить видео";
-      updateWorkflowNext();
-    } finally {
-      wizardSlice.dispatch({ type: "UPLOAD_FINISH" }, (state) => ({ ...state, uploadInFlight: false }));
-      mediaSlice.dispatch({ type: "UPLOAD_FINISH" }, (state) => ({ ...state, uploading: false }));
-      workflowNext.classList.remove("is-loading");
-      updateWorkflowNext();
-    }
-  });
+      if (selection() !== expected || pendingDraftFiles().length) throw new Error("Материалы или режим изменились во время загрузки. Проверьте их и повторите запуск.");
+      markDraftDirty();
+    })();
+    try { await preparingMedia; }
+    finally { preparingMedia = null; syncStudioSelection(); }
+  };
 
   const renderOutputs = (outputs) => {
     outputGrid.replaceChildren();
@@ -3046,7 +3003,7 @@
     body.set("assistant_original_prompt", assistant.original);
     body.set("assistant_suggestion", assistant.suggestion);
     if (assistant.correlationID) body.set("correlation_id", assistant.correlationID);
-    ["input_image", "input_image_2", "input_image_3", "input_image_4"].forEach((name, index) => body.set(name, uploadedImages.get(index + 1) || ""));
+    ["input_image", "input_image_2", "input_image_3", "input_image_4"].forEach((name, index) => body.set(name, index < activeMaxInputImages() ? (uploadedImages.get(index + 1) || "") : ""));
     for (let index = 1; index <= 4; index += 1) {
       body.delete(`image_role_${index}`);
       body.delete(`image_source_${index}`);
@@ -3066,15 +3023,15 @@
     return new URLSearchParams(body);
   };
 
-  const pendingDraftFiles = () => [
-    ...imageSlots.filter((item) => item.index <= activeMaxInputImages() && !uploadedImages.get(item.index))
+  const pendingDraftFiles = ({ all = false } = {}) => [
+    ...imageSlots.filter((item) => (all || item.index <= activeMaxInputImages()) && !uploadedImages.get(item.index))
       .map((item) => ({ field: imageDraftField(item.index), source: selectedImageFile(item) || gallerySelections.get(item.index), upload: () => uploadSelectedImage(item), state: item.state })),
-    { field: "input_audio", source: hasPendingMiniMaxAudio() ? miniMaxAudioFile.files[0] : null, upload: () => uploadSelectedAV("audio"), state: miniMaxAudioState },
-    { field: "input_video", source: hasPendingMiniMaxVideo() ? miniMaxVideoFile.files[0] : null, upload: () => uploadSelectedAV("video"), state: miniMaxVideoState },
+    { field: "input_audio", source: (all || miniMaxAudioIsAvailable()) && !uploadedAudio ? miniMaxAudioFile?.files?.[0] : null, upload: () => uploadSelectedAV("audio"), state: miniMaxAudioState },
+    { field: "input_video", source: (all || miniMaxReferencesAreAvailable()) && !uploadedVideo ? miniMaxVideoFile?.files?.[0] : null, upload: () => uploadSelectedAV("video"), state: miniMaxVideoState },
   ].filter((item) => item.source);
 
   const captureGenerationDraft = () => {
-    const pending = pendingDraftFiles();
+    const pending = pendingDraftFiles({ all: true });
     // Save text first. Upload one reference in the background and save its ID next.
     const next = !pendingMediaUploads.size && pending.find((item) => draftUploadAttempts.get(item.field) !== item.source);
     if (next) {
@@ -3085,9 +3042,15 @@
       }).finally(markDraftDirty);
     }
     const body = buildGenerationPayload();
+    imageSlots.forEach((item) => {
+      body.set(imageDraftField(item.index), uploadedImages.get(item.index) || "");
+      body.set(`image_role_${item.index}`, item.savedReferenceRole ?? item.role?.value ?? "details");
+    });
+    body.set("input_audio", uploadedAudio);
+    body.set("input_video", uploadedVideo);
     const names = new Set([...form.elements].map((control) => control.name).filter(Boolean));
     names.forEach((name) => {
-      if (name.startsWith("input_image") || ["input_audio", "input_video"].includes(name)) return;
+      if (name.startsWith("input_image") || /^image_role_[1-4]$/.test(name) || ["input_audio", "input_video"].includes(name)) return;
       const candidates = namedControlCandidates(name);
       const control = candidates.find((item) => item.type !== "radio" || item.checked);
       if (!control || ["file", "submit", "button"].includes(control.type)) return;
@@ -3152,13 +3115,18 @@
         if (generationAdvanced) generationAdvanced.open = false;
         draftAdvancedOpen = false;
         syncWorkflowFields();
+        const first = root.querySelector(".scenario-choice:not(:disabled)");
+        if (first) chooseScenario(first);
         showStep(1);
         return;
       }
       applySavedValues(values, { openStep: false });
       imageSlots.forEach((item) => {
         const role = values[`image_role_${item.index}`];
-        if (item.role && [...item.role.options].some((option) => option.value === role)) item.role.value = role;
+        if (item.role && [...item.role.options].some((option) => option.value === role)) {
+          if (item.savedReferenceRole !== undefined) item.savedReferenceRole = role;
+          else item.role.value = role;
+        }
       });
       syncImageSlots();
       (draft.assets || []).forEach((asset) => {
@@ -3213,7 +3181,8 @@
       }
       syncBatchBuilder();
       syncGenerationSummary();
-      updateWorkflowNext();
+      syncImageSlots();
+      syncStudioSelection();
       showStep(Math.max(1, Math.min(3, Number(values.draft_step) || 2)));
     } finally { restoringDraft = false; }
   };
@@ -3221,7 +3190,7 @@
   const initializeGenerationDraft = () => {
     draftController = generationModules.draft?.bindUI?.({
       document, window, capture: captureGenerationDraft, apply: applyGenerationDraft,
-      hasUnsavedFiles: () => pendingDraftFiles().length > 0,
+      hasUnsavedFiles: () => pendingDraftFiles({ all: true }).length > 0,
       transport: async (operation, body) => {
         if (body) body.set("csrf", form.elements.csrf?.value || "");
         const response = await fetch(operation === "delete" ? "/generate/draft/delete" : "/generate/draft", {
@@ -3279,9 +3248,7 @@
   const revealPreflightField = (name) => {
     const field = preflightField(name);
     if (!field) return false;
-    const panel = field.closest("[data-step]");
-    const step = Number(panel?.dataset.step || 0);
-    if (step > 0 && step !== wizardSlice.get().step) showStep(step);
+    studio?.revealField(field);
     for (let details = field.closest("details"); details; details = details.parentElement?.closest("details")) {
       details.open = true;
     }
@@ -3346,14 +3313,17 @@
     if (preflightButton) preflightButton.disabled = true;
     if (preflightRepeat) preflightRepeat.disabled = true;
     try {
+      await prepareActiveMedia();
+      const checkedBody = buildGenerationPayload();
       const response = await fetch("/generate/preflight", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-        body: buildGenerationPayload(),
+        body: checkedBody,
         credentials: "same-origin",
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "Не удалось проверить готовность workflow");
+      if (checkedBody.toString() !== buildGenerationPayload().toString()) throw new Error("Настройки изменились во время проверки. Проверьте их ещё раз.");
       renderPreflight(payload);
       if (reveal) preflight?.scrollIntoView({ block: "center", behavior: "smooth" });
       return Boolean(payload.ok);
@@ -4357,6 +4327,7 @@
     activeGenerationRequestID = requestID;
     persistActiveGeneration();
     result.hidden = false;
+    studio?.show("result");
     runProgress.hidden = false;
     result.classList.remove("has-error");
     resultTitle.textContent = "Восстанавливаем генерацию";
@@ -4416,10 +4387,10 @@
     generationSubmit.disabled = true;
     generationSubmit.classList.add("is-loading");
     result.hidden = false;
+    studio?.show("result");
     result.classList.remove("has-error");
     resultTitle.textContent = "Создаём пакет вариантов";
     resultStatus.textContent = "Проверяем варианты и резервируем лимит одной транзакцией...";
-    outputGrid.replaceChildren();
     runProgress.hidden = true;
     setGenerationActions();
     try {
@@ -4473,12 +4444,7 @@
     syncGenerationHistoryVisibility({ persist: true });
   });
   generationOpenExact?.addEventListener("click", () => {
-    if (!generationAdvanced) return;
-    generationAdvanced.open = true;
-    generationAdvanced.scrollIntoView({ block: "start", behavior: "smooth" });
-    if (isMiniMaxSelected()) {
-      generationAdvanced.querySelector(".minimax-video-settings select, .minimax-video-settings input")?.focus({ preventScroll: true });
-    }
+    studio?.openSettings();
   });
   form.addEventListener("input", () => {
     syncGenerationSummary();
@@ -4530,17 +4496,21 @@
     }
   });
 
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    if (hasMissingDraftAssets() || pendingDraftFiles().length) {
-      showRepeatNotice("Проверьте материалы", "В черновике есть недоступные или ещё не загруженные файлы. Замените их или удалите перед запуском.", true);
-      showStep(2);
+  const submitGeneration = async () => {
+    if (!form.checkValidity()) {
+      const invalid = [...form.elements].find((field) => field.willValidate && !field.validity.valid);
+      studio?.revealField(invalid);
+      invalid?.reportValidity();
       return;
     }
-    if (!selectedChoice() || !selectedGenerationWorkflow() || !model?.value || !positive.value.trim()) return;
+    if (!selectedChoice() || !selectedGenerationWorkflow() || !model?.value || !positive.value.trim()) {
+      studio?.revealField(!positive.value.trim() ? positive : model);
+      return;
+    }
     const batchLaunch = Boolean(batchEnabled?.checked);
     if (!batchLaunch && (activeGenerationID || activeGenerationRequestID)) {
       result.hidden = false;
+      studio?.show("result");
       resultTitle.textContent = "Генерация уже выполняется";
       resultStatus.textContent = "Сначала дождитесь результата или отмените текущую задачу.";
       return;
@@ -4576,13 +4546,13 @@
     submit.disabled = true;
     submit.classList.add("is-loading");
     result.hidden = false;
+    studio?.show("result");
     activeGenerationRequestID = newGenerationRequestID();
     activeGenerationID = "";
     persistActiveGeneration();
     setGenerationActions();
     resultTitle.textContent = "Генерация выполняется";
     resultStatus.textContent = "Ставим задачу в очередь ComfyUI...";
-    outputGrid.replaceChildren();
     result.classList.remove("has-error");
     runProgress.hidden = false;
     setGenerationProgress("Подготовка", "Проверяем параметры схемы генерации", null);
@@ -4637,11 +4607,19 @@
       submit.disabled = false;
       submit.classList.remove("is-loading");
     }
+  };
+  let submitInFlight = false;
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (submitInFlight) return;
+    submitInFlight = true;
+    try { await submitGeneration(); }
+    finally { submitInFlight = false; }
   });
 
   const initialID = root.dataset.selectedWorkflow || "";
   const workflowCapabilitiesReady = loadWorkflowCapabilities();
-  const initial = initialID ? root.querySelector(`[data-workflow-id="${CSS.escape(initialID)}"]`) : null;
+  const initial = (initialID ? root.querySelector(`[data-workflow-id="${CSS.escape(initialID)}"]:not(:disabled)`) : null) || root.querySelector(".scenario-choice:not(:disabled)");
   if (initial) chooseScenario(initial);
   workflowCapabilitiesReady.finally(async () => {
     await initializeGenerationDraft();
@@ -4670,6 +4648,7 @@
     activeGenerationID = savedGeneration.promptID || "";
     if (activeGenerationID) {
       result.hidden = false;
+      studio?.show("result");
       runProgress.hidden = false;
       resultTitle.textContent = "Восстанавливаем генерацию";
       resultStatus.textContent = "Проверяем сохранённую задачу в Gateway...";

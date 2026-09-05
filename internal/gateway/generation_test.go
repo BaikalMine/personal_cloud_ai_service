@@ -40,13 +40,13 @@ func TestGenerateTemplateRenders(t *testing.T) {
 	if !strings.Contains(output.String(), "data-comfy-generation") || !strings.Contains(output.String(), "/static/generate.js") ||
 		!strings.Contains(output.String(), "/static/generation-store.js") || !strings.Contains(output.String(), "/static/generation-media.js") ||
 		!strings.Contains(output.String(), "/static/generation-summary.js") || !strings.Contains(output.String(), "Krea 2: фото и промт") ||
-		!strings.Contains(output.String(), "Выберите workflow и модель") || !strings.Contains(output.String(), "Что будет создавать результат") ||
+		!strings.Contains(output.String(), "studio-workspace") || !strings.Contains(output.String(), "studio-settings") ||
 		!strings.Contains(output.String(), "generation-editor-profile") || !strings.Contains(output.String(), "prompt-assistant-template") ||
 		!strings.Contains(output.String(), "Перенос внешности и редактирование") || !strings.Contains(output.String(), "prompt-assistant-think") ||
 		!strings.Contains(output.String(), "Максимум деталей · 4,7 Мп") || !strings.Contains(output.String(), "data-gallery-image-picker-open") ||
-		!strings.Contains(output.String(), "Из моих генераций") || !strings.Contains(output.String(), "generation-image-picker-refresh") ||
+		!strings.Contains(output.String(), "Из результатов") || !strings.Contains(output.String(), "generation-image-picker-refresh") ||
 		!strings.Contains(output.String(), "generation-image-picker-grid") || !strings.Contains(output.String(), `data-requires-advanced-settings="true"`) {
-		t.Fatal("generation template did not render the wizard")
+		t.Fatal("generation template did not render the studio")
 	}
 }
 

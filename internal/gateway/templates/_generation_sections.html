@@ -1,0 +1,772 @@
+{{define "studio_notices"}}
+<section class="generation-repeat-notice" id="generation-repeat-notice" hidden aria-live="polite">
+    <div><strong id="generation-repeat-title">Параметры перенесены</strong><span id="generation-repeat-message"></span></div>
+    <button type="button" id="generation-repeat-dismiss" aria-label="Закрыть уведомление">&#10005;</button>
+  </section>
+{{end}}
+
+{{define "studio_draft"}}
+<section class="generation-draft-bar" id="generation-draft-bar" aria-label="Черновик генерации" hidden>
+    <div><strong>Черновик</strong><span id="generation-draft-status" role="status" aria-live="polite">Загружаем...</span><small id="generation-draft-expiry"></small></div>
+    <div class="generation-draft-actions">
+      <button type="button" class="button ghost" id="generation-draft-save">Сохранить</button>
+      <button type="button" class="button ghost" id="generation-draft-remote" hidden>Взять сохранённый</button>
+      <button type="button" class="button ghost" id="generation-draft-local" hidden>Сохранить мои правки</button>
+      <button type="button" class="button ghost" id="generation-draft-delete" disabled>Удалить черновик</button>
+    </div>
+  </section>
+{{end}}
+
+{{define "studio_queue"}}
+<section class="generation-queue" id="generation-queue" hidden aria-live="polite"><span>Очередь сервера</span><strong id="generation-queue-title"></strong><small id="generation-queue-details"></small></section>
+{{end}}
+
+{{define "studio_scenarios"}}
+<div class="studio-tasks ui-segmented" role="group" aria-label="Что создать">
+        {{range .Workflows}}
+        <button class="ui-segment scenario-choice" type="button" aria-pressed="false" title="{{if .Restriction}}{{.Restriction}}{{else}}{{.Description}}{{end}}" data-workflow-id="{{.ID}}" data-requires-image="{{.RequiresImage}}" data-allows-images="{{.AllowsImages}}" {{if .Restricted}}disabled{{end}}>
+          <strong>{{if .AllowsImages}}Видео{{else if .RequiresImage}}Редактировать фото{{else}}Изображение{{end}}</strong>
+        </button>
+        {{end}}
+      </div>
+{{end}}
+
+{{define "studio_workflows"}}
+<div class="studio-workflows generation-workflow-choices" role="group" aria-label="Способ обработки">
+        {{range .GenerationPresets}}
+        <button class="workflow-choice generation-workflow-choice" type="button" data-preset-id="{{.ID}}" data-template-id="{{.TemplateID}}" data-family="{{.Family}}" data-default-model-id="{{.ModelID}}" data-available="{{if and .Available (not .Restricted)}}true{{else}}false{{end}}" data-default-steps="{{.DefaultSteps}}" data-default-cfg="{{.DefaultCFG}}" data-default-sampler="{{.DefaultSampler}}" data-default-scheduler="{{.DefaultScheduler}}" data-default-lora-strength="{{.LoraStrength}}" data-requires-image="{{.RequiresImage}}" data-allows-images="{{.AllowsImages}}" data-max-input-images="{{.MaxInputImages}}" {{if or (not .Available) .Restricted}}disabled{{end}}>
+          <span><strong>{{.Name}}</strong>{{if .Reason}}<small>{{.Reason}}</small>{{end}}{{if .Restriction}}<small>{{.Restriction}}</small>{{end}}</span>
+        </button>
+        {{end}}
+      </div>
+<p class="generation-model-note" id="generation-workflow-note" hidden>Для выбранного сценария пока нет готовой схемы генерации.</p>
+{{end}}
+
+{{define "studio_model"}}
+<section class="generation-model-picker" id="generation-model-field" hidden>
+        <label class="ui-field"><span class="ui-field-label">Выберите модель
+          </span><select name="model" id="generation-model" required><option value="">Выберите модель</option>{{range .QuickModels}}<option value="{{.ID}}" data-family="{{.Family}}" data-available="{{.Available}}" data-default-steps="{{.DefaultSteps}}" data-default-cfg="{{.DefaultCFG}}" data-default-sampler="{{.DefaultSampler}}" data-default-scheduler="{{.DefaultScheduler}}" data-default-lora-strength="{{.LoraStrength}}" data-video-integrated-turbo="{{.VideoIntegratedTurbo}}" data-video-reference-only="{{.VideoReferenceOnly}}" data-default-video-shift="{{.DefaultVideoShift}}" data-default-audio-shift="{{.DefaultAudioShift}}" {{if not .Available}}disabled{{end}}>{{.DisplayName}}{{if .Reason}} — {{.Reason}}{{end}}</option>{{end}}</select>
+        </label>
+      </section>
+{{end}}
+
+{{define "studio_video_mode"}}
+<section class="minimax-video-mode" id="minimax-video-mode" hidden>
+        <strong class="studio-section-label">Способ создания видео</strong>
+        <div class="minimax-mode-segments ui-segmented" role="radiogroup" aria-label="Способ создания видео MiniMax H3">
+          <label>
+            <input type="radio" name="video_mode" value="frames" aria-describedby="minimax-video-mode-hint" checked>
+            <span class="minimax-mode-option">
+              <span class="minimax-mode-option-head"><b>По описанию и кадрам</b></span>
+              <small>Начало и финал · 0–2 фото</small>
+            </span>
+          </label>
+          <label>
+            <input type="radio" name="video_mode" value="references" aria-describedby="minimax-video-mode-hint">
+            <span class="minimax-mode-option">
+              <span class="minimax-mode-option-head"><b>По референсам</b></span>
+              <small>0–4 фото, аудио и видео</small>
+            </span>
+          </label>
+        </div>
+        <small id="minimax-video-mode-hint" class="field-hint" aria-live="polite"></small>
+        <section class="minimax-reference-media" id="minimax-reference-media" hidden>
+          <div class="minimax-reference-media-grid">
+            <section class="minimax-media-card" id="minimax-audio-reference">
+              <label class="upload-zone" for="minimax-audio-file"><span class="upload-slot-label">Аудио · необязательно</span><span class="upload-icon" aria-hidden="true">♪</span><strong>Добавить аудиореференс</strong><small>WAV, MP3, OGG, M4A, FLAC · до 32 МБ</small><input id="minimax-audio-file" type="file" accept="audio/wav,audio/mpeg,audio/ogg,audio/mp4,audio/x-m4a,audio/flac"></label>
+              <div class="upload-preview audio-upload-preview" id="minimax-audio-preview" hidden><span><strong id="minimax-audio-name"></strong><small id="minimax-audio-state">Готово к загрузке</small></span><button class="upload-remove" type="button" id="minimax-audio-remove" aria-label="Удалить аудиореференс">×</button></div>
+              <small class="field-hint">Задаёт голос, музыку или окружение. Финальную дорожку синтезирует MiniMax H3.</small>
+            </section>
+            <section class="minimax-media-card" id="minimax-video-reference">
+              <label class="upload-zone" for="minimax-video-file"><span class="upload-slot-label">Видео · необязательно</span><span class="upload-icon upload-icon-video" aria-hidden="true">▶</span><strong>Добавить видеореференс</strong><small>MP4, WEBM, MOV или MKV · до 512 МБ</small><input id="minimax-video-file" type="file" accept="video/mp4,video/webm,video/quicktime,video/x-matroska"></label>
+              <div class="upload-preview minimax-video-upload-preview" id="minimax-video-preview" hidden><video id="minimax-video-preview-media" muted playsinline preload="metadata"></video><span><strong id="minimax-video-name"></strong><small id="minimax-video-state">Готово к загрузке</small></span><button class="upload-remove" type="button" id="minimax-video-remove" aria-label="Удалить видеореференс">×</button></div>
+              <small class="field-hint">Передаёт движение, сцену или ритм как отдельный видеореференс.</small>
+              <div class="ui-field-grid minimax-video-reference-options">
+                <label class="ui-field"><span class="ui-field-label">Начало фрагмента, сек</span><input name="video_reference_start" type="number" min="0" max="600" step="0.1" value="0"></label>
+                <label class="ui-field"><span class="ui-field-label">Длина фрагмента, сек</span><input name="video_reference_duration" type="number" min="1" max="15" step="1" value="5"></label>
+                <label class="minimax-inline-toggle ui-choice ui-choice--compact"><input name="video_reference_audio" type="checkbox" value="true" checked><span>Использовать звук видео</span></label>
+              </div>
+            </section>
+          </div>
+        </section>
+      </section>
+{{end}}
+
+{{define "studio_mode_guide"}}
+<section class="generation-mode-guide" id="generation-mode-guide" hidden aria-live="polite">
+        <div class="generation-mode-guide-copy"><span id="generation-mode-guide-eyebrow">Текущий способ</span><strong id="generation-mode-guide-title"></strong><p id="generation-mode-guide-description"></p></div>
+        <dl class="generation-mode-guide-facts" id="generation-mode-guide-facts"></dl>
+        <p class="generation-mode-guide-advice" id="generation-mode-guide-advice"></p>
+      </section>
+{{end}}
+
+{{define "studio_sources"}}
+<div id="image-source-fields" hidden>
+        <p class="image-source-note" id="image-source-note">Первое фото обязательно. Дополнительные файлы используются как референсы.</p>
+        <div class="source-image-grid">
+          <section class="source-image-card studio-source" data-image-slot="1">
+  <strong class="studio-source-label" data-image-slot-label>Фото 1</strong>
+  <div class="upload-preview" data-image-preview hidden><img data-image-preview-image alt="Предпросмотр основного фото"><span><strong data-image-name></strong><small data-image-state>Готово к загрузке</small></span><button class="upload-remove" type="button" data-remove-image aria-label="Удалить основное фото">×</button></div>
+  <div class="studio-source-actions">
+    <label class="button ghost studio-device" for="source-image"><i data-lucide="upload" aria-hidden="true"></i><span>С устройства</span><input id="source-image" data-image-file type="file" accept="image/png,image/jpeg,image/webp"></label>
+    <div data-gallery-image-picker-choice hidden><button class="button ghost" type="button" data-gallery-image-picker-open><i data-lucide="images" aria-hidden="true"></i><span>Из результатов</span></button></div>
+  </div>
+  <label class="ui-field image-reference-role"><span class="ui-field-label">Роль в промте</span><select data-image-role><option value="base_scene">Основной кадр и композиция</option><option value="identity">Внешность и лицо</option><option value="wardrobe_object">Одежда, предмет или материал</option><option value="pose_composition">Поза и ракурс</option><option value="style">Стиль, свет и цвет</option><option value="background">Фон и окружение</option><option value="details">Текст и мелкие детали</option></select></label>
+</section>
+          <section class="source-image-card studio-source" data-image-slot="2">
+  <strong class="studio-source-label" data-image-slot-label>Фото 2</strong>
+  <div class="upload-preview" data-image-preview hidden><img data-image-preview-image alt="Предпросмотр второго фото"><span><strong data-image-name></strong><small data-image-state>Готово к загрузке</small></span><button class="upload-remove" type="button" data-remove-image aria-label="Удалить второе фото">×</button></div>
+  <div class="studio-source-actions">
+    <label class="button ghost studio-device" for="source-image-2"><i data-lucide="upload" aria-hidden="true"></i><span>С устройства</span><input id="source-image-2" data-image-file type="file" accept="image/png,image/jpeg,image/webp"></label>
+    <div data-gallery-image-picker-choice hidden><button class="button ghost" type="button" data-gallery-image-picker-open><i data-lucide="images" aria-hidden="true"></i><span>Из результатов</span></button></div>
+  </div>
+  <label class="ui-field image-reference-role"><span class="ui-field-label">Роль в промте</span><select data-image-role><option value="base_scene">Основной кадр и композиция</option><option value="identity" selected>Внешность и лицо</option><option value="wardrobe_object">Одежда, предмет или материал</option><option value="pose_composition">Поза и ракурс</option><option value="style">Стиль, свет и цвет</option><option value="background">Фон и окружение</option><option value="details">Текст и мелкие детали</option></select></label>
+</section>
+          <section class="source-image-card studio-source" data-image-slot="3">
+  <strong class="studio-source-label" data-image-slot-label>Фото 3</strong>
+  <div class="upload-preview" data-image-preview hidden><img data-image-preview-image alt="Предпросмотр третьего фото"><span><strong data-image-name></strong><small data-image-state>Готово к загрузке</small></span><button class="upload-remove" type="button" data-remove-image aria-label="Удалить третье фото">×</button></div>
+  <div class="studio-source-actions">
+    <label class="button ghost studio-device" for="source-image-3"><i data-lucide="upload" aria-hidden="true"></i><span>С устройства</span><input id="source-image-3" data-image-file type="file" accept="image/png,image/jpeg,image/webp"></label>
+    <div data-gallery-image-picker-choice hidden><button class="button ghost" type="button" data-gallery-image-picker-open><i data-lucide="images" aria-hidden="true"></i><span>Из результатов</span></button></div>
+  </div>
+  <label class="ui-field image-reference-role"><span class="ui-field-label">Роль в промте</span><select data-image-role><option value="base_scene">Основной кадр и композиция</option><option value="identity">Внешность и лицо</option><option value="wardrobe_object">Одежда, предмет или материал</option><option value="pose_composition">Поза и ракурс</option><option value="style" selected>Стиль, свет и цвет</option><option value="background">Фон и окружение</option><option value="details">Текст и мелкие детали</option></select></label>
+</section>
+          <section class="source-image-card studio-source" data-image-slot="4">
+  <strong class="studio-source-label" data-image-slot-label>Фото 4</strong>
+  <div class="upload-preview" data-image-preview hidden><img data-image-preview-image alt="Предпросмотр четвёртого фото"><span><strong data-image-name></strong><small data-image-state>Готово к загрузке</small></span><button class="upload-remove" type="button" data-remove-image aria-label="Удалить четвёртое фото">×</button></div>
+  <div class="studio-source-actions">
+    <label class="button ghost studio-device" for="source-image-4"><i data-lucide="upload" aria-hidden="true"></i><span>С устройства</span><input id="source-image-4" data-image-file type="file" accept="image/png,image/jpeg,image/webp"></label>
+    <div data-gallery-image-picker-choice hidden><button class="button ghost" type="button" data-gallery-image-picker-open><i data-lucide="images" aria-hidden="true"></i><span>Из результатов</span></button></div>
+  </div>
+  <label class="ui-field image-reference-role"><span class="ui-field-label">Роль в промте</span><select data-image-role><option value="base_scene">Основной кадр и композиция</option><option value="identity">Внешность и лицо</option><option value="wardrobe_object">Одежда, предмет или материал</option><option value="pose_composition">Поза и ракурс</option><option value="style">Стиль, свет и цвет</option><option value="background">Фон и окружение</option><option value="details" selected>Текст и мелкие детали</option></select></label>
+</section>
+        </div>
+      </div>
+{{end}}
+
+{{define "studio_guides"}}
+<section class="workflow-guides" aria-label="Мини-гайд по выбранной схеме" hidden>
+        <details class="workflow-mini-guide" data-workflow-guide="text" hidden>
+          <summary><span>Мини-гайд: генерация из текста</span><small>Промт, качество, LoRA и апскейл: четыре практические подсказки.</small></summary>
+          <div class="workflow-mini-guide-grid">
+            <section><strong>Промт задаёт сцену</strong><p>Сначала назовите главный объект, затем действие или позу, окружение, свет и стиль. Один чёткий сюжет даёт более стабильный результат, чем несколько несвязанных идей в одной строке.</p></section>
+            <section><strong>Негативный промт</strong><p>Используйте его для постоянных нежелательных дефектов: размытия, лишних конечностей, текста или водяных знаков. Не повторяйте там то, что уже попросили в позитивном промте.</p></section>
+            <section><strong>Качество и размер</strong><p>Начните с «Оптимального» профиля. Повышайте мегапиксели только для финального кадра: это увеличивает детализацию, время генерации и потребление видеопамяти.</p></section>
+            <section><strong>LoRA и апскейл</strong><p>Подключайте LoRA по одной и начинайте с рекомендованной силы. Апскейл улучшает финальные детали, но не исправляет исходную композицию: сначала добейтесь удачного базового изображения.</p></section>
+          </div>
+        </details>
+        <details class="workflow-mini-guide" data-workflow-guide="krea-edit" hidden>
+          <summary><span>Мини-гайд: Krea2 «Фото и промт»</span><small>Как удержать исходник, использовать референсы и не переусердствовать с обработкой.</small></summary>
+          <div class="workflow-mini-guide-grid">
+            <section><strong>Главное фото</strong><p>Первое изображение задаёт лицо, позу, кадр и композицию. Опишите в промте именно изменение: например, замену одежды, фона или материала, а не пересказывайте всё фото.</p></section>
+            <section><strong>Второй референс</strong><p>Добавляйте второе фото, когда нужно перенести внешность, одежду, предмет, стиль или свет. Выберите его роль: так ассистент поймёт, что брать из каждого фото.</p></section>
+            <section><strong>Сохранение и апскейл</strong><p>«Сохранение исходника» удерживает сходство с первым фото. Оставьте 4 для обычного редактирования; повышайте аккуратно, если Krea2 слишком меняет лицо или композицию. Апскейл добавляет детали после основного прохода.</p></section>
+            <section><strong>Кожа и цвет</strong><p>Начните с профиля Natural. Сильная очистка, сглаживание или цветокоррекция способны убрать фактуру и сделать фото искусственным, поэтому меняйте параметры небольшими шагами.</p></section>
+          </div>
+        </details>
+        <details class="workflow-mini-guide" data-workflow-guide="flux-edit" hidden>
+          <summary><span>Мини-гайд: Flux2 «Фото и промт»</span><small>Точная правка, роли референсов, LoRA и выбор финального апскейла.</small></summary>
+          <div class="workflow-mini-guide-grid">
+            <section><strong>Точное редактирование</strong><p>Первое фото остаётся базовой сценой. Сформулируйте только нужное изменение и явно попросите сохранить лицо, ракурс, позу, свет и композицию, если менять их не требуется.</p></section>
+            <section><strong>Несколько изображений</strong><p>Используйте дополнительные файлы как референсы для внешности, одежды, предметов, стиля или фона. Карта референсов показывает их порядок, а ассистент учитывает выбранную роль каждого фото.</p></section>
+            <section><strong>Размер и семплирование</strong><p>Сохранение исходного размера подходит для ретуши. Изменение кадра используйте, когда нужна новая пропорция. Начните с текущих значений шагов, CFG и Guidance: их повышение не всегда делает результат лучше.</p></section>
+            <section><strong>LoRA и финальный апскейл</strong><p>LoRA усиливает конкретный стиль или деталь, поэтому добавляйте её после удачной базовой правки. Ultimate SD Upscale и SeedVR2 требуют больше времени и VRAM; включайте их для финала, а не для каждой пробы.</p></section>
+          </div>
+        </details>
+        <details class="workflow-mini-guide" data-workflow-guide="video" hidden>
+          <summary><span>MiniMax H3 v5: как собрать ролик</span><small>Режим, исходники, промт, память и финальная обработка без терминологии нод.</small></summary>
+          <div class="workflow-mini-guide-grid">
+            <section><strong>T2VA / I2VA / FL2VA · точные кадры</strong><p>Без фото работает T2VA по тексту. Фото 1 включает I2VA и становится точным первым кадром. Фото 1 и Фото 2 включают FL2VA и задают точные начало и финал, поэтому промт описывает один достижимый непрерывный переход между ними.</p></section>
+            <section><strong>REF2VA · свободные референсы</strong><p>Этот режим тоже создаёт видео по промту и может работать без файлов. До четырёх фото передают внешность, одежду, предметы, стиль или сцену; видео — движение и работу камеры; аудио — голос, музыку или окружение.</p></section>
+            <section><strong>Размер кадра</strong><p>При наличии Фото 1 его пропорции используются по умолчанию. Качество 480–1440 ограничивает длинную сторону, а обе стороны выравниваются до 32 px. Без фото выберите формат кадра вручную.</p></section>
+            <section><strong>Модели и Turbo</strong><p>Gateway сам подключает подходящую внутреннюю ветку для выбранного способа. Внешний Turbo опционален; модели со встроенным Turbo получают подходящее число шагов автоматически.</p></section>
+            <section><strong>Промт-ассистент</strong><p>Ассистент получает тот же режим и порядок файлов, что MiniMax: точные первый и последний кадры либо до четырёх свободных фото. Он анализирует каждый материал и собирает один редактируемый план. Для видео и аудио явно напишите, что брать: движение, сцену, голос, музыку или окружение.</p></section>
+            <section><strong>Длительность и память</strong><p>5–15 секунд — основной проверенный диапазон; более длинные ролики экспериментальны и заметно тяжелее. Memory Optimization и очистка VRAM включены. Low VRAM Attention и Chunk FeedForward из v5 оставлены опциональными для случаев нехватки памяти.</p></section>
+            <section><strong>RIFE, RTX и Sharpen</strong><p>RIFE добавляет промежуточные кадры, RTX увеличивает разрешение, Sharpen подчёркивает детали. Они выполняются именно в таком порядке. Все этапы опциональны: сначала получите удачный базовый ролик, затем включайте нужные улучшения.</p></section>
+            <section><strong>Звук и экспорт</strong><p>MiniMax генерирует финальную аудиодорожку вместе с видео. Аудиофайл или звук видеореференса используются как ориентир в режиме свободных референсов. Gateway сохраняет H.264 с yuv420p, чтобы ролик открывался в браузере и на Android.</p></section>
+          </div>
+        </details>
+      </section>
+{{end}}
+
+{{define "studio_profiles"}}
+<div class="generation-profile-picker">
+          <strong class="studio-section-label">Качество</strong>
+          <div class="generation-profile-actions ui-segmented ui-segmented--cards" role="group" aria-label="Профиль качества">
+            <button type="button" class="generation-profile-button ui-segment" data-generation-profile="draft"><strong>Быстро</strong></button>
+            <button type="button" class="generation-profile-button ui-segment is-active" data-generation-profile="balanced"><strong>Баланс</strong></button>
+            <button type="button" class="generation-profile-button ui-segment" data-generation-profile="maximum"><strong>Детальнее</strong></button>
+          </div>
+        </div>
+{{end}}
+
+{{define "studio_recipes"}}
+<div class="generation-recipe-bar" id="generation-recipe-bar">
+          <label class="ui-field"><span class="ui-field-label">Мои наборы</span><select id="generation-recipe-select"><option value="">Выберите сохранённый набор</option></select></label>
+          <button type="button" class="button ghost" id="generation-recipe-apply" disabled>Применить набор</button>
+          <button type="button" class="button ghost" id="generation-recipe-delete" disabled>Удалить</button>
+          <label class="ui-field generation-recipe-save"><span class="ui-field-label">Сохранить текущие настройки</span><input id="generation-recipe-name" maxlength="80" placeholder="Например: портрет для соцсетей"></label>
+          <button type="button" class="button ghost" id="generation-recipe-save">Сохранить</button>
+          <small id="generation-recipe-state" aria-live="polite"></small>
+        </div>
+{{end}}
+
+{{define "studio_prompt"}}
+<div class="generation-prompt-fields">
+        <label class="ui-field"><span class="ui-field-label"><span id="generation-positive-prompt-label">Позитивный промт</span></span><textarea name="positive_prompt" id="positive-prompt" rows="6" maxlength="4000" placeholder="Например: портрет в мягком вечернем свете, высокая детализация" required></textarea></label>
+        <label class="ui-field" id="generation-negative-prompt-field"><span class="ui-field-label">Негативный промт</span><textarea name="negative_prompt" id="negative-prompt" rows="6" maxlength="4000" placeholder="Например: blurry, low quality, deformed hands"></textarea></label>
+      </div>
+{{end}}
+
+{{define "studio_reference_map"}}
+<section class="generation-reference-map" id="generation-reference-map" hidden aria-live="polite"><div><strong>Карта референсов</strong><small>Ассистент использует эти номера в промте: выберите, что именно брать из каждого изображения.</small></div><div class="generation-reference-map-list" id="generation-reference-map-list"></div></section>
+{{end}}
+
+{{define "studio_assistant"}}
+<section class="prompt-assistant" id="prompt-assistant" aria-live="polite">
+        <label class="prompt-assistant-toggle ui-choice"><input type="checkbox" id="prompt-assistant-enabled"><span><strong>Промт-ассистент</strong><small id="prompt-assistant-description">Локальная модель подготовит вариант, но генерация начнётся только после вашего подтверждения.</small></span></label>
+        <div class="prompt-assistant-controls" id="prompt-assistant-controls" hidden>
+          <label class="ui-field"><span class="ui-field-label">Шаблон ассистента</span><select id="prompt-assistant-template"><option value="workflow-default">Универсальный</option><option value="photographic">Редакционная фотография</option><option value="realistic">Естественный реализм</option><option value="anime">Иллюстрация и аниме</option><option value="nsfw">NSFW (Контент для взрослых)</option><option value="flux-edit" data-image-only>Перенос внешности и редактирование</option><option value="minimax-h3-fl2va" data-video-only data-video-mode="frames">MiniMax H3 · T2VA / I2VA / FL2VA</option><option value="minimax-h3-ref2va" data-video-only data-video-mode="references">MiniMax H3 REF2VA · свободные референсы</option></select></label>
+          <label class="prompt-assistant-think"><input type="checkbox" id="prompt-assistant-think"><span>Режим рассуждений</span></label>
+          <button type="button" class="button ghost" id="prompt-assistant-improve">Подготовить вариант</button>
+          <p class="prompt-assistant-state" id="prompt-assistant-state">Вариант будет создан локальной моделью e4b и затем выгружен из видеопамяти.</p>
+          <div class="prompt-assistant-review" id="prompt-assistant-review" hidden>
+            <header class="prompt-assistant-review-heading"><div><span>Проверка варианта</span><strong>Что понял и изменил ассистент</strong></div><small id="prompt-assistant-review-meta"></small></header>
+            <section class="prompt-assistant-reference-review" id="prompt-assistant-reference-review" hidden aria-labelledby="prompt-assistant-reference-title">
+              <div class="prompt-assistant-section-heading"><h3 id="prompt-assistant-reference-title">Референсы</h3><span id="prompt-assistant-reference-count"></span></div>
+              <ol id="prompt-assistant-reference-list"></ol>
+            </section>
+            <section class="prompt-assistant-diff" aria-labelledby="prompt-assistant-diff-title">
+              <div class="prompt-assistant-section-heading"><h3 id="prompt-assistant-diff-title">Сравнение промта</h3><span><i class="is-removed"></i>Убрано <i class="is-added"></i>Добавлено</span></div>
+              <div class="prompt-assistant-diff-grid">
+                <article><h4>Ваш текст</h4><div id="prompt-assistant-diff-original"></div></article>
+                <article><h4>Вариант ассистента</h4><div id="prompt-assistant-diff-suggestion"></div></article>
+              </div>
+            </section>
+            <label class="ui-field prompt-assistant-draft"><span class="ui-field-label">Итоговый вариант</span><textarea id="prompt-assistant-draft" rows="7" maxlength="4000"></textarea><small id="prompt-assistant-draft-limit">Можно изменить перед применением. До 4000 символов.</small></label>
+            <div class="prompt-assistant-actions"><button type="button" class="button" id="prompt-assistant-apply">Применить в промт</button><button type="button" class="button ghost" id="prompt-assistant-keep">Оставить мой промт</button></div>
+          </div>
+        </div>
+      </section>
+{{end}}
+
+{{define "studio_editor_profile"}}
+<section class="generation-editor-profile" id="generation-editor-profile" hidden aria-live="polite"><span class="workflow-choice-icon">IMG</span><div><strong id="generation-editor-profile-title"></strong><small id="generation-editor-profile-description"></small></div></section>
+{{end}}
+
+{{define "studio_selected_image"}}
+<section class="generation-selected-image" id="generation-selected-image" hidden aria-live="polite"><img id="generation-selected-image-preview" alt="Выбранное основное фото"><div><span>Основное фото</span><strong id="generation-selected-image-name"></strong><small id="generation-selected-image-details"></small></div></section>
+{{end}}
+
+{{define "studio_quality"}}
+<div class="generation-primary-fields" id="generation-quality-field">
+        <label class="ui-field"><span class="ui-field-label">Профиль качества Krea2</span><select id="generation-quality"><option value="fast">Быстрое · 1,0 Мп</option><option value="balanced" selected>Оптимальное · 1,9 Мп</option><option value="krea-2-5">Детальное · 2,5 Мп</option><option value="krea-3-2">Высокое · 3,2 Мп</option><option value="maximum">Максимальное · 4,0 Мп</option><option value="krea-4-7">Максимум деталей · 4,7 Мп</option></select></label>
+      </div>
+{{end}}
+
+{{define "studio_advanced"}}
+<details class="ui-disclosure generation-advanced" {{if not .CanUseAdvancedGenerationSettings}}hidden inert{{end}}><summary><span class="ui-disclosure-label">Точные настройки workflow</span><i data-lucide="chevron-down" aria-hidden="true"></i></summary><div class="workflow-settings">
+        <section class="workflow-settings-section minimax-video-settings minimax-v4-settings" hidden>
+          <div class="workflow-settings-heading minimax-settings-heading"><div><span>ГЕНЕРАЦИЯ</span><strong>Семплирование MiniMax H3 v5</strong><small>Модель задаёт безопасные значения при выборе. Меняйте их только для осознанного сравнения результатов.</small></div></div>
+          <div class="ui-field-grid minimax-parameter-grid">
+            <label class="ui-field minimax-field"><span class="ui-field-label">Seed</span><input name="seed" type="number" min="-1" value="-1"><small>-1 выбирает новый seed.</small></label>
+            <label class="ui-field minimax-field"><span class="ui-field-label">Сэмплер</span><select name="video_sampler" id="minimax-video-sampler"><option value="euler" selected>Euler · v5 рекомендует</option><option value="res_multistep">Res Multistep · совместимость v3</option></select><small>Режим Turbo использует собственный сэмплер.</small></label>
+            <label class="ui-field minimax-field"><span class="ui-field-label">Планировщик</span><select name="video_scheduler" id="minimax-video-scheduler"><option value="simple" selected>Simple · рекомендуем</option><option value="sgm_uniform">SGM Uniform</option><option value="karras">Karras</option><option value="exponential">Exponential</option><option value="beta">Beta</option><option value="normal">Normal</option></select><small>Simple соответствует workflow v5.</small></label>
+            <label class="ui-field minimax-field"><span class="ui-field-label">Video Sigma</span><input name="video_shift_video" id="minimax-video-shift-video" type="number" min="1" max="32" step="1" value="11"><small>11 для базовой модели, 12 для Eros Max.</small></label>
+            <label class="ui-field minimax-field"><span class="ui-field-label">Audio Sigma</span><input name="video_shift_audio" id="minimax-video-shift-audio" type="number" min="1" max="32" step="1" value="3"><small>3 для базовой модели, 7 для Eros Max.</small></label>
+          </div>
+          <div class="minimax-utility-grid">
+            <label class="minimax-utility-toggle ui-choice"><input name="video_sage_attention" type="checkbox" value="true" checked><span><strong>SageAttention</strong><small>Экономит VRAM на слоях внимания H3.</small></span></label>
+            <label class="minimax-utility-toggle ui-choice"><input name="video_clear_vram" type="checkbox" value="true" checked><span><strong>Поэтапно освобождать VRAM</strong><small>Очистка выполняется до sampler, перед VAE и после декодирования.</small></span></label>
+          </div>
+        </section>
+        <section class="workflow-settings-section minimax-video-settings minimax-v4-settings" hidden>
+          <div class="workflow-settings-heading minimax-settings-heading"><div><span>КАДР</span><strong>Подготовка ключевых кадров</strong><small>Эти параметры повторяют геометрию Aspect Ratio Simplifier. Они влияют только на Фото 1 и Фото 2 в режиме ключевых кадров.</small></div></div>
+          <div class="ui-field-grid minimax-parameter-grid minimax-frame-grid">
+            <label class="ui-field minimax-field"><span class="ui-field-label">Масштабирование</span><select name="video_resize_method"><option value="nearest-exact" selected>Nearest exact · workflow v5</option><option value="lanczos">Lanczos · фото</option><option value="bicubic">Bicubic</option><option value="bilinear">Bilinear</option><option value="area">Area</option><option value="nvidia_rtx_vsr">NVIDIA RTX VSR</option></select><small>Фильтр изменения размера.</small></label>
+            <label class="ui-field minimax-field"><span class="ui-field-label">Вписывание</span><select name="video_proportion"><option value="crop" selected>Заполнить и обрезать</option><option value="pad">Вписать с полями</option><option value="resize">Вписать без холста</option><option value="stretch">Растянуть</option><option value="total_pixels">Сохранить бюджет пикселей</option></select><small>Как согласовать разные пропорции.</small></label>
+            <label class="ui-field minimax-field"><span class="ui-field-label">Позиция обрезки</span><select name="video_crop_location"><option value="center" selected>По центру</option><option value="top">Сверху</option><option value="bottom">Снизу</option><option value="left">Слева</option><option value="right">Справа</option></select><small>Используется только для обрезки.</small></label>
+            <label class="ui-field minimax-field"><span class="ui-field-label">Цвет полей</span><input name="video_pad_color" value="0, 0, 0" maxlength="32"><small>RGB: 0–255 или 0–1.</small></label>
+          </div>
+        </section>
+        <section class="workflow-settings-section minimax-video-settings minimax-v4-settings" hidden>
+          <div class="workflow-settings-heading minimax-settings-heading"><div><span>H3 v5</span><strong>Память и ускорение внимания</strong><small>Low VRAM Attention и Chunk FeedForward экспериментальны и выключены по умолчанию. При артефактах сначала отключайте Sparse Attention; при OOM подключайте экономичные режимы по одному.</small></div></div>
+          <div class="video-enhancements minimax-optimizations">
+            <section class="video-enhancement">
+              <label class="ui-choice--row video-enhancement-toggle ui-choice"><input name="video_low_vram_attention" type="checkbox" value="true"><span><strong>Low VRAM Attention</strong><small>Разбивает attention по группам голов и снижает его пиковое потребление VRAM.</small></span><b>V5</b></label>
+              <div class="video-enhancement-settings video-enhancement-settings--compact">
+                <div class="ui-field-grid video-enhancement-fields">
+                  <label class="ui-field"><span class="ui-field-label">Группы голов</span><input name="video_low_vram_head_chunks" type="number" min="1" max="56" step="1" value="4"><small class="field-hint">4 — значение workflow v5. Больше групп экономит память, но добавляет накладные расходы.</small></label>
+                </div>
+              </div>
+            </section>
+            <section class="video-enhancement">
+              <label class="ui-choice--row video-enhancement-toggle ui-choice"><input name="video_chunk_feed_forward" type="checkbox" value="true"><span><strong>Chunk FeedForward</strong><small>Делит длинную последовательность токенов на части для снижения пика VRAM.</small></span><b>V5</b></label>
+              <div class="video-enhancement-settings video-enhancement-settings--compact">
+                <div class="ui-field-grid video-enhancement-fields">
+                  <label class="ui-field"><span class="ui-field-label">Число частей</span><input name="video_chunk_feed_forward_chunks" type="number" min="1" max="64" step="1" value="2"></label>
+                  <label class="ui-field"><span class="ui-field-label">Порог токенов</span><input name="video_chunk_feed_forward_threshold" type="number" min="256" max="262144" step="256" value="4096"><small class="field-hint">Разбиение включается только для последовательностей длиннее порога.</small></label>
+                </div>
+              </div>
+            </section>
+            <section class="video-enhancement">
+              <label class="ui-choice--row video-enhancement-toggle ui-choice"><input name="video_memory_optimize" type="checkbox" value="true" checked><span><strong>H3 Memory Optimization</strong><small>Ограничивает пиковые активации и управляет точностью вычислений.</small></span><b>VRAM</b></label>
+              <div class="video-enhancement-settings">
+                <div class="ui-field-grid minimax-optimization-fields">
+                  <label class="ui-field"><span class="ui-field-label">MLP память</span><select name="video_memory_mlp"><option value="auto" selected>Auto · рекомендуем</option><option value="off">Off</option></select></label>
+                  <label class="ui-field"><span class="ui-field-label">Точность</span><select name="video_memory_precision"><option value="Auto" selected>Auto</option><option value="BF16">BF16</option><option value="Preserve native">Preserve native</option><option value="Force quant">Force quant</option></select></label>
+                  <label class="ui-field"><span class="ui-field-label">QKV streaming</span><select name="video_memory_qkv"><option value="Auto" selected>Auto</option><option value="Off">Off</option><option value="Forced">Forced</option></select></label>
+                  <label class="ui-field"><span class="ui-field-label">Режим внимания</span><select name="video_memory_attention"><option value="Standard" selected>Standard · быстрее</option><option value="Lower VRAM (slower)">Lower VRAM · медленнее</option></select></label>
+                  <label class="ui-field"><span class="ui-field-label">Строк в блоке</span><input name="video_memory_chunk_rows" type="number" min="256" max="65536" step="256" value="4096"><small class="field-hint">Меньше — ниже пик VRAM, но медленнее.</small></label>
+                </div>
+              </div>
+            </section>
+            <section class="video-enhancement">
+              <label class="ui-choice--row video-enhancement-toggle ui-choice"><input name="video_aimdo_enabled" type="checkbox" value="true" checked><span><strong>AIMDO Residency Limiter</strong><small>Оставляет больше VRAM кадрам, звуку и временным данным H3.</small></span><b>MODEL</b></label>
+              <div class="video-enhancement-settings video-enhancement-settings--compact">
+                <div class="ui-field-grid video-enhancement-fields">
+                  <label class="ui-field"><span class="ui-field-label">Резидентность модели</span><select name="video_aimdo_residency"><option value="0 blocks" selected>0 блоков · минимум VRAM</option><option value="1 block">1 блок</option><option value="2 blocks">2 блока · баланс</option><option value="4 blocks">4 блока · быстрее</option><option value="stock">Stock · без ограничения</option></select><small class="field-hint">Меньше блоков экономит VRAM, но усиливает перенос весов между RAM и GPU.</small></label>
+                </div>
+              </div>
+            </section>
+            <section class="video-enhancement">
+              <label class="ui-choice--row video-enhancement-toggle ui-choice"><input name="video_sparse_attention" type="checkbox" value="true" checked><span><strong>H3 Sparse Attention</strong><small>Ускоряет внимание, сохраняя больше связей в начале и конце денойзинга.</small></span><b>SPARSE</b></label>
+              <div class="video-enhancement-settings">
+                <div class="ui-field-grid minimax-optimization-fields minimax-sparse-fields">
+                  <label class="ui-field"><span class="ui-field-label">Бюджет видео</span><input name="video_sparse_budget" type="number" min="0.01" max="1" step="0.01" value="0.30"><small class="field-hint">0,30 — значение v5; 1,0 = плотное внимание.</small></label>
+                  <label class="ui-field"><span class="ui-field-label">Backend</span><select name="video_sparse_backend"><option value="Kitchen INT8" selected>Kitchen INT8 · рекомендуем</option><option value="FROST BF16 (SM89)">FROST BF16 (SM89)</option><option value="Sparse Sage">Sparse Sage</option><option value="BF16 Triton">BF16 Triton</option><option value="FP8 FlexAttention">FP8 FlexAttention</option></select></label>
+                  <label class="ui-field"><span class="ui-field-label">Раннее расписание</span><select name="video_sparse_early_schedule"><option value="Hold" selected>Hold · постоянный KV</option><option value="Ramp">Ramp · плавный переход</option></select></label>
+                  <label class="ui-field"><span class="ui-field-label">Ранние шаги</span><input name="video_sparse_early_steps" type="number" min="0" max="1000" step="1" value="2"></label>
+                  <label class="ui-field"><span class="ui-field-label">Ранний KV</span><input name="video_sparse_early_kv" type="number" min="0.01" max="1" step="0.01" value="0.5"></label>
+                  <label class="ui-field"><span class="ui-field-label">Финальные шаги</span><input name="video_sparse_late_steps" type="number" min="0" max="1000" step="1" value="2"></label>
+                  <label class="ui-field"><span class="ui-field-label">Финальный KV</span><input name="video_sparse_late_kv" type="number" min="0.01" max="1" step="0.01" value="0.5"></label>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+        <section class="workflow-settings-section minimax-video-settings minimax-v4-settings" hidden>
+          <div class="workflow-settings-heading minimax-settings-heading"><div><span>УЛУЧШЕНИЯ</span><strong>Обработка готового ролика</strong><small>Подключайте этапы только для финального результата. Выключенные этапы не потребляют ресурсы.</small></div></div>
+          <div class="video-enhancements">
+            <section class="video-enhancement">
+              <label class="ui-choice--row video-enhancement-toggle ui-choice"><input name="video_rife_enabled" type="checkbox" value="true"><span><strong>Плавность движения</strong><small>Добавляет промежуточные кадры и повышает FPS.</small><em class="workflow-load-note"><b>Время ++</b><b>VRAM +</b></em></span><b>RIFE</b></label>
+              <div class="video-enhancement-settings video-enhancement-settings--rife">
+                <div class="ui-field-grid video-enhancement-fields">
+                  <label class="ui-field"><span class="ui-field-label">Модель RIFE</span><select name="video_rife_checkpoint"><option value="rife49.pth" selected>rife49 · исходный workflow</option><option value="rife47.pth">rife47</option><option value="rife417.pth">rife417</option><option value="rife426.pth">rife426</option><option value="sudo_rife4_269.662_testV1_scale1.pth">sudo_rife4_269</option></select></label>
+                  <label class="ui-field"><span class="ui-field-label">Частота кадров</span><select name="video_rife_multiplier"><option value="2" selected>2× · 48 FPS</option><option value="3">3× · 72 FPS</option><option value="4">4× · 96 FPS</option></select></label>
+                  <label class="ui-field"><span class="ui-field-label">Точность</span><select name="video_rife_dtype"><option value="float32" selected>float32 · стабильнее</option><option value="float16">float16 · меньше VRAM</option><option value="bfloat16">bfloat16</option></select></label>
+                  <label class="ui-field"><span class="ui-field-label">Размер пакета</span><input name="video_rife_batch_size" type="number" min="1" max="4" step="1" value="1"><small class="field-hint">1 безопаснее для VRAM.</small></label>
+                </div>
+                <div class="video-enhancement-flags">
+                  <label class="minimax-utility-toggle ui-choice"><input name="video_rife_fast_mode" type="checkbox" value="true" checked><span><strong>Быстрый режим</strong><small>Приоритет скорости.</small></span></label>
+                  <label class="minimax-utility-toggle ui-choice"><input name="video_rife_ensemble" type="checkbox" value="true" checked><span><strong>Ensemble</strong><small>Стабильнее движение.</small></span></label>
+                  <label class="minimax-utility-toggle ui-choice"><input name="video_rife_compile" type="checkbox" value="true" checked><span><strong>Компиляция</strong><small>Значение исходного v5; первый запуск дольше.</small></span></label>
+                </div>
+              </div>
+            </section>
+            <section class="video-enhancement">
+              <label class="ui-choice--row video-enhancement-toggle ui-choice"><input name="video_rtx_enabled" type="checkbox" value="true"><span><strong>Финальный апскейл</strong><small>Увеличивает детализацию ролика средствами NVIDIA.</small><em class="workflow-load-note"><b>Время +++</b><b>VRAM +++</b></em></span><b>RTX</b></label>
+              <div class="video-enhancement-settings video-enhancement-settings--compact">
+                <div class="ui-field-grid video-enhancement-fields">
+                  <label class="ui-field"><span class="ui-field-label">Масштаб</span><input name="video_rtx_scale" type="number" min="1" max="2" step="0.1" value="2"><small class="field-hint">Штатный диапазон: 1–2×.</small></label>
+                  <label class="ui-field"><span class="ui-field-label">Качество</span><select name="video_rtx_quality"><option value="LOW">Low</option><option value="MEDIUM">Medium</option><option value="HIGH">High</option><option value="ULTRA" selected>Ultra · исходный workflow</option></select></label>
+                </div>
+              </div>
+            </section>
+            <section class="video-enhancement">
+              <label class="ui-choice--row video-enhancement-toggle ui-choice"><input name="video_color_match" type="checkbox" value="true"><span><strong>Палитра референса</strong><small>Дополнительный этап Gateway перед RIFE; требует Фото 1.</small><em class="workflow-load-note"><b>Время +</b><b>VRAM +</b></em></span><b>COLOR</b></label>
+              <div class="video-enhancement-settings video-enhancement-settings--compact">
+                <div class="ui-field-grid video-enhancement-fields">
+                  <label class="ui-field"><span class="ui-field-label">Метод</span><select name="video_color_method"><option value="adain" selected>AdaIN · рекомендуем</option><option value="mean_std">Mean / Std</option></select></label>
+                  <label class="ui-field"><span class="ui-field-label">Сила</span><input name="video_color_strength" type="number" min="0" max="1" step="0.05" value="1"></label>
+                </div>
+              </div>
+            </section>
+            <section class="video-enhancement">
+              <label class="ui-choice--row video-enhancement-toggle ui-choice"><input name="video_sharpen_enabled" type="checkbox" value="true"><span><strong>Финальная резкость</strong><small>Подчёркивает детали после плавности движения и апскейла.</small><em class="workflow-load-note"><b>Время +</b><b>VRAM +</b></em></span><b>SHARPEN</b></label>
+              <div class="video-enhancement-settings">
+                <div class="ui-field-grid video-enhancement-fields video-sharpen-fields">
+                  <label class="ui-field"><span class="ui-field-label">Метод</span><select name="video_sharpen_method" id="minimax-video-sharpen-method"><option value="rcas" selected>RCAS · workflow v5</option><option value="adaptive_usm">Adaptive USM</option><option value="high_pass">High Pass</option><option value="deconvolution">Deconvolution</option></select></label>
+                  <label class="ui-field"><span class="ui-field-label">Сила</span><input name="video_sharpen_strength" type="number" min="0" max="1" step="0.01" value="0.8"></label>
+                  <label class="ui-field" data-sharpen-field="radius" hidden><span class="ui-field-label">Радиус</span><input name="video_sharpen_radius" type="number" min="0.5" max="5" step="0.1" value="1"></label>
+                  <label class="ui-field" data-sharpen-field="threshold" hidden><span class="ui-field-label">Порог шума</span><input name="video_sharpen_threshold" type="number" min="0" max="1" step="0.01" value="0.05"></label>
+                  <label class="ui-field" data-sharpen-field="iterations" hidden><span class="ui-field-label">Итерации</span><input name="video_sharpen_iterations" type="number" min="1" max="100" step="1" value="10"></label>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+        <section class="workflow-settings-section minimax-video-settings minimax-v4-settings" hidden>
+          <div class="workflow-settings-heading minimax-settings-heading"><div><span>ФАЙЛ</span><strong>Звук и экспорт</strong><small>Аудиореференс используется только в режиме «Референсы». H.264 воспроизводится на Android.</small></div></div>
+          <div class="ui-field-grid minimax-export-grid">
+            <label class="ui-field"><span class="ui-field-label">Смещение аудио</span><input name="video_audio_start" type="number" min="-60" max="60" step="0.01" value="0.03"><small class="field-hint">С какого момента брать аудиореференс.</small></label>
+            <label class="ui-field"><span class="ui-field-label">Качество H.264 (CRF)</span><input name="video_output_crf" type="number" min="0" max="51" step="1" value="19"><small class="field-hint">Меньше CRF — выше качество и размер файла.</small></label>
+          </div>
+        </section>
+        <section class="workflow-settings-section image-edit-field">
+          <div class="workflow-settings-heading"><div><strong id="generation-edit-source-title">Привязка к исходному фото</strong><small id="generation-edit-source-description">Редактор получает оригинал напрямую: промт меняет только то, что вы попросили.</small></div></div>
+          <div class="ui-field-grid generation-fields">
+            <label class="ui-field flux-edit-field"><span class="ui-field-label">Детализация исходника <span class="field-help" tabindex="0" data-tooltip="Перед редактированием Flux 2 подготавливает копию фото. В режиме сохранения размера значение заполняется по исходнику.">?</span></span><input name="source_megapixels" type="number" min="0.25" max="16" step="0.25" value="1"></label>
+            <label class="ui-field krea-edit-field"><span class="ui-field-label">Сохранение исходника <span class="field-help" tabindex="0" data-tooltip="Чем выше значение, тем строже Krea2 держится за исходное фото. Для обычного редактирования оставьте 4.">?</span></span><input name="reference_boost" type="number" min="0" max="8" step="0.1" value="4"></label>
+            <label class="ui-field krea-edit-field"><span class="ui-field-label">Анализ фото</span><input name="grounding_pixels" type="number" min="256" max="2048" step="64" value="768"><small class="field-hint">Больше значение полезно для лиц, текста и мелких объектов.</small></label>
+            <input type="hidden" name="edit_use_custom_size" value="true">
+            <label class="edit-size-toggle ui-choice ui-choice--compact"><input name="preserve_original_size" id="generation-preserve-original-size" type="checkbox" value="true" checked><span id="generation-preserve-original-label">Сохранить размер исходного фото</span></label>
+            <output class="original-resolution-note" id="generation-original-resolution">Выберите основное фото: его размер будет подставлен автоматически.</output>
+          </div>
+        </section>
+        <section class="workflow-settings-section size-workflow-field">
+          <div class="workflow-settings-heading"><div><strong>Размер результата</strong><small>Мегапиксели распределяются по выбранному соотношению сторон.</small></div><output class="resolution-preview" id="generation-resolution-preview">1408 × 1408 · 1,89 Мп</output></div>
+          <div class="ui-field-grid generation-fields generation-fields-resolution">
+            <label class="ui-field"><span class="ui-field-label">Соотношение сторон <span class="field-help" tabindex="0" data-tooltip="Определяет форму кадра. Разрешение автоматически пересчитается без искажений.">?</span></span><select name="aspect_ratio" id="generation-aspect"><option value="1:1">1:1 · квадрат</option><option value="2:3">2:3 · портрет</option><option value="3:2">3:2 · альбом</option><option value="3:4" selected>3:4 · стандартный портрет</option><option value="4:3">4:3 · стандартный альбом</option><option value="9:16">9:16 · телефон</option><option value="16:9">16:9 · широкий</option><option value="21:9">21:9 · панорама</option><option value="custom">Свой размер</option></select></label>
+            <label class="ui-field"><span class="ui-field-label">Итоговые мегапиксели <span class="field-help" tabindex="0" data-tooltip="Количество деталей в конечной картинке. Большее значение требует больше времени и видеопамяти.">?</span></span><input name="output_megapixels" id="generation-output-megapixels" type="number" min="0.1" max="16" step="0.1" value="1.9"></label>
+            <label class="ui-field"><span class="ui-field-label">Кратность <span class="field-help" tabindex="0" data-tooltip="Выравнивает размер под требования модели. Для PhotoFlow рекомендуется 16 px.">?</span></span><select name="dimension_multiple" id="generation-dimension-multiple"><option value="8">8 px</option><option value="16" selected>16 px</option><option value="32">32 px</option><option value="64">64 px</option></select></label>
+            <label class="ui-field"><span class="ui-field-label">Ограничить длинную сторону</span><select name="max_longest_side" id="generation-max-side"><option value="0">Без ограничения</option><option value="1640">1640 px</option><option value="2048">2048 px</option><option value="2160">2160 px</option><option value="2560">2560 px</option><option value="3072">3072 px</option><option value="4096">4096 px</option></select></label>
+            <label class="ui-field"><span class="ui-field-label">Ширина</span><input name="width" id="generation-width" type="number" min="256" max="4096" step="8" value="1408"></label>
+            <label class="ui-field"><span class="ui-field-label">Высота</span><input name="height" id="generation-height" type="number" min="256" max="4096" step="8" value="1408"></label>
+          </div>
+        </section>
+        <section class="workflow-settings-section flux-edit-settings" data-workflow-panel="flux2">
+          <div class="workflow-settings-heading"><div><strong>Flux2 · семплирование</strong><small>Параметры LCSamplerConfigureSimplePipeOut из схемы Flux2 Редактирование.</small></div></div>
+          <div class="ui-field-grid generation-fields">
+            <label class="ui-field"><span class="ui-field-label">Шаги</span><input name="steps" type="number" min="1" max="100" value="25"></label>
+            <label class="ui-field"><span class="ui-field-label">Шаги detailer</span><input name="flux_detailer_steps" type="number" min="0" max="100" value="25"></label>
+            <label class="ui-field"><span class="ui-field-label">Сила перерисовки</span><input name="denoise" type="number" min="0.05" max="1" step="0.01" value="0.9"></label>
+            <label class="ui-field"><span class="ui-field-label">CFG</span><input name="cfg" type="number" min="1" max="30" step="0.1" value="1"></label>
+            <label class="ui-field"><span class="ui-field-label">Сэмплер</span><select name="sampler"><option value="euler" selected>Euler</option><option value="euler_ancestral">Euler Ancestral</option><option value="dpmpp_2m">DPM++ 2M</option><option value="deis">DEIS</option></select></label>
+            <label class="ui-field"><span class="ui-field-label">Планировщик</span><select name="scheduler"><option value="normal" selected>Normal</option><option value="simple">Simple</option><option value="beta">Beta</option><option value="karras">Karras</option><option value="sgm_uniform">SGM Uniform</option><option value="exponential">Exponential</option></select></label>
+            <label class="ui-field"><span class="ui-field-label">Случайное число (seed)</span><input name="seed" type="number" min="-1" value="-1"><small class="field-hint">-1 = случайный</small></label>
+          </div>
+        </section>
+        <section class="workflow-settings-section flux-edit-settings" data-workflow-panel="flux2">
+          <div class="workflow-settings-heading"><div><strong>Flux2 · обработка промта</strong><small>Отдельные параметры Flux Guidance и Flux2 Klein Enhancer из исходной схемы.</small></div></div>
+          <div class="ui-field-grid generation-fields">
+            <label class="ui-field"><span class="ui-field-label">Flux Guidance</span><input name="flux_guidance" type="number" min="0" max="10" step="0.1" value="4"></label>
+            <label class="ui-field"><span class="ui-field-label">Active scale</span><input name="flux_active_scale" type="number" min="0" max="10" step="0.05" value="1"></label>
+            <label class="ui-field"><span class="ui-field-label">Token whiten</span><input name="flux_token_whiten" type="number" min="-1" max="5" step="0.05" value="0"></label>
+            <label class="ui-field"><span class="ui-field-label">Norm equalize</span><input name="flux_norm_equalize" type="number" min="0" max="1" step="0.05" value="0"></label>
+          </div>
+        </section>
+        <section class="workflow-settings-section flux-edit-settings" data-workflow-panel="flux2">
+          <div class="workflow-settings-heading"><div><strong>Flux2 · финальный апскейл</strong><small>Выберите необязательные ветки из исходной схемы. При двух проходах сначала используется Ultimate SD Upscale, затем SeedVR2.</small><span class="workflow-load-note"><b>Время ++ / +++</b><b>VRAM ++ / +++</b></span></div></div>
+          <div class="ui-field-grid generation-fields">
+            <label class="ui-field"><span class="ui-field-label">Апскейл после Flux2</span><select name="flux_upscale_mode" id="generation-flux-upscale-mode"><option value="none" selected>Без апскейла</option><option value="ultimate">Ultimate SD Upscale · 1,5×</option><option value="seedvr2">SeedVR2 · 2×</option><option value="both">Оба по очереди · 1,5× и 2×</option></select><small class="field-hint">SeedVR2 использует 7B-модель и ограничивает длинную сторону 4098 px.</small></label>
+          </div>
+        </section>
+        <section class="workflow-settings-section flux-edit-settings" data-workflow-panel="flux2">
+          <div class="workflow-settings-heading"><div><strong>Flux2 · LoRA</strong><small>Совместимые LoRA из папки Flux2 подключаются в оригинальный Power LoRA Loader.</small></div></div>
+          <div class="lora-list">
+            <div class="ui-field-grid lora-row flux-lora-row" data-lora-slots="flux"><span class="lora-number">1</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_1" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .FluxLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Сила</span><input name="lora_model_strength_1" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label></div>
+            <div class="ui-field-grid lora-row flux-lora-row" data-lora-slots="flux" hidden><span class="lora-number">2</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_2" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .FluxLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Сила</span><input name="lora_model_strength_2" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label></div>
+            <div class="ui-field-grid lora-row flux-lora-row" data-lora-slots="flux" hidden><span class="lora-number">3</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_3" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .FluxLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Сила</span><input name="lora_model_strength_3" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label></div>
+            <div class="ui-field-grid lora-row flux-lora-row" data-lora-slots="flux" hidden><span class="lora-number">4</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_4" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .FluxLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Сила</span><input name="lora_model_strength_4" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label></div>
+            <div class="ui-field-grid lora-row flux-lora-row" data-lora-slots="flux" hidden><span class="lora-number">5</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_5" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .FluxLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Сила</span><input name="lora_model_strength_5" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label></div>
+            <div class="ui-field-grid lora-row flux-lora-row" data-lora-slots="flux" hidden><span class="lora-number">6</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_6" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .FluxLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Сила</span><input name="lora_model_strength_6" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label></div>
+            <div class="ui-field-grid lora-row flux-lora-row" data-lora-slots="flux" hidden><span class="lora-number">7</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_7" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .FluxLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Сила</span><input name="lora_model_strength_7" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label></div>
+            <div class="ui-field-grid lora-row flux-lora-row" data-lora-slots="flux" hidden><span class="lora-number">8</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_8" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .FluxLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Сила</span><input name="lora_model_strength_8" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label></div>
+            <div class="ui-field-grid lora-row flux-lora-row" data-lora-slots="flux" hidden><span class="lora-number">9</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_9" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .FluxLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Сила</span><input name="lora_model_strength_9" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label></div>
+            <div class="ui-field-grid lora-row flux-lora-row" data-lora-slots="flux" hidden><span class="lora-number">10</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_10" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .FluxLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Сила</span><input name="lora_model_strength_10" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label></div>
+          </div>
+        </section>
+        <section class="workflow-settings-section flux-edit-settings" data-workflow-panel="flux2">
+          <div class="workflow-settings-heading"><div><strong>Flux2 · кадр</strong><small>Параметры LCAspectRatioPipeOut из исходной схемы перед редактированием.</small></div></div>
+          <div class="ui-field-grid generation-fields">
+            <label class="ui-field"><span class="ui-field-label">Пресет кадра</span><select name="edit_aspect_preset"><option value="custom" selected>Свой размер</option><option value="Instagram Portrait - 1080x1350">Instagram Portrait</option><option value="Instagram Square - 1080x1080">Instagram Square</option><option value="Instagram Landscape - 1080x608">Instagram Landscape</option><option value="Instagram Stories/Reels - 1080x1920">Stories / Reels</option><option value="3:4 - 896x1152">3:4</option><option value="4:3 - 1152x896">4:3</option><option value="9:16 - 768x1344">9:16</option><option value="16:9 - 1344x768">16:9</option></select></label>
+            <label class="ui-field"><span class="ui-field-label">Ресайз</span><select name="edit_resize_method"><option value="lanczos" selected>Lanczos</option><option value="bicubic">Bicubic</option><option value="bilinear">Bilinear</option><option value="area">Area</option><option value="nearest-exact">Nearest exact</option></select></label>
+            <label class="ui-field"><span class="ui-field-label">Подгонка</span><select name="edit_proportion"><option value="crop" selected>Crop</option><option value="resize">Resize</option><option value="pad">Pad</option><option value="stretch">Stretch</option><option value="total_pixels">Total pixels</option></select></label>
+            <label class="ui-field"><span class="ui-field-label">Якорь crop</span><select name="edit_crop_location"><option value="center" selected>Center</option><option value="top">Top</option><option value="bottom">Bottom</option><option value="left">Left</option><option value="right">Right</option></select></label>
+            <label class="ui-field"><span class="ui-field-label">Цвет полей</span><input name="edit_pad_color" maxlength="32" value="0, 0, 0"></label>
+            <label class="setting-toggle ui-choice ui-choice--compact"><input name="edit_swap_dimensions" type="checkbox" value="true"><span>Поменять ширину и высоту</span></label>
+          </div>
+        </section>
+        <section class="workflow-settings-section krea-edit-settings" data-workflow-panel="krea2">
+          <div class="workflow-settings-heading"><div><strong>Krea2 · основной проход</strong><small>Оригинальный Krea2 Turbo identity workflow: 8-12 шагов, CFG 1, Euler, Simple.</small></div></div>
+          <div class="ui-field-grid generation-fields">
+            <label class="ui-field"><span class="ui-field-label">Шаги</span><input name="steps" type="number" min="1" max="100" value="8"></label>
+            <label class="ui-field"><span class="ui-field-label">CFG</span><input name="cfg" type="number" min="1" max="30" step="0.1" value="1"></label>
+            <label class="ui-field"><span class="ui-field-label">Denoise</span><input name="denoise" type="number" min="0.05" max="1" step="0.01" value="1"></label>
+            <label class="ui-field"><span class="ui-field-label">Сэмплер</span><select name="sampler"><option value="euler" selected>Euler</option><option value="euler_ancestral">Euler Ancestral</option><option value="dpmpp_2m">DPM++ 2M</option></select></label>
+            <label class="ui-field"><span class="ui-field-label">Планировщик</span><select name="scheduler"><option value="simple" selected>Simple</option><option value="normal">Normal</option><option value="beta">Beta</option><option value="karras">Karras</option></select></label>
+            <label class="ui-field"><span class="ui-field-label">Seed</span><input name="seed" type="number" min="-1" value="-1"><small class="field-hint">-1 = случайный</small></label>
+          </div>
+        </section>
+        <section class="workflow-settings-section krea-edit-settings" data-workflow-panel="krea2">
+          <div class="workflow-settings-heading"><div><strong>Krea2 · Ultimate Upscale</strong><small>Отдельный проход после основного редактирования.</small><span class="workflow-load-note"><b>Время ++</b><b>VRAM ++</b></span></div></div>
+          <div class="ui-field-grid generation-fields">
+            <label class="ui-field"><span class="ui-field-label">Коэффициент</span><input name="upscale_factor" type="number" min="1" max="2" step="0.05" value="1.5"><small class="field-hint">При сохранении размера исходника автоматически используется 1×.</small></label>
+            <label class="ui-field"><span class="ui-field-label">Шаги</span><input name="upscale_steps" type="number" min="1" max="100" value="4"></label>
+            <label class="ui-field"><span class="ui-field-label">CFG</span><input name="upscale_cfg" type="number" min="0" max="30" step="0.1" value="1"></label>
+            <label class="ui-field"><span class="ui-field-label">Denoise</span><input name="upscale_denoise" type="number" min="0.01" max="0.5" step="0.01" value="0.15"></label>
+            <label class="ui-field"><span class="ui-field-label">Сэмплер</span><select name="upscale_sampler"><option value="deis" selected>DEIS</option><option value="euler">Euler</option><option value="euler_ancestral">Euler Ancestral</option><option value="dpmpp_2m">DPM++ 2M</option></select></label>
+            <label class="ui-field"><span class="ui-field-label">Планировщик</span><select name="upscale_scheduler"><option value="simple" selected>Simple</option><option value="normal">Normal</option><option value="beta">Beta</option><option value="karras">Karras</option></select></label>
+          </div>
+        </section>
+        <section class="workflow-settings-section krea-edit-settings" data-workflow-panel="krea2">
+          <div class="workflow-settings-heading"><div><strong>Krea2 · очистка и тон</strong><small>LCImageDenoise и LCImageAdjust после апскейла.</small></div></div>
+          <div class="ui-field-grid generation-fields">
+            <label class="ui-field"><span class="ui-field-label">Blur</span><input name="post_denoise_blur" type="number" min="0.001" max="8" step="0.001" value="1"></label><label class="ui-field"><span class="ui-field-label">Сохранение краёв</span><input name="post_denoise_edge" type="number" min="0.001" max="0.25" step="0.001" value="0.05"></label><label class="ui-field"><span class="ui-field-label">Радиус</span><input name="post_denoise_radius" type="number" min="0" max="3" step="0.01" value="1"></label><label class="ui-field"><span class="ui-field-label">Сила очистки</span><input name="post_denoise_strength" type="number" min="0" max="1" step="0.05" value="0.75"></label><label class="ui-field"><span class="ui-field-label">Оттенок</span><input name="adjust_hue" type="number" min="-1" max="1" step="0.05" value="0"></label><label class="ui-field"><span class="ui-field-label">Насыщенность</span><input name="adjust_saturation" type="number" min="-1" max="1" step="0.05" value="0"></label><label class="ui-field"><span class="ui-field-label">Яркость</span><input name="adjust_brightness" type="number" min="-1" max="1" step="0.05" value="0"></label><label class="ui-field"><span class="ui-field-label">Контраст</span><input name="adjust_contrast" type="number" min="-1" max="1" step="0.05" value="0"></label><label class="ui-field"><span class="ui-field-label">Резкость</span><input name="adjust_sharpness" type="number" min="-1" max="1" step="0.05" value="0"></label>
+          </div>
+        </section>
+        <section class="workflow-settings-section krea-edit-settings" data-workflow-panel="krea2">
+          <div class="workflow-settings-heading"><div><strong>Krea2 · обработка кожи и цвет</strong><small>Сначала кожа и локальная коррекция, затем при необходимости общий цветовой стиль.</small></div></div>
+          <div class="ui-field-grid generation-fields">
+            <label class="ui-field"><span class="ui-field-label">Профиль кожи</span><select name="skin_preset"><option value="Natural" selected>Natural</option><option value="Light">Light</option><option value="Fresh">Fresh</option><option value="Porcelain">Porcelain</option><option value="Warm keep">Warm keep</option><option value="Custom">Custom</option></select></label><label class="ui-field"><span class="ui-field-label">Сила</span><input name="skin_strength" type="number" min="0" max="2" step="0.05" value="1"></label><label class="ui-field"><span class="ui-field-label">Холодность</span><input name="skin_coolness" type="number" min="0" max="1" step="0.05" value="0.22"></label><label class="ui-field"><span class="ui-field-label">Свет кожи</span><input name="skin_brightness" type="number" min="0" max="1" step="0.05" value="0.12"></label><label class="ui-field"><span class="ui-field-label">Румянец</span><input name="skin_rosy" type="number" min="-0.3" max="0.5" step="0.05" value="0.08"></label><label class="ui-field"><span class="ui-field-label">Ровность</span><input name="skin_evenness" type="number" min="0" max="1" step="0.05" value="0.18"></label><label class="ui-field"><span class="ui-field-label">Поднять тени</span><input name="skin_shadow_lift" type="number" min="0" max="1" step="0.05" value="0.15"></label><label class="ui-field"><span class="ui-field-label">Сглаживание</span><input name="skin_smooth" type="number" min="0" max="1" step="0.05" value="0.06"></label><label class="ui-field"><span class="ui-field-label">Сохранить текстуру</span><input name="skin_texture_preserve" type="number" min="0" max="1" step="0.05" value="0.88"></label><label class="ui-field"><span class="ui-field-label">Насыщенность кожи</span><input name="skin_saturation" type="number" min="-0.5" max="0.5" step="0.05" value="-0.08"></label><label class="ui-field"><span class="ui-field-label">Защита светов</span><input name="skin_highlight_protect" type="number" min="0" max="1" step="0.05" value="0.75"></label><label class="ui-field"><span class="ui-field-label">Чувствительность маски</span><input name="skin_mask_sensitivity" type="number" min="0" max="1" step="0.05" value="0.55"></label><label class="ui-field"><span class="ui-field-label">Растушёвка маски</span><input name="skin_mask_feather" type="number" min="0" max="1" step="0.05" value="0.45"></label>
+          </div>
+        </section>
+        <section class="workflow-settings-section lut-workflow-field" data-lut-control>
+          <div class="lut-control">
+            <div class="lut-control-heading">
+              <div><strong>LUT: финальная цветокоррекция <span class="field-help" tabindex="0" data-tooltip="LUT (Look-Up Table) - готовая карта цвета. Она применяется к уже готовому кадру: меняет оттенки, свет, тени и контраст, но не перерисовывает лицо, позу, предметы или композицию.">?</span></strong><small>Доступна в Krea2 и Flux2. Подходит, когда нужен единый визуальный стиль серии. Для точной передачи цвета одежды, товара или исходного фото оставьте выключенной.</small></div>
+              <label class="setting-toggle ui-choice ui-choice--compact"><input name="lut_enabled" type="checkbox" value="true" data-lut-enabled><span>Применять LUT</span></label>
+            </div>
+            <p class="lut-explanation" data-lut-explanation>Выключено: финальный кадр сохранит цвета, полученные после генерации и обработки, без общей тонировки.</p>
+            <div class="lut-options" data-lut-options hidden>
+              <label class="ui-field"><span class="ui-field-label">Профиль LUT</span><select name="lut_name" data-lut-name disabled><option value="LC_Crushed_Blacks.cube">LC Crushed Blacks</option><option value="LC Highlights_Protection.cube">LC Highlights Protection</option><option value="Cool_Natural_Breeze.cube">Cool Natural Breeze</option><option value="street.cube">Street</option></select></label>
+              <label class="ui-field"><span class="ui-field-label">Интенсивность <output data-lut-strength-output>23%</output></span><input name="lut_strength" type="range" min="0" max="0.7" step="0.01" value="0.23" data-lut-strength disabled></label>
+              <div class="lut-strength-presets" aria-label="Быстрый выбор силы LUT"><button type="button" data-lut-strength-preset="0.12">Мягко</button><button type="button" data-lut-strength-preset="0.23">Рекомендуется</button><button type="button" data-lut-strength-preset="0.38">Выразительно</button></div>
+            </div>
+            <details class="lut-guide">
+              <summary>Мини-гайд по LUT</summary>
+              <div class="lut-guide-grid">
+                <section><strong>Что именно меняет</strong><p>Это финальная общая цветокоррекция: LUT сдвигает оттенки, характер теней и светов, насыщенность и контраст уже готового кадра. Он не заменяет промт и не меняет позу, лицо, композицию, предметы или детали сцены.</p></section>
+                <section><strong>Когда включать</strong><p>Используйте LUT, когда нужна единая подача серии: киношный портрет, fashion, улица, публикация в соцсетях. Для каталога, точного цвета одежды и бережного редактирования исходника лучше оставить его выключенным.</p></section>
+                <section><strong>Как выбрать</strong><p><b>Crushed Blacks</b> углубляет тени; <b>Highlights Protection</b> смягчает яркий свет; <b>Cool Natural Breeze</b> даёт спокойную прохладную палитру; <b>Street</b> усиливает городской контраст и цветовой акцент.</p></section>
+                <section><strong>Как выбрать силу</strong><p>0-15%: почти незаметная коррекция. 15-30%: естественный законченный вид. 30-45%: выраженная стилизация. Выше 45% используйте осознанно: на коже и белых предметах цвет может стать неестественным.</p></section>
+              </div>
+            </details>
+          </div>
+        </section>
+        <section class="workflow-settings-section standard-main-settings">
+          <div class="workflow-settings-heading"><div><strong id="generation-main-pass-title">Основной проход</strong><small id="generation-main-pass-description">Параметры основного семплирования выбранной схемы генерации.</small></div></div>
+          <div class="ui-field-grid generation-fields">
+            <label class="ui-field"><span class="ui-field-label">Шаги</span><input name="steps" id="generation-steps" type="number" min="1" max="100" value="25"></label>
+            <label class="ui-field"><span class="ui-field-label">CFG <span class="field-help" tabindex="0" data-tooltip="Сила следования промту. Слишком высокое значение может сделать результат неестественным.">?</span></span><input name="cfg" id="generation-cfg" type="number" min="1" max="30" step="0.5" value="7"></label>
+            <label class="ui-field"><span class="ui-field-label">Сэмплер</span><select name="sampler" id="generation-sampler"><option value="euler">Euler</option><option value="euler_ancestral">Euler Ancestral</option><option value="dpmpp_2m">DPM++ 2M</option><option value="dpmpp_2m_sde">DPM++ 2M SDE</option><option value="heun">Heun</option><option value="res_multistep">RES Multistep</option><option value="gradient_estimation">Gradient Estimation</option><option value="er_sde">ER SDE</option></select></label>
+            <label class="ui-field"><span class="ui-field-label">Планировщик</span><select name="scheduler" id="generation-scheduler"><option value="normal">Normal</option><option value="simple">Simple</option><option value="beta">Beta</option><option value="karras">Karras</option><option value="sgm_uniform">SGM Uniform</option><option value="exponential">Exponential</option></select></label>
+            <label class="ui-field"><span class="ui-field-label">Seed</span><input name="seed" type="number" min="-1" value="-1"><small class="field-hint">-1 = случайный</small></label>
+            <label class="ui-field krea-text-workflow-field"><span class="ui-field-label">Базовые мегапиксели <span class="field-help" tabindex="0" data-tooltip="Разрешение первого прохода. Оно влияет на скорость и композицию до апскейла.">?</span></span><input name="base_megapixels" id="generation-base-megapixels" type="number" min="0.5" max="2" step="0.05" value="1"></label>
+          </div>
+        </section>
+        <section class="workflow-settings-section krea-text-workflow-field">
+          <input type="hidden" name="loras_configured" value="true">
+          <div class="workflow-settings-heading"><div><strong>LoRA <span class="field-help" tabindex="0" data-tooltip="Дополнительные адаптеры стиля и деталей. Начните с одной LoRA, затем добавляйте следующую при необходимости.">?</span></strong><small>Список сгруппирован в Gateway, файлы ComfyUI остаются на своих местах.</small></div></div>
+          <div class="lora-list">
+            <div class="ui-field-grid lora-row krea-lora-row" data-lora-slots="krea"><span class="lora-number">1</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_1" class="generation-lora-select"><option value="">Без LoRA</option>{{range .LoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}" {{if .Default}}selected{{end}}>{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Model</span><input name="lora_model_strength_1" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0.8"></label><label class="ui-field"><span class="ui-field-label">CLIP</span><input name="lora_clip_strength_1" type="number" min="-100" max="100" step="0.05" value="1"></label></div>
+            <div class="ui-field-grid lora-row krea-lora-row" data-lora-slots="krea" hidden><span class="lora-number">2</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_2" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .LoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Model</span><input name="lora_model_strength_2" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label><label class="ui-field"><span class="ui-field-label">CLIP</span><input name="lora_clip_strength_2" type="number" min="-100" max="100" step="0.05" value="1"></label></div>
+            <div class="ui-field-grid lora-row krea-lora-row" data-lora-slots="krea" hidden><span class="lora-number">3</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_3" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .LoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Model</span><input name="lora_model_strength_3" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label><label class="ui-field"><span class="ui-field-label">CLIP</span><input name="lora_clip_strength_3" type="number" min="-100" max="100" step="0.05" value="1"></label></div>
+            <div class="ui-field-grid lora-row krea-lora-row" data-lora-slots="krea" hidden><span class="lora-number">4</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_4" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .LoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Model</span><input name="lora_model_strength_4" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label><label class="ui-field"><span class="ui-field-label">CLIP</span><input name="lora_clip_strength_4" type="number" min="-100" max="100" step="0.05" value="1"></label></div>
+            <div class="ui-field-grid lora-row krea-lora-row" data-lora-slots="krea" hidden><span class="lora-number">5</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_5" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .LoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Model</span><input name="lora_model_strength_5" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label><label class="ui-field"><span class="ui-field-label">CLIP</span><input name="lora_clip_strength_5" type="number" min="-100" max="100" step="0.05" value="1"></label></div>
+            <div class="ui-field-grid lora-row krea-lora-row" data-lora-slots="krea" hidden><span class="lora-number">6</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_6" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .LoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Model</span><input name="lora_model_strength_6" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label><label class="ui-field"><span class="ui-field-label">CLIP</span><input name="lora_clip_strength_6" type="number" min="-100" max="100" step="0.05" value="1"></label></div>
+            <div class="ui-field-grid lora-row krea-lora-row" data-lora-slots="krea" hidden><span class="lora-number">7</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_7" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .LoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Model</span><input name="lora_model_strength_7" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label><label class="ui-field"><span class="ui-field-label">CLIP</span><input name="lora_clip_strength_7" type="number" min="-100" max="100" step="0.05" value="1"></label></div>
+            <div class="ui-field-grid lora-row krea-lora-row" data-lora-slots="krea" hidden><span class="lora-number">8</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_8" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .LoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Model</span><input name="lora_model_strength_8" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label><label class="ui-field"><span class="ui-field-label">CLIP</span><input name="lora_clip_strength_8" type="number" min="-100" max="100" step="0.05" value="1"></label></div>
+            <div class="ui-field-grid lora-row krea-lora-row" data-lora-slots="krea" hidden><span class="lora-number">9</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_9" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .LoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Model</span><input name="lora_model_strength_9" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label><label class="ui-field"><span class="ui-field-label">CLIP</span><input name="lora_clip_strength_9" type="number" min="-100" max="100" step="0.05" value="1"></label></div>
+            <div class="ui-field-grid lora-row krea-lora-row" data-lora-slots="krea" hidden><span class="lora-number">10</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_10" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .LoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Model</span><input name="lora_model_strength_10" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label><label class="ui-field"><span class="ui-field-label">CLIP</span><input name="lora_clip_strength_10" type="number" min="-100" max="100" step="0.05" value="1"></label></div>
+          </div>
+        </section>
+        <section class="workflow-settings-section krea-workflow-field">
+          <div class="workflow-settings-heading"><div><strong>Апскейл <span class="field-help" tabindex="0" data-tooltip="Увеличивает картинку до итогового разрешения и добавляет детали. Автоматическая сила перерисовки подбирает мягкое значение по размеру кадра.">?</span></strong><small>Второй проход после масштабирования изображения.</small><span class="workflow-load-note"><b>Время ++</b><b>VRAM ++</b></span></div><label class="setting-toggle krea-text-workflow-field ui-choice ui-choice--compact"><input name="upscale_auto_denoise" id="generation-auto-denoise" type="checkbox" value="true" checked><span>Автонастройка перерисовки</span></label></div>
+          <div class="ui-field-grid generation-fields"><label class="ui-field"><span class="ui-field-label">Шаги</span><input name="upscale_steps" id="generation-upscale-steps" type="number" min="1" max="12" value="5"></label><label class="ui-field"><span class="ui-field-label">Сэмплер</span><select name="upscale_sampler" id="generation-upscale-sampler"><option value="euler_ancestral" selected>Euler Ancestral</option><option value="euler">Euler</option><option value="dpmpp_2m">DPM++ 2M</option><option value="dpmpp_2m_sde">DPM++ 2M SDE</option></select></label><label class="ui-field"><span class="ui-field-label">Denoise <span class="field-help" tabindex="0" data-tooltip="Насколько апскейл может изменить исходный результат. Низкое значение сохраняет композицию, высокое сильнее перерисовывает её.">?</span></span><input name="upscale_denoise" id="generation-upscale-denoise" type="number" min="0.01" max="0.5" step="0.01" value="0.18"></label></div>
+        </section>
+        <section class="workflow-settings-section krea-text-workflow-field krea-processing">
+          <div class="workflow-settings-heading"><div><strong>Дополнительная обработка PhotoFlow</strong><small>Каждая ветка запускается независимо. Выключенный модуль не попадает в workflow и не расходует ресурсы.</small></div></div>
+          <div class="krea-module-list">
+            <section class="krea-module" data-krea-module>
+              <header class="krea-module-header">
+                <div class="krea-module-copy"><span class="krea-module-node">Оптимизация</span><strong>SageAttention / Triton</strong><small>Экспериментальная оптимизация внимания перед семплированием.</small></div>
+                <label class="setting-toggle ui-choice ui-choice--compact"><input name="krea_sage_enabled" type="checkbox" value="true" data-krea-module-toggle aria-controls="krea-sage-options" aria-expanded="false"><span data-krea-module-state>Выключено</span></label>
+              </header>
+              <div class="krea-module-options" id="krea-sage-options" data-krea-module-options hidden>
+                <div class="ui-field-grid generation-fields krea-module-grid">
+                  <label class="ui-field"><span class="ui-field-label">Режим</span><select name="krea_sage_mode" disabled><option value="auto" selected>Auto · рекомендуем</option><option value="sageattn_qk_int8_pv_fp16_cuda">CUDA · FP16</option><option value="sageattn_qk_int8_pv_fp16_triton">Triton · FP16</option><option value="sageattn_qk_int8_pv_fp8_cuda">CUDA · FP8</option><option value="sageattn_qk_int8_pv_fp8_cuda++">CUDA · FP8++</option><option value="sageattn3">SageAttention 3</option><option value="sageattn3_per_block_mean">SageAttention 3 · per-block mean</option></select></label>
+                  <label class="setting-toggle ui-choice"><input name="krea_sage_allow_compile" type="checkbox" value="true" checked disabled><span><strong>Разрешить компиляцию</strong><small>Ускоряет повторные запуски после первого прогрева.</small></span></label>
+                  <label class="setting-toggle ui-choice"><input name="krea_fp16_accumulation" type="checkbox" value="true" checked disabled><span><strong>FP16 accumulation</strong><small>Настройка ModelPatchTorchSettings из исходного workflow.</small></span></label>
+                </div>
+              </div>
+            </section>
+
+            <section class="krea-module is-enabled" data-krea-module>
+              <header class="krea-module-header">
+                <div class="krea-module-copy"><span class="krea-module-node">Refinement</span><strong>Финальная детализация</strong><small>Короткий завершающий проход после апскейла.</small><span class="workflow-load-note"><b>Время +</b><b>VRAM +</b></span></div>
+                <label class="setting-toggle ui-choice ui-choice--compact"><input name="detail_enabled" type="checkbox" value="true" checked data-krea-module-toggle aria-controls="krea-detail-options" aria-expanded="true"><span data-krea-module-state>Включено</span></label>
+              </header>
+              <div class="krea-module-options" id="krea-detail-options" data-krea-module-options>
+                <div class="ui-field-grid generation-fields krea-module-grid"><label class="ui-field"><span class="ui-field-label">Шаги</span><input name="detail_steps" id="generation-detail-steps" type="number" min="1" max="8" value="2"></label><label class="ui-field"><span class="ui-field-label">CFG</span><input name="detail_cfg" id="generation-detail-cfg" type="number" min="0" max="30" step="0.1" value="1"></label><label class="ui-field"><span class="ui-field-label">Сэмплер</span><select name="detail_sampler" id="generation-detail-sampler"><option value="euler" selected>Euler</option><option value="euler_ancestral">Euler Ancestral</option><option value="dpmpp_2m">DPM++ 2M</option><option value="dpmpp_2m_sde">DPM++ 2M SDE</option></select></label><label class="ui-field"><span class="ui-field-label">Планировщик</span><select name="detail_scheduler" id="generation-detail-scheduler"><option value="simple" selected>Simple</option><option value="normal">Normal</option><option value="karras">Karras</option><option value="sgm_uniform">SGM Uniform</option></select></label><label class="ui-field"><span class="ui-field-label">Denoise</span><input name="detail_denoise" id="generation-detail-denoise" type="number" min="0.01" max="0.2" step="0.005" value="0.03"></label></div>
+              </div>
+            </section>
+
+            <section class="krea-module is-enabled" data-krea-module>
+              <header class="krea-module-header">
+                <div class="krea-module-copy"><span class="krea-module-node">Color Correction</span><strong>Согласование цвета</strong><small>Возвращает цветовую статистику первого прохода после refinement.</small></div>
+                <label class="setting-toggle ui-choice ui-choice--compact"><input name="color_transfer" type="checkbox" value="true" checked data-krea-module-toggle aria-controls="krea-color-options" aria-expanded="true"><span data-krea-module-state>Включено</span></label>
+              </header>
+              <div class="krea-module-options" id="krea-color-options" data-krea-module-options>
+                <div class="ui-field-grid generation-fields krea-module-grid"><label class="ui-field"><span class="ui-field-label">Метод</span><select name="color_method"><option value="reinhard_lab" selected>Reinhard LAB</option><option value="mkl_lab">MKL LAB</option><option value="histogram">Histogram</option></select></label><label class="ui-field"><span class="ui-field-label">Статистика</span><select name="color_mode"><option value="per_frame" selected>Для каждого кадра</option><option value="uniform">Общая</option></select></label><label class="ui-field"><span class="ui-field-label">Сила</span><input name="color_strength" type="number" min="0" max="10" step="0.05" value="1"></label></div>
+              </div>
+            </section>
+
+            <section class="krea-module" data-krea-module>
+              <header class="krea-module-header">
+                <div class="krea-module-copy"><span class="krea-module-node">Image Filter</span><strong>Фильтр и уровни</strong><small>Точная коррекция готового изображения после согласования цвета.</small></div>
+                <label class="setting-toggle ui-choice ui-choice--compact"><input name="image_filter_enabled" type="checkbox" value="true" data-krea-module-toggle aria-controls="krea-filter-options" aria-expanded="false"><span data-krea-module-state>Выключено</span></label>
+              </header>
+              <div class="krea-module-options" id="krea-filter-options" data-krea-module-options hidden>
+                <div class="krea-filter-group"><strong>Тон и резкость</strong><div class="ui-field-grid generation-fields krea-module-grid"><label class="ui-field"><span class="ui-field-label">Яркость</span><input name="image_filter_brightness" type="number" min="-1" max="1" step="0.01" value="0" disabled></label><label class="ui-field"><span class="ui-field-label">Контраст</span><input name="image_filter_contrast" type="number" min="-1" max="2" step="0.01" value="1" disabled></label><label class="ui-field"><span class="ui-field-label">Насыщенность</span><input name="image_filter_saturation" type="number" min="0" max="5" step="0.01" value="1" disabled></label><label class="ui-field"><span class="ui-field-label">Резкость</span><input name="image_filter_sharpness" type="number" min="-5" max="5" step="0.01" value="1" disabled></label></div></div>
+                <div class="krea-filter-group"><strong>Размытие и детали</strong><div class="ui-field-grid generation-fields krea-module-grid"><label class="ui-field"><span class="ui-field-label">Blur</span><input name="image_filter_blur" type="number" min="0" max="16" step="1" value="0" disabled></label><label class="ui-field"><span class="ui-field-label">Gaussian blur</span><input name="image_filter_gaussian" type="number" min="0" max="1024" step="0.1" value="0" disabled></label><label class="ui-field"><span class="ui-field-label">Усиление краёв</span><input name="image_filter_edge" type="number" min="0" max="1" step="0.01" value="0" disabled></label><label class="setting-toggle ui-choice"><input name="image_filter_detail" type="checkbox" value="true" disabled><span><strong>Усиление деталей</strong><small>Дополнительный detail enhance.</small></span></label></div></div>
+                <div class="krea-filter-group"><strong>Уровни</strong><div class="ui-field-grid generation-fields krea-module-grid"><label class="ui-field"><span class="ui-field-label">Чёрная точка</span><input name="image_level_black" type="number" min="0" max="255" step="0.1" value="0" disabled></label><label class="ui-field"><span class="ui-field-label">Средняя точка</span><input name="image_level_mid" type="number" min="0" max="255" step="0.1" value="127.5" disabled></label><label class="ui-field"><span class="ui-field-label">Белая точка</span><input name="image_level_white" type="number" min="0" max="255" step="0.1" value="255" disabled></label></div></div>
+              </div>
+            </section>
+          </div>
+        </section>
+      </div></details>
+{{end}}
+
+{{define "studio_preflight"}}
+<section class="generation-preflight" id="generation-preflight" hidden aria-live="polite"><div class="generation-preflight-heading"><div><strong>Проверка перед запуском</strong><small id="generation-preflight-summary"></small></div><button type="button" class="button ghost" id="generation-preflight-repeat">Проверить ещё раз</button></div><div class="generation-preflight-checks" id="generation-preflight-checks"></div></section>
+{{end}}
+
+{{define "studio_batch"}}
+<section class="generation-batch-builder" id="generation-batch-builder">
+        <label class="generation-batch-switch ui-choice">
+          <input type="checkbox" name="batch_enabled" id="generation-batch-enabled" value="true">
+          <span><strong>Пакет вариантов</strong><small>Несколько запусков с одной контролируемой разницей</small></span>
+        </label>
+        <div class="generation-batch-controls" id="generation-batch-controls" hidden>
+          <fieldset class="generation-batch-mode"><legend>Меняется между вариантами</legend><div class="ui-segmented ui-segmented--compact">
+            <label class="ui-segment"><input type="radio" name="batch_mode" value="seeds" checked><span>Разные seed</span></label>
+            <label class="ui-segment"><input type="radio" name="batch_mode" value="parameter"><span>Один параметр</span></label>
+          </div></fieldset>
+          <div class="ui-field-grid generation-batch-fields">
+            <label class="ui-field"><span class="ui-field-label">Количество</span><input type="number" name="batch_count" id="generation-batch-count" min="2" max="20" value="4" inputmode="numeric"></label>
+            <label class="ui-field generation-batch-parameter-field" hidden><span class="ui-field-label">Параметр</span><select name="batch_parameter" id="generation-batch-parameter"><option value="">Выберите параметр</option></select></label>
+            <label class="ui-field generation-batch-range-field" hidden><span class="ui-field-label">От</span><input type="number" name="batch_from" id="generation-batch-from" step="any"></label>
+            <label class="ui-field generation-batch-range-field" hidden><span class="ui-field-label">До</span><input type="number" name="batch_to" id="generation-batch-to" step="any"></label>
+          </div>
+          <div class="generation-batch-estimate" id="generation-batch-estimate" aria-live="polite"><strong>4 варианта</strong><span>Будет списано 4 генерации</span></div>
+          <small class="generation-batch-error" id="generation-batch-error" role="alert" hidden></small>
+        </div>
+      </section>
+{{end}}
+
+{{define "studio_dock"}}
+<div class="generation-run-dock" id="generation-run-dock">
+        <details class="generation-summary studio-summary" id="generation-summary">
+          <summary class="generation-summary-head"><strong id="generation-summary-title">Текущая конфигурация</strong><i data-lucide="chevron-down" aria-hidden="true"></i></summary>
+          <dl class="generation-summary-facts" id="generation-summary-facts"><div><dt>Модель</dt><dd>Не выбрана</dd></div></dl>
+          <p class="generation-summary-impact" id="generation-summary-impact" data-load="normal">Дополнительная тяжёлая обработка не включена.</p>
+        </details>
+        <div class="generation-actions"><button type="button" class="button ghost" id="generation-preflight-button">Проверить</button><button type="submit" class="button" id="generation-submit">Создать</button></div>
+      </div>
+{{end}}
+
+{{define "studio_result"}}
+<section class="generation-result panel" id="generation-result" hidden aria-live="polite">
+    <div class="panel-heading"><div><p class="section-kicker">Результат</p><h2 id="generation-result-title">Генерация выполняется</h2></div></div>
+    <p class="generation-status" id="generation-status"></p>
+    <div class="generation-run-progress" id="generation-run-progress" hidden>
+      <div class="generation-run-progress-head"><strong id="generation-stage">Подготовка</strong><span id="generation-stage-detail"></span></div>
+      <div class="generation-run-progress-track" role="progressbar" id="generation-progressbar" aria-label="Ход генерации" aria-valuemin="0" aria-valuemax="100"><span id="generation-progressbar-fill"></span></div>
+    </div>
+    <div class="generation-output-grid" id="generation-output-grid"></div>
+    <div class="generation-result-actions" id="generation-result-actions" hidden>
+      <button type="button" class="button ghost" id="generation-retry">Повторить</button>
+      <button type="button" class="button danger" id="generation-cancel">Отменить генерацию</button>
+    </div>
+  </section>
+{{end}}
+
+{{define "studio_history"}}
+<section class="generation-variants generation-jobs panel" id="generation-variants" aria-live="polite">
+    <div class="generation-history-toolbar ui-toolbar ui-toolbar--plain">
+      <div class="generation-history-title"><p class="section-kicker">Быстрая генерация</p><h2>Задания генерации</h2><small id="generation-variant-count">Подключаем обновления...</small></div>
+      <div class="generation-variant-filters">
+        <label class="ui-field"><span class="ui-field-label"><span>Статус</span></span><select id="generation-variant-state"><option value="">Все</option><option value="submitting">Подготовка</option><option value="queued">В очереди</option><option value="running">В работе</option><option value="cancelling">Отменяется</option><option value="completed">Готово</option><option value="error">С ошибкой</option><option value="cancelled">Отменено</option><option value="expired">Истекло</option></select></label>
+        <label class="ui-field"><span class="ui-field-label"><span>Сценарий</span></span><select id="generation-variant-template"><option value="">Все сценарии</option><option value="text-to-image">Текст в изображение</option><option value="image-to-image">Фото и промт</option><option value="minimax-h3-video">Видео</option></select></label>
+      </div>
+      <button type="button" class="button ghost generation-history-toggle" id="generation-history-toggle" aria-expanded="true">Свернуть</button>
+    </div>
+    <div class="generation-history-content" id="generation-history-content"><div class="generation-variant-list generation-job-list" id="generation-variant-list"><p class="generation-variant-empty">Загружаем задания...</p></div></div>
+  </section>
+{{end}}
+
+{{define "studio_image_picker"}}
+<div class="generation-image-picker" id="generation-image-picker" hidden role="dialog" aria-modal="true" aria-labelledby="generation-image-picker-title">
+    <button class="generation-image-picker-backdrop" type="button" tabindex="-1" data-gallery-image-picker-close aria-label="Закрыть выбор изображения"></button>
+    <section class="generation-image-picker-window">
+      <header class="generation-image-picker-header">
+        <div class="generation-image-picker-copy"><span>Мои генерации</span><h2 id="generation-image-picker-title">Выберите ранее созданное фото</h2><p>Изображение появится в <strong id="generation-image-picker-slot">карточке референса</strong> и будет передано в ComfyUI автоматически.</p></div>
+        <div class="generation-image-picker-actions"><button class="generation-image-picker-refresh" id="generation-image-picker-refresh" type="button" aria-label="Обновить изображения" title="Обновить изображения">&#8635;</button><button class="generation-image-picker-close" type="button" data-gallery-image-picker-close aria-label="Закрыть">&#10005;</button></div>
+      </header>
+      <div class="generation-image-picker-body">
+        <p class="generation-image-picker-state" id="generation-image-picker-state">Загружаем ваши изображения...</p>
+        <div class="generation-image-picker-grid" id="generation-image-picker-grid" aria-live="polite"></div>
+      </div>
+    </section>
+  </div>
+{{end}}
+
+{{define "studio_lightbox"}}
+<div class="generation-lightbox" id="generation-lightbox" hidden role="dialog" aria-modal="true" aria-label="Просмотр результата">
+    <button class="generation-lightbox-backdrop" type="button" tabindex="-1" data-lightbox-close aria-label="Закрыть просмотр"></button>
+    <div class="generation-lightbox-window ui-dialog">
+      <div class="generation-lightbox-toolbar ui-dialog__toolbar"><span id="generation-lightbox-name"></span><a class="button generation-lightbox-download" id="generation-lightbox-download" download>Скачать оригинал</a><button class="generation-lightbox-close" type="button" data-lightbox-close aria-label="Закрыть">&#10005;</button></div>
+      <img id="generation-lightbox-image" alt="Результат генерации в полном размере">
+      <video id="generation-lightbox-video" controls playsinline hidden></video>
+    </div>
+  </div>
+{{end}}
+
+{{define "studio_batch_compare"}}
+<dialog class="generation-batch-compare" id="generation-batch-compare" aria-labelledby="generation-batch-compare-title">
+    <header><div><span>Пакет вариантов</span><h2 id="generation-batch-compare-title">Сравнение результатов</h2></div><button type="button" id="generation-batch-compare-close" aria-label="Закрыть сравнение">&#10005;</button></header>
+    <div class="generation-batch-compare-body" id="generation-batch-compare-body"></div>
+  </dialog>
+{{end}}
+
+{{define "studio_video_settings"}}
+<section class="workflow-settings-section minimax-video-settings minimax-v4-settings" hidden>
+        <div class="workflow-settings-heading"><div><strong>MiniMax H3 v5 · видео</strong><small>Качество задаёт максимальную длинную сторону кадра. Размер всегда кратен 32.</small></div><output class="resolution-preview" id="minimax-video-resolution-preview">432 × 720 · формат 9:16</output></div>
+        <p class="minimax-model-profile" id="minimax-video-model-profile">Активная модель: MiniMax_H3_FL2VA. Режим автоматически становится T2VA, I2VA или FL2VA по количеству точных кадров.</p>
+        <div class="ui-field-grid generation-fields minimax-primary-grid">
+          <label class="ui-field"><span class="ui-field-label"><span class="field-label">Базовое качество <span class="field-help" tabindex="0" data-tooltip="Это максимальная длинная сторона кадра до постобработки. Лимит учётной записи применяется только здесь; финальный RTX-апскейл может увеличить готовое видео.">?</span></span></span><select name="video_quality" id="minimax-video-quality"><option value="480">480 · быстрый просмотр</option><option value="720" selected>720 · рекомендуем</option><option value="1080">1080 · Full HD</option><option value="1440">1440 · 2K</option></select><small class="field-hint">База доступна до {{.MaxVideoGenerationQuality}}p. RTX-апскейл не входит в лимит.</small></label>
+          <label class="ui-field"><span class="ui-field-label"><span class="field-label">Длительность <span class="field-help" tabindex="0" data-tooltip="5–15 секунд — основной диапазон MiniMax H3. Значения до 60 секунд доступны для экспериментов и требуют заметно больше времени и памяти.">?</span></span></span><input name="video_duration_seconds" id="minimax-video-duration" type="number" min="5" max="60" step="1" value="5"><small class="field-hint">5–60 секунд</small></label>
+          <label class="ui-field"><span class="ui-field-label"><span class="field-label">Шаги <span class="field-help" tabindex="0" data-tooltip="Базовая модель без Turbo использует 20–25 шагов, внешний Turbo — 4–8. Eros Max содержит Turbo внутри и работает на 6–8 шагах.">?</span></span></span><input name="video_steps" id="minimax-video-steps" type="number" min="20" max="25" value="25"></label>
+          <label class="ui-field"><span class="ui-field-label"><span class="field-label">Имя файла</span></span><input name="video_filename" type="text" maxlength="80" value="AI-Gateway-MiniMaxH3"><small class="field-hint">Без расширения</small></label>
+          <label class="setting-toggle ui-choice" id="minimax-video-turbo-control"><input name="video_turbo" id="minimax-video-turbo" type="checkbox" value="true"><span><strong id="minimax-video-turbo-title">Turbo MiniMax H3</strong><small id="minimax-video-turbo-description">Опциональная официальная LoRA v4: 4–8 шагов для быстрых проб.</small></span></label>
+          <label class="ui-field minimax-reference-field"><span class="ui-field-label"><span class="field-label">Размер референсов <span class="field-help" tabindex="0" data-tooltip="По размеру кадра экономит память. Максимальная детализация лучше сохраняет черты, текст и аксессуары, но для 1440p/2160p может требовать существенно больше VRAM.">?</span></span></span><select name="video_reference_size" id="minimax-video-reference-size"><option value="match">По размеру кадра · рекомендуем</option><option value="max">Максимальная детализация</option></select></label>
+        </div>
+        <div class="minimax-aspect-controls">
+          <div class="setting-toggle minimax-source-aspect-note" id="minimax-source-aspect-control"><input name="video_use_source_aspect" id="minimax-use-source-aspect" type="hidden" value="true"><span><strong>Пропорции Фото 1 · автоматически</strong><small>Если фото добавлено, MiniMax всегда использует его исходное соотношение сторон.</small></span></div>
+          <label class="ui-field"><span class="ui-field-label">Формат без Фото 1</span><select name="video_aspect" id="minimax-video-aspect"><option value="9:16" selected>9:16 · вертикальное</option><option value="16:9">16:9 · широкое</option><option value="4:5">4:5 · портрет</option><option value="1:1">1:1 · квадрат</option><option value="2:3">2:3 · фото</option><option value="3:2">3:2 · альбом</option><option value="3:4">3:4 · портрет</option><option value="4:3">4:3 · альбом</option><option value="21:9">21:9 · ультраширокое</option><option value="4:1">4:1 · обложка</option></select></label>
+          <label class="minimax-inline-toggle ui-choice ui-choice--compact"><input name="video_swap_dimensions" id="minimax-video-swap" type="checkbox" value="true"><span>Поменять ширину и высоту</span></label>
+        </div>
+      </section>
+{{end}}
+
+{{define "studio_video_loras"}}
+<section class="workflow-settings-section minimax-video-settings minimax-v4-settings" hidden {{if not .CanUseAdvancedGenerationSettings}}inert data-requires-advanced-settings="true"{{end}}>
+        <div class="workflow-settings-heading"><div><strong>MiniMax H3 v5 · LoRA</strong><small>Адаптеры из отдельной папки MiniMaxH3 подключаются после оптимизаций модели. Внешний Turbo применяется только к базовой модели.</small></div></div>
+        <div class="lora-list">
+          <div class="ui-field-grid lora-row" data-lora-slots="minimax"><span class="lora-number">1</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_1" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .MiniMaxLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Модель</span><input name="lora_model_strength_1" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label><label class="ui-field"><span class="ui-field-label">CLIP</span><input name="lora_clip_strength_1" class="generation-lora-clip" type="number" min="-100" max="100" step="0.05" value="1"></label></div>
+          <div class="ui-field-grid lora-row" data-lora-slots="minimax" hidden><span class="lora-number">2</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_2" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .MiniMaxLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Модель</span><input name="lora_model_strength_2" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label><label class="ui-field"><span class="ui-field-label">CLIP</span><input name="lora_clip_strength_2" class="generation-lora-clip" type="number" min="-100" max="100" step="0.05" value="1"></label></div>
+          <div class="ui-field-grid lora-row" data-lora-slots="minimax" hidden><span class="lora-number">3</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_3" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .MiniMaxLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Модель</span><input name="lora_model_strength_3" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label><label class="ui-field"><span class="ui-field-label">CLIP</span><input name="lora_clip_strength_3" class="generation-lora-clip" type="number" min="-100" max="100" step="0.05" value="1"></label></div>
+          <div class="ui-field-grid lora-row" data-lora-slots="minimax" hidden><span class="lora-number">4</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_4" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .MiniMaxLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Модель</span><input name="lora_model_strength_4" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label><label class="ui-field"><span class="ui-field-label">CLIP</span><input name="lora_clip_strength_4" class="generation-lora-clip" type="number" min="-100" max="100" step="0.05" value="1"></label></div>
+          <div class="ui-field-grid lora-row" data-lora-slots="minimax" hidden><span class="lora-number">5</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_5" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .MiniMaxLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Модель</span><input name="lora_model_strength_5" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label><label class="ui-field"><span class="ui-field-label">CLIP</span><input name="lora_clip_strength_5" class="generation-lora-clip" type="number" min="-100" max="100" step="0.05" value="1"></label></div>
+          <div class="ui-field-grid lora-row" data-lora-slots="minimax" hidden><span class="lora-number">6</span><label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_6" class="generation-lora-select"><option value="" selected>Без LoRA</option>{{range .MiniMaxLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label><label class="ui-field"><span class="ui-field-label">Модель</span><input name="lora_model_strength_6" class="generation-lora-model" type="number" min="-100" max="100" step="0.05" value="0"></label><label class="ui-field"><span class="ui-field-label">CLIP</span><input name="lora_clip_strength_6" class="generation-lora-clip" type="number" min="-100" max="100" step="0.05" value="1"></label></div>
+        </div>
+      </section>
+{{end}}
+
+{{define "studio_quota"}}
+{{if .GenerationQuota.HasLimits}}<section class="generation-quota" id="generation-quota" aria-label="Лимиты быстрой генерации"><div class="generation-quota-heading"><span>Остаток генераций</span><small>Изображения и видео учитываются отдельно.</small></div><div class="generation-quota-types">{{if or (gt .GenerationQuota.Image.DailyLimit 0) (gt .GenerationQuota.Image.TotalLimit 0)}}<div class="generation-quota-type"><strong>Изображения</strong><div class="generation-quota-items">{{if gt .GenerationQuota.Image.DailyLimit 0}}<div class="generation-quota-item"><span>Сегодня</span><strong><b data-generation-quota-image-daily-remaining>{{.GenerationQuota.Image.DailyRemaining}}</b> из <b data-generation-quota-image-daily-limit>{{.GenerationQuota.Image.DailyLimit}}</b></strong></div>{{end}}{{if gt .GenerationQuota.Image.TotalLimit 0}}<div class="generation-quota-item"><span>Всего</span><strong><b data-generation-quota-image-total-remaining>{{.GenerationQuota.Image.TotalRemaining}}</b> из <b data-generation-quota-image-total-limit>{{.GenerationQuota.Image.TotalLimit}}</b></strong></div>{{end}}</div></div>{{end}}{{if or (gt .GenerationQuota.Video.DailyLimit 0) (gt .GenerationQuota.Video.TotalLimit 0)}}<div class="generation-quota-type"><strong>Видео</strong><div class="generation-quota-items">{{if gt .GenerationQuota.Video.DailyLimit 0}}<div class="generation-quota-item"><span>Сегодня</span><strong><b data-generation-quota-video-daily-remaining>{{.GenerationQuota.Video.DailyRemaining}}</b> из <b data-generation-quota-video-daily-limit>{{.GenerationQuota.Video.DailyLimit}}</b></strong></div>{{end}}{{if gt .GenerationQuota.Video.TotalLimit 0}}<div class="generation-quota-item"><span>Всего</span><strong><b data-generation-quota-video-total-remaining>{{.GenerationQuota.Video.TotalRemaining}}</b> из <b data-generation-quota-video-total-limit>{{.GenerationQuota.Video.TotalLimit}}</b></strong></div>{{end}}</div></div>{{end}}</div></section>{{end}}
+{{end}}
+
+{{define "studio_inputs"}}
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<input type="hidden" name="template_id" id="template-id">
+<input type="hidden" name="generation_workflow" id="generation-workflow-id">
+<input type="hidden" name="input_image" id="input-image">
+<input type="hidden" name="input_image_2" id="input-image-2">
+<input type="hidden" name="input_image_3" id="input-image-3">
+<input type="hidden" name="input_image_4" id="input-image-4">
+<input type="hidden" name="input_audio" id="input-audio">
+<input type="hidden" name="input_video" id="input-video">
+{{end}}
