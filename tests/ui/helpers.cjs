@@ -26,6 +26,9 @@ const installPreviewClock = async (page) => {
 
 const settlePage = async (page) => {
   await page.waitForLoadState("domcontentloaded");
+  if (await page.locator("#generation-draft-bar").count()) {
+    await expect(page.locator("#generation-draft-bar")).not.toHaveAttribute("data-state", /^(loading|dirty|saving)$/);
+  }
   await page.evaluate(async () => {
     if (document.fonts?.ready) await document.fonts.ready;
   });

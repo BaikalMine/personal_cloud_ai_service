@@ -9,6 +9,7 @@
 <script src="/static/generation-batch.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-job.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-recipes.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/generation-draft.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-history.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-lightbox.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generate.js?v={{.AssetVersion}}" defer></script>
@@ -26,6 +27,16 @@
   <section class="generation-repeat-notice" id="generation-repeat-notice" hidden aria-live="polite">
     <div><strong id="generation-repeat-title">Параметры перенесены</strong><span id="generation-repeat-message"></span></div>
     <button type="button" id="generation-repeat-dismiss" aria-label="Закрыть уведомление">&#10005;</button>
+  </section>
+
+  <section class="generation-draft-bar" id="generation-draft-bar" aria-label="Черновик генерации" hidden>
+    <div><strong>Черновик</strong><span id="generation-draft-status" role="status" aria-live="polite">Загружаем...</span><small id="generation-draft-expiry"></small></div>
+    <div class="generation-draft-actions">
+      <button type="button" class="button ghost" id="generation-draft-save">Сохранить</button>
+      <button type="button" class="button ghost" id="generation-draft-remote" hidden>Взять сохранённый</button>
+      <button type="button" class="button ghost" id="generation-draft-local" hidden>Сохранить мои правки</button>
+      <button type="button" class="button ghost" id="generation-draft-delete" disabled>Удалить черновик</button>
+    </div>
   </section>
 
   <section class="generation-progress" aria-label="Шаги генерации">

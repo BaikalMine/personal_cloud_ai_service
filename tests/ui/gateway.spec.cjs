@@ -19,8 +19,12 @@ const responsiveRoutes = [
 ];
 
 const open = async (page, route) => {
+  await page.context().clearCookies({ name: "preview_generation_draft" });
   await installPreviewClock(page);
-  await page.goto(route, { waitUntil: "domcontentloaded" });
+  const discardPreviousFixture = (dialog) => dialog.type() === "beforeunload" ? dialog.accept() : dialog.dismiss();
+  page.on("dialog", discardPreviousFixture);
+  try { await page.goto(route, { waitUntil: "domcontentloaded" }); }
+  finally { page.off("dialog", discardPreviousFixture); }
   await settlePage(page);
 };
 
@@ -148,6 +152,7 @@ test("generation wizard covers Krea2, Flux2 and MiniMax", async ({ page }, testI
   await page.locator("#workflow-next").click();
   await expect(page.locator("#generation-summary")).toContainText("Flux 2 / Klein 9B");
   await expect(page.locator("#generation-summary")).toContainText("1 фото (1 из галереи)");
+  await settlePage(page);
   const promptBox = await page.locator("#positive-prompt").boundingBox();
   const launchBox = await page.locator("#generation-run-dock").boundingBox();
   expect(launchBox.y, "launch actions must stay below the prompt instead of covering it").toBeGreaterThan(promptBox.y + promptBox.height);
@@ -206,6 +211,7 @@ test("video prompt assistant can derive an I2VA prompt from the opening frame", 
 test("video reference sources use equal tiles at every viewport", async ({ page }) => {
   await open(page, "/preview/generate");
   await page.getByRole("button", { name: /Видео Создаёт/ }).click();
+  await settlePage(page);
   await expect(page.locator("#minimax-video-mode")).toHaveScreenshot("generation-video-modes.png", { stylePath: visualStyle });
 
   const visibleSlots = page.locator(".source-image-card:visible");
@@ -274,6 +280,7 @@ test("Krea2 exposes the PhotoFlow processing branches as independent modules", a
   await expect(processing.locator('input[name="image_filter_brightness"]')).toBeEnabled();
   const overflow = await processing.locator(".krea-module").evaluateAll((modules) => modules.map((module) => module.scrollWidth - module.clientWidth));
   expect(overflow.every((difference) => difference <= 1), `module overflow: ${overflow.join(", ")}`).toBeTruthy();
+  await settlePage(page);
   await expect(processing).toHaveScreenshot("generation-krea-processing.png", { stylePath: visualStyle });
 });
 
@@ -320,6 +327,7 @@ test("controlled generation batches stay clear and usable at every viewport", as
   await expect(group.locator(".generation-job--batch")).toHaveCount(3);
   await expect(group.locator(".generation-batch-progress")).toContainText("2 из 3");
   await expect(group.getByRole("button", { name: "Новая ветка" })).toBeVisible();
+  await settlePage(page);
   await expect(group).toHaveScreenshot("generation-batch-group.png", { stylePath: visualStyle });
   await assertNoViewportOverflow(page, `${testInfo.project.name} generation batch workbench`);
   await page.evaluate(() => window.scrollTo(0, 0));
@@ -360,6 +368,7 @@ test("prompt assistant review stays readable at every viewport", async ({ page }
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     window.scrollTo(0, 0);
   });
+  await settlePage(page);
   await expect(page).toHaveScreenshot("prompt-assistant-review.png", { fullPage: true, stylePath: visualStyle });
 
   await page.locator("#prompt-assistant-apply").click();

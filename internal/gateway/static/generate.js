@@ -253,6 +253,16 @@
   const selectedImages = new Map();
   const gallerySelections = new Map();
   const uploadedImages = new Map();
+  const restoredImages = new Map();
+  const draftAssets = new Map();
+  const pendingMediaUploads = new Map();
+  const draftUploadAttempts = new Map();
+  let draftController = null;
+  let restoringDraft = false;
+  let draftAdvancedOpen = Boolean(generationAdvanced?.open);
+  const imageDraftField = (index) => index === 1 ? "input_image" : `input_image_${index}`;
+  const markDraftDirty = () => { if (!restoringDraft) draftController?.markDirty(); };
+  const hasMissingDraftAssets = () => [...draftAssets.values()].some((asset) => !asset.available);
   let uploadedAudio = "";
   let uploadedVideo = "";
   let videoPreviewURL = "";
@@ -289,7 +299,7 @@
   const selectedImageSource = (item) => generationModules.media?.sourceFrom?.(
     selectedImageFile(item),
     gallerySelections.get(item?.index),
-  ) || selectedImageFile(item) || gallerySelections.get(item?.index) || null;
+  ) || selectedImageFile(item) || gallerySelections.get(item?.index) || restoredImages.get(item?.index) || null;
   const hasSelectedImage = (item) => Boolean(selectedImageSource(item));
   const workflowManifestsByID = new Map();
   const referenceRoleLabels = {
@@ -982,6 +992,7 @@
   const hasPendingMiniMaxVideo = () => miniMaxReferencesAreAvailable() && Boolean(miniMaxVideoFile?.files?.[0]) && !uploadedVideo;
 
   const clearMiniMaxAudio = () => {
+    draftAssets.delete("input_audio");
     if (miniMaxAudioFile) miniMaxAudioFile.value = "";
     uploadedAudio = "";
     if (inputAudio) inputAudio.value = "";
@@ -991,6 +1002,7 @@
   };
 
   const clearMiniMaxVideo = () => {
+    draftAssets.delete("input_video");
     if (miniMaxVideoFile) miniMaxVideoFile.value = "";
     uploadedVideo = "";
     if (inputVideo) inputVideo.value = "";
@@ -1055,6 +1067,8 @@
 
   const clearImageSlot = (item) => {
     if (!item) return;
+    restoredImages.delete(item.index);
+    draftAssets.delete(imageDraftField(item.index));
 	item.slot.classList.remove("has-image");
     const oldURL = previewURLs.get(item.index);
     if (oldURL?.startsWith("blob:")) URL.revokeObjectURL(oldURL);
@@ -1314,6 +1328,7 @@
       const needsImage = selectedChoice()?.dataset.requiresImage === "true";
       showStep(needsImage && !uploadedImages.get(1) ? 2 : 3);
     }
+    markDraftDirty();
     return Boolean(selectedChoice() && selectedGenerationWorkflow());
   };
 
@@ -1679,6 +1694,7 @@
     calculateResolution();
     syncMiniMaxVideoProfile();
     syncGenerationSummary();
+    markDraftDirty();
   };
 
   const updateQuickModelOptions = (workflow) => {
@@ -2118,6 +2134,11 @@
 	});
 
   promptAssistantImprove?.addEventListener("click", async () => {
+    if (hasMissingDraftAssets() || pendingDraftFiles().length) {
+      setPromptAssistantState("Сначала загрузите или замените недоступные материалы черновика.", "error");
+      showStep(2);
+      return;
+    }
     const original = positive?.value.trim() || "";
     const mode = templateID.value;
     const canUseVisualOnlyVideo = mode === "minimax-h3-video" && selectedReferenceMetadata().length > 0;
@@ -2269,6 +2290,7 @@
   miniMaxVideoModeInputs.forEach((input) => input.addEventListener("change", handleMiniMaxModeChange));
 
   miniMaxAudioFile?.addEventListener("change", () => {
+    draftAssets.delete("input_audio");
     const file = miniMaxAudioFile.files?.[0];
     uploadedAudio = "";
     if (inputAudio) inputAudio.value = "";
@@ -2294,6 +2316,7 @@
     updateWorkflowNext();
   });
   miniMaxVideoFile?.addEventListener("change", () => {
+    draftAssets.delete("input_video");
     const file = miniMaxVideoFile.files?.[0];
     uploadedVideo = "";
     if (inputVideo) inputVideo.value = "";
@@ -2490,6 +2513,8 @@
   };
 
   const selectGalleryImage = (item, entry) => {
+    restoredImages.delete(item.index);
+    draftAssets.delete(imageDraftField(item.index));
     const previousURL = previewURLs.get(item.index);
     if (previousURL?.startsWith("blob:")) URL.revokeObjectURL(previousURL);
     previewURLs.delete(item.index);
@@ -2506,6 +2531,7 @@
     if (inputImages[item.index - 1]) inputImages[item.index - 1].value = "";
     applyImageSelectionPreview(item, entry, entry.url, "Выбрано из моих генераций. Передадим фото в ComfyUI при продолжении.");
     closeGalleryImagePicker();
+    markDraftDirty();
   };
 
   const clearRequestedLibraryMediaQuery = () => {
@@ -2571,6 +2597,8 @@
   };
 
   const handleImageSelection = (item) => {
+    restoredImages.delete(item.index);
+    draftAssets.delete(imageDraftField(item.index));
     const file = item.input?.files?.[0] || null;
     const previousURL = previewURLs.get(item.index);
     if (previousURL?.startsWith("blob:")) URL.revokeObjectURL(previousURL);
@@ -2622,7 +2650,7 @@
   imagePickerRefresh?.addEventListener("click", () => { refreshGalleryPickerImages().catch(() => {}); });
   if (!imagePickerFocusTrap) document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeGalleryImagePicker(); });
 
-  const uploadSelectedImage = async (item) => {
+  const uploadSelectedImageSource = async (item) => {
     const file = selectedImageFile(item);
     const galleryImage = gallerySelections.get(item.index);
     const source = generationModules.media?.sourceFrom?.(file, galleryImage) || file || galleryImage;
@@ -2652,6 +2680,58 @@
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.name) throw new Error(payload.error || "ComfyUI не принял фото");
     return { ...payload, value: [payload.subfolder, payload.name].filter(Boolean).join("/"), source };
+  };
+
+  // Autosave and the Next button share uploads so a file is reserved only once.
+  const uploadSelectedImage = (item) => {
+    const field = imageDraftField(item.index);
+    const source = selectedImageFile(item) || gallerySelections.get(item.index);
+    if (pendingMediaUploads.get(field)?.source === source) return pendingMediaUploads.get(field).promise;
+    const promise = uploadSelectedImageSource(item).then((payload) => {
+      if (source !== (selectedImageFile(item) || gallerySelections.get(item.index))) throw new Error("Выбранное фото изменилось");
+      uploadedImages.set(item.index, payload.value);
+      draftAssets.delete(field);
+      mediaSlice.dispatch({ type: "UPLOAD_SUCCESS", slot: item.index, value: payload.value });
+      if (inputImages[item.index - 1]) inputImages[item.index - 1].value = payload.value;
+      if (item.state) item.state.textContent = "Загружено в вашу сессию";
+      return payload;
+    }).finally(() => {
+      if (pendingMediaUploads.get(field)?.promise === promise) pendingMediaUploads.delete(field);
+      updateWorkflowNext();
+    });
+    pendingMediaUploads.set(field, { source, promise });
+    return promise;
+  };
+
+  const uploadSelectedAV = (kind) => {
+    const field = `input_${kind}`;
+    const input = kind === "audio" ? miniMaxAudioFile : miniMaxVideoFile;
+    const source = input?.files?.[0];
+    if (!source) return Promise.reject(new Error("Файл не выбран"));
+    if (pendingMediaUploads.get(field)?.source === source) return pendingMediaUploads.get(field).promise;
+    const promise = (async () => {
+      const body = new FormData();
+      body.append("image", source, source.name);
+      body.append("type", "input");
+      body.append("overwrite", "true");
+      const response = await fetch(`/generate/upload/${kind}`, { method: "POST", body, credentials: "same-origin" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.name) throw new Error(payload.error || "Не удалось загрузить файл");
+      if (source !== input?.files?.[0]) throw new Error("Выбранный файл изменился");
+      const value = [payload.subfolder, payload.name].filter(Boolean).join("/");
+      draftAssets.delete(field);
+      if (kind === "audio") uploadedAudio = value;
+      else uploadedVideo = value;
+      syncMiniMaxAudioReference();
+      const state = kind === "audio" ? miniMaxAudioState : miniMaxVideoState;
+      if (state) state.textContent = "Загружено в вашу сессию";
+      return value;
+    })().finally(() => {
+      if (pendingMediaUploads.get(field)?.promise === promise) pendingMediaUploads.delete(field);
+      updateWorkflowNext();
+    });
+    pendingMediaUploads.set(field, { source, promise });
+    return promise;
   };
 
   workflowNext?.addEventListener("click", async () => {
@@ -2696,31 +2776,11 @@
       }
       if (pendingAudio && miniMaxAudioFile?.files?.[0]) {
         if (miniMaxAudioState) miniMaxAudioState.textContent = "Загружаем аудио в вашу сессию...";
-        const body = new FormData();
-        const file = miniMaxAudioFile.files[0];
-        body.append("image", file, file.name);
-        body.append("type", "input");
-        body.append("overwrite", "true");
-        const response = await fetch("/generate/upload/audio", { method: "POST", body, credentials: "same-origin" });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !payload.name) throw new Error(payload.error || "ComfyUI не принял аудиофайл");
-        uploadedAudio = [payload.subfolder, payload.name].filter(Boolean).join("/");
-        syncMiniMaxAudioReference();
-        if (miniMaxAudioState) miniMaxAudioState.textContent = "Загружено в вашу сессию";
+        await uploadSelectedAV("audio");
       }
       if (pendingVideo && miniMaxVideoFile?.files?.[0]) {
         if (miniMaxVideoState) miniMaxVideoState.textContent = "Загружаем видео в вашу сессию...";
-        const body = new FormData();
-        const file = miniMaxVideoFile.files[0];
-        body.append("image", file, file.name);
-        body.append("type", "input");
-        body.append("overwrite", "true");
-        const response = await fetch("/generate/upload/video", { method: "POST", body, credentials: "same-origin" });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !payload.name) throw new Error(payload.error || "ComfyUI не принял видеореференс");
-        uploadedVideo = [payload.subfolder, payload.name].filter(Boolean).join("/");
-        syncMiniMaxAudioReference();
-        if (miniMaxVideoState) miniMaxVideoState.textContent = "Загружено в вашу сессию";
+        await uploadSelectedAV("video");
       }
       showStep(3);
       positive?.focus({ preventScroll: true });
@@ -3004,6 +3064,206 @@
     body.set("video_reference_audio", miniMaxReferencesAreAvailable() && uploadedVideo && form.elements.video_reference_audio?.checked ? "true" : "false");
     if (pendingParentJobID) body.set("parent_job_id", pendingParentJobID);
     return new URLSearchParams(body);
+  };
+
+  const pendingDraftFiles = () => [
+    ...imageSlots.filter((item) => item.index <= activeMaxInputImages() && !uploadedImages.get(item.index))
+      .map((item) => ({ field: imageDraftField(item.index), source: selectedImageFile(item) || gallerySelections.get(item.index), upload: () => uploadSelectedImage(item), state: item.state })),
+    { field: "input_audio", source: hasPendingMiniMaxAudio() ? miniMaxAudioFile.files[0] : null, upload: () => uploadSelectedAV("audio"), state: miniMaxAudioState },
+    { field: "input_video", source: hasPendingMiniMaxVideo() ? miniMaxVideoFile.files[0] : null, upload: () => uploadSelectedAV("video"), state: miniMaxVideoState },
+  ].filter((item) => item.source);
+
+  const captureGenerationDraft = () => {
+    const pending = pendingDraftFiles();
+    // Save text first. Upload one reference in the background and save its ID next.
+    const next = !pendingMediaUploads.size && pending.find((item) => draftUploadAttempts.get(item.field) !== item.source);
+    if (next) {
+      draftUploadAttempts.set(next.field, next.source);
+      if (next.state) next.state.textContent = "Сохраняем материал...";
+      next.upload().catch((error) => {
+        if (next.state) next.state.textContent = error.message || "Материал не загружен";
+      }).finally(markDraftDirty);
+    }
+    const body = buildGenerationPayload();
+    const names = new Set([...form.elements].map((control) => control.name).filter(Boolean));
+    names.forEach((name) => {
+      if (name.startsWith("input_image") || ["input_audio", "input_video"].includes(name)) return;
+      const candidates = namedControlCandidates(name);
+      const control = candidates.find((item) => item.type !== "radio" || item.checked);
+      if (!control || ["file", "submit", "button"].includes(control.type)) return;
+      body.set(name, control.type === "checkbox" ? String(control.checked) : control.value);
+    });
+    body.set("assistant_enabled", String(Boolean(promptAssistantEnabled?.checked)));
+    body.set("assistant_template_used", promptAssistantTemplate?.value || "");
+    body.set("assistant_think_used", String(Boolean(promptAssistantThink?.checked)));
+    body.set("assistant_draft", promptAssistantDraft?.value || "");
+    body.set("assistant_references", JSON.stringify(assistantSlice.get().references || []));
+    body.set("quality_preset", quality?.value || "");
+    body.set("draft_step", String(wizardSlice.get().step || 1));
+    body.set("draft_advanced", String(Boolean(generationAdvanced?.open)));
+    imageSlots.forEach((item) => {
+      const source = selectedImageSource(item);
+      if (source?.name) body.set(`draft_name_${imageDraftField(item.index)}`, source.name);
+    });
+    body.set("draft_name_input_audio", miniMaxAudioFile?.files?.[0]?.name || miniMaxAudioName?.textContent || "");
+    body.set("draft_name_input_video", miniMaxVideoFile?.files?.[0]?.name || miniMaxVideoName?.textContent || "");
+    draftAssets.forEach((asset, field) => {
+      if (asset.id) body.set(`draft_asset_${field}`, asset.id);
+      else if (!asset.available) body.set(`draft_pending_${field}`, asset.name || "Материал");
+      body.set(`draft_name_${field}`, asset.name || "");
+    });
+    pending.forEach((item) => {
+      body.delete(`draft_asset_${item.field}`);
+      body.set(`draft_pending_${item.field}`, item.source.name || item.source.filename || "Материал");
+    });
+    return body;
+  };
+
+  const applyGenerationDraft = (draft) => {
+    const values = draft.values || {};
+    const scenario = values.template_id && root.querySelector(`.scenario-choice[data-workflow-id="${CSS.escape(values.template_id)}"]`);
+    const workflow = values.generation_workflow && root.querySelector(`.generation-workflow-choice[data-preset-id="${CSS.escape(values.generation_workflow)}"]`);
+    if ((values.template_id && (!scenario || scenario.disabled)) || (values.generation_workflow && (!workflow || workflow.disabled))) {
+      throw new Error("Модель черновика сейчас недоступна. Сохранённая версия не изменена.");
+    }
+    if (values.model && ![...model.options].some((option) => option.value === values.model && option.dataset.available === "true" && (!workflow || option.dataset.family === workflow.dataset.family))) {
+      throw new Error("Модель черновика сейчас недоступна. Сохранённая версия не изменена.");
+    }
+    const loraKind = { minimax_h3: "minimax", flux2: "flux", krea2: "krea" }[workflow?.dataset.family];
+    if (loraKind) {
+      const choices = [...root.querySelectorAll(`[data-lora-slots="${loraKind}"] select option`)];
+      if (Object.entries(values).some(([name, value]) => /^lora_\d+$/.test(name) && value && !choices.some((option) => option.value === value))) {
+        throw new Error("Одна из LoRA черновика сейчас недоступна. Сохранённая версия не изменена.");
+      }
+    }
+    restoringDraft = true;
+    try {
+      imageSlots.forEach(clearImageSlot);
+      clearMiniMaxAudio();
+      clearMiniMaxVideo();
+      draftAssets.clear();
+      resetPromptAssistantReview();
+      if (!Object.keys(values).length) {
+        form.reset();
+        if (positive) positive.value = "";
+        root.querySelectorAll(".scenario-choice, .generation-workflow-choice").forEach((choice) => choice.classList.remove("is-selected"));
+        templateID.value = generationWorkflowID.value = "";
+        wizardSlice.dispatch({ type: "SELECT_SCENARIO", scenarioID: "", requiresImage: false, allowsImages: false });
+        if (generationAdvanced) generationAdvanced.open = false;
+        draftAdvancedOpen = false;
+        syncWorkflowFields();
+        showStep(1);
+        return;
+      }
+      applySavedValues(values, { openStep: false });
+      imageSlots.forEach((item) => {
+        const role = values[`image_role_${item.index}`];
+        if (item.role && [...item.role.options].some((option) => option.value === role)) item.role.value = role;
+      });
+      syncImageSlots();
+      (draft.assets || []).forEach((asset) => {
+        if (!/^input_(?:image(?:_[234])?|audio|video)$/.test(asset.field)) return;
+        draftAssets.set(asset.field, asset);
+        const item = imageSlots.find((slot) => imageDraftField(slot.index) === asset.field);
+        const message = asset.available ? "Восстановлено из черновика" : "Материал недоступен. Замените его или удалите.";
+        if (item) {
+          if (asset.available) {
+            const source = { kind: "restored", name: asset.name, url: asset.url };
+            restoredImages.set(item.index, source);
+            uploadedImages.set(item.index, asset.value);
+            inputImages[item.index - 1].value = asset.value;
+            mediaSlice.dispatch({ type: "SELECT_SOURCE", slot: item.index, source });
+            mediaSlice.dispatch({ type: "UPLOAD_SUCCESS", slot: item.index, value: asset.value });
+          }
+          applyImageSelectionPreview(item, { name: asset.name }, asset.available ? asset.url : "", message);
+        } else if (asset.field === "input_audio") {
+          uploadedAudio = asset.available ? asset.value : "";
+          if (miniMaxAudioName) miniMaxAudioName.textContent = asset.name;
+          if (miniMaxAudioState) miniMaxAudioState.textContent = message;
+          if (miniMaxAudioPreview) miniMaxAudioPreview.hidden = false;
+        } else {
+          uploadedVideo = asset.available ? asset.value : "";
+          if (asset.available && miniMaxVideoPreviewMedia) miniMaxVideoPreviewMedia.src = asset.url;
+          if (miniMaxVideoName) miniMaxVideoName.textContent = asset.name;
+          if (miniMaxVideoState) miniMaxVideoState.textContent = message;
+          if (miniMaxVideoPreview) miniMaxVideoPreview.hidden = false;
+        }
+      });
+      if (quality && values.quality_preset) quality.value = values.quality_preset;
+      if (generationAdvanced) generationAdvanced.open = values.draft_advanced === "true";
+      draftAdvancedOpen = Boolean(generationAdvanced?.open);
+      if (promptAssistantEnabled) promptAssistantEnabled.checked = values.assistant_enabled === "true";
+      if (promptAssistantTemplate && values.assistant_template_used) promptAssistantTemplate.value = values.assistant_template_used;
+      if (promptAssistantThink) promptAssistantThink.checked = values.assistant_think_used === "true";
+      syncMiniMaxAudioReference();
+      syncPromptAssistant();
+      if (values.assistant_original_prompt && promptAssistantEnabled?.checked) {
+        let references = [];
+        try { references = JSON.parse(values.assistant_references || "[]"); } catch (_) {}
+        assistantSlice.dispatch({ type: "REQUEST_START", original: values.assistant_original_prompt });
+        assistantSlice.dispatch({ type: "REQUEST_SUCCESS", suggestion: values.assistant_suggestion, correlationID: values.correlation_id, references });
+        if (["applied", "edited_after_apply"].includes(values.assistant_action)) assistantSlice.dispatch({ type: "APPLY", edited: values.assistant_action === "edited_after_apply" });
+        else if (values.assistant_action === "kept_original") assistantSlice.dispatch({ type: "KEEP_ORIGINAL" });
+        if (promptAssistantDraft) promptAssistantDraft.value = values.assistant_draft || values.assistant_suggestion || "";
+        if (promptAssistantReview) promptAssistantReview.hidden = assistantSlice.get().approved;
+        renderPromptAssistantReview({ prompt: promptAssistantDraft?.value, references }, values.assistant_original_prompt);
+        setPromptAssistantState(assistantSlice.get().approved
+          ? "Подтверждённый вариант восстановлен из черновика."
+          : "Вариант восстановлен. Проверьте его и примените либо оставьте свой промт.", assistantSlice.get().approved ? "approved" : "review");
+      }
+      syncBatchBuilder();
+      syncGenerationSummary();
+      updateWorkflowNext();
+      showStep(Math.max(1, Math.min(3, Number(values.draft_step) || 2)));
+    } finally { restoringDraft = false; }
+  };
+
+  const initializeGenerationDraft = () => {
+    draftController = generationModules.draft?.bindUI?.({
+      document, window, capture: captureGenerationDraft, apply: applyGenerationDraft,
+      hasUnsavedFiles: () => pendingDraftFiles().length > 0,
+      transport: async (operation, body) => {
+        if (body) body.set("csrf", form.elements.csrf?.value || "");
+        const response = await fetch(operation === "delete" ? "/generate/draft/delete" : "/generate/draft", {
+          method: operation === "load" ? "GET" : "POST", body, credentials: "same-origin", cache: "no-store",
+          headers: body ? { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" } : {},
+          signal: AbortSignal.timeout(20000),
+        });
+        return { ok: response.ok, status: response.status, payload: await response.json() };
+      },
+      onSaved: (draft) => (draft.assets || []).forEach((asset) => {
+        const item = imageSlots.find((slot) => imageDraftField(slot.index) === asset.field);
+        const current = item ? uploadedImages.get(item.index) : asset.field === "input_audio" ? uploadedAudio : uploadedVideo;
+        if (asset.available && current === asset.value) draftAssets.set(asset.field, asset);
+        else if (!asset.available && asset.id && draftAssets.get(asset.field)?.id === asset.id) {
+          draftAssets.set(asset.field, asset);
+          if (item) {
+            uploadedImages.delete(item.index);
+            restoredImages.delete(item.index);
+            inputImages[item.index - 1].value = "";
+            if (item.state) item.state.textContent = "Срок хранения истёк. Замените материал или удалите его.";
+          } else if (asset.field === "input_audio") uploadedAudio = "";
+          else uploadedVideo = "";
+        }
+      }),
+    });
+    form.addEventListener("input", markDraftDirty);
+    form.addEventListener("change", markDraftDirty);
+    generationAdvanced?.addEventListener("toggle", () => {
+      if (draftAdvancedOpen === generationAdvanced.open) return;
+      draftAdvancedOpen = generationAdvanced.open;
+      markDraftDirty();
+    });
+    root.addEventListener("click", (event) => {
+      if (event.target.closest(".scenario-choice, .generation-workflow-choice, [data-remove-image], #minimax-audio-remove, #minimax-video-remove, #prompt-assistant-apply, #prompt-assistant-keep")) markDraftDirty();
+    });
+    generationStore?.subscribe?.("assistant:change", ({ previous, current }) => {
+      if (["original", "suggestion", "action", "correlationID"].some((key) => previous?.[key] !== current?.[key])) markDraftDirty();
+    });
+    generationStore?.subscribe?.("wizard:change", ({ previous, current }) => {
+      if (["step", "scenarioID", "workflowID"].some((key) => previous?.[key] !== current?.[key])) markDraftDirty();
+    });
+    return draftController?.load({ preserveLocal: Boolean(requestedVariantID || requestedLibraryMediaID || requestedJobID) });
   };
 
   const preflightField = (name) => {
@@ -4272,6 +4532,11 @@
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (hasMissingDraftAssets() || pendingDraftFiles().length) {
+      showRepeatNotice("Проверьте материалы", "В черновике есть недоступные или ещё не загруженные файлы. Замените их или удалите перед запуском.", true);
+      showStep(2);
+      return;
+    }
     if (!selectedChoice() || !selectedGenerationWorkflow() || !model?.value || !positive.value.trim()) return;
     const batchLaunch = Boolean(batchEnabled?.checked);
     if (!batchLaunch && (activeGenerationID || activeGenerationRequestID)) {
@@ -4378,7 +4643,10 @@
   const workflowCapabilitiesReady = loadWorkflowCapabilities();
   const initial = initialID ? root.querySelector(`[data-workflow-id="${CSS.escape(initialID)}"]`) : null;
   if (initial) chooseScenario(initial);
-  workflowCapabilitiesReady.finally(() => applyRequestedLibraryMedia().catch(() => {}));
+  workflowCapabilitiesReady.finally(async () => {
+    await initializeGenerationDraft();
+    await applyRequestedLibraryMedia().catch(() => {});
+  });
   if (root.dataset.previewOutput) {
     result.hidden = false;
     resultTitle.textContent = "Готово";

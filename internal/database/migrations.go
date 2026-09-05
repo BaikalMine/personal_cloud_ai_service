@@ -1288,6 +1288,22 @@ var migrationCatalog = []migration{
 			`CREATE INDEX IF NOT EXISTS lora_training_jobs_failed_cleanup_idx ON lora_training_jobs((COALESCE(finished_at,updated_at)),id) WHERE state='failed'`,
 		},
 	},
+	{
+		version: 53,
+		name:    "generation_drafts",
+		statements: []string{
+			`CREATE SEQUENCE generation_draft_revision_seq`,
+			`CREATE TABLE generation_drafts (
+				user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+				revision BIGINT NOT NULL DEFAULT nextval('generation_draft_revision_seq'),
+				payload_cipher BYTEA NOT NULL CHECK (octet_length(payload_cipher) BETWEEN 1 AND 262144),
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				expires_at TIMESTAMPTZ NOT NULL DEFAULT now() + interval '30 days'
+			)`,
+			`CREATE INDEX generation_drafts_expiry_idx ON generation_drafts(expires_at)`,
+			`CREATE INDEX comfy_input_assets_owner_path_idx ON comfy_input_assets(user_id,subfolder,filename) WHERE state='stored'`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

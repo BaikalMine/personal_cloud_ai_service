@@ -50,6 +50,7 @@ func TestStoreIntegrationLifecycle(t *testing.T) {
 	assertMiningProfiles(t, ctx, repository, adminID)
 	assertDatabaseRetentionLifecycle(t, ctx, db, repository, adminID)
 	assertGenerationJobLifecycle(t, ctx, db, repository, adminID)
+	assertGenerationDraftLifecycle(t, ctx, db, repository, adminID)
 	assertGenerationBatchLifecycle(t, ctx, db, repository)
 	assertObservabilityLifecycle(t, ctx, repository, adminID)
 

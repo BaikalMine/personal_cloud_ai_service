@@ -54,6 +54,7 @@ type generationVariantView struct {
 }
 
 func (a *App) registerGenerationCompanionRoutes(mux *http.ServeMux, quick func(http.Handler) http.Handler) {
+	a.registerGenerationDraftRoutes(mux, quick)
 	mux.Handle("/generate/preflight", quick(http.HandlerFunc(a.handleGenerationPreflight)))
 	mux.Handle("/generate/recipes", quick(http.HandlerFunc(a.handleGenerationRecipes)))
 	mux.Handle("/generate/recipes/delete", quick(http.HandlerFunc(a.handleDeleteGenerationRecipe)))

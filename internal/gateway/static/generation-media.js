@@ -31,7 +31,7 @@
 
   const normalizeSource = (source) => {
     if (!source) return null;
-    if (source.kind === SOURCE_DEVICE || source.kind === SOURCE_GALLERY) return source;
+    if ([SOURCE_DEVICE, SOURCE_GALLERY, SOURCE_RESTORED].includes(source.kind)) return source;
     if (source.id && (source.url || source.filename)) return gallerySource(source);
     return deviceSource(source);
   };

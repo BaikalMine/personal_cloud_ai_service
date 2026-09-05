@@ -145,6 +145,7 @@ func main() {
 	}}
 
 	mux := http.NewServeMux()
+	registerDraftPreview(mux, now)
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("internal/gateway/static"))))
 	mux.HandleFunc("/preview/result.svg", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "image/svg+xml")
