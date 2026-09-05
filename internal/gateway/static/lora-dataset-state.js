@@ -4,7 +4,12 @@
   if (root) root.AIGatewayLoraDataset = api;
 })(typeof window !== "undefined" ? window : null, function () {
   const copy = (value) => JSON.parse(JSON.stringify(value));
-  const createController = ({ request, defaults, onChange = () => {}, schedule = setTimeout, unschedule = clearTimeout, newID = () => crypto.randomUUID() }) => {
+  const createID = (random = globalThis.crypto) => {
+    if (typeof random.randomUUID === "function") return random.randomUUID();
+    // HTTP/IP pages still expose getRandomValues, but not randomUUID.
+    return Array.from(random.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("");
+  };
+  const createController = ({ request, defaults, onChange = () => {}, schedule = setTimeout, unschedule = clearTimeout, newID = createID }) => {
     const state = { dataset: null, manifest: copy(defaults), assets: {}, datasets: [], status: "loading", error: "", dirty: false, ready: false };
     let epoch = 0;
     let timer = null;
@@ -88,5 +93,5 @@
     const ensure = async () => { if (!state.dataset) touch(); return await flush() ? state.dataset?.id : null; };
     return { state, load, apply, touch, flush, ensure, startNew, refreshList, setError, dispose: stopTimer };
   };
-  return { createController };
+  return { createController, createID };
 });

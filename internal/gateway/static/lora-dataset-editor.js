@@ -26,7 +26,7 @@
   let captionPoller;
   let previousTrigger = defaults.settings.trigger_word;
   let outputEdited = false;
-  const id = () => crypto.randomUUID();
+  const id = window.AIGatewayLoraDataset.createID;
   const formatBytes = (bytes) => `${((Number(bytes) || 0) / 1048576).toFixed(1)} МБ`;
   const plural = (count) => `${count} ${count % 10 === 1 && count % 100 !== 11 ? "изображение" : count % 10 >= 2 && count % 10 <= 4 && !(count % 100 >= 12 && count % 100 <= 14) ? "изображения" : "изображений"}`;
   const node = (tag, text, className = "") => { const result = document.createElement(tag); result.textContent = text; result.className = className; return result; };

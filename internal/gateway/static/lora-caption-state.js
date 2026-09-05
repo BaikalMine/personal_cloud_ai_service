@@ -1,8 +1,9 @@
 (function (root, factory) {
-  const api = factory();
+  const dataset = typeof module === "object" && module.exports ? require("./lora-dataset-state.js") : root.AIGatewayLoraDataset;
+  const api = factory(dataset.createID);
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.AIGatewayLoraCaptions = api;
-})(typeof window !== "undefined" ? window : null, function () {
+})(typeof window !== "undefined" ? window : null, function (createID) {
   const active = (job) => job && ["queued", "running"].includes(job.state);
   const matches = (manifest, item, job) => {
     const source = job?.source;
@@ -19,7 +20,7 @@
     }
     return result;
   };
-  const reconcile = (manifest, jobs, newID = () => crypto.randomUUID()) => {
+  const reconcile = (manifest, jobs, newID = createID) => {
     let changed = 0;
     for (const job of latest(jobs).values()) {
       const item = manifest.images.find((image) => image.id === job.image_id);

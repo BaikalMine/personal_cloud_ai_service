@@ -21,6 +21,19 @@ const fill = async (page, count = 5) => {
 };
 const desktopOnly = (info) => test.skip(info.project.name !== "desktop-1440", "state transitions run once on desktop");
 
+test("dataset saves and reloads when the browser has no randomUUID", async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(crypto, "randomUUID", { value: undefined, configurable: true }));
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await open(page);
+  await fill(page, 2);
+  await page.reload();
+  await settlePage(page);
+  await expect(items(page)).toHaveCount(2);
+  await expect(captions(page).first()).toHaveValue(/frame 1/);
+  expect(errors).toEqual([]);
+});
+
 test("dataset editor, versions and gallery fit the viewport", async ({ page }, info) => {
   await open(page); await fill(page, 2);
   await page.locator("h1").click();
