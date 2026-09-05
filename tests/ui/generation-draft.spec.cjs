@@ -1,5 +1,5 @@
 const { test, expect } = require("@playwright/test");
-const { installPreviewClock, settlePage, assertNoViewportOverflow } = require("./helpers.cjs");
+const { installPreviewClock, settlePage, assertNoViewportOverflow, openStudioOptions } = require("./helpers.cjs");
 
 const open = async (page) => {
   await installPreviewClock(page);
@@ -19,7 +19,7 @@ test("draft restores prompt, LoRA, seed, optional settings and manual assistant 
   await open(page);
   await page.getByRole("button", { name: /^Изображение$/ }).click();
   await page.locator("#positive-prompt").fill("A white ceramic vase in soft window light.");
-  await page.locator("#studio-settings-open").click();
+  await openStudioOptions(page);
   await page.locator('.krea-lora-row select[name="lora_1"]').selectOption({ label: "Krea2 Realism V2" });
   await page.locator('.krea-lora-row input[name="lora_model_strength_1"]').fill("0.65");
   await page.locator('input[name="seed"]:enabled').fill("123456");

@@ -24,6 +24,7 @@
 
   const downloadURL = (outputURL, origin = "http://localhost") => {
     const url = new URL(outputURL, origin);
+    if (url.protocol === "blob:") return url.href;
     url.searchParams.set("download", "1");
     return url.pathname + url.search;
   };

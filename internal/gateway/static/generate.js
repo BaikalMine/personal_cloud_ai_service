@@ -57,6 +57,7 @@
     input: slot.querySelector("[data-image-file]"),
     preview: slot.querySelector("[data-image-preview]"),
     previewImage: slot.querySelector("[data-image-preview-image]"),
+    previewOpen: slot.querySelector("[data-image-preview-open]"),
     name: slot.querySelector("[data-image-name]"),
     state: slot.querySelector("[data-image-state]"),
     remove: slot.querySelector("[data-remove-image]"),
@@ -83,6 +84,7 @@
   const miniMaxAudioReference = document.getElementById("minimax-audio-reference");
   const miniMaxAudioFile = document.getElementById("minimax-audio-file");
   const miniMaxAudioPreview = document.getElementById("minimax-audio-preview");
+  const miniMaxAudioPreviewMedia = document.getElementById("minimax-audio-preview-media");
   const miniMaxAudioName = document.getElementById("minimax-audio-name");
   const miniMaxAudioState = document.getElementById("minimax-audio-state");
   const miniMaxAudioRemove = document.getElementById("minimax-audio-remove");
@@ -266,7 +268,16 @@
   const hasMissingDraftAssets = () => [...draftAssets.entries()].some(([field, asset]) => draftFieldIsActive(field) && !asset.available);
   let uploadedAudio = "";
   let uploadedVideo = "";
-  let videoPreviewURL = "";
+  const audioPlayer = generationModules.studio?.bindReferencePlayer?.({
+    media: miniMaxAudioPreviewMedia, button: document.getElementById("minimax-audio-play"),
+    status: document.getElementById("minimax-audio-playback-status"),
+    start: () => form.elements.video_audio_start?.value, duration: () => form.elements.video_duration_seconds?.value,
+  });
+  const videoPlayer = generationModules.studio?.bindReferencePlayer?.({
+    media: miniMaxVideoPreviewMedia, button: document.getElementById("minimax-video-play"),
+    status: document.getElementById("minimax-video-playback-status"),
+    start: () => form.elements.video_reference_start?.value, duration: () => form.elements.video_reference_duration?.value,
+  });
   let primaryImageSize = null;
 
   const krea2EditMaxBaseMegapixels = 4.7;
@@ -979,6 +990,7 @@
     if (miniMaxReferenceMedia) miniMaxReferenceMedia.hidden = !available;
     if (miniMaxAudioReference) miniMaxAudioReference.hidden = !available;
     if (miniMaxVideoReference) miniMaxVideoReference.hidden = !available;
+    if (!available) { audioPlayer?.pause(); videoPlayer?.pause(); }
     if (inputAudio) inputAudio.value = available ? uploadedAudio : "";
     if (inputVideo) inputVideo.value = available ? uploadedVideo : "";
   };
@@ -987,6 +999,7 @@
   const hasPendingMiniMaxVideo = () => miniMaxReferencesAreAvailable() && Boolean(miniMaxVideoFile?.files?.[0]) && !uploadedVideo;
 
   const clearMiniMaxAudio = () => {
+    audioPlayer?.clear();
     draftAssets.delete("input_audio");
     if (miniMaxAudioFile) miniMaxAudioFile.value = "";
     uploadedAudio = "";
@@ -1001,9 +1014,7 @@
     if (miniMaxVideoFile) miniMaxVideoFile.value = "";
     uploadedVideo = "";
     if (inputVideo) inputVideo.value = "";
-    if (videoPreviewURL) URL.revokeObjectURL(videoPreviewURL);
-    videoPreviewURL = "";
-    if (miniMaxVideoPreviewMedia) miniMaxVideoPreviewMedia.removeAttribute("src");
+    videoPlayer?.clear();
     if (miniMaxVideoName) miniMaxVideoName.textContent = "";
     if (miniMaxVideoState) miniMaxVideoState.textContent = "Готово к загрузке";
     if (miniMaxVideoPreview) miniMaxVideoPreview.hidden = true;
@@ -1687,8 +1698,26 @@
     }
   };
 
+  const profileChanges = document.getElementById("studio-profile-changes");
+  const clearProfileFeedback = () => {
+    root.querySelectorAll("[data-generation-profile]").forEach(button => button.classList.remove("is-active"));
+    if (profileChanges) profileChanges.hidden = true;
+  };
+  const profileSnapshot = (names) => Object.fromEntries(names.flatMap(name => {
+    const control = namedControlCandidates(name).find(item => !item.disabled && item.type !== "hidden" && !item.closest("[hidden], [inert]"));
+    if (!control) return [];
+    const label = control.closest("label");
+    const title = label?.querySelector(".ui-field-label, strong, b")?.textContent?.trim()
+      || [...(label?.childNodes || [])].find(node => node.nodeType === 3 && node.textContent.trim())?.textContent.trim();
+    if (!title) return [];
+    const value = control.type === "checkbox" ? (control.checked ? "Включено" : "Выключено")
+      : control.tagName === "SELECT" ? control.selectedOptions[0]?.textContent.trim() || "Не выбрано" : control.value;
+    return [[name, { label: title, value }]];
+  }));
   const applyGenerationProfile = (profile) => {
     if (!selectedGenerationWorkflow()) return;
+    const names = [...new Set([...Object.keys(profileValues(profile)), "width", "height", "output_megapixels", "base_megapixels"])];
+    const before = profileSnapshot(names);
     Object.entries(profileValues(profile)).forEach(([name, value]) => setNamedControlValue(name, value));
     root.querySelectorAll("[data-generation-profile]").forEach((button) => button.classList.toggle("is-active", button.dataset.generationProfile === profile));
     if (quality && selectedGenerationWorkflow()?.dataset.family === "krea2" && templateID.value !== "image-to-image") {
@@ -1697,11 +1726,17 @@
     calculateResolution();
     syncMiniMaxVideoProfile();
     syncGenerationSummary();
+    const changes = generationModules.studio.settingChanges(before, profileSnapshot(names));
+    if (profileChanges) {
+      renderDefinitionList(profileChanges.querySelector("dl"), changes.map(change => ({ label: change.label, value: `${change.before} → ${change.after}` })));
+      profileChanges.hidden = changes.length === 0;
+    }
     markDraftDirty();
   };
 
   const updateQuickModelOptions = (workflow) => {
     if (!model || !workflow) return;
+    clearProfileFeedback();
     [...model.options].forEach((option) => {
       if (!option.value) return;
       const allowed = option.dataset.family === workflow.dataset.family;
@@ -1709,8 +1744,8 @@
       option.disabled = option.dataset.available !== "true" || !allowed;
     });
     const defaultID = workflow.dataset.defaultModelId || "";
-    const defaultOption = [...model.options].find((option) => option.value === defaultID && !option.disabled);
-    model.value = defaultOption ? defaultID : "";
+    const defaultOption = generationModules.studio.chooseModel([...model.options], defaultID);
+    model.value = defaultOption?.value || "";
   };
 
   const syncAdaptiveLoraSlots = (kind) => {
@@ -2014,6 +2049,7 @@
       if (mainPassDescription) mainPassDescription.textContent = "Параметры основного семплирования выбранной схемы генерации.";
     }
     syncGenerationSummary();
+    studio?.syncOptions();
   };
 
   const applyQuality = () => {
@@ -2286,6 +2322,7 @@
   miniMaxVideoModeInputs.forEach((input) => input.addEventListener("change", handleMiniMaxModeChange));
 
   miniMaxAudioFile?.addEventListener("change", () => {
+    audioPlayer?.clear();
     draftAssets.delete("input_audio");
     const file = miniMaxAudioFile.files?.[0];
     uploadedAudio = "";
@@ -2303,6 +2340,7 @@
       return;
     }
     if (miniMaxAudioName) miniMaxAudioName.textContent = file.name;
+    audioPlayer?.setSource(file);
     if (miniMaxAudioState) miniMaxAudioState.textContent = "Аудио выбрано. Оно загрузится вместе с фото.";
     if (miniMaxAudioPreview) miniMaxAudioPreview.hidden = false;
     syncStudioSelection();
@@ -2316,24 +2354,20 @@
     const file = miniMaxVideoFile.files?.[0];
     uploadedVideo = "";
     if (inputVideo) inputVideo.value = "";
-    if (videoPreviewURL) URL.revokeObjectURL(videoPreviewURL);
-    videoPreviewURL = "";
-    if (miniMaxVideoPreviewMedia) miniMaxVideoPreviewMedia.removeAttribute("src");
+    videoPlayer?.clear();
     if (!file) {
       if (miniMaxVideoPreview) miniMaxVideoPreview.hidden = true;
       syncStudioSelection();
       return;
     }
     if (file.size > 512 * 1024 * 1024) {
+      clearMiniMaxVideo();
       if (miniMaxVideoState) miniMaxVideoState.textContent = "Видеофайл должен быть не больше 512 МБ";
       if (miniMaxVideoPreview) miniMaxVideoPreview.hidden = false;
       syncStudioSelection();
       return;
     }
-    try {
-      videoPreviewURL = URL.createObjectURL(file);
-      if (miniMaxVideoPreviewMedia) miniMaxVideoPreviewMedia.src = videoPreviewURL;
-    } catch (_) {}
+    videoPlayer?.setSource(file);
     if (miniMaxVideoName) miniMaxVideoName.textContent = file.name;
     if (miniMaxVideoState) miniMaxVideoState.textContent = "Видео выбрано. Оно загрузится перед продолжением.";
     if (miniMaxVideoPreview) miniMaxVideoPreview.hidden = false;
@@ -2628,6 +2662,10 @@
 
   imageSlots.forEach((item) => {
     item.input?.addEventListener("change", () => handleImageSelection(item));
+    item.previewOpen?.addEventListener("click", () => {
+      const url = previewURLs.get(item.index);
+      if (url) openLightbox({ url, filename: selectedImageSource(item)?.name || `Фото ${item.index}`, media_type: "image" });
+    });
     item.input?.addEventListener("input", () => handleImageSelection(item));
     item.remove?.addEventListener("click", () => {
       clearImageSlot(item);
@@ -3147,11 +3185,12 @@
         } else if (asset.field === "input_audio") {
           uploadedAudio = asset.available ? asset.value : "";
           if (miniMaxAudioName) miniMaxAudioName.textContent = asset.name;
+          if (asset.available) audioPlayer?.setSource(asset.url);
           if (miniMaxAudioState) miniMaxAudioState.textContent = message;
           if (miniMaxAudioPreview) miniMaxAudioPreview.hidden = false;
         } else {
           uploadedVideo = asset.available ? asset.value : "";
-          if (asset.available && miniMaxVideoPreviewMedia) miniMaxVideoPreviewMedia.src = asset.url;
+          if (asset.available) videoPlayer?.setSource(asset.url);
           if (miniMaxVideoName) miniMaxVideoName.textContent = asset.name;
           if (miniMaxVideoState) miniMaxVideoState.textContent = message;
           if (miniMaxVideoPreview) miniMaxVideoPreview.hidden = false;
@@ -4446,11 +4485,13 @@
   generationOpenExact?.addEventListener("click", () => {
     studio?.openSettings();
   });
-  form.addEventListener("input", () => {
+  form.addEventListener("input", (event) => {
+    if (event.target?.name in profileValues("balanced") || event.target?.closest(".studio-basic-settings, .studio-models")) clearProfileFeedback();
     syncGenerationSummary();
     syncBatchBuilder();
   });
-  form.addEventListener("change", () => {
+  form.addEventListener("change", (event) => {
+    if (event.target?.name in profileValues("balanced") || event.target?.closest(".studio-basic-settings, .studio-models")) clearProfileFeedback();
     syncGenerationSummary();
     syncBatchBuilder();
   });

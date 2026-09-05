@@ -76,4 +76,11 @@ const expectFocusInside = async (page, selector) => {
   expect(inside).toBe(true);
 };
 
-module.exports = { installPreviewClock, settlePage, assertNoViewportOverflow, expectFocusInside };
+const openStudioOptions = async (page) => {
+  await page.locator("#studio-settings-open").click();
+  for (const group of await page.locator("[data-studio-option-group]:not([hidden])").all()) {
+    if (await group.getAttribute("open") === null) await group.locator(":scope > summary").click();
+  }
+};
+
+module.exports = { installPreviewClock, settlePage, assertNoViewportOverflow, expectFocusInside, openStudioOptions };

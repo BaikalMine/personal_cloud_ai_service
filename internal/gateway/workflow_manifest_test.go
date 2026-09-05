@@ -38,11 +38,21 @@ func TestWorkflowManifestCatalogIsValid(t *testing.T) {
 	}
 }
 
-func TestMiniMaxManifestCoversEveryVideoControl(t *testing.T) {
-	body, err := embeddedFS.ReadFile("templates/_generation_sections.html")
-	if err != nil {
-		t.Fatal(err)
+func generationControlTemplates(t *testing.T) []byte {
+	t.Helper()
+	var body []byte
+	for _, name := range []string{"_generation_sections.html", "_generation_options.html"} {
+		part, err := embeddedFS.ReadFile("templates/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body = append(body, part...)
 	}
+	return body
+}
+
+func TestMiniMaxManifestCoversEveryVideoControl(t *testing.T) {
+	body := generationControlTemplates(t)
 	controlPattern := regexp.MustCompile(`name="(video_[^"]+)"`)
 	controls := make(map[string]struct{})
 	for _, match := range controlPattern.FindAllStringSubmatch(string(body), -1) {
@@ -64,10 +74,7 @@ func TestMiniMaxManifestCoversEveryVideoControl(t *testing.T) {
 }
 
 func TestWorkflowManifestParametersHaveFormControls(t *testing.T) {
-	body, err := embeddedFS.ReadFile("templates/_generation_sections.html")
-	if err != nil {
-		t.Fatal(err)
-	}
+	body := generationControlTemplates(t)
 	controlPattern := regexp.MustCompile(`name="([^"]+)"`)
 	controls := make(map[string]struct{})
 	for _, match := range controlPattern.FindAllStringSubmatch(string(body), -1) {

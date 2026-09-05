@@ -2,7 +2,7 @@ const path = require("node:path");
 const fs = require("node:fs");
 const { test, expect } = require("@playwright/test");
 const AxeBuilder = require("@axe-core/playwright").default;
-const { installPreviewClock, settlePage, assertNoViewportOverflow, expectFocusInside } = require("./helpers.cjs");
+const { installPreviewClock, settlePage, assertNoViewportOverflow, expectFocusInside, openStudioOptions } = require("./helpers.cjs");
 const { installCaptionFixture } = require("./caption-fixture.cjs");
 
 const visualStyle = path.join(__dirname, "visual-stability.css");
@@ -222,7 +222,7 @@ test("video reference sources use equal tiles at every viewport", async ({ page 
 test("MiniMax H3 v5 memory modules stay usable at every viewport", async ({ page }, testInfo) => {
   await open(page, "/preview/generate");
   await page.getByRole("button", { name: /^Видео$/ }).click();
-  await page.locator("#studio-settings-open").click();
+  await openStudioOptions(page);
 
   const modules = page.locator(".minimax-optimizations");
   const lowVRAM = modules.locator('input[name="video_low_vram_attention"]');
@@ -242,10 +242,10 @@ test("MiniMax H3 v5 memory modules stay usable at every viewport", async ({ page
 test("Krea2 exposes the PhotoFlow processing branches as independent modules", async ({ page }) => {
   await open(page, "/preview/generate");
   await page.getByRole("button", { name: /^Изображение$/ }).click();
-  await page.locator("#studio-settings-open").click();
+  await openStudioOptions(page);
 
   const processing = page.locator(".krea-processing");
-  const sage = processing.locator('input[name="krea_sage_enabled"]');
+  const sage = page.locator('input[name="krea_sage_enabled"]');
   const detail = processing.locator('input[name="detail_enabled"]');
   const color = processing.locator('input[name="color_transfer"]');
   const filter = processing.locator('input[name="image_filter_enabled"]');
@@ -263,12 +263,13 @@ test("Krea2 exposes the PhotoFlow processing branches as independent modules", a
   await filter.check();
   await expect(page.locator("#krea-sage-options")).toBeVisible();
   await expect(page.locator("#krea-filter-options")).toBeVisible();
-  await expect(processing.locator('select[name="krea_sage_mode"]')).toBeEnabled();
+  await expect(page.locator('select[name="krea_sage_mode"]')).toBeEnabled();
   await expect(processing.locator('input[name="image_filter_brightness"]')).toBeEnabled();
   const overflow = await processing.locator(".krea-module").evaluateAll((modules) => modules.map((module) => module.scrollWidth - module.clientWidth));
   expect(overflow.every((difference) => difference <= 1), `module overflow: ${overflow.join(", ")}`).toBeTruthy();
   await settlePage(page);
-  await expect(processing).toHaveScreenshot("generation-krea-processing.png", { stylePath: componentVisualStyle });
+  await page.locator('[data-studio-option-group="processing"]').evaluate(group => group.scrollIntoView({ block: "start" }));
+  await expect(page.locator("#studio-settings")).toHaveScreenshot("generation-krea-processing.png", { stylePath: componentVisualStyle });
 });
 
 test("repeat restores the active workflow LoRA stack and strengths", async ({ page }, testInfo) => {
@@ -282,7 +283,7 @@ test("repeat restores the active workflow LoRA stack and strengths", async ({ pa
   await expect(page.locator('.krea-lora-row select[name="lora_2"]')).toHaveValue("Krea2-realism-V2.safetensors");
   await expect(page.locator('.krea-lora-row input[name="lora_model_strength_2"]')).toHaveValue("1.15");
   await expect(page.locator('.krea-lora-row input[name="lora_clip_strength_2"]')).toHaveValue("0.84");
-  await page.locator("#studio-settings-open").click();
+  await openStudioOptions(page);
   await expect(page.locator('.krea-lora-row[data-lora-slots="krea"]').nth(1)).toBeVisible();
   await expect(page.locator('input[name="krea_sage_enabled"]')).toBeChecked();
   await expect(page.locator('select[name="krea_sage_mode"]')).toHaveValue("sageattn_qk_int8_pv_fp16_triton");

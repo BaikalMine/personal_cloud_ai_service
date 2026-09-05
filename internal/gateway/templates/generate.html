@@ -41,9 +41,15 @@
           {{template "studio_model" .}}
         </section>
         {{template "studio_profiles" .}}
-        {{template "studio_quality" .}}
+        <details class="studio-profile-changes" id="studio-profile-changes" hidden><summary>Изменения профиля</summary><dl></dl></details>
+        <div hidden>{{template "studio_quality" .}}</div>
+        {{template "studio_image_size" .}}
         {{template "studio_video_settings" .}}
-        <button type="button" class="button ghost studio-settings-button" id="studio-settings-open" {{if not .CanUseAdvancedGenerationSettings}}hidden{{end}}><i data-lucide="sliders-horizontal" aria-hidden="true"></i>Параметры и обработка</button>
+        <div class="studio-option-shortcuts" {{if not .CanUseAdvancedGenerationSettings}}hidden{{end}}>
+          <button type="button" class="button ghost" data-studio-settings-target="lora"><i data-lucide="layers" aria-hidden="true"></i>LoRA<i data-lucide="chevron-right" aria-hidden="true"></i></button>
+          <button type="button" class="button ghost studio-settings-button" id="studio-settings-open" data-studio-settings-target="processing"><i data-lucide="sparkles" aria-hidden="true"></i>Обработка результата<i data-lucide="chevron-right" aria-hidden="true"></i></button>
+          <button type="button" class="button ghost" data-studio-settings-target="sampling"><i data-lucide="sliders-horizontal" aria-hidden="true"></i>Дополнительные параметры<i data-lucide="chevron-right" aria-hidden="true"></i></button>
+        </div>
         {{template "studio_batch" .}}
         {{template "studio_preflight" .}}
         <details class="ui-disclosure studio-help">
@@ -63,7 +69,6 @@
       {{template "studio_dock" .}}
       <dialog class="studio-settings ui-dialog" id="studio-settings" aria-labelledby="studio-settings-title">
         <header class="studio-settings-heading"><h2 id="studio-settings-title">Параметры и обработка</h2><button type="button" class="button ghost icon-button" id="studio-settings-close" aria-label="Закрыть параметры"><i data-lucide="x" aria-hidden="true"></i></button></header>
-        {{template "studio_video_loras" .}}
         {{template "studio_advanced" .}}
       </dialog>
     </form>

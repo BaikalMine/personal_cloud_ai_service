@@ -4,6 +4,63 @@
     const limit = Math.max(0, Math.min(4, Number(maximum) || 0));
     return isVideo && videoMode === "frames" ? Math.min(2, limit) : limit;
   };
+  const chooseModel = (models, defaultID) => models.find(model => model.value && model.value === defaultID && !model.disabled && !model.hidden)
+    || models.find(model => model.value && !model.disabled && !model.hidden);
+  const settingChanges = (before, after) => Object.keys(after).filter(name => before[name] && before[name].value !== after[name].value)
+    .map(name => ({ name, label: after[name].label, before: before[name].value, after: after[name].value }));
+  const fragmentBounds = (start, duration, mediaDuration) => {
+    const total = Number(mediaDuration);
+    if (!Number.isFinite(total) || total <= 0) return null;
+    const offset = Number(String(start).replace(",", ".")) || 0;
+    const from = Math.max(0, Math.min(total, offset < 0 ? total + offset : offset));
+    return { start: from, end: Math.min(total, from + Math.max(0, Number(String(duration).replace(",", ".")) || 0)) };
+  };
+  function bindReferencePlayer({ media, button, status, start, duration, urlAPI = host.URL }) {
+    if (!media) return null;
+    let objectURL = "";
+    let fragmentEnd = null;
+    const pause = () => { media.pause(); fragmentEnd = null; };
+    const clear = () => {
+      pause();
+      media.removeAttribute("src");
+      media.load();
+      if (objectURL) urlAPI.revokeObjectURL(objectURL);
+      objectURL = "";
+      if (button) button.disabled = true;
+      if (status) status.textContent = "";
+    };
+    media.addEventListener("loadedmetadata", () => { if (button) button.disabled = !Number.isFinite(media.duration) || media.duration <= 0; });
+    media.addEventListener("error", () => {
+      if (!media.getAttribute("src")) return;
+      pause();
+      if (button) button.disabled = true;
+      if (status) status.textContent = "Браузер не воспроизводит этот файл. Его можно оставить как референс.";
+    });
+    media.addEventListener("timeupdate", () => { if (fragmentEnd !== null && media.currentTime >= fragmentEnd) pause(); });
+    media.addEventListener("pause", () => { fragmentEnd = null; });
+    button?.addEventListener("click", async () => {
+      const bounds = fragmentBounds(start(), duration(), media.duration);
+      if (!bounds || bounds.end <= bounds.start) {
+        if (status) status.textContent = "Начало фрагмента находится за пределами файла.";
+        return;
+      }
+      if (status) status.textContent = "";
+      media.currentTime = bounds.start;
+      fragmentEnd = bounds.end;
+      try { await media.play(); } catch (_) {
+        fragmentEnd = null;
+        if (status) status.textContent = "Не удалось начать воспроизведение. Попробуйте кнопку плеера.";
+      }
+    });
+    return { clear, pause, setSource(source) {
+      clear();
+      if (!source) return;
+      try {
+        if (typeof source !== "string") objectURL = urlAPI.createObjectURL(source);
+        media.src = objectURL || source;
+      } catch (_) { if (status) status.textContent = "Предпросмотр файла недоступен."; }
+    } };
+  }
   function bindUI({ root, window, document }) {
     const workspace = root.querySelector(".studio-workspace");
     const tabs = [...root.querySelectorAll("[data-studio-tab]")];
@@ -11,6 +68,14 @@
     const result = root.querySelector("#generation-result");
     const empty = root.querySelector("#studio-result-empty");
     const narrow = window.matchMedia("(max-width: 899px)");
+    const groups = [...root.querySelectorAll("[data-studio-option-group]")];
+    const shortcuts = [...root.querySelectorAll("[data-studio-settings-target]")];
+    const syncOptions = () => {
+      groups.forEach(group => {
+        group.hidden = ![...group.querySelector(".studio-option-content").children].some(section => !section.hidden && !section.closest("[inert]"));
+      });
+      shortcuts.forEach(button => { button.hidden = !groups.some(group => !group.hidden && group.dataset.studioOptionGroup === button.dataset.studioSettingsTarget); });
+    };
     const show = (view, { focus = false } = {}) => {
       if (!workspace) return;
       workspace.dataset.studioView = view === "result" ? "result" : "configure";
@@ -31,14 +96,18 @@
         show(tabs[next].dataset.studioTab, { focus: true });
       });
     });
-    const openSettings = () => {
+    const openSettings = (groupID = "processing") => {
       show("configure");
       const advanced = root.querySelector(".generation-advanced");
       if (!settings || !advanced || advanced.hidden || advanced.inert) return;
       advanced.open = true;
+      syncOptions();
+      const group = groups.find(item => !item.hidden && item.dataset.studioOptionGroup === groupID) || groups.find(item => !item.hidden);
+      if (group) group.open = true;
       if (!settings.open) settings.showModal();
+      group?.scrollIntoView({ block: "start", behavior: "instant" });
     };
-    root.querySelector("#studio-settings-open")?.addEventListener("click", openSettings);
+    shortcuts.forEach(button => button.addEventListener("click", () => openSettings(button.dataset.studioSettingsTarget)));
     root.querySelector("#studio-settings-close")?.addEventListener("click", () => settings.close());
     settings?.addEventListener("click", (event) => {
       if (event.target !== settings) return;
@@ -56,7 +125,7 @@
     window.visualViewport?.addEventListener("resize", syncKeyboard);
     document.addEventListener("focusin", syncKeyboard);
     document.addEventListener("focusout", syncKeyboard);
-    return { show, openSettings, revealField(field) {
+    return { show, openSettings, syncOptions, revealField(field) {
       show("configure");
       if (field?.closest("#studio-settings")) openSettings();
       let parent = field?.parentElement;
@@ -68,7 +137,7 @@
       field?.focus({ preventScroll: true });
     } };
   }
-  const api = { activeImageLimit, bindUI };
+  const api = { activeImageLimit, chooseModel, settingChanges, fragmentBounds, bindReferencePlayer, bindUI };
   if (typeof module === "object" && module.exports) module.exports = api;
   host.AIGatewayGeneration = host.AIGatewayGeneration || {};
   host.AIGatewayGeneration.studio = api;

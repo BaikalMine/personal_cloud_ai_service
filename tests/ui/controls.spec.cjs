@@ -1,7 +1,7 @@
 const path = require("node:path");
 const fs = require("node:fs");
 const { test, expect } = require("@playwright/test");
-const { installPreviewClock, settlePage, assertNoViewportOverflow } = require("./helpers.cjs");
+const { installPreviewClock, settlePage, assertNoViewportOverflow, openStudioOptions } = require("./helpers.cjs");
 
 const screenshotStyle = fs.readFileSync(path.join(__dirname, "component-visual-stability.css"), "utf8");
 
@@ -109,7 +109,7 @@ for (const workflow of workflows) {
         await page.locator('[data-image-slot="1"] [data-gallery-image-picker-open]').click();
         await page.getByRole("button", { name: "Выбрать AI-Gateway-Krea2-portrait.png" }).click();
       }
-      await page.locator("#studio-settings-open").click();
+      await openStudioOptions(page);
       if (workflow.image) {
         const lut = page.locator('[data-lut-enabled]:visible');
         await expect(lut).not.toBeChecked();
@@ -119,7 +119,8 @@ for (const workflow of workflows) {
       await settlePage(page);
       await alignedFields(page, `${theme} ${workflow.id}`);
       await assertNoViewportOverflow(page, `${theme} ${workflow.id}`);
-      await page.locator(".generation-advanced").screenshot({ path: testInfo.outputPath(`${workflow.id}-${theme}.png`), style: screenshotStyle });
+      await page.locator('[data-studio-option-group="processing"]').evaluate(group => group.scrollIntoView({ block: "start" }));
+      await page.locator("#studio-settings").screenshot({ path: testInfo.outputPath(`${workflow.id}-${theme}.png`), style: screenshotStyle });
     }
   });
 }
