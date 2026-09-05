@@ -34,6 +34,19 @@ func TestLoraTrainingJSONUsesLiveAgentState(t *testing.T) {
 	}
 }
 
+func TestLoraTrainingJSONDoesNotTurnUnknownExecutionIntoFailure(t *testing.T) {
+	job := domain.LoraTrainingJob{PublicID: "lora-job-0123456789", State: domain.LoraTrainingRunning, Progress: 45}
+	for _, status := range []*loratraining.JobStatus{
+		{State: "unknown"},
+		{State: "failed", ExecutionUnconfirmed: true},
+	} {
+		result := loraTrainingJSON(job, status, false)
+		if result.State != "running" || result.CanDelete || !result.CanCancel || result.Progress != 45 {
+			t.Fatalf("unconfirmed status overwrote last confirmed state: %+v", result)
+		}
+	}
+}
+
 func TestLoraTrainingJSONExposesDeleteOnlyForTerminalJobs(t *testing.T) {
 	t.Parallel()
 	active := loraTrainingJSON(domain.LoraTrainingJob{PublicID: "lora-active-012345", State: domain.LoraTrainingRunning}, nil, false)

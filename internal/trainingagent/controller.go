@@ -45,14 +45,15 @@ type jobRecord struct {
 }
 
 type Controller struct {
-	config    Config
-	ctx       context.Context
-	cancel    context.CancelFunc
-	mu        sync.RWMutex
-	jobs      map[string]*jobRecord
-	byGateway map[string]string
-	queue     chan string
-	wg        sync.WaitGroup
+	config           Config
+	ctx              context.Context
+	cancel           context.CancelFunc
+	mu               sync.RWMutex
+	jobs             map[string]*jobRecord
+	byGateway        map[string]string
+	submissionFences map[string]bool
+	queue            chan string
+	wg               sync.WaitGroup
 }
 
 func NewController(config Config) (*Controller, error) {
@@ -68,6 +69,10 @@ func NewController(config Config) (*Controller, error) {
 	controller := &Controller{
 		config: config, ctx: ctx, cancel: cancel, jobs: make(map[string]*jobRecord),
 		byGateway: make(map[string]string), queue: make(chan string, 100),
+	}
+	if err := controller.loadSubmissionFences(); err != nil {
+		cancel()
+		return nil, err
 	}
 	if err := controller.loadJobs(); err != nil {
 		cancel()
@@ -108,6 +113,10 @@ func (controller *Controller) Submit(ctx context.Context, spec loratraining.JobS
 		return loratraining.JobStatus{}, errors.New(detail)
 	}
 	controller.mu.RLock()
+	if controller.submissionFences[spec.GatewayJobID] {
+		controller.mu.RUnlock()
+		return loratraining.JobStatus{}, errors.New("submission was fenced during recovery; create a new Gateway job")
+	}
 	if existingID := controller.byGateway[spec.GatewayJobID]; existingID != "" {
 		status := cloneStatus(controller.jobs[existingID].Status)
 		controller.mu.RUnlock()
@@ -147,26 +156,28 @@ func (controller *Controller) Submit(ctx context.Context, spec loratraining.JobS
 		},
 	}
 	controller.mu.Lock()
+	if controller.submissionFences[spec.GatewayJobID] {
+		controller.mu.Unlock()
+		_ = os.RemoveAll(jobDir)
+		return loratraining.JobStatus{}, errors.New("submission was fenced during recovery; create a new Gateway job")
+	}
 	if existingID := controller.byGateway[spec.GatewayJobID]; existingID != "" {
 		status := cloneStatus(controller.jobs[existingID].Status)
 		controller.mu.Unlock()
 		_ = os.RemoveAll(jobDir)
 		return status, nil
 	}
-	controller.jobs[id] = record
-	controller.byGateway[spec.GatewayJobID] = id
-	controller.mu.Unlock()
 	if err := controller.persist(record); err != nil {
-		controller.mu.Lock()
-		delete(controller.jobs, id)
-		delete(controller.byGateway, spec.GatewayJobID)
 		controller.mu.Unlock()
 		_ = os.RemoveAll(jobDir)
 		return loratraining.JobStatus{}, err
 	}
+	controller.jobs[id] = record
+	controller.byGateway[spec.GatewayJobID] = id
+	controller.mu.Unlock()
 	select {
 	case controller.queue <- id:
-		return cloneStatus(record.Status), nil
+		return controller.Status(id)
 	case <-ctx.Done():
 		return loratraining.JobStatus{}, ctx.Err()
 	case <-controller.ctx.Done():
@@ -235,7 +246,7 @@ func (controller *Controller) Delete(id string) (loratraining.JobStatus, error) 
 		controller.mu.RUnlock()
 		return loratraining.JobStatus{}, os.ErrNotExist
 	}
-	if !record.Status.Terminal() {
+	if !record.Status.Terminal() || record.Status.ExecutionUnconfirmed {
 		controller.mu.RUnlock()
 		return loratraining.JobStatus{}, ErrJobNotTerminal
 	}
@@ -249,7 +260,7 @@ func (controller *Controller) Delete(id string) (loratraining.JobStatus, error) 
 
 	controller.mu.Lock()
 	if current := controller.jobs[id]; current != nil {
-		if !current.Status.Terminal() {
+		if !current.Status.Terminal() || current.Status.ExecutionUnconfirmed {
 			controller.mu.Unlock()
 			return loratraining.JobStatus{}, ErrJobNotTerminal
 		}
@@ -312,7 +323,7 @@ func (controller *Controller) deleteExpiredFailedJobs(now time.Time) {
 	controller.mu.RLock()
 	ids := make([]string, 0)
 	for id, record := range controller.jobs {
-		if record == nil || record.Status.State != "failed" {
+		if record == nil || record.Status.State != "failed" || record.Status.ExecutionUnconfirmed {
 			continue
 		}
 		finishedAt := record.Status.FinishedAt
@@ -967,20 +978,30 @@ func (controller *Controller) loadJobs() error {
 	for _, filename := range matches {
 		payload, err := os.ReadFile(filename)
 		if err != nil {
-			continue
+			return fmt.Errorf("read training execution record: %w", err)
 		}
 		var record jobRecord
-		if err := json.Unmarshal(payload, &record); err != nil || record.Status.ID == "" {
-			continue
+		if err := json.Unmarshal(payload, &record); err != nil {
+			return fmt.Errorf("decode training execution record: %w", err)
+		}
+		if record.Status.ID == "" || record.Spec.GatewayJobID == "" || filepath.Base(filepath.Dir(filename)) != record.Status.ID {
+			return errors.New("incomplete training execution inventory")
 		}
 		if !record.Status.Terminal() {
+			record.Status.ExecutionUnconfirmed = true
 			record.Status.State = "failed"
 			record.Status.Stage = "Агент перезапущен"
 			record.Status.Progress = 100
-			record.Status.Message = "Незавершённый процесс был остановлен перезапуском агента."
-			record.Status.Error = "Запустите обучение повторно."
+			record.Status.Message = "Агент перезапущен. Завершение прежнего процесса ещё не подтверждено."
+			record.Status.Error = "Перед новым запуском требуется проверить завершение прежнего процесса."
 			record.Status.FinishedAt = time.Now()
 			_ = controller.persist(&record)
+		}
+		if record.Status.State == "failed" && record.Status.Stage == "Агент перезапущен" && !record.Status.ExecutionUnconfirmed {
+			record.Status.ExecutionUnconfirmed = true
+			if err := controller.persist(&record); err != nil {
+				return err
+			}
 		}
 		controller.jobs[record.Status.ID] = &record
 		controller.byGateway[record.Spec.GatewayJobID] = record.Status.ID

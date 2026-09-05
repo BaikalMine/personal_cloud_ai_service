@@ -19,7 +19,7 @@ const loraTrainingColumns = `
 	network_dim, network_alpha, learning_rate, seed, sample_count, dataset_bytes, dataset_path,
 	state, stage, progress, message, error_message, agent_job_id, artifact_name, artifact_bytes,
 	cancellation_requested_at, started_at, finished_at, created_at, updated_at,
-	COALESCE(dataset_snapshot_id,''), dataset_snapshot_hash`
+	COALESCE(dataset_snapshot_id,''), dataset_snapshot_hash, agent_submission_started_at`
 
 func (s *Store) CreateLoraTrainingJob(ctx context.Context, params domain.CreateLoraTrainingJobParams) (domain.LoraTrainingJob, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -124,11 +124,15 @@ func (s *Store) ClaimNextLoraTrainingJob(ctx context.Context) (domain.LoraTraini
 		return domain.LoraTrainingJob{}, err
 	}
 	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('lora_training_dispatch',0))`); err != nil {
+		return domain.LoraTrainingJob{}, err
+	}
 	var id int64
 	err = tx.QueryRowContext(ctx, `
 		SELECT job.id FROM lora_training_jobs job
 		LEFT JOIN users owner ON owner.id=job.user_id
 		WHERE job.state='queued' AND job.cancellation_requested_at IS NULL
+		AND NOT EXISTS (SELECT 1 FROM lora_training_jobs active WHERE active.state IN ('uploading','preparing','caching','running','installing'))
 		ORDER BY COALESCE(owner.pause_mining_for_quick_generation,FALSE) DESC,job.created_at,job.id
 		FOR UPDATE OF job SKIP LOCKED LIMIT 1
 	`).Scan(&id)
@@ -157,7 +161,7 @@ func (s *Store) RequeueLoraTrainingJob(ctx context.Context, id int64, message st
 			message=CASE WHEN cancellation_requested_at IS NULL THEN $2 ELSE 'Задание отменено во время передачи датасета.' END,
 			finished_at=CASE WHEN cancellation_requested_at IS NULL THEN finished_at ELSE COALESCE(finished_at,now()) END,
 			updated_at=now()
-		WHERE id=$1 AND state='uploading' AND agent_job_id=''
+		WHERE id=$1 AND state='uploading' AND agent_job_id='' AND agent_submission_started_at IS NULL
 		RETURNING `+loraTrainingColumns,
 		id, message,
 	))
@@ -167,7 +171,7 @@ func (s *Store) AttachLoraTrainingAgentJob(ctx context.Context, id int64, agentJ
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE lora_training_jobs SET agent_job_id=$2,state='preparing',stage=$3,message=$4,progress=$5,
 			started_at=COALESCE(started_at,now()),updated_at=now()
-		WHERE id=$1 AND state='uploading'
+		WHERE id=$1 AND state='uploading' AND (agent_job_id='' OR agent_job_id=$2)
 	`, id, agentJobID, stage, message, progress)
 	if err != nil {
 		return err
@@ -180,6 +184,20 @@ func (s *Store) AttachLoraTrainingAgentJob(ctx context.Context, id int64, agentJ
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+func (s *Store) BeginLoraTrainingSubmission(ctx context.Context, id int64) (domain.LoraTrainingJob, error) {
+	return scanLoraTrainingJob(s.db.QueryRowContext(ctx, `UPDATE lora_training_jobs
+		SET agent_submission_started_at=now(),updated_at=now()
+		WHERE id=$1 AND state='uploading' AND agent_job_id='' AND agent_submission_started_at IS NULL AND cancellation_requested_at IS NULL
+		RETURNING `+loraTrainingColumns, id))
+}
+
+func (s *Store) SetLoraTrainingHandoffMessage(ctx context.Context, id int64, message string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE lora_training_jobs
+		SET stage='Проверяем передачу',message=$2,updated_at=now()
+		WHERE id=$1 AND state='uploading' AND agent_job_id='' AND agent_submission_started_at IS NOT NULL`, id, message)
+	return err
 }
 
 type UpdateLoraTrainingJobParams struct {
@@ -243,7 +261,7 @@ func (s *Store) RecoverLoraTrainingJobs(ctx context.Context) (int64, error) {
 			END,
 			finished_at=CASE WHEN cancellation_requested_at IS NULL THEN finished_at ELSE COALESCE(finished_at,now()) END,
 			updated_at=now()
-		WHERE state='uploading' AND agent_job_id=''
+		WHERE state='uploading' AND agent_job_id='' AND agent_submission_started_at IS NULL
 	`)
 	if err != nil {
 		return 0, err
@@ -286,6 +304,7 @@ func scanLoraTrainingJob(scanner loraTrainingScanner) (domain.LoraTrainingJob, e
 		&state, &job.Stage, &job.Progress, &job.Message, &job.ErrorMessage, &job.AgentJobID, &job.ArtifactName, &job.ArtifactBytes,
 		&cancellationRequestedAt, &startedAt, &finishedAt, &job.CreatedAt, &job.UpdatedAt,
 		&job.DatasetSnapshotID, &job.DatasetSnapshotHash,
+		&job.AgentSubmissionStartedAt,
 	)
 	if err != nil {
 		return domain.LoraTrainingJob{}, err

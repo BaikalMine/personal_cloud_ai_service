@@ -1406,6 +1406,12 @@ var migrationCatalog = []migration{
 			`CREATE INDEX gpu_work_events_work_idx ON gpu_work_events(work_id,id)`,
 		},
 	},
+	{
+		version: 57, name: "lora_training_durable_handoff", statements: []string{
+			`ALTER TABLE lora_training_jobs ADD COLUMN agent_submission_started_at TIMESTAMPTZ`,
+			`UPDATE lora_training_jobs SET agent_submission_started_at=updated_at WHERE state='uploading' AND agent_job_id=''`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

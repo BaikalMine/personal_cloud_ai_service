@@ -128,6 +128,24 @@ func (c *Client) StatusByGatewayID(ctx context.Context, id string) (JobStatus, e
 	return response, nil
 }
 
+func (c *Client) FenceSubmission(ctx context.Context, id string) (SubmissionFenceResult, error) {
+	if !c.Configured() {
+		return SubmissionFenceResult{}, ErrUnavailable
+	}
+	if strings.TrimSpace(id) == "" || len(id) > 96 {
+		return SubmissionFenceResult{}, errors.New("invalid Gateway job ID")
+	}
+	target := c.endpoint("/v1/gateway-jobs/fence") + "?" + url.Values{"gateway_job_id": {id}}.Encode()
+	var result SubmissionFenceResult
+	if err := c.doJSONURL(c.http, ctx, http.MethodPost, target, http.NoBody, "", &result); err != nil {
+		return SubmissionFenceResult{}, err
+	}
+	if result.GatewayJobID != id || !result.Fenced || (result.Job != nil && (result.Job.ID == "" || result.Job.GatewayJobID != id)) || (result.Settled && result.Job != nil && (!result.Job.Terminal() || result.Job.ExecutionUnconfirmed)) {
+		return SubmissionFenceResult{}, errors.New("invalid submission fence confirmation")
+	}
+	return result, nil
+}
+
 func (c *Client) Cancel(ctx context.Context, id string) (JobStatus, error) {
 	var response JobStatus
 	err := c.doJSON(c.http, ctx, http.MethodPost, "/v1/jobs/"+url.PathEscape(id)+"/cancel", bytes.NewReader([]byte("{}")), "application/json", &response)

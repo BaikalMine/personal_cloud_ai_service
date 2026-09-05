@@ -61,6 +61,27 @@ func TestStatusByGatewayIDClientRejectsUnprovenResponses(t *testing.T) {
 	}
 }
 
+func TestFenceSubmissionRejectsFalseSettlement(t *testing.T) {
+	for _, body := range []string{
+		`{}`,
+		`{"gateway_job_id":"requested","fenced":false,"settled":true}`,
+		`{"gateway_job_id":"other","fenced":true,"settled":true}`,
+		`{"gateway_job_id":"requested","fenced":true,"settled":true,"job":{"id":"agent","gateway_job_id":"requested","state":"running"}}`,
+		`{"gateway_job_id":"requested","fenced":true,"settled":true,"job":{"id":"agent","gateway_job_id":"requested","state":"failed","execution_unconfirmed":true}}`,
+		`{"gateway_job_id":"requested","fenced":true,"settled":true,"job":{"id":"agent","gateway_job_id":"other","state":"completed"}}`,
+	} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, body)
+		}))
+		base, _ := url.Parse(server.URL)
+		result, err := NewClient(base, strings.Repeat("f", 32)).FenceSubmission(context.Background(), "requested")
+		server.Close()
+		if err == nil || result.Settled {
+			t.Fatalf("false settlement accepted: %s: %+v %v", body, result, err)
+		}
+	}
+}
+
 func TestDecodeHTTPErrorPreservesMachineCode(t *testing.T) {
 	response := &http.Response{
 		StatusCode: http.StatusNotFound,

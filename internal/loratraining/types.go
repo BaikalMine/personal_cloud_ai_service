@@ -40,20 +40,28 @@ type JobSpec struct {
 }
 
 type JobStatus struct {
-	ID            string    `json:"id"`
-	GatewayJobID  string    `json:"gateway_job_id"`
-	ProfileID     string    `json:"profile_id"`
-	State         string    `json:"state"`
-	Stage         string    `json:"stage"`
-	Progress      int       `json:"progress"`
-	Message       string    `json:"message,omitempty"`
-	Error         string    `json:"error,omitempty"`
-	LogTail       []string  `json:"log_tail,omitempty"`
-	ArtifactName  string    `json:"artifact_name,omitempty"`
-	ArtifactBytes int64     `json:"artifact_bytes,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	StartedAt     time.Time `json:"started_at,omitempty"`
-	FinishedAt    time.Time `json:"finished_at,omitempty"`
+	ExecutionUnconfirmed bool      `json:"execution_unconfirmed,omitempty"`
+	ID                   string    `json:"id"`
+	GatewayJobID         string    `json:"gateway_job_id"`
+	ProfileID            string    `json:"profile_id"`
+	State                string    `json:"state"`
+	Stage                string    `json:"stage"`
+	Progress             int       `json:"progress"`
+	Message              string    `json:"message,omitempty"`
+	Error                string    `json:"error,omitempty"`
+	LogTail              []string  `json:"log_tail,omitempty"`
+	ArtifactName         string    `json:"artifact_name,omitempty"`
+	ArtifactBytes        int64     `json:"artifact_bytes,omitempty"`
+	CreatedAt            time.Time `json:"created_at"`
+	StartedAt            time.Time `json:"started_at,omitempty"`
+	FinishedAt           time.Time `json:"finished_at,omitempty"`
+}
+
+type SubmissionFenceResult struct {
+	GatewayJobID string     `json:"gateway_job_id"`
+	Fenced       bool       `json:"fenced"`
+	Settled      bool       `json:"settled"`
+	Job          *JobStatus `json:"job,omitempty"`
 }
 
 func (status JobStatus) Terminal() bool {

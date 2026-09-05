@@ -39,6 +39,7 @@ func (server *Server) Handler() http.Handler {
 	mux.Handle("/v1/jobs", server.authenticate(http.HandlerFunc(server.handleJobs)))
 	mux.Handle("/v1/jobs/", server.authenticate(http.HandlerFunc(server.handleJob)))
 	mux.Handle("/v1/gateway-jobs", server.authenticate(http.HandlerFunc(server.handleGatewayJob)))
+	mux.Handle("/v1/gateway-jobs/fence", server.authenticate(http.HandlerFunc(server.handleSubmissionFence)))
 	return agentSecurityHeaders(mux)
 }
 
@@ -203,6 +204,24 @@ func (server *Server) handleGatewayJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, status)
+}
+
+func (server *Server) handleSubmissionFence(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	ids := r.URL.Query()["gateway_job_id"]
+	if len(ids) != 1 || strings.TrimSpace(ids[0]) == "" || len(ids[0]) > 96 {
+		writeError(w, http.StatusBadRequest, "Некорректный идентификатор Gateway.")
+		return
+	}
+	result, err := server.controller.FenceGatewaySubmission(ids[0])
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Не удалось подтвердить остановку передачи.")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (server *Server) handleArtifact(w http.ResponseWriter, r *http.Request, id string) {

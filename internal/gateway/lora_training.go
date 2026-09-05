@@ -849,7 +849,18 @@ func (a *App) refreshLoraTrainingJobs(ctx context.Context) (int64, error) {
 		}
 		processed++
 		if job.AgentJobID == "" {
-			if job.CancellationRequestedAt != nil {
+			if job.AgentSubmissionStartedAt != nil {
+				recovered, settled, recoverErr := a.recoverLoraTrainingSubmission(ctx, job)
+				if recoverErr != nil {
+					_ = a.store.SetLoraTrainingHandoffMessage(ctx, job.ID, "Проверяем исход передачи. Завершение работы агента пока не подтверждено; майнинг остаётся на паузе.")
+					refreshErrors = append(refreshErrors, recoverErr)
+					continue
+				}
+				if settled {
+					continue
+				}
+				job = recovered
+			} else if job.CancellationRequestedAt != nil {
 				_ = a.store.UpdateLoraTrainingJob(ctx, job.ID, store.UpdateLoraTrainingJobParams{
 					State: domain.LoraTrainingCancelled, Stage: "Отменено", Progress: 100,
 					Message: "Задание отменено до запуска локального процесса.",
@@ -857,8 +868,10 @@ func (a *App) refreshLoraTrainingJobs(ctx context.Context) (int64, error) {
 				a.removeLoraTrainingDataset(job)
 				_ = a.store.ClearLoraTrainingDatasetPath(ctx, job.ID)
 				a.releaseMiningPauseForLoraTraining(ctx, job.ID)
+				continue
+			} else {
+				continue
 			}
-			continue
 		}
 		if job.CancellationRequestedAt != nil {
 			if _, cancelErr := a.loraTraining.Cancel(ctx, job.AgentJobID); cancelErr != nil {
@@ -872,6 +885,14 @@ func (a *App) refreshLoraTrainingJobs(ctx context.Context) (int64, error) {
 			continue
 		}
 		state := loraTrainingStateFromAgent(status.State)
+		if !state.Valid() || status.ExecutionUnconfirmed || status.ID != job.AgentJobID || status.GatewayJobID != job.PublicID {
+			_ = a.store.UpdateLoraTrainingJob(ctx, job.ID, store.UpdateLoraTrainingJobParams{
+				State: job.State, Stage: "Проверяем процесс", Progress: job.Progress,
+				Message: "Агент не подтвердил состояние прежнего процесса. Пауза майнинга сохраняется.",
+			})
+			refreshErrors = append(refreshErrors, fmt.Errorf("LoRA training %s executor state is unconfirmed", job.PublicID))
+			continue
+		}
 		if err := a.store.UpdateLoraTrainingJob(ctx, job.ID, store.UpdateLoraTrainingJobParams{
 			State: state, Stage: truncateLoraText(status.Stage, 120), Progress: clampLoraProgress(status.Progress),
 			Message: truncateLoraText(status.Message, 1000), ErrorMessage: truncateLoraText(status.Error, 2000),
@@ -913,7 +934,7 @@ func (a *App) refreshLoraTrainingJobs(ctx context.Context) (int64, error) {
 		a.releaseMiningPauseForLoraTraining(ctx, job.ID)
 		return processed, errors.Join(refreshErrors...)
 	}
-	lease, miningWarning, pauseErr := a.pauseMiningForLoraTraining(ctx, &user, job.ID)
+	_, miningWarning, pauseErr := a.pauseMiningForLoraTraining(ctx, &user, job.ID)
 	if pauseErr != nil {
 		file.Close()
 		requeued, requeueErr := a.store.RequeueLoraTrainingJob(ctx, job.ID, "Ждём освобождения GPU: "+pauseErr.Error())
@@ -927,6 +948,20 @@ func (a *App) refreshLoraTrainingJobs(ctx context.Context) (int64, error) {
 		}
 		return processed, errors.Join(append(refreshErrors, pauseErr)...)
 	}
+	submission, beginErr := a.store.BeginLoraTrainingSubmission(ctx, job.ID)
+	if beginErr != nil {
+		file.Close()
+		recoveryCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		requeued, requeueErr := a.store.RequeueLoraTrainingJob(recoveryCtx, job.ID, "Повторяем подготовку передачи.")
+		if requeueErr == nil && requeued.State.Terminal() {
+			a.removeLoraTrainingDataset(requeued)
+			_ = a.store.ClearLoraTrainingDatasetPath(recoveryCtx, job.ID)
+			a.releaseMiningPauseForLoraTraining(recoveryCtx, job.ID)
+		}
+		return processed, errors.Join(append(refreshErrors, beginErr, requeueErr)...)
+	}
+	job = submission
 	status, submitErr := a.loraTraining.Submit(ctx, loratraining.JobSpec{
 		GatewayJobID: job.PublicID, ProfileID: job.ProfileID, Owner: job.UsernameSnapshot, Name: job.Name,
 		OutputName: job.OutputName, TriggerWord: job.TriggerWord, ConceptType: job.ConceptType,
@@ -934,40 +969,19 @@ func (a *App) refreshLoraTrainingJobs(ctx context.Context) (int64, error) {
 		NetworkAlpha: job.NetworkAlpha, LearningRate: job.LearningRate, Seed: job.Seed, SampleCount: job.SampleCount,
 	}, file, job.DatasetBytes)
 	file.Close()
+	if submitErr == nil && (status.ID == "" || status.GatewayJobID != job.PublicID || status.ExecutionUnconfirmed || !loraTrainingStateFromAgent(status.State).Valid()) {
+		submitErr = errors.New("agent returned an invalid submission receipt")
+	}
 	if submitErr != nil {
-		if lease != nil {
-			a.releaseMiningPause(ctx, lease.ID)
-		}
-		var httpErr *loratraining.HTTPError
-		if errors.Is(submitErr, loratraining.ErrUnavailable) || !errors.As(submitErr, &httpErr) || httpErr.StatusCode >= 500 {
-			requeued, requeueErr := a.store.RequeueLoraTrainingJob(ctx, job.ID, "Агент временно недоступен. Задание осталось в очереди.")
-			if requeueErr == nil && requeued.State.Terminal() {
-				a.removeLoraTrainingDataset(requeued)
-				_ = a.store.ClearLoraTrainingDatasetPath(ctx, requeued.ID)
-			}
-			if requeueErr != nil {
-				refreshErrors = append(refreshErrors, requeueErr)
-			}
-			return processed, errors.Join(append(refreshErrors, submitErr)...)
-		}
-		_ = a.store.UpdateLoraTrainingJob(ctx, job.ID, store.UpdateLoraTrainingJobParams{State: domain.LoraTrainingFailed, Stage: "Профиль не готов", Progress: 100, Message: "Агент отклонил запуск.", ErrorMessage: truncateLoraText(submitErr.Error(), 2000)})
-		a.removeLoraTrainingDataset(job)
-		_ = a.store.ClearLoraTrainingDatasetPath(ctx, job.ID)
-		return processed, errors.Join(refreshErrors...)
+		messageErr := a.store.SetLoraTrainingHandoffMessage(ctx, job.ID, "Ответ агента не подтверждён. Проверяем принятие задания; пауза майнинга сохраняется.")
+		return processed, errors.Join(append(refreshErrors, submitErr, messageErr)...)
 	}
 	message := status.Message
 	if miningWarning != "" {
 		message = strings.TrimSpace(message + " " + miningWarning)
 	}
 	if err := a.store.AttachLoraTrainingAgentJob(ctx, job.ID, status.ID, truncateLoraText(status.Stage, 120), truncateLoraText(message, 1000), clampLoraProgress(status.Progress)); err != nil {
-		requeued, requeueErr := a.store.RequeueLoraTrainingJob(ctx, job.ID, "Повторно связываем задание с локальным агентом.")
-		if requeueErr == nil && requeued.State.Terminal() {
-			_, _ = a.loraTraining.Cancel(ctx, status.ID)
-			a.removeLoraTrainingDataset(requeued)
-			_ = a.store.ClearLoraTrainingDatasetPath(ctx, requeued.ID)
-			a.releaseMiningPauseForLoraTraining(ctx, requeued.ID)
-		}
-		return processed, errors.Join(append(refreshErrors, err, requeueErr)...)
+		return processed, errors.Join(append(refreshErrors, err)...)
 	}
 	a.removeLoraTrainingDataset(job)
 	_ = a.store.ClearLoraTrainingDatasetPath(ctx, job.ID)
@@ -988,8 +1002,10 @@ func loraTrainingStateFromAgent(state string) domain.LoraTrainingState {
 		return domain.LoraTrainingCompleted
 	case "cancelled":
 		return domain.LoraTrainingCancelled
-	default:
+	case "failed":
 		return domain.LoraTrainingFailed
+	default:
+		return ""
 	}
 }
 
@@ -1006,7 +1022,7 @@ func loraTrainingJSON(job domain.LoraTrainingJob, agent *loratraining.JobStatus,
 		ArtifactName: job.ArtifactName, ArtifactBytes: job.ArtifactBytes,
 		DatasetSnapshotID: job.DatasetSnapshotID, DatasetSnapshotHash: job.DatasetSnapshotHash,
 	}
-	if agent != nil {
+	if agent != nil && loraTrainingStateFromAgent(agent.State).Valid() && !agent.ExecutionUnconfirmed {
 		agentState := loraTrainingStateFromAgent(agent.State)
 		result.State = string(agentState)
 		result.StateLabel = loraTrainingStateLabel(agentState)
