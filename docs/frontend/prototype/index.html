@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ru" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>AI Gateway · дизайн-концепт</title>
+    <script>
+      try {
+        const theme = localStorage.getItem("nd-design-theme") || "system";
+        document.documentElement.dataset.theme =
+          theme === "system"
+            ? matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light"
+            : theme;
+      } catch (_) {}
+    </script>
+    <link rel="stylesheet" href="style.css" />
+    <script src="assets/lucide.js" defer></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip" href="#main">К содержимому</a>
+    <aside class="sidebar" aria-label="Основная навигация">
+      <a class="brand" href="#studio"
+        ><span class="brand-icon"><i data-lucide="aperture"></i></span
+        ><span>AI Gateway</span></a
+      >
+      <div class="workspace-label">Личное пространство</div>
+      <nav class="primary-nav">
+        <a href="#studio" data-page="studio"
+          ><i data-lucide="plus"></i><span>Создать</span></a
+        >
+        <a href="#library" data-page="library"
+          ><i data-lucide="images"></i><span>Результаты</span></a
+        >
+        <a href="#jobs" data-page="jobs"
+          ><i data-lucide="list-video"></i><span>Задачи</span
+          ><span class="nav-count">2</span></a
+        >
+        <a href="#training" data-page="training"
+          ><i data-lucide="scan-face"></i><span>Мои LoRA</span></a
+        >
+      </nav>
+      <div class="workspace-label admin-label">Управление</div>
+      <nav class="admin-nav">
+        <a href="#users" data-page="users"
+          ><i data-lucide="users"></i><span>Пользователи</span></a
+        >
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="theme-field">
+          <i data-lucide="sun-moon"></i
+          ><select id="theme" aria-label="Цветовая тема">
+            <option value="system">Как в системе</option>
+            <option value="light">Светлая тема</option>
+            <option value="dark">Тёмная тема</option>
+          </select>
+        </div>
+        <button class="account" data-action="profile">
+          <span class="avatar">АЛ</span
+          ><span><strong>Алексей</strong><small>Администратор</small></span
+          ><i data-lucide="chevron-right"></i>
+        </button>
+      </div>
+    </aside>
+    <div class="shell">
+      <header class="topbar">
+        <span class="breadcrumb"
+          >Личное пространство <i data-lucide="chevron-right"></i>
+          <span id="crumb">Создать</span></span
+        >
+        <div class="row">
+          <span class="demo-label">Дизайн-концепт</span
+          ><button
+            class="icon-button"
+            title="Уведомления"
+            aria-label="Уведомления"
+            data-action="notifications"
+          >
+            <i data-lucide="bell"></i
+            ><span class="notification-dot"></span></button
+          ><button
+            class="icon-button mobile-theme"
+            title="Сменить тему"
+            aria-label="Сменить тему"
+            data-action="theme"
+          >
+            <i data-lucide="sun-moon"></i>
+          </button>
+        </div>
+      </header>
+      <main id="main" tabindex="-1"></main>
+    </div>
+    <nav class="mobile-nav" aria-label="Мобильная навигация">
+      <a href="#studio" data-page="studio"
+        ><i data-lucide="plus"></i><span>Создать</span></a
+      >
+      <a href="#library" data-page="library"
+        ><i data-lucide="images"></i><span>Результаты</span></a
+      >
+      <a href="#jobs" data-page="jobs"
+        ><i data-lucide="list-video"></i><span>Задачи</span></a
+      >
+      <button data-action="more">
+        <i data-lucide="menu"></i><span>Ещё</span>
+      </button>
+    </nav>
+    <dialog id="dialog" aria-labelledby="dialog-title">
+      <div id="dialog-content"></div>
+    </dialog>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <input
+      id="file-upload"
+      type="file"
+      accept="image/png,image/jpeg,image/webp"
+      hidden
+    />
+  </body>
+</html>
