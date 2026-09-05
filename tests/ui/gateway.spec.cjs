@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const { test, expect } = require("@playwright/test");
 const AxeBuilder = require("@axe-core/playwright").default;
 const { installPreviewClock, settlePage, assertNoViewportOverflow, expectFocusInside } = require("./helpers.cjs");
+const { installCaptionFixture } = require("./caption-fixture.cjs");
 
 const visualStyle = path.join(__dirname, "visual-stability.css");
 const responsiveRoutes = [
@@ -70,26 +71,11 @@ test("LoRA dataset composer keeps files and captions together", async ({ page },
   await expect(page.locator("[data-lora-image-count]")).toHaveText("4 изображения");
 });
 
-test("LoRA caption assistant sends every dataset image separately", async ({ page }, testInfo) => {
+test("LoRA caption editor queues every image by ID without uploading photos twice", async ({ page, context }, testInfo) => {
   desktopOnly(testInfo);
-  let activeRequests = 0;
-  let maximumActiveRequests = 0;
-  let requestCount = 0;
-  const imageParts = [];
-  await page.route("**/api/lora-training/caption", async (route) => {
-    activeRequests += 1;
-    maximumActiveRequests = Math.max(maximumActiveRequests, activeRequests);
-    requestCount += 1;
-    const requestBody = route.request().postDataBuffer()?.toString("latin1") || "";
-    imageParts.push((requestBody.match(/name="image"/g) || []).length);
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ caption: `subject_token, separately analyzed frame ${requestCount}` }),
-    });
-    activeRequests -= 1;
-  });
+  const queue = await installCaptionFixture(context, { autoComplete: true });
+  let legacyUploads = 0;
+  page.on("request", request => { if (new URL(request.url()).pathname === "/api/lora-training/caption") legacyUploads++; });
 
   await open(page, "/preview/lora-training");
   const pixel = fs.readFileSync(path.join(__dirname, "../../docs/frontend/prototype/assets/portrait.jpg"));
@@ -103,9 +89,12 @@ test("LoRA caption assistant sends every dataset image separately", async ({ pag
   const captions = await page.locator('.lora-dataset-item textarea[name="caption"]').evaluateAll((nodes) => nodes.map((node) => node.value));
   expect(captions).toHaveLength(5);
   expect(captions.every((caption) => caption.startsWith("subject_token,"))).toBe(true);
-  expect(requestCount).toBe(5);
-  expect(maximumActiveRequests).toBe(1);
-  expect(imageParts).toEqual([1, 1, 1, 1, 1]);
+  expect(queue.posts).toHaveLength(1);
+  expect(queue.posts[0].image_ids).toHaveLength(5);
+  expect(new Set(queue.posts[0].image_ids).size).toBe(5);
+  expect(queue.posts[0].only_empty).toBe(true);
+  expect(legacyUploads).toBe(0);
+  // The real model's one-image request and max concurrency are tested in PostgreSQL integration.
 });
 
 test("suggestion intake and review expose one clear next action", async ({ page }, testInfo) => {

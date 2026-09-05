@@ -78,13 +78,11 @@ type App struct {
 	observabilityOnce      sync.Once
 	mediaObservabilityOnce sync.Once
 	loraTrainingMu         sync.Mutex
-	loraCaptionMu          sync.Mutex
 	maintenanceWorkers     *maintenanceRegistry
 	maintenanceDone        chan struct{}
 	dependencyHealth       *dependencyMonitor
 	serviceLatencies       *serviceLatencyRegistry
 	mediaOperations        *mediaOperationRegistry
-	loraCaptionJobs        *loraCaptionJobRegistry
 	mediaBytes             *weightedByteLimiter
 	objectInfoOnce         sync.Once
 	objectInfoCache        *comfyObjectInfoCache

@@ -3,7 +3,9 @@ package promptassistant
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -50,6 +52,18 @@ type captionModelResult struct {
 // callers can iterate this method, but combining several frames in one model
 // request is intentionally impossible through this API.
 func (c *Client) CaptionImage(ctx context.Context, triggerWord, conceptType string, image []byte, mimeType string) (CaptionResult, error) {
+	return c.CaptionImageWithInstruction(ctx, triggerWord, conceptType, image, mimeType, loraCaptionInstruction)
+}
+
+func LoraCaptionInstructionSnapshot() (string, string) {
+	hash := sha256.Sum256([]byte(loraCaptionInstruction))
+	return loraCaptionInstruction, hex.EncodeToString(hash[:])
+}
+
+func (c *Client) CaptionImageWithInstruction(ctx context.Context, triggerWord, conceptType string, image []byte, mimeType, instruction string) (CaptionResult, error) {
+	if instruction == "" || len(instruction) > 20000 {
+		return CaptionResult{}, errors.New("некорректная сохранённая инструкция описания")
+	}
 	triggerWord = strings.TrimSpace(triggerWord)
 	conceptType = strings.TrimSpace(conceptType)
 	if triggerWord == "" {
@@ -91,7 +105,7 @@ func (c *Client) CaptionImage(ctx context.Context, triggerWord, conceptType stri
 	payload := chatRequest{
 		Model: c.visionModel,
 		Messages: []Message{
-			{Role: "system", Content: loraCaptionInstruction},
+			{Role: "system", Content: instruction},
 			{Role: "user", Content: string(metadata), Images: []string{base64.StdEncoding.EncodeToString(image)}},
 		},
 		Stream:    false,
@@ -125,7 +139,7 @@ func (c *Client) CaptionImage(ctx context.Context, triggerWord, conceptType stri
 		return CaptionResult{Model: c.visionModel, Policy: requestPolicy}, errors.New("локальная модель вернула слишком большой ответ")
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return CaptionResult{Model: c.visionModel, Policy: requestPolicy}, fmt.Errorf("локальная модель ответила HTTP %d", response.StatusCode)
+		return CaptionResult{Model: c.visionModel, Policy: requestPolicy}, &CaptionHTTPError{StatusCode: response.StatusCode}
 	}
 	var result chatResponse
 	if err := json.Unmarshal(responseBody, &result); err != nil {
@@ -158,4 +172,10 @@ func (c *Client) CaptionImage(ctx context.Context, triggerWord, conceptType stri
 			DoneReason: strings.TrimSpace(result.DoneReason),
 		},
 	}, nil
+}
+
+type CaptionHTTPError struct{ StatusCode int }
+
+func (err *CaptionHTTPError) Error() string {
+	return fmt.Sprintf("локальная модель ответила HTTP %d", err.StatusCode)
 }

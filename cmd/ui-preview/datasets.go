@@ -34,6 +34,7 @@ type datasetPreviewSession struct {
 	assets   map[string]domain.LoraDatasetAsset
 	data     map[string][]byte
 	jobs     []map[string]any
+	captions []captionPreviewJob
 }
 type datasetPreview struct {
 	mu       sync.Mutex
@@ -48,6 +49,7 @@ func registerDatasetPreview(mux *http.ServeMux, now time.Time) *datasetPreview {
 	p := &datasetPreview{sessions: map[string]*datasetPreviewSession{}, now: now}
 	mux.HandleFunc("/api/lora-datasets", p.serve)
 	mux.HandleFunc("/api/lora-datasets/", p.serve)
+	mux.HandleFunc("/api/lora-training/caption/", p.captionAction)
 	mux.Handle("/preview/dataset-media/", http.StripPrefix("/preview/dataset-media/", http.FileServer(http.Dir("docs/frontend/prototype/assets"))))
 	return p
 }
@@ -197,6 +199,10 @@ func (p *datasetPreview) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(parts) == 1 {
 		write(200, view)
+		return
+	}
+	if parts[1] == "captions" {
+		p.serveCaptions(w, r, state, view)
 		return
 	}
 	if parts[1] == "assets" {

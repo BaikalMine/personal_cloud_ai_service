@@ -39,6 +39,10 @@ var staticJavaScriptAssetPaths = []string{
 	"static/dialog-focus.js",
 	"static/gallery.js",
 	"static/lora-training.js",
+	"static/lora-dataset-state.js",
+	"static/lora-caption-state.js",
+	"static/lora-dataset-editor.js",
+	"static/vendor/lucide.js",
 	"static/generate.js",
 	"static/generation-assistant.js",
 	"static/generation-batch.js",
@@ -184,7 +188,6 @@ func Run() error {
 		maintenanceDone:      make(chan struct{}),
 		serviceLatencies:     newServiceLatencyRegistry(),
 		mediaOperations:      newMediaOperationRegistry(),
-		loraCaptionJobs:      newLoraCaptionJobRegistry(),
 		mediaBytes:           newWeightedByteLimiter(cfg.MediaInFlightLimitBytes),
 		proxyCounts:          map[string]int64{},
 	}

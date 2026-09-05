@@ -22,10 +22,12 @@ type LoraDatasetSettings struct {
 }
 
 type LoraDatasetImage struct {
-	ID       string `json:"id"`
-	AssetID  string `json:"asset_id"`
-	Caption  string `json:"caption"`
-	Excluded bool   `json:"excluded"`
+	ID              string `json:"id"`
+	AssetID         string `json:"asset_id"`
+	Caption         string `json:"caption"`
+	Excluded        bool   `json:"excluded"`
+	CaptionRevision string `json:"caption_revision,omitempty"`
+	CaptionJobID    string `json:"caption_job_id,omitempty"`
 }
 
 type LoraDatasetManifest struct {

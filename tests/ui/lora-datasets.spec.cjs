@@ -3,6 +3,7 @@ const path = require("node:path");
 const { test, expect } = require("@playwright/test");
 const AxeBuilder = require("@axe-core/playwright").default;
 const { installPreviewClock, settlePage, assertNoViewportOverflow } = require("./helpers.cjs");
+const { installCaptionFixture } = require("./caption-fixture.cjs");
 
 const source = (name) => fs.readFileSync(path.join(__dirname, "../../docs/frontend/prototype/assets", name));
 const items = (page) => page.locator(".lora-dataset-item");
@@ -99,16 +100,53 @@ test("dataset two-tab conflict can preserve both variants", async ({ page, conte
   await other.close();
 });
 
-test("dataset late assistant response never overwrites a manual caption", async ({ page }, info) => {
+test("dataset late assistant response never overwrites a manual caption", async ({ page, context }, info) => {
   desktopOnly(info); await open(page); await fill(page, 1);
-  let deliver; let started;
-  const entered = new Promise((resolve) => { started = resolve; });
-  const held = new Promise((resolve) => { deliver = resolve; });
-  await page.route("**/api/lora-training/caption", async (route) => { started(); await held; await route.fulfill({ json: { caption: "portrait_person, assistant output" } }); });
-  await items(page).first().getByRole("button", { name: "Описать кадр" }).click(); await entered;
-  await captions(page).first().fill("manual caption while assistant waits"); deliver();
+  const queue = await installCaptionFixture(context);
+  await items(page).first().getByRole("button", { name: "Описать кадр" }).click();
+  await expect.poll(() => queue.jobs.length).toBe(1);
+  await captions(page).first().fill("manual caption while assistant waits"); queue.jobs[0].state = "completed"; await queue.refresh(page);
   await expect(items(page).first().locator("[data-lora-caption-item-status]")).toContainText("Ответ не применён");
   await expect(captions(page).first()).toHaveValue("manual caption while assistant waits"); await saved(page);
+});
+
+test("caption series survives closing the page and keeps already applied results", async ({ page, context }, info) => {
+  desktopOnly(info); const queue = await installCaptionFixture(context); await open(page); await fill(page, 3);
+  for (let i = 0; i < 3; i++) await captions(page).nth(i).fill(""); await saved(page);
+  await page.getByRole("button", { name: "Описать пустые" }).click(); await expect.poll(() => queue.jobs.length).toBe(3);
+  queue.jobs[0].state = "completed"; await queue.refresh(page); await expect(captions(page).first()).toHaveValue(/separately analyzed/); await saved(page);
+  await page.close(); queue.jobs[1].state = "completed";
+  const reopened = await context.newPage(); await open(reopened);
+  await expect(captions(reopened).nth(1)).toHaveValue(/separately analyzed/); await saved(reopened);
+  expect(queue.posts).toHaveLength(1); expect(queue.actions).toHaveLength(0);
+  await expect(reopened.getByRole("button", { name: "Остановить серию" })).toBeVisible();
+  queue.jobs[2].state = "completed"; await queue.refresh(reopened);
+  await expect(reopened.locator("[data-lora-caption-status]")).toContainText("Готово 3 из 3"); await saved(reopened);
+  await reopened.reload(); await settlePage(reopened);
+  await expect(captions(reopened).first()).toHaveValue(/frame 1/); expect(queue.posts).toHaveLength(1); await reopened.close();
+});
+
+test("caption errors, cancellation and reconnect remain usable at every viewport", async ({ page, context }, info) => {
+  const queue = await installCaptionFixture(context); await open(page); await fill(page, 2);
+  for (let i = 0; i < 2; i++) await captions(page).nth(i).fill(""); await saved(page);
+  await page.getByRole("button", { name: "Описать пустые" }).click(); await expect.poll(() => queue.jobs.length).toBe(2);
+  queue.jobs[0].state = "failed"; queue.jobs[0].error = "Не удалось подготовить описание. Повторите этот кадр."; await queue.refresh(page);
+  await expect(items(page).first().getByRole("button", { name: "Повторить описание кадра" })).toBeVisible();
+  await assertNoViewportOverflow(page, "caption failure");
+  await page.screenshot({ path: info.outputPath("caption-failure.png"), fullPage: true });
+  await items(page).first().getByRole("button", { name: "Повторить описание кадра" }).click();
+  expect(queue.actions).toEqual([{ id: queue.jobs[0].job_id, action: "retry" }]); expect(queue.posts).toHaveLength(1);
+  await page.getByRole("button", { name: "Остановить серию" }).click();
+  await expect(page.locator("[data-lora-caption-status]")).toContainText("Отменено: 2");
+  queue.offline = true; await queue.refresh(page);
+  await expect(page.locator("[data-lora-caption-status]")).toContainText("Повтор через 3 сек.");
+  await expect(page.locator("[data-lora-caption-status]")).toContainText("Повтор через 2 сек.");
+  await expect(captions(page).first()).toBeEnabled();
+  queue.offline = false; await queue.refresh(page);
+  await expect(page.locator("[data-lora-caption-status]")).toContainText("Отменено: 2");
+  await items(page).last().getByRole("button", { name: "Повторить описание кадра" }).click();
+  await items(page).last().getByRole("button", { name: "Отменить описание кадра" }).click();
+  expect(queue.actions.at(-1)).toEqual({ id: queue.jobs[1].job_id, action: "cancel" });
 });
 
 test("dataset training uses the saved set and appends one history entry", async ({ page }, info) => {

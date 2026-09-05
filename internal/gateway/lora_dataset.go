@@ -66,6 +66,9 @@ func validateLoraDatasetManifest(manifest domain.LoraDatasetManifest) error {
 			return datasetInputError("Некорректный или повторяющийся идентификатор изображения.")
 		}
 		seen[item.ID] = true
+		if (item.CaptionRevision != "" && !loraDatasetIDPattern.MatchString(item.CaptionRevision)) || (item.CaptionJobID != "" && !loraDatasetIDPattern.MatchString(item.CaptionJobID)) {
+			return datasetInputError("Некорректная версия подписи изображения.")
+		}
 		if !utf8.ValidString(item.Caption) || utf8.RuneCountInString(item.Caption) > 1000 || strings.ContainsRune(item.Caption, 0) {
 			return datasetInputError("Описание изображения должно содержать не больше 1000 символов.")
 		}
@@ -145,6 +148,8 @@ func writeLoraDatasetError(w http.ResponseWriter, err error) {
 		status, message = http.StatusConflict, "Датасет изменён в другой вкладке. Сначала загрузите актуальную версию."
 	case errors.Is(err, store.ErrLoraDatasetQuota):
 		status, message = http.StatusRequestEntityTooLarge, "Достигнут лимит: 20 датасетов, 100 версий, 100 изображений и 512 МБ на набор, 2 ГБ на пользователя."
+	case errors.Is(err, store.ErrLoraCaptionQuota):
+		status, message = http.StatusTooManyRequests, "В очереди уже 100 описаний или достигнут лимит 500 сохранённых заданий. Дождитесь завершения и очистки старых записей."
 	case errors.Is(err, store.ErrLoraDatasetInUse):
 		status, message = http.StatusConflict, "Эта версия используется активным обучением."
 	case errors.Is(err, store.ErrLoraTrainingAlreadyActive):
@@ -281,6 +286,10 @@ func (a *App) handleLoraDatasets(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(parts) == 1 && r.Method == http.MethodGet {
 		a.writeLoraDatasetView(w, r, row, http.StatusOK)
+		return
+	}
+	if len(parts) == 2 && parts[1] == "captions" {
+		a.handleLoraDatasetCaptions(w, r, row)
 		return
 	}
 	if len(parts) == 2 && parts[1] == "export" && r.Method == http.MethodGet {

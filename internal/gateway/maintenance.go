@@ -21,6 +21,14 @@ func (a *App) maintenanceWorkerSpecs() []maintenanceWorkerSpec {
 	shortRetry := 15 * time.Second
 	return []maintenanceWorkerSpec{
 		{
+			Key: "lora_captions", Name: "Описания кадров LoRA", Interval: time.Second, Timeout: 20 * time.Minute,
+			RetryDelay: 5 * time.Second, MaxBackoff: time.Minute, Run: a.refreshLoraCaptionJobs,
+		},
+		{
+			Key: "lora_captions_cleanup", Name: "Очистка описаний LoRA", Interval: maintenanceInterval, Timeout: time.Minute, InitialDelay: 17 * time.Second,
+			RetryDelay: 30 * time.Second, MaxBackoff: 5 * time.Minute, Run: a.store.CleanupLoraCaptionJobs,
+		},
+		{
 			Key: "lora_datasets_cleanup", Name: "Очистка датасетов LoRA", Interval: maintenanceInterval, Timeout: time.Minute, InitialDelay: 18 * time.Second,
 			RetryDelay: 30 * time.Second, MaxBackoff: 5 * time.Minute, Run: a.store.CleanupLoraDatasets,
 		},

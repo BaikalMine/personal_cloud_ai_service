@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/png"
 	"io"
+	"io/fs"
 	"math"
 	"mime/multipart"
 	"net/http"
@@ -75,6 +76,20 @@ func TestGenerationJavaScriptModulesAreServed(t *testing.T) {
 	app.handleStaticJS(response, request)
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("unknown JavaScript status = %d, want %d", response.Code, http.StatusNotFound)
+	}
+}
+
+func TestEveryEmbeddedJavaScriptHasAProductionRoute(t *testing.T) {
+	if err := fs.WalkDir(embeddedFS, "static", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() && strings.HasSuffix(path, ".js") && staticJavaScriptAssets["/"+path] != path {
+			t.Errorf("embedded script %s is absent from the production asset routes/version hash", path)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

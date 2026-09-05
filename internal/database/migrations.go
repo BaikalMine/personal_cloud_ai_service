@@ -1352,6 +1352,30 @@ var migrationCatalog = []migration{
 			`CREATE INDEX lora_training_jobs_snapshot_idx ON lora_training_jobs(dataset_snapshot_id) WHERE dataset_snapshot_id IS NOT NULL`,
 		},
 	},
+	{
+		version: 55, name: "durable_lora_caption_jobs", statements: []string{
+			`CREATE TABLE lora_caption_jobs (
+				id TEXT PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				dataset_id TEXT REFERENCES lora_datasets(id) ON DELETE CASCADE, image_id TEXT NOT NULL DEFAULT '',
+				asset_id TEXT NOT NULL REFERENCES lora_dataset_assets(id) ON DELETE CASCADE,
+				request_key TEXT NOT NULL CHECK(length(request_key)=64), instruction_version TEXT NOT NULL,
+				input_cipher BYTEA NOT NULL CHECK(octet_length(input_cipher) BETWEEN 1 AND 65536), result_cipher BYTEA NOT NULL DEFAULT '',
+				state TEXT NOT NULL DEFAULT 'queued' CHECK(state IN ('queued','running','completed','failed','cancelled')),
+				status TEXT NOT NULL DEFAULT 'Описание поставлено в очередь', error TEXT NOT NULL DEFAULT '',
+				attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts>=0), run_token TEXT NOT NULL DEFAULT '',
+				cancel_requested BOOLEAN NOT NULL DEFAULT false, available_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				expires_at TIMESTAMPTZ NOT NULL DEFAULT now()+interval '30 days', UNIQUE(user_id,request_key)
+			)`,
+			`CREATE UNIQUE INDEX lora_caption_one_active_image_idx ON lora_caption_jobs(dataset_id,image_id) WHERE dataset_id IS NOT NULL AND state IN ('queued','running')`,
+			`CREATE INDEX lora_caption_queue_idx ON lora_caption_jobs(available_at,created_at) WHERE state='queued'`,
+			`CREATE INDEX lora_caption_dataset_idx ON lora_caption_jobs(user_id,dataset_id,created_at)`,
+			`ALTER TABLE lora_dataset_asset_refs ADD COLUMN caption_job_id TEXT REFERENCES lora_caption_jobs(id) ON DELETE CASCADE`,
+			`ALTER TABLE lora_dataset_asset_refs DROP CONSTRAINT lora_dataset_asset_refs_check`,
+			`ALTER TABLE lora_dataset_asset_refs ADD CONSTRAINT lora_dataset_asset_refs_check CHECK(num_nonnulls(dataset_id,snapshot_id,caption_job_id)=1)`,
+			`CREATE UNIQUE INDEX lora_dataset_caption_asset_idx ON lora_dataset_asset_refs(caption_job_id,asset_id) WHERE caption_job_id IS NOT NULL`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

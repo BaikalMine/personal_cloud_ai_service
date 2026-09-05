@@ -71,32 +71,6 @@ func TestEnsureLoraCaptionTriggerAlwaysUsesExactLeadingTrigger(t *testing.T) {
 	}
 }
 
-func TestLoraCaptionJobRegistryKeepsJobsPrivateAndBounded(t *testing.T) {
-	registry := newLoraCaptionJobRegistry()
-	job, accepted := registry.enqueue(7)
-	if !accepted || job.State != loraCaptionQueued || job.ID == "" {
-		t.Fatalf("caption job was not queued: %+v accepted=%t", job, accepted)
-	}
-	if _, ok := registry.get(8, job.ID); ok {
-		t.Fatal("another user can read a caption job")
-	}
-	registry.update(job.ID, loraCaptionRunning, "Ассистент анализирует кадр")
-	registry.complete(job.ID, "subject_token, portrait in window light", "test:vision", "")
-	completed, ok := registry.get(7, job.ID)
-	if !ok || completed.State != loraCaptionCompleted || completed.Caption == "" || completed.Model != "test:vision" {
-		t.Fatalf("completed caption job was not retained: %+v", completed)
-	}
-
-	for index := 0; index < maxQueuedLoraCaptionJobsPerUser; index++ {
-		if _, accepted := registry.enqueue(11); !accepted {
-			t.Fatalf("queued caption %d was rejected before the limit", index)
-		}
-	}
-	if _, accepted := registry.enqueue(11); accepted {
-		t.Fatal("caption queue accepted more jobs than the per-user limit")
-	}
-}
-
 func TestTrainingCaptionsRequireTriggerAtTheBeginning(t *testing.T) {
 	t.Parallel()
 	captions, err := trainingCaptions([]string{"front portrait with subject_token on a sign"}, "", "subject_token", 1)

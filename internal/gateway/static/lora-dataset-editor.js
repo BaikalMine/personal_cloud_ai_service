@@ -1,6 +1,7 @@
 (() => {
   const page = document.querySelector("[data-lora-training-page]");
-  if (!page || !window.AIGatewayLoraDataset) return;
+  if (!page || !window.AIGatewayLoraDataset || !window.AIGatewayLoraCaptions) return;
+  const captions = window.AIGatewayLoraCaptions;
   const find = (selector) => page.querySelector(selector);
   const form = find("[data-lora-training-form]");
   const grid = find("[data-lora-dataset-grid]");
@@ -21,7 +22,8 @@
   const cards = new Map();
   let operation = "";
   let uploading = false;
-  let captionRun = null;
+  let captionAction = false;
+  let captionPoller;
   let previousTrigger = defaults.settings.trigger_word;
   let outputEdited = false;
   const id = () => crypto.randomUUID();
@@ -48,7 +50,7 @@
       headers: { Accept: "application/json", ...(method === "POST" ? { "X-CSRF-Token": csrf } : {}),
         ...(!multipart && data !== undefined ? { "Content-Type": "application/json" } : {}), ...options.headers },
       body: data === undefined ? undefined : multipart ? data : JSON.stringify(data),
-      signal: options.signal || AbortSignal.timeout(multipart ? 900000 : 60000),
+      signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(multipart ? 900000 : 60000),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) { const error = new Error(payload.error || `Сервис ответил HTTP ${response.status}.`); error.status = response.status; throw error; }
@@ -62,10 +64,11 @@
       }
       previousTrigger = state.manifest.settings.trigger_word;
       outputEdited = Boolean(state.manifest.settings.output_name);
-      captionStates.clear(); renderItems();
+      captionStates.clear(); captionPoller?.select(state.dataset?.id, true); renderItems();
     }
     if (kind === "items") renderItems();
     if (kind === "list" || kind === "load") {
+      captionPoller?.select(state.dataset?.id);
       select.replaceChildren(...[...(!state.dataset ? [{ id: "", name: "Новый набор" }] : []), ...state.datasets].map((item) => new Option(item.name || "Без названия", item.id)));
       if (state.dataset && ![...select.options].some((item) => item.value === state.dataset.id)) select.add(new Option(state.dataset.name || "Без названия", state.dataset.id));
       select.value = state.dataset?.id || "";
@@ -73,7 +76,9 @@
     renderState();
   } });
   const state = controller.state;
-  const busy = () => Boolean(operation || uploading || state.status === "loading");
+  const busy = () => Boolean(operation || uploading || captionAction || state.status === "loading");
+  const captionJobs = () => captionPoller && captionPoller.state.datasetID === state.dataset?.id ? captionPoller.state.jobs : [];
+  const captionActive = () => captionJobs().some(captions.active);
   const renderState = () => {
     const blocked = busy();
     const dirtyFiles = files.size > 0;
@@ -82,22 +87,35 @@
     find("[data-dataset-save-state]").dataset.state = dirtyFiles ? "dirty" : state.status;
     find("[data-dataset-retention]").textContent = state.dataset ? `Хранится до ${new Date(state.dataset.expires_at).toLocaleDateString("ru-RU")}` : "";
     find("[data-dataset-conflict]").hidden = state.status !== "conflict";
-    select.disabled = blocked || dirtyFiles || Boolean(captionRun);
-    for (const button of page.querySelectorAll("[data-dataset-toolbar] button")) button.disabled = blocked || Boolean(captionRun);
+    select.disabled = blocked || dirtyFiles;
+    for (const button of page.querySelectorAll("[data-dataset-toolbar] button")) button.disabled = blocked;
     find("[data-dataset-new]").disabled ||= dirtyFiles;
     find("[data-dataset-delete]").disabled ||= !state.dataset || dirtyFiles;
     find("[data-dataset-export]").disabled ||= !state.manifest.images.length || dirtyFiles;
     for (const fieldset of form.querySelectorAll("fieldset")) fieldset.disabled = Boolean(operation || !state.ready);
-    fileInput.disabled = blocked || !state.ready || Boolean(captionRun);
-    find("[data-dataset-gallery]").disabled = blocked || !state.ready || Boolean(captionRun);
-    find("[data-lora-clear-images]").disabled = blocked || Boolean(captionRun);
-    find("[data-lora-caption-all]").disabled = blocked || (!captionRun && (!state.manifest.images.some((item) => !item.excluded) || dirtyFiles));
-    find("[data-lora-caption-all]").textContent = captionRun ? "Остановить" : "Описать пустые";
-    find("[data-lora-caption-assistant]").setAttribute("aria-busy", String(Boolean(captionRun)));
+    fileInput.disabled = blocked || !state.ready;
+    find("[data-dataset-gallery]").disabled = blocked || !state.ready;
+    find("[data-lora-clear-images]").disabled = blocked;
+    find("[data-lora-caption-all]").disabled = blocked || (!captionActive() && (!state.manifest.images.some((item) => !item.excluded) || dirtyFiles || state.status === "conflict"));
+    find("[data-lora-caption-all]").textContent = captionActive() ? "Остановить серию" : "Описать пустые";
+    find("[data-lora-caption-assistant]").setAttribute("aria-busy", String(captionActive()));
     const submit = find("[data-lora-submit]");
-    submit.disabled = blocked || !state.ready || dirtyFiles || Boolean(captionRun) || state.status === "conflict" || submit.dataset.agentReady !== "true";
+    submit.disabled = blocked || !state.ready || dirtyFiles || captionActive() || (Boolean(state.dataset) && !captionPoller?.state.ready) || state.status === "conflict" || submit.dataset.agentReady !== "true";
     submit.textContent = operation === "train" ? "Подготавливаем обучение…" : "Запустить обучение";
-    for (const card of cards.values()) for (const button of card.querySelectorAll("button")) button.disabled = blocked || Boolean(captionRun);
+    const latestJobs = captions.latest(captionJobs());
+    for (const [key, card] of cards) {
+      for (const button of card.querySelectorAll("button")) button.disabled = blocked;
+      const describe = card.querySelector("[data-lora-caption-one]");
+      const job = latestJobs.get(key);
+      const item = state.manifest.images.find((image) => image.id === key);
+      describe.disabled ||= !item?.asset_id || (!captions.active(job) && (item?.excluded || state.status === "conflict"));
+      const label = captions.active(job) ? "Отменить описание кадра" : ["failed", "cancelled"].includes(job?.state) ? "Повторить описание кадра" : "Описать кадр";
+      if (describe.getAttribute("aria-label") !== label) {
+        describe.title = label; describe.setAttribute("aria-label", label);
+        const mark = document.createElement("i"); mark.dataset.lucide = captions.active(job) ? "square" : ["failed", "cancelled"].includes(job?.state) ? "rotate-cw" : "sparkles"; describe.replaceChildren(mark);
+      }
+    }
+    icons();
   };
   const assetFor = (item) => state.assets[item.asset_id] || {};
   const itemName = (item) => files.get(item.id)?.name || assetFor(item).name || "Изображение";
@@ -107,6 +125,7 @@
   const renderItems = () => {
     for (const [key, card] of cards) if (!state.manifest.images.some((item) => item.id === key)) { card.remove(); cards.delete(key); if (urls.has(key)) URL.revokeObjectURL(urls.get(key)); urls.delete(key); }
     const seen = new Set();
+    const latestJobs = captions.latest(captionJobs());
     state.manifest.images.forEach((item, index) => {
       let card = cards.get(item.id);
       if (!card) {
@@ -119,7 +138,7 @@
         const describe = iconButton("sparkles", "Описать кадр", () => void describeImages([item.id])); describe.dataset.loraCaptionOne = "";
         heading.append(identity, describe);
         const caption = document.createElement("textarea"); caption.name = "caption"; caption.rows = 4; caption.maxLength = 1000; caption.placeholder = "Ракурс, одежда, фон, свет";
-        caption.addEventListener("input", () => { const current = state.manifest.images.find((image) => image.id === item.id); if (!current) return; current.caption = caption.value; caption.setCustomValidity(""); captionStates.set(item.id, "Изменено вручную"); card.querySelector("[data-lora-caption-item-status]").textContent = "Изменено вручную"; controller.touch(); });
+        caption.addEventListener("input", () => { const current = state.manifest.images.find((image) => image.id === item.id); if (!current) return; current.caption = caption.value; current.caption_revision = id(); delete current.caption_job_id; caption.setCustomValidity(""); captionStates.set(item.id, "Изменено вручную"); card.querySelector("[data-lora-caption-item-status]").textContent = "Изменено вручную"; controller.touch(); });
         const status = node("small", "", "lora-caption-item-status"); status.dataset.loraCaptionItemStatus = "";
         body.append(heading, caption, status);
         const footer = node("footer", "", "dataset-item-actions");
@@ -139,7 +158,7 @@
       card.querySelector(".lora-dataset-media > span").textContent = String(index + 1).padStart(2, "0");
       const title = card.querySelector("strong"); title.textContent = itemName(item); title.title = itemName(item);
       card.querySelector(".lora-dataset-heading small").textContent = `${asset.width ? `${asset.width} × ${asset.height} · ` : ""}${formatBytes(file?.size || asset.size_bytes)}`;
-      const caption = card.querySelector("textarea"); if (document.activeElement !== caption) caption.value = item.caption;
+      const caption = card.querySelector("textarea"); if (caption.value !== item.caption) caption.value = item.caption;
       caption.setAttribute("aria-label", `Описание кадра ${index + 1}`);
       card.querySelector('input[type="checkbox"]').checked = !item.excluded;
       card.classList.toggle("is-excluded", item.excluded);
@@ -149,7 +168,15 @@
       if (asset.sha256) seen.add(asset.sha256);
       if (asset.width && Math.min(asset.width, asset.height) < state.manifest.settings.resolution) warnings.push("Меньше рабочего разрешения");
       if (!item.excluded && !item.caption.trim() && !state.manifest.settings.global_caption.trim()) warnings.push("Нет подписи");
-      card.querySelector("[data-lora-caption-item-status]").textContent = captionStates.get(item.id) || warnings.join(" · ") || "Готово к обучению";
+      const job = latestJobs.get(item.id);
+      let jobMessage = "";
+      if (captions.active(job)) jobMessage = job.cancel_requested ? "Отменяем описание…" : job.state === "running" ? "Ассистент анализирует этот кадр" : "Описание в очереди";
+      else if (job?.state === "completed") jobMessage = item.caption_job_id === job.job_id ? "Описание готово" : "Ответ не применён: кадр или подпись изменены.";
+      else if (job?.state === "failed") jobMessage = job.error || "Описание не удалось. Повторите этот кадр.";
+      else if (job?.state === "cancelled") jobMessage = "Описание отменено";
+      const itemStatus = card.querySelector("[data-lora-caption-item-status]");
+      itemStatus.textContent = jobMessage || captionStates.get(item.id) || warnings.join(" · ") || "Готово к обучению";
+      itemStatus.classList.toggle("is-error", job?.state === "failed");
     });
     const images = state.manifest.images;
     find("[data-lora-dataset-summary]").hidden = !images.length;
@@ -160,14 +187,14 @@
     icons(); renderState();
   };
   const move = (key, offset) => {
-    if (busy() || captionRun) return;
+    if (busy()) return;
     const images = state.manifest.images; const index = images.findIndex((item) => item.id === key); const target = index + offset;
     if (target < 0 || target >= images.length) return;
     [images[index], images[target]] = [images[target], images[index]]; controller.touch("items");
     cards.get(key)?.querySelector(`[aria-label="${offset < 0 ? "Переместить выше" : "Переместить ниже"}"]`)?.focus();
   };
   const remove = (key) => {
-    if (busy() || captionRun) return;
+    if (busy()) return;
     const item = state.manifest.images.find((image) => image.id === key);
     if (item?.caption && !window.confirm("Убрать изображение вместе с его подписью из этого набора?")) return;
     files.delete(key); captionStates.delete(key); state.manifest.images = state.manifest.images.filter((image) => image.id !== key); controller.touch("items");
@@ -189,7 +216,7 @@
     } finally { uploading = false; renderItems(); }
   };
   const addFiles = async (incoming) => {
-    if (busy() || captionRun) return;
+    if (busy()) return;
     const accepted = [...incoming];
     if (state.manifest.images.length + accepted.length > 100) { feedback("В одном наборе может быть не больше 100 изображений.", true); return; }
     const currentBytes = state.manifest.images.reduce((sum, item) => sum + (files.get(item.id)?.size || assetFor(item).size_bytes || 0), 0);
@@ -201,10 +228,10 @@
     controller.touch("items"); await uploadFiles();
   };
   const safely = async (kind, work) => {
-    if (busy() || captionRun) return;
+    if (busy()) return;
     operation = kind; renderState();
     try { await work(); } catch (error) { feedback(error.message || "Не удалось выполнить действие.", true); }
-    finally { operation = ""; renderState(); }
+    finally { operation = ""; applyCaptionResults(); renderState(); }
   };
   const flush = async () => {
     if (files.size) { feedback("Сначала повторите загрузку фотографий кнопкой сохранения или уберите их из набора.", true); return false; }
@@ -267,51 +294,64 @@
       }
     } catch (error) { feedback(error.message, true); }
   };
-  const captionRequest = async (key, signal) => {
-    const item = state.manifest.images.find((image) => image.id === key); if (!item) return false;
-    const before = item.caption; const metadata = { trigger: state.manifest.settings.trigger_word.trim(), concept: state.manifest.settings.concept_type };
-    captionStates.set(key, "Ассистент анализирует этот кадр"); renderItems();
-    const imageResponse = await fetch(`/api/lora-datasets/assets/${item.asset_id}`, { credentials: "same-origin", signal });
-    if (!imageResponse.ok) throw new Error("Не удалось получить фотографию для описания.");
-    const body = new FormData(); body.append("csrf", csrf); body.append("trigger_word", metadata.trigger); body.append("concept_type", metadata.concept); body.append("image", await imageResponse.blob(), itemName(item));
-    const response = await fetch("/api/lora-training/caption", { method: "POST", credentials: "same-origin", body, signal });
-    let payload = await response.json().catch(() => ({}));
-    if (!response.ok) { const error = new Error(payload.error || `Сервис ответил HTTP ${response.status}.`); error.status = response.status; throw error; }
-    if (response.status === 202) {
-      if (!payload.job_id) throw new Error("Не получен номер задания описания.");
-      const jobID = payload.job_id;
-      while (payload.state !== "completed") {
-        await new Promise((resolve, reject) => { const abort = () => { clearTimeout(timer); reject(new DOMException("Остановлено", "AbortError")); }; const timer = setTimeout(() => { signal.removeEventListener("abort", abort); resolve(); }, 1200); if (signal.aborted) abort(); else signal.addEventListener("abort", abort, { once: true }); });
-        const response = await fetch(`/api/lora-training/caption/${encodeURIComponent(jobID)}`, { credentials: "same-origin", cache: "no-store", signal });
-        payload = await response.json().catch(() => ({}));
-        if (!response.ok || payload.state === "failed") throw new Error(payload.error || "Описание не завершилось. Повторите запрос.");
-      }
-    }
-    if (!payload.caption?.trim()) throw new Error("Ассистент вернул пустое описание.");
-    if (item.caption !== before || state.manifest.settings.trigger_word.trim() !== metadata.trigger || state.manifest.settings.concept_type !== metadata.concept) {
-      captionStates.set(key, "Ответ не применён: вы изменили подпись или триггер."); renderItems(); return false;
-    }
-    item.caption = payload.caption.trim(); captionStates.set(key, "Описание готово"); controller.touch("items"); await controller.flush(); return true;
+  const applyCaptionResults = () => {
+    if (!state.ready || busy() || state.status === "conflict") return;
+    if (captions.reconcile(state.manifest, captionJobs(), id)) controller.touch("items");
   };
-  const describeImages = async (keys) => {
-    if (busy() || captionRun || files.size) return;
-    const trigger = state.manifest.settings.trigger_word.trim();
-    if (trigger.length < 2 || trigger.length > 80) { captionMessage("Сначала укажите триггер длиной 2–80 символов.", true); form.querySelector('[name="trigger_word"]').focus(); return; }
-    if (!keys.length) { captionMessage("Пустых подписей нет."); return; }
-    captionRun = new AbortController(); renderState(); let completed = 0; let failed = false;
-    for (const key of keys) {
-      if (keys.length > 1 && state.manifest.images.find((image) => image.id === key)?.caption.trim()) continue;
-      captionMessage(`Описываем кадр ${completed + 1} из ${keys.length}.`);
-      try { if (await captionRequest(key, captionRun.signal)) completed += 1; }
-      catch (error) { failed = true; captionStates.set(key, error.name === "AbortError" ? "Описание остановлено" : error.message); captionMessage(`Готово ${completed}. ${error.name === "AbortError" ? "Описание остановлено." : error.message}`, true); break; }
+  const renderCaptionSummary = () => {
+    const queue = captionPoller.state;
+    if (queue.error) { captionMessage(`Не удалось проверить описания. Повтор через ${queue.retrySeconds} сек.`, true); return; }
+    const jobs = [...captions.latest(captionJobs()).values()].filter((job) => state.manifest.images.some((item) => item.id === job.image_id));
+    if (!jobs.length) { captionMessage(state.manifest.images.length ? `Пустых подписей: ${state.manifest.images.filter(item => !item.excluded && !item.caption.trim()).length}.` : "Добавьте изображения и укажите триггер."); return; }
+    const completed = jobs.filter((job) => job.state === "completed").length;
+    const waiting = jobs.filter(captions.active).length;
+    const failed = jobs.filter((job) => job.state === "failed").length;
+    const cancelled = jobs.filter((job) => job.state === "cancelled").length;
+    captionMessage(`Готово ${completed} из ${jobs.length}.${waiting ? ` В работе и очереди: ${waiting}.` : ""}${failed ? ` Ошибок: ${failed}. Повторите нужный кадр.` : ""}${cancelled ? ` Отменено: ${cancelled}.` : ""}`, Boolean(failed));
+  };
+  captionPoller = captions.createPoller({
+    request: (datasetID, signal) => request(`/${datasetID}/captions`, "GET", undefined, { signal }),
+    onChange: () => { applyCaptionResults(); renderItems(); renderCaptionSummary(); },
+  });
+  const captionJobAction = async (job, action) => {
+    const response = await fetch(`/api/lora-training/caption/${encodeURIComponent(job.job_id)}/${action}`, {
+      method: "POST", credentials: "same-origin", headers: { Accept: "application/json", "X-CSRF-Token": csrf }, signal: AbortSignal.timeout(60000),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `Сервис ответил HTTP ${response.status}.`);
+    return payload;
+  };
+  const describeImages = async (keys, onlyEmpty = false, cancelSeries = false) => {
+    if (busy() || files.size) return;
+    const one = keys.length === 1 && !onlyEmpty ? captions.latest(captionJobs()).get(keys[0]) : null;
+    const cancelling = cancelSeries || captions.active(one);
+    if (!cancelling) {
+      const trigger = state.manifest.settings.trigger_word.trim();
+      if (trigger.length < 2 || trigger.length > 80) { captionMessage("Сначала укажите триггер длиной 2–80 символов.", true); form.querySelector('[name="trigger_word"]').focus(); return; }
+      if (!keys.length) { captionMessage("Пустых подписей нет."); return; }
     }
-    captionRun = null; renderItems(); if (!failed) captionMessage(`Готово ${completed}. ${completed === keys.length ? "Подписи сохранены." : "Изменённые вручную подписи сохранены без замены."}`);
+    captionAction = true; renderState();
+    try {
+      if (cancelSeries) await request(`/${state.dataset.id}/captions`, "POST", { cancel: true });
+      else if (captions.active(one)) await captionJobAction(one, "cancel");
+      else {
+        if (!await flush()) return;
+        const item = state.manifest.images.find((image) => image.id === keys[0]);
+        if (one && ["failed", "cancelled"].includes(one.state) && captions.matches(state.manifest, item, one)) await captionJobAction(one, "retry");
+        else await request(`/${state.dataset.id}/captions`, "POST", { revision: state.dataset.revision, image_ids: keys, only_empty: onlyEmpty });
+      }
+      await captionPoller.refresh();
+    } catch (error) {
+      feedback(`${error.message} Состояние заданий будет проверено повторно.`, true);
+      await captionPoller.refresh();
+    } finally { captionAction = false; applyCaptionResults(); renderItems(); renderCaptionSummary(); }
   };
   fileInput.addEventListener("change", () => { const incoming = [...fileInput.files]; fileInput.value = ""; void addFiles(incoming); });
   const dropzone = find("[data-lora-dropzone]");
   for (const eventName of ["dragenter", "dragover", "dragleave", "drop"]) dropzone.addEventListener(eventName, (event) => { event.preventDefault(); dropzone.classList.toggle("is-dragging", eventName === "dragenter" || eventName === "dragover"); if (eventName === "drop") void addFiles(event.dataTransfer?.files || []); });
   form.addEventListener("input", (event) => {
     if (!fields.includes(event.target.name)) return;
+    if (["trigger_word", "concept_type"].includes(event.target.name)) for (const item of state.manifest.images) { item.caption_revision = id(); delete item.caption_job_id; }
     if (event.target.name === "output_name") outputEdited = Boolean(event.target.value);
     if (event.target.name === "name" && !outputEdited) {
       const from = "а б в г д е ё ж з и й к л м н о п р с т у ф х ц ч ш щ ъ ы ь э ю я".split(" "); const to = "a b v g d e e zh z i y k l m n o p r s t u f h ts ch sh sch _ y _ e yu ya".split(" ");
@@ -326,7 +366,7 @@
       const next = state.manifest.settings.trigger_word.trim();
       if (next && previousTrigger && next !== previousTrigger) for (const item of state.manifest.images) {
         const value = item.caption.trim(); const boundary = value.slice(previousTrigger.length, previousTrigger.length + 1);
-        if (value.slice(0, previousTrigger.length).toLowerCase() === previousTrigger.toLowerCase() && (!boundary || /[\s,.;:!?-]/u.test(boundary))) item.caption = `${next}${value.slice(previousTrigger.length)}`;
+        if (value.slice(0, previousTrigger.length).toLowerCase() === previousTrigger.toLowerCase() && (!boundary || /[\s,.;:!?-]/u.test(boundary))) { item.caption = `${next}${value.slice(previousTrigger.length)}`; item.caption_revision = id(); delete item.caption_job_id; }
       }
       previousTrigger = next;
     }
@@ -353,8 +393,10 @@
   find("[data-dataset-reload]").addEventListener("click", () => { if (window.confirm("Отбросить несохранённые правки и загрузить набор с сервера?")) void controller.load(state.dataset?.id); });
   find("[data-dataset-fork]").addEventListener("click", () => { controller.startNew({ preserve: true }); void controller.flush(); });
   find("[data-lora-clear-images]").addEventListener("click", () => { if (!window.confirm("Убрать все изображения и подписи из этого набора?")) return; files.clear(); state.manifest.images = []; controller.touch("items"); });
-  find("[data-lora-caption-all]").addEventListener("click", () => { if (captionRun) captionRun.abort(); else void describeImages(state.manifest.images.filter((item) => !item.excluded && !item.caption.trim()).map((item) => item.id)); });
+  find("[data-lora-caption-all]").addEventListener("click", () => void describeImages(state.manifest.images.filter((item) => !item.excluded && !item.caption.trim()).map((item) => item.id), true, captionActive()));
   form.addEventListener("submit", (event) => { event.preventDefault(); void safely("train", async () => {
+    if (state.dataset && !captionPoller.state.ready) throw new Error("Дождитесь проверки заданий описания.");
+    if (captionActive()) throw new Error("Дождитесь описаний или остановите серию перед обучением.");
     if (!await flush()) return;
     const included = state.manifest.images.filter((item) => !item.excluded);
     if (included.length < 5 || included.length > 100) throw new Error("Включите от 5 до 100 изображений для обучения.");
@@ -363,7 +405,10 @@
     const result = await request(`/${state.dataset.id}/train`, "POST", { revision: state.dataset.revision });
     feedback("Обучение поставлено в очередь. Набор сохранён отдельной версией."); page.dispatchEvent(new CustomEvent("lora-training-created", { detail: result.job }));
   }); });
-  window.addEventListener("beforeunload", (event) => { if (state.dirty || files.size || uploading || captionRun) { event.preventDefault(); event.returnValue = ""; } });
-  window.addEventListener("pagehide", () => { controller.dispose(); captionRun?.abort(); for (const url of urls.values()) URL.revokeObjectURL(url); });
+  window.addEventListener("online", () => void captionPoller.refresh());
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) void captionPoller.refresh(); });
+  window.addEventListener("pageshow", (event) => { if (event.persisted) { urls.clear(); captionPoller.resume(); renderItems(); if (state.dirty) void controller.flush(); } });
+  window.addEventListener("beforeunload", (event) => { if (state.dirty || files.size || uploading) { event.preventDefault(); event.returnValue = ""; } });
+  window.addEventListener("pagehide", () => { controller.dispose(); captionPoller.dispose(); for (const url of urls.values()) URL.revokeObjectURL(url); });
   icons(); void controller.load();
 })();
