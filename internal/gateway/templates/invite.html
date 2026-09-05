@@ -13,9 +13,9 @@
       {{if .Access.GrantQuickGeneration}}<p class="muted">Изображения: {{if gt .Access.GenerationDailyLimit 0}}{{.Access.GenerationDailyLimit}} в сутки{{else}}без суточного лимита{{end}}, {{if gt .Access.GenerationTotalLimit 0}}{{.Access.GenerationTotalLimit}} всего{{else}}без общего лимита{{end}}.{{if .Access.GrantVideo}} Видео: {{if gt .Access.VideoGenerationDailyLimit 0}}{{.Access.VideoGenerationDailyLimit}} в сутки{{else}}без суточного лимита{{end}}, {{if gt .Access.VideoGenerationTotalLimit 0}}{{.Access.VideoGenerationTotalLimit}} всего{{else}}без общего лимита{{end}}, базовое качество до {{.Access.MaxVideoGenerationQuality}}p; RTX-апскейл не ограничен.{{end}}</p>{{end}}
       {{if .Error}}<p class="alert">{{.Error}}</p>{{end}}
       <form method="post">
-        <label>Логин<input name="username" autocomplete="username" placeholder="От 3 символов" required minlength="3" autofocus></label>
-        <label>E-mail <span class="muted">необязательно</span><input name="email" type="email" autocomplete="email"></label>
-        <label>Пароль<input name="password" type="password" autocomplete="new-password" placeholder="Не менее 10 символов" required minlength="10"></label>
+        <label class="ui-field"><span class="ui-field-label">Логин</span><input name="username" autocomplete="username" placeholder="От 3 символов" required minlength="3" autofocus></label>
+        <label class="ui-field"><span class="ui-field-label">E-mail <span class="muted">необязательно</span></span><input name="email" type="email" autocomplete="email"></label>
+        <label class="ui-field"><span class="ui-field-label">Пароль</span><input name="password" type="password" autocomplete="new-password" placeholder="Не менее 10 символов" required minlength="10"></label>
         <button type="submit">Создать аккаунт</button>
       </form>
     {{end}}

@@ -10,11 +10,11 @@
     <form method="post">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       {{if .CanChangeUsername}}
-      <label>Логин<input name="username" value="{{.ProfileUsername}}" autocomplete="username" required minlength="3" maxlength="48" pattern="[A-Za-z0-9._-]+"></label>
+      <label class="ui-field"><span class="ui-field-label">Логин</span><input name="username" value="{{.ProfileUsername}}" autocomplete="username" required minlength="3" maxlength="48" pattern="[A-Za-z0-9._-]+"></label>
       {{else}}
-      <label>Логин<input value="{{.ProfileUsername}}" readonly aria-readonly="true"></label>
+      <label class="ui-field"><span class="ui-field-label">Логин</span><input value="{{.ProfileUsername}}" readonly aria-readonly="true"></label>
       {{end}}
-      <label>E-mail<input name="email" type="email" value="{{.ProfileEmail}}" autocomplete="email" maxlength="254" placeholder="name@example.com"></label>
+      <label class="ui-field"><span class="ui-field-label">E-mail</span><input name="email" type="email" value="{{.ProfileEmail}}" autocomplete="email" maxlength="254" placeholder="name@example.com"></label>
       <p class="field-hint">E-mail необязателен. Оставьте поле пустым, чтобы удалить адрес из профиля.</p>
       <button type="submit">Сохранить профиль</button>
     </form>

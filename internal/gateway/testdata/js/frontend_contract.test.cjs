@@ -21,6 +21,8 @@ const css = fs.readFileSync(stylePath, "utf8");
 const themeCSS = fs.readFileSync(path.join(projectRoot, "internal/gateway/static/theme.css"), "utf8");
 const notificationCSS = fs.readFileSync(path.join(projectRoot, "internal/gateway/static/notifications.css"), "utf8");
 const shellCSS = fs.readFileSync(path.join(projectRoot, "internal/gateway/static/shell.css"), "utf8");
+const controlsCSS = fs.readFileSync(path.join(projectRoot, "internal/gateway/static/controls.css"), "utf8");
+const componentCSS = `${css}\n${controlsCSS}`;
 const generateScript = fs.readFileSync(generatePath, "utf8");
 const batchScript = fs.readFileSync(batchPath, "utf8");
 const generateTemplate = fs.readFileSync(generateTemplatePath, "utf8");
@@ -89,12 +91,12 @@ test("frontend tokens have one source of truth", () => {
   assert.equal((css.match(/:root\s*\{/g) || []).length, 1);
   assert.equal((themeCSS.match(/:root\s*\{/g) || []).length, 1);
   for (const token of [
-    "--font-size-utility", "--font-size-badge", "--control-height",
+    "--font-size-utility", "--font-size-badge", "--font-size-label", "--font-size-control", "--control-height",
     "--radius-control", "--radius-panel", "--transition-fast",
   ]) {
     assert.match(css, new RegExp(`${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:`));
   }
-  const combined = `${themeCSS}\n${css}\n${notificationCSS}\n${shellCSS}`;
+  const combined = `${themeCSS}\n${componentCSS}\n${notificationCSS}\n${shellCSS}`;
   const definitions = [...combined.matchAll(/(--[\w-]+)\s*:/g)].map(match => match[1]);
   for (const token of [...themeCSS.matchAll(/(--[\w-]+)\s*:/g)].map(match => match[1])) {
     assert.equal(definitions.filter(name => name === token).length, 1, `duplicate palette token ${token}`);
@@ -105,7 +107,7 @@ test("frontend tokens have one source of truth", () => {
   for (const match of combined.matchAll(/var\((--color-[\w-]+)/g)) {
     assert.ok(definitions.includes(match[1]), `undefined color ${match[1]}`);
   }
-  assert.doesNotMatch(`${css}\n${notificationCSS}\n${shellCSS}`, /#[\da-f]{3,8}\b/i, "literal palette colors belong in theme.css");
+  assert.doesNotMatch(`${componentCSS}\n${notificationCSS}\n${shellCSS}`, /#[\da-f]{3,8}\b/i, "literal palette colors belong in theme.css");
 });
 
 test("service copy never falls below 12px outside the short badge token", () => {
@@ -123,16 +125,16 @@ test("shared components expose semantic states", () => {
     ".ui-field", ".ui-choice", ".ui-segmented", ".ui-toolbar", ".ui-dialog",
     ".ui-media-card", ".ui-status-banner", ".ui-empty-state",
   ]) {
-    assert.ok(css.includes(selector), `missing ${selector}`);
+    assert.ok(componentCSS.includes(selector), `missing ${selector}`);
     assert.ok(templates.includes(selector.slice(1)), `templates do not use ${selector}`);
   }
   for (const state of ["is-loading", "is-error", "is-success", "aria-disabled", "aria-busy"]) {
-    assert.ok(css.includes(state), `missing component state ${state}`);
+    assert.ok(componentCSS.includes(state), `missing component state ${state}`);
   }
 });
 
 test("selector duplication stays below the G2.3 baseline", () => {
-  const inventory = selectorInventory(css);
+  const inventory = selectorInventory(componentCSS);
   console.info(`frontend selector inventory: ${JSON.stringify(inventory)}`);
   assert.ok(inventory.repeatedNames <= 110, JSON.stringify(inventory));
   assert.ok(inventory.excessDeclarations <= 120, JSON.stringify(inventory));
@@ -181,6 +183,19 @@ test("controlled generation batches are wired through the form, job center, and 
   assert.match(batchScript, /MAX_COUNT = 20/);
   for (const route of ["/generate/batches", "/generate/batches/cancel", "/generate/batches/winner"]) {
     assert.ok(gatewayRoutes.includes(route), `missing batch route ${route}`);
+  }
+});
+
+test("fields and native control states have one shared owner", () => {
+  assert.doesNotMatch(css, /^\.ui-field\s*\{|^\.ui-choice\s*\{|^input, select\s*\{|^textarea\s*\{/m);
+  assert.match(controlsCSS, /grid-template-rows:\s*subgrid/);
+  assert.match(controlsCSS, /font-size:\s*16px/);
+  assert.match(layoutTemplate, /\/static\/controls\.css/);
+  assert.match(appSource, /"\/static\/controls\.css":\s*"static\/controls\.css"/);
+  for (const file of ["generate.html", "lora_training.html", "admin_invites.html", "admin_user_detail.html"]) {
+    const source = fs.readFileSync(path.join(templateRoot, file), "utf8");
+    assert.ok(source.includes("ui-field-grid"), `${file} does not use aligned fields`);
+    assert.ok(source.includes("ui-field-label"), `${file} does not separate labels and controls`);
   }
 });
 

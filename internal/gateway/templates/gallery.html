@@ -14,10 +14,10 @@
 
   {{if .Items}}
   <section class="media-library-controls" aria-label="Поиск и фильтры">
-    <label class="media-library-search ui-field"><span>Поиск</span><input type="search" data-gallery-search placeholder="Промт, модель, workflow или тег" autocomplete="off"></label>
-    <div class="media-library-date-range">
-      <label class="ui-field"><span>С даты</span><input type="date" data-gallery-date-from></label>
-      <label class="ui-field"><span>По дату</span><input type="date" data-gallery-date-to></label>
+    <label class="media-library-search ui-field"><span class="ui-field-label"><span>Поиск</span></span><input type="search" data-gallery-search placeholder="Промт, модель, workflow или тег" autocomplete="off"></label>
+    <div class="ui-field-grid media-library-date-range">
+      <label class="ui-field"><span class="ui-field-label"><span>С даты</span></span><input type="date" data-gallery-date-from></label>
+      <label class="ui-field"><span class="ui-field-label"><span>По дату</span></span><input type="date" data-gallery-date-to></label>
     </div>
     <div class="media-library-filter-row">
       <div class="media-library-type-filter ui-segmented ui-segmented--compact" role="group" aria-label="Тип результата">
@@ -49,7 +49,7 @@
       </nav>
       <form class="media-library-collection-create" action="/generate/library/collections" method="post" data-gallery-collection-create>
         <input type="hidden" name="csrf" value="{{.CSRF}}">
-        <label><span>Новая коллекция</span><input name="name" type="text" maxlength="60" placeholder="Например, портреты" required></label>
+        <label class="ui-field"><span class="ui-field-label"><span>Новая коллекция</span></span><input name="name" type="text" maxlength="60" placeholder="Например, портреты" required></label>
         <button class="ghost" type="submit">Создать</button>
       </form>
     </aside>
@@ -156,7 +156,7 @@
       <div class="ui-dialog__toolbar"><strong id="gallery-metadata-title">Теги и коллекции</strong><button type="button" data-gallery-metadata-close aria-label="Закрыть">&#10005;</button></div>
       <div class="media-library-dialog-body">
         <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="media_id" value="">
-        <label class="ui-field"><span>Теги</span><input name="tags" type="text" maxlength="400" placeholder="портрет, студия, вариант 2"><small>Разделяйте теги запятыми.</small></label>
+        <label class="ui-field"><span class="ui-field-label"><span>Теги</span></span><input name="tags" type="text" maxlength="400" placeholder="портрет, студия, вариант 2"><small>Разделяйте теги запятыми.</small></label>
         <fieldset class="media-library-collection-options"><legend>Коллекции</legend><div data-gallery-metadata-collections>{{range .Collections}}<label class="ui-choice" data-gallery-metadata-collection="{{.ID}}"><input type="checkbox" name="collection_id" value="{{.ID}}"><span><strong>{{.Name}}</strong><small>{{.ItemCount}} результатов</small></span></label>{{else}}<p data-gallery-no-collections>Сначала создайте коллекцию слева.</p>{{end}}</div></fieldset>
         <p class="media-library-dialog-status" data-gallery-metadata-status aria-live="polite"></p>
       </div>
@@ -177,9 +177,9 @@
           {{end}}
           {{if .CanUseMiniMaxVideo}}<label class="ui-choice"><input type="radio" name="workflow" value="minimax-h3-video" data-template-id="minimax-h3-video" data-max-slots="4" {{if not $.CanUseImageToImage}}checked{{end}}><span><strong>MiniMax H3 · видео</strong><small>Кадр или свободный референс</small></span></label>{{end}}
         </fieldset>
-        <div class="media-library-use-fields">
-          <label class="ui-field"><span>Номер изображения</span><select name="slot"><option value="1">Изображение 1</option><option value="2">Изображение 2</option><option value="3">Изображение 3</option><option value="4">Изображение 4</option></select></label>
-          <label class="ui-field"><span>Роль</span><select name="role"><option value="base_scene">Основная сцена</option><option value="identity">Внешность и лицо</option><option value="wardrobe_object">Одежда или предмет</option><option value="pose_composition">Поза и композиция</option><option value="style">Стиль, свет и цвет</option><option value="background">Фон</option><option value="details">Мелкие детали</option><option value="first_frame">Точный первый кадр</option><option value="last_frame">Точный последний кадр</option></select></label>
+        <div class="ui-field-grid media-library-use-fields">
+          <label class="ui-field"><span class="ui-field-label"><span>Номер изображения</span></span><select name="slot"><option value="1">Изображение 1</option><option value="2">Изображение 2</option><option value="3">Изображение 3</option><option value="4">Изображение 4</option></select></label>
+          <label class="ui-field"><span class="ui-field-label"><span>Роль</span></span><select name="role"><option value="base_scene">Основная сцена</option><option value="identity">Внешность и лицо</option><option value="wardrobe_object">Одежда или предмет</option><option value="pose_composition">Поза и композиция</option><option value="style">Стиль, свет и цвет</option><option value="background">Фон</option><option value="details">Мелкие детали</option><option value="first_frame">Точный первый кадр</option><option value="last_frame">Точный последний кадр</option></select></label>
         </div>
         <p class="media-library-use-hint" data-gallery-use-hint>Изображение откроется в первом слоте Krea2.</p>
       </div>

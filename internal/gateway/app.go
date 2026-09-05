@@ -73,11 +73,12 @@ var staticJavaScriptAssets = func() map[string]string {
 var staticCSSAssets = map[string]string{
 	"/static/theme.css":         "static/theme.css",
 	"/static/style.css":         "static/style.css",
+	"/static/controls.css":      "static/controls.css",
 	"/static/shell.css":         "static/shell.css",
 	"/static/notifications.css": "static/notifications.css",
 }
 
-var frontendAssetPaths = append([]string{"static/theme.css", "static/style.css", "static/shell.css", "static/notifications.css"}, staticJavaScriptAssetPaths...)
+var frontendAssetPaths = append([]string{"static/theme.css", "static/style.css", "static/controls.css", "static/shell.css", "static/notifications.css"}, staticJavaScriptAssetPaths...)
 
 type Templates struct {
 	*template.Template

@@ -13,7 +13,7 @@ Typography, rhythm and dimensions stay in `internal/gateway/static/style.css`:
 
 - surfaces and text: `--canvas`, `--surface*`, `--text*`, `--muted`, `--faint`;
 - actions and states: `--mint`, `--cyan`, `--amber`, `--coral`, `--violet`;
-- type: `--font-size-body`, `--font-size-utility`, `--font-size-badge`,
+- type: `--font-size-body`, `--font-size-label`, `--font-size-control`, `--font-size-utility`, `--font-size-badge`,
   `--font-size-section`, `--font-size-title`;
 - rhythm: `--space-1` through `--space-6`, `--control-height`,
   `--control-height-compact`;
@@ -32,8 +32,10 @@ is `--font-size-badge`, reserved for short badges. Letter spacing remains zero.
 | Component | Class | Required states |
 | --- | --- | --- |
 | Field | `.ui-field` | default, focus, disabled, loading, error, success |
+| Aligned field group | `.ui-field-grid` + `.ui-field-label` | wrapped labels, validation messages, hidden fields, single column |
 | Binary or radio choice | `.ui-choice` | unchecked, checked, disabled, loading, error, success |
 | Segmented choice | `.ui-segmented` + `.ui-segment` | default, selected, focus, disabled |
+| Optional settings disclosure | `.ui-disclosure` | closed, open, focus; native keyboard behavior |
 | Toolbar | `.ui-toolbar` | default, wrapping, loading; use `--plain` when its parent already frames the task |
 | Dialog surface | `.ui-dialog` | open, loading, error, success |
 | Media/result card | `.ui-media-card` | default, loading, error, success |
@@ -42,6 +44,19 @@ is `--font-size-badge`, reserved for short badges. Letter spacing remains zero.
 
 Page-specific classes remain responsible for content layout. They may not
 redefine the shared focus, disabled, loading or semantic state language.
+
+`controls.css` owns native inputs, buttons, `.ui-field`, `.ui-choice`, segmented
+choices and disclosures. It loads after style.css and before shell.css. Pages
+own column counts and placement, not alternate field heights or focus styles.
+Regular fields place the label text in `.ui-field-label`, then the native control,
+then an optional `small` or `.field-hint`. Direct fields in `.ui-field-grid` share
+three subgrid rows so a wrapping label or hint cannot misalign neighboring inputs.
+Do not put buttons or another interactive control inside a field label.
+The fallback for browsers without subgrid preserves a readable independent grid.
+Control text is 14 px on desktop and 16 px on narrow screens; control height is
+at least 44 px. Labels use 13 px/600, hints use 12 px/400. Binary choices use an
+18 px native input inside a 44 px or larger target. `.ui-choice--row` is the
+unframed option row for processing modules, not a nested card.
 
 ## Responsive Contract
 

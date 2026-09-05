@@ -36,7 +36,7 @@
         <footer class="admin-suggestion-review">
           <form method="post" action="/admin/suggestions/{{.ID}}/decision">
             <input type="hidden" name="csrf" value="{{$.CSRF}}">
-            <label><span>Комментарий пользователю</span><textarea name="comment" rows="2" maxlength="1000" placeholder="Объясните решение; при отклонении комментарий обязателен"></textarea></label>
+            <label class="ui-field"><span class="ui-field-label"><span>Комментарий пользователю</span></span><textarea name="comment" rows="2" maxlength="1000" placeholder="Объясните решение; при отклонении комментарий обязателен"></textarea></label>
             <div class="admin-suggestion-review-actions">{{if .CanAccept}}<button type="submit" name="decision" value="accepted">Принять в работу</button>{{else}}<span>Принятие недоступно: вложения не прошли чистую проверку.</span>{{end}}<button class="danger" type="submit" name="decision" value="rejected">Отклонить</button></div>
           </form>
           {{if .CanRetry}}<form method="post" action="/admin/suggestions/{{.ID}}/retry"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="ghost" type="submit" {{if not $.VirusTotalConfigured}}disabled{{end}}>Проверить повторно</button></form>{{end}}

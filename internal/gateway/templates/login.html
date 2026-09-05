@@ -8,8 +8,8 @@
     {{if .Error}}<p class="alert">{{.Error}}</p>{{end}}
     <form method="post" action="/login">
       <input type="hidden" name="next" value="{{.Next}}">
-      <label>Логин или e-mail<input name="login" autocomplete="username" placeholder="Ваш логин или e-mail" required autofocus></label>
-      <label>Пароль<input name="password" type="password" autocomplete="current-password" placeholder="Ваш пароль" required></label>
+      <label class="ui-field"><span class="ui-field-label">Логин или e-mail</span><input name="login" autocomplete="username" placeholder="Ваш логин или e-mail" required autofocus></label>
+      <label class="ui-field"><span class="ui-field-label">Пароль</span><input name="password" type="password" autocomplete="current-password" placeholder="Ваш пароль" required></label>
       <button type="submit">Войти</button>
     </form>
   </section>

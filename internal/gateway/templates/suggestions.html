@@ -30,14 +30,14 @@
           </div>
         </fieldset>
 
-        <label class="ui-field"><span>Название</span><input name="title" value="{{.Form.Title}}" required minlength="3" maxlength="120" placeholder="Коротко: что нужно добавить"></label>
-        <label class="ui-field"><span>Описание</span><textarea name="description" maxlength="4000" rows="6" placeholder="Для чего это нужно, с чем работает и какого результата вы ждёте">{{.Form.Description}}</textarea><small class="field-hint">Для отправки нужно не менее 10 символов. Черновик можно сохранить раньше.</small></label>
+        <label class="ui-field"><span class="ui-field-label"><span>Название</span></span><input name="title" value="{{.Form.Title}}" required minlength="3" maxlength="120" placeholder="Коротко: что нужно добавить"></label>
+        <label class="ui-field"><span class="ui-field-label"><span>Описание</span></span><textarea name="description" maxlength="4000" rows="6" placeholder="Для чего это нужно, с чем работает и какого результата вы ждёте">{{.Form.Description}}</textarea><small class="field-hint">Для отправки нужно не менее 10 символов. Черновик можно сохранить раньше.</small></label>
 
         <section class="suggestion-attachments" aria-labelledby="suggestion-attachments-title">
           <div class="suggestion-subheading"><div><h3 id="suggestion-attachments-title">Материалы</h3><p>Опционально. Без вложений администратор получит только ваш текст.</p></div><span>до 3 ссылок · JSON до 5 МБ</span></div>
           {{if not .VirusTotalConfigured}}<p class="ui-status-banner is-warning">Текстовое предложение можно отправить. Ссылки и JSON останутся в черновике до восстановления VirusTotal.</p>{{end}}
           <div class="suggestion-attachment-grid">
-            <label class="ui-field"><span>Ссылки</span><textarea name="links" rows="4" placeholder="По одной ссылке в строке">{{.Form.Links}}</textarea><small class="field-hint">Gateway не открывает ссылки. Перед просмотром они проходят VirusTotal.</small></label>
+            <label class="ui-field"><span class="ui-field-label"><span>Ссылки</span></span><textarea name="links" rows="4" placeholder="По одной ссылке в строке">{{.Form.Links}}</textarea><small class="field-hint">Gateway не открывает ссылки. Перед просмотром они проходят VirusTotal.</small></label>
             <label class="ui-field suggestion-file-field"><span>Workflow JSON</span><span class="suggestion-file-control" data-suggestion-file-control><input name="workflow_json" type="file" accept="application/json,.json" aria-describedby="suggestion-json-hint"><span class="suggestion-file-button" aria-hidden="true">Выбрать JSON</span><span class="suggestion-file-name" data-suggestion-file-name>Файл не выбран</span></span><small class="field-hint" id="suggestion-json-hint">Файл сохраняется зашифрованным и никогда не запускается автоматически.</small></label>
           </div>
           {{if .Form.JSONName}}<div class="suggestion-saved-file"><span aria-hidden="true">{ }</span><div><strong>{{.Form.JSONName}}</strong><small>{{formatBytes .Form.JSONSize}} · сохранён в черновике</small></div><label><input type="checkbox" name="remove_json" value="1"><span>Удалить</span></label></div>{{end}}

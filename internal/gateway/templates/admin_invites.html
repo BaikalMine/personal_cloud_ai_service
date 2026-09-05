@@ -44,27 +44,27 @@
 
         <section class="invite-builder-section invite-builder-section--limits">
           <div class="invite-section-heading"><p class="section-kicker">02</p><h3>Ссылка и учётная запись</h3><p>Срок ссылки не связан со сроком временной учётной записи.</p></div>
-          <div class="invite-limit-grid">
-            <label>Ссылка действует<select name="invite_ttl_hours"><option value="1">1 час</option><option value="24" selected>24 часа</option><option value="72">3 дня</option><option value="168">7 дней</option><option value="720">30 дней</option></select></label>
-            <label>Количество активаций<input name="max_uses" type="number" value="1" min="1" max="10000" inputmode="numeric"></label>
+          <div class="ui-field-grid invite-limit-grid">
+            <label class="ui-field"><span class="ui-field-label">Ссылка действует</span><select name="invite_ttl_hours"><option value="1">1 час</option><option value="24" selected>24 часа</option><option value="72">3 дня</option><option value="168">7 дней</option><option value="720">30 дней</option></select></label>
+            <label class="ui-field"><span class="ui-field-label">Количество активаций</span><input name="max_uses" type="number" value="1" min="1" max="10000" inputmode="numeric"></label>
           </div>
-          <label class="invite-temporary-lifetime ui-field" data-temporary-lifetime hidden>Срок доступа после регистрации<select name="temporary_account_hours" disabled><option value="1">1 час</option><option value="6">6 часов</option><option value="12">12 часов</option><option value="24">1 день</option><option value="72">3 дня</option><option value="168" selected>7 дней</option><option value="336">14 дней</option><option value="720">30 дней</option><option value="2160">90 дней</option></select><small class="field-hint">По окончании срока учётная запись удаляется, а история и медиа остаются до штатного срока хранения с пометкой об удалённом пользователе.</small></label>
+          <label class="invite-temporary-lifetime ui-field" data-temporary-lifetime hidden><span class="ui-field-label">Срок доступа после регистрации</span><select name="temporary_account_hours" disabled><option value="1">1 час</option><option value="6">6 часов</option><option value="12">12 часов</option><option value="24">1 день</option><option value="72">3 дня</option><option value="168" selected>7 дней</option><option value="336">14 дней</option><option value="720">30 дней</option><option value="2160">90 дней</option></select><small class="field-hint">По окончании срока учётная запись удаляется, а история и медиа остаются до штатного срока хранения с пометкой об удалённом пользователе.</small></label>
         </section>
       </div>
 
       <section class="invite-generation-policy" data-quick-policy>
         <div class="invite-section-heading"><p class="section-kicker">03</p><h3>Генерация и ресурсы</h3><p>Квоты считаются отдельно. Ноль означает отсутствие ограничения для выбранного типа.</p></div>
         <div class="invite-generation-grid">
-          <fieldset class="invite-quota-group" data-image-policy>
+          <fieldset class="ui-field-grid invite-quota-group" data-image-policy>
             <legend><span>Изображения</span><small>Текст в изображение и фото с промтом</small></legend>
-            <label>В сутки<input name="image_generation_daily_limit" type="number" value="0" min="0" max="100000" inputmode="numeric"></label>
-            <label>Всего<input name="image_generation_total_limit" type="number" value="0" min="0" max="10000000" inputmode="numeric"></label>
+            <label class="ui-field"><span class="ui-field-label">В сутки</span><input name="image_generation_daily_limit" type="number" value="0" min="0" max="100000" inputmode="numeric"></label>
+            <label class="ui-field"><span class="ui-field-label">Всего</span><input name="image_generation_total_limit" type="number" value="0" min="0" max="10000000" inputmode="numeric"></label>
           </fieldset>
-          <fieldset class="invite-quota-group" data-video-policy>
+          <fieldset class="ui-field-grid invite-quota-group" data-video-policy>
             <legend><span>Видео</span><small>Отдельная квота для MiniMax H3</small></legend>
-            <label>В сутки<input name="video_generation_daily_limit" type="number" value="0" min="0" max="100000" inputmode="numeric"></label>
-            <label>Всего<input name="video_generation_total_limit" type="number" value="0" min="0" max="10000000" inputmode="numeric"></label>
-            <label class="invite-video-quality">Максимум базового качества<select name="max_video_generation_quality"><option value="480">480p</option><option value="720" selected>720p</option><option value="1080">1080p</option><option value="1440">1440p · 2K</option></select><small class="field-hint">Финальный RTX-апскейл этим лимитом не ограничивается.</small></label>
+            <label class="ui-field"><span class="ui-field-label">В сутки</span><input name="video_generation_daily_limit" type="number" value="0" min="0" max="100000" inputmode="numeric"></label>
+            <label class="ui-field"><span class="ui-field-label">Всего</span><input name="video_generation_total_limit" type="number" value="0" min="0" max="10000000" inputmode="numeric"></label>
+            <label class="ui-field invite-video-quality"><span class="ui-field-label">Максимум базового качества</span><select name="max_video_generation_quality"><option value="480">480p</option><option value="720" selected>720p</option><option value="1080">1080p</option><option value="1440">1440p · 2K</option></select><small class="field-hint">Финальный RTX-апскейл этим лимитом не ограничивается.</small></label>
           </fieldset>
           <fieldset class="invite-runtime-group">
             <legend><span>Возможности</span><small>Начальные настройки новой учётной записи</small></legend>

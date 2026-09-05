@@ -6,15 +6,28 @@
     <div><p class="eyebrow">UI preview</p><h1>Компоненты интерфейса</h1><p class="hero-copy">Проверка общей сетки, состояний и читаемости без производственных данных.</p></div>
   </section>
 
+  <section class="component-field-matrix" aria-label="Выравнивание полей">
+    <h2>Параметры задачи</h2>
+    <div class="ui-field-grid component-field-grid" data-control-alignment>
+      <label class="ui-field"><span class="ui-field-label">Seed</span><input name="example_seed" value="-1"><small>Случайный результат.</small></label>
+      <label class="ui-field"><span class="ui-field-label">Планировщик с длинным названием для проверки переноса</span><select name="example_scheduler"><option>Simple</option><option>Normal</option></select></label>
+      <label class="ui-field is-error"><span class="ui-field-label">Длительность</span><input name="example_duration" value="30" aria-invalid="true" aria-describedby="example-duration-error"><small id="example-duration-error">Допустимый диапазон: от 1 до 15 секунд.</small></label>
+      <label class="ui-field is-loading" aria-busy="true"><span class="ui-field-label">Модель</span><select name="example_model" disabled><option>Загрузка моделей...</option></select><small>Обновляем список.</small></label>
+      <label class="ui-field"><span class="ui-field-label">Рабочее разрешение</span><input name="example_resolution" value="720" readonly><small>Ограничение учётной записи.</small></label>
+      <label class="ui-field is-success"><span class="ui-field-label">Число вариантов</span><input name="example_count" type="number" value="2" min="1" max="4"><small>Доступно по квоте.</small></label>
+    </div>
+    <details class="ui-disclosure" data-control-disclosure><summary><span class="ui-disclosure-label">Дополнительные параметры</span><i data-lucide="chevron-down" aria-hidden="true"></i></summary><div class="component-disclosure-body"><label class="ui-choice ui-choice--row"><input type="checkbox" name="example_postprocess"><span><strong>Плавность движения</strong><small>Дополнительные кадры после генерации.</small></span><b>RIFE</b></label></div></details>
+  </section>
+
   <section class="panel">
     <div class="panel-heading"><div><p class="section-kicker">Ввод</p><h2>Поля и выбор</h2></div></div>
     <div class="component-lab-grid">
       <section class="component-lab-stack">
         <h3>Поля</h3>
-        <label class="ui-field">Название задачи<input value="Портрет для каталога"><small>Обычное состояние с пояснением.</small></label>
-        <label class="ui-field is-success">Готовое значение<input value="Параметры приняты"><small>Значение прошло проверку.</small></label>
-        <label class="ui-field is-error">Значение с ошибкой<input value="Неверный формат" aria-invalid="true"><small>Исправьте формат и повторите проверку.</small></label>
-        <label class="ui-field">Недоступное поле<input value="Изменение запрещено" disabled></label>
+        <label class="ui-field"><span class="ui-field-label">Название задачи</span><input value="Портрет для каталога"><small>Обычное состояние с пояснением.</small></label>
+        <label class="ui-field is-success"><span class="ui-field-label">Готовое значение</span><input value="Параметры приняты"><small>Значение прошло проверку.</small></label>
+        <label class="ui-field is-error"><span class="ui-field-label">Значение с ошибкой</span><input value="Неверный формат" aria-invalid="true"><small>Исправьте формат и повторите проверку.</small></label>
+        <label class="ui-field"><span class="ui-field-label">Недоступное поле</span><input value="Изменение запрещено" disabled></label>
       </section>
       <section class="component-lab-stack">
         <h3>Переключатели</h3>
@@ -44,7 +57,7 @@
       <section class="component-lab-stack">
         <h3>Действия</h3>
         <div class="ui-toolbar">
-          <label class="ui-field search-field">Поиск<input placeholder="Модель или workflow"></label>
+          <label class="ui-field search-field"><span class="ui-field-label">Поиск</span><input placeholder="Модель или workflow"></label>
           <button type="button">Применить</button>
           <button type="button" class="ghost">Сбросить</button>
           <button type="button" class="danger">Удалить</button>

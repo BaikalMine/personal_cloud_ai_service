@@ -6,7 +6,7 @@
   {{if eq .DeleteStatus "1"}}<p class="success-box">Учётная запись и её данные удалены.</p>{{end}}
   <section class="panel">
     <form method="get" class="toolbar ui-toolbar">
-      <label class="search-field ui-field">Поиск<input name="q" value="{{.Query}}" placeholder="Логин или e-mail"></label>
+      <label class="search-field ui-field"><span class="ui-field-label">Поиск</span><input name="q" value="{{.Query}}" placeholder="Логин или e-mail"></label>
       <button type="submit">Найти</button>
       {{if .Query}}<a class="button ghost" href="/admin/users">Сбросить</a>{{end}}
     </form>

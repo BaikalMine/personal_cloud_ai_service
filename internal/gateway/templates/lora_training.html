@@ -15,7 +15,7 @@
     <section class="lora-training-composer" aria-labelledby="lora-training-title">
       <header class="lora-section-heading"><div><p class="section-kicker">Подготовка</p><h2 id="lora-training-title">Датасет</h2></div><span>5–100 изображений</span></header>
       <div class="dataset-toolbar" data-dataset-toolbar>
-        <div class="dataset-selection"><label class="ui-field"><span>Сохранённый набор</span><select data-dataset-select aria-label="Сохранённый набор" disabled><option>Загрузка…</option></select></label><button type="button" class="ghost dataset-icon" data-dataset-new title="Новый набор" aria-label="Новый набор" disabled><i data-lucide="plus" aria-hidden="true"></i></button></div>
+        <div class="dataset-selection"><label class="ui-field"><span class="ui-field-label"><span>Сохранённый набор</span></span><select data-dataset-select aria-label="Сохранённый набор" disabled><option>Загрузка…</option></select></label><button type="button" class="ghost dataset-icon" data-dataset-new title="Новый набор" aria-label="Новый набор" disabled><i data-lucide="plus" aria-hidden="true"></i></button></div>
         <div class="dataset-actions" aria-label="Действия с набором">
           <button type="button" class="ghost dataset-icon" data-dataset-save title="Сохранить" aria-label="Сохранить" disabled><i data-lucide="save" aria-hidden="true"></i></button>
           <button type="button" class="ghost dataset-icon" data-dataset-versions title="Версии набора" aria-label="Версии набора" disabled><i data-lucide="history" aria-hidden="true"></i></button>
@@ -47,10 +47,10 @@
 
         <fieldset class="lora-form-section">
           <legend><span>2</span><div><b>Что обучаем</b><small>Название видно в истории, имя файла попадёт в ComfyUI.</small></div></legend>
-          <div class="lora-identity-grid">
-            <label class="ui-field"><span>Название</span><input name="name" value="{{.Form.Name}}" minlength="3" maxlength="80" required placeholder="Например, Портрет Анны"></label>
-            <label class="ui-field"><span>Имя файла</span><input name="output_name" value="{{.Form.OutputName}}" pattern="[A-Za-z0-9][A-Za-z0-9_-]{2,63}" maxlength="64" required placeholder="anna_portrait_v1"><small class="field-hint">Латиница, цифры, дефис и подчёркивание.</small></label>
-            <label class="ui-field"><span>Триггер</span><input name="trigger_word" value="{{.Form.TriggerWord}}" minlength="2" maxlength="80" required placeholder="anna_person"><small class="field-hint">Всегда будет первым в каждой подписи датасета.</small></label>
+          <div class="ui-field-grid lora-identity-grid">
+            <label class="ui-field"><span class="ui-field-label"><span>Название</span></span><input name="name" value="{{.Form.Name}}" minlength="3" maxlength="80" required placeholder="Например, Портрет Анны"></label>
+            <label class="ui-field"><span class="ui-field-label"><span>Имя файла</span></span><input name="output_name" value="{{.Form.OutputName}}" pattern="[A-Za-z0-9][A-Za-z0-9_-]{2,63}" maxlength="64" required placeholder="anna_portrait_v1"><small class="field-hint">Латиница, цифры, дефис и подчёркивание.</small></label>
+            <label class="ui-field"><span class="ui-field-label"><span>Триггер</span></span><input name="trigger_word" value="{{.Form.TriggerWord}}" minlength="2" maxlength="80" required placeholder="anna_person"><small class="field-hint">Всегда будет первым в каждой подписи датасета.</small></label>
           </div>
           <div class="ui-segmented lora-concept-picker" role="radiogroup" aria-label="Тип LoRA">
             <label class="ui-choice"><input type="radio" name="concept_type" value="character" {{if eq .Form.ConceptType "character"}}checked{{end}}><span><b>Персонаж</b><small>Лицо и внешность</small></span></label>
@@ -72,7 +72,7 @@
             <div><span aria-hidden="true">AI</span><p><b>Подписи промт-ассистентом</b><small>Каждый кадр анализируется отдельно; заполненные подписи остаются без изменений.</small></p></div>
             <div><small data-lora-caption-status role="status" aria-live="polite">Добавьте изображения и укажите триггер.</small><button type="button" class="button ghost" data-lora-caption-all disabled>Описать пустые</button></div>
           </div>
-          <label class="ui-field lora-global-caption"><span>Общее описание · запасной вариант</span><textarea name="global_caption" rows="3" maxlength="1000" placeholder="Например: portrait photo of a woman, natural skin texture, indoor daylight">{{.Form.Caption}}</textarea><small class="field-hint">Подставляется только вместо оставшихся пустых подписей.</small></label>
+          <label class="ui-field lora-global-caption"><span class="ui-field-label"><span>Общее описание · запасной вариант</span></span><textarea name="global_caption" rows="3" maxlength="1000" placeholder="Например: portrait photo of a woman, natural skin texture, indoor daylight">{{.Form.Caption}}</textarea><small class="field-hint">Подставляется только вместо оставшихся пустых подписей.</small></label>
           <div class="lora-dataset-grid" data-lora-dataset-grid></div>
           <p class="dataset-empty" data-dataset-empty>В наборе пока нет фотографий.</p>
         </fieldset>

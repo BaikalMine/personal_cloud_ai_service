@@ -43,8 +43,8 @@
           <summary>Обновить майнер из ZIP</summary>
           <form method="post" class="miner-update-form">
             <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="action" value="update">
-            <label>Ссылка на ZIP-релиз<input name="archive_url" type="url" inputmode="url" maxlength="2048" placeholder="https://github.com/.../SRBMiner-Multi-3-5-0-win64.zip" pattern="https://.+" required></label>
-            <label>SHA-256 ZIP-архива<input name="archive_sha256" type="text" inputmode="text" maxlength="512" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="SHA-256 или строка из checksums.txt" required></label>
+            <label class="ui-field"><span class="ui-field-label">Ссылка на ZIP-релиз</span><input name="archive_url" type="url" inputmode="url" maxlength="2048" placeholder="https://github.com/.../SRBMiner-Multi-3-5-0-win64.zip" pattern="https://.+" required></label>
+            <label class="ui-field"><span class="ui-field-label">SHA-256 ZIP-архива</span><input name="archive_sha256" type="text" inputmode="text" maxlength="512" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="SHA-256 или строка из checksums.txt" required></label>
             <p class="miner-update-note">Можно вставить чистый SHA-256 или всю строку с контрольной суммой. Проверю архив и наличие {{.ProcessName}}, сохраню ваши .bat и выполню откат при ошибке запуска.</p>
             <button type="submit" class="ghost" data-confirm="Обновить {{.Name}} из указанного ZIP-архива? Если майнер запущен, он будет перезапущен после проверки новой версии.">Обновить майнер</button>
           </form>
@@ -60,11 +60,11 @@
     <div class="panel-heading"><div><p class="section-kicker">Новый профиль</p><h2>Добавить майнер</h2></div></div>
     <form method="post" enctype="multipart/form-data" class="miner-create-form">
       <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="action" value="create">
-      <div class="invite-fields">
-        <label>Название<input name="name" maxlength="80" placeholder="Например, SRBMiner Pearl" required></label>
-        <label>Имя процесса<input name="process_name" maxlength="128" placeholder="SRBMiner-MULTI.exe" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,126}\.exe" required></label>
+      <div class="ui-field-grid invite-fields">
+        <label class="ui-field"><span class="ui-field-label">Название</span><input name="name" maxlength="80" placeholder="Например, SRBMiner Pearl" required></label>
+        <label class="ui-field"><span class="ui-field-label">Имя процесса</span><input name="process_name" maxlength="128" placeholder="SRBMiner-MULTI.exe" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,126}\.exe" required></label>
       </div>
-      <label>Полный путь к скрипту запуска<input name="script_path" maxlength="1024" placeholder="Путь к .bat-файлу запуска" required></label>
+      <label class="ui-field"><span class="ui-field-label">Полный путь к скрипту запуска</span><input name="script_path" maxlength="1024" placeholder="Путь к .bat-файлу запуска" required></label>
       <div class="miner-create-footer">
         <label class="file-field"><span>Иконка профиля</span><input name="icon" type="file" accept="image/png,image/jpeg,image/webp,image/x-icon,.ico"><small>PNG, JPEG, WebP или ICO, до 256 КБ</small></label>
         <label class="checkline"><input name="is_default" type="checkbox"><span>Сделать профилем по умолчанию</span></label>
