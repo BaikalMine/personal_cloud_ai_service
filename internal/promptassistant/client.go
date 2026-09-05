@@ -53,6 +53,7 @@ type chatRequest struct {
 }
 
 type chatResponse struct {
+	Done               bool    `json:"done"`
 	Message            Message `json:"message"`
 	TotalDuration      int64   `json:"total_duration"`
 	LoadDuration       int64   `json:"load_duration"`
@@ -162,7 +163,9 @@ func (c *Client) PolicyForRequest(mode Mode, profile Profile, think, hasImages b
 	return policy
 }
 
-func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt string, references []ImageReference, video VideoContext, think bool) (Result, error) {
+func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt string, references []ImageReference, video VideoContext, think bool) (output Result, err error) {
+	execution := ExecutionNotDispatched
+	defer func() { output.Execution = execution }()
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		if mode != ModeTextToVideo || len(references) == 0 {
@@ -241,6 +244,7 @@ func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
+	execution = ExecutionUnconfirmed
 	response, err := c.httpClientFor(requestPolicy).Do(request)
 	if err != nil {
 		return Result{Model: payload.Model, Policy: requestPolicy}, fmt.Errorf("локальная модель недоступна: %w", err)
@@ -259,6 +263,9 @@ func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt
 	var result chatResponse
 	if err := json.Unmarshal(responseBody, &result); err != nil {
 		return Result{Model: payload.Model, Policy: requestPolicy}, fmt.Errorf("некорректный ответ локальной модели: %w", err)
+	}
+	if result.Done {
+		execution = ExecutionCompleted
 	}
 	parsed, err := parseModelResult(result.Message.Content, mode, references, video)
 	if err != nil {

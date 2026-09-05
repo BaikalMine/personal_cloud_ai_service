@@ -149,15 +149,11 @@ func (a *App) executeLoraCaption(ctx context.Context, job domain.LoraCaptionJob)
 	if err != nil {
 		return output, fmt.Errorf("prepare caption resources: %w", err)
 	}
-	if lease != nil {
-		defer func() {
-			release, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
-			a.releaseMiningPause(release, lease.ID)
-		}()
-	}
+	execution := promptassistant.ExecutionUnconfirmed
+	defer func() { a.finishInferenceMiningPause(lease, execution) }()
 	started := time.Now()
 	result, err := a.promptAssistant.CaptionImageWithInstruction(ctx, input.TriggerWord, input.ConceptType, prepared, mime, input.Instruction)
+	execution = result.Execution
 	a.observeServiceCall(ctx, dependencyOllama, "caption_lora_image", started, err, false, "assistant_request_failed", "")
 	if err != nil {
 		return output, err

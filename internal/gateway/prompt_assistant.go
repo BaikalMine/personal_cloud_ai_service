@@ -127,13 +127,8 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 		writeGenerationError(w, http.StatusServiceUnavailable, "не удалось освободить ресурсы для приоритетной работы ассистента: "+err.Error())
 		return
 	}
-	if miningLease != nil {
-		defer func() {
-			releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer releaseCancel()
-			a.releaseMiningPause(releaseCtx, miningLease.ID)
-		}()
-	}
+	execution := promptassistant.ExecutionNotDispatched
+	defer func() { a.finishInferenceMiningPause(miningLease, execution) }()
 	video := promptassistant.VideoContext{}
 	operation := "enhance_image"
 	if promptassistant.IsMiniMaxH3Profile(profile) {
@@ -155,11 +150,13 @@ func (a *App) handlePromptAssistant(w http.ResponseWriter, r *http.Request) {
 	correlation := correlationID(r)
 	assistantStarted := time.Now()
 	result := promptassistant.Result{Policy: policy}
+	execution = promptassistant.ExecutionUnconfirmed
 	if promptassistant.IsMiniMaxH3Profile(profile) {
 		result, err = a.promptAssistant.EnhanceVideoResult(ctx, mode, profile, prompt, references, video, think)
 	} else {
 		result, err = a.promptAssistant.EnhanceResult(ctx, mode, profile, prompt, references, think)
 	}
+	execution = result.Execution
 	latency := time.Since(assistantStarted)
 	a.observeServiceCall(r.Context(), dependencyOllama, operation, assistantStarted, err, false, "assistant_request_failed", "")
 	if err != nil {

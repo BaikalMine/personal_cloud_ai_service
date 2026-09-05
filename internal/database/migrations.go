@@ -1420,6 +1420,11 @@ var migrationCatalog = []migration{
 			`UPDATE invites SET queue_priority=pause_mining_for_quick_generation`,
 		},
 	},
+	{
+		version: 59, name: "mining_resume_completion_evidence", statements: []string{
+			`ALTER TABLE quick_generation_mining_leases ADD COLUMN resume_ready BOOLEAN NOT NULL DEFAULT FALSE`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

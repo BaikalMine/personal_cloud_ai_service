@@ -11,6 +11,7 @@ import (
 
 	"ai-access-gateway/internal/domain"
 	"ai-access-gateway/internal/mining"
+	"ai-access-gateway/internal/promptassistant"
 )
 
 // pauseMiningForQuickGeneration reserves the active mining profile before a
@@ -185,25 +186,45 @@ func (a *App) releaseMiningPauseForLoraTraining(ctx context.Context, jobID int64
 func (a *App) releaseMiningPause(ctx context.Context, leaseID string) bool {
 	a.miningPauseMu.Lock()
 	defer a.miningPauseMu.Unlock()
-	lease, remaining, err := a.store.DeleteQuickGenerationMiningLease(ctx, leaseID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return true
-	}
-	if err != nil {
-		log.Printf("remove mining-pause lease %s: %v", leaseID, err)
+	if err := a.store.MarkQuickGenerationMiningLeaseReady(ctx, leaseID); err != nil {
+		log.Printf("record mining-pause completion %s: %v", leaseID, err)
 		return false
 	}
-	if remaining > 0 || !lease.ResumeMining {
+	leases, err := a.store.ListQuickGenerationMiningLeases(ctx)
+	if err != nil {
+		log.Printf("read mining-pause leases before resume %s: %v", leaseID, err)
+		return false
+	}
+	var lease domain.QuickGenerationMiningLease
+	for _, candidate := range leases {
+		if candidate.ID == leaseID {
+			lease = candidate
+			break
+		}
+	}
+	if lease.ID == "" {
 		return true
 	}
+	remove := func() bool {
+		_, _, err := a.store.DeleteQuickGenerationMiningLease(ctx, leaseID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			log.Printf("remove completed mining-pause lease %s: %v", leaseID, err)
+			return false
+		}
+		return true
+	}
+	if len(leases) > 1 || !lease.ResumeMining {
+		return remove()
+	}
+	// Keep the final durable lease until Start is confirmed. A process exit
+	// during network I/O must leave a retryable resume request in PostgreSQL.
 	overview := a.miningOverview(ctx, true, false)
 	if !overview.Available {
 		log.Printf("resume mining after quick generation: %s", overview.Message)
-		a.restoreMiningPauseLease(ctx, lease)
 		return false
 	}
 	if overview.Running {
-		return true
+		return remove()
 	}
 	state, err := a.mining.Start(ctx, mining.Request{ScriptPath: lease.ScriptPath, ProcessName: lease.ProcessName})
 	if err != nil || !state.Running {
@@ -212,21 +233,25 @@ func (a *App) releaseMiningPause(ctx context.Context, leaseID string) bool {
 		} else {
 			log.Printf("resume mining after quick generation: miner did not start")
 		}
-		a.restoreMiningPauseLease(ctx, lease)
 		return false
 	}
 	a.audit(ctx, &lease.UserID, "mining_resumed_after_quick_generation", "miner", &lease.MinerID, "", "", map[string]any{
 		"lease_id": lease.ID, "prompt_id": lease.PromptID, "process_name": lease.ProcessName,
 	})
-	return true
+	return remove()
 }
 
-// restoreMiningPauseLease keeps a terminal lease durable when the agent cannot
-// restart mining yet. The maintenance loop will retry without needing a user action.
-func (a *App) restoreMiningPauseLease(ctx context.Context, lease domain.QuickGenerationMiningLease) {
-	if err := a.store.CreateQuickGenerationMiningLease(ctx, lease); err != nil {
-		log.Printf("restore mining-pause lease %s for retry: %v", lease.ID, err)
+func (a *App) finishInferenceMiningPause(lease *domain.QuickGenerationMiningLease, execution promptassistant.ExecutionOutcome) {
+	if lease == nil {
+		return
 	}
+	if !execution.Settled() {
+		log.Printf("retain mining-pause lease %s: local inference completion is unconfirmed", lease.ID)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	a.releaseMiningPause(ctx, lease.ID)
 }
 
 // refreshQuickGenerationMiningLeases also covers a Gateway restart: leases
@@ -244,6 +269,10 @@ func (a *App) refreshQuickGenerationMiningLeases(ctx context.Context) (int64, er
 			return processed, errors.Join(append(refreshErrors, ctx.Err())...)
 		}
 		processed++
+		if lease.ResumeReady {
+			a.releaseMiningPause(ctx, lease.ID)
+			continue
+		}
 		if lease.LoraTrainingJobID > 0 {
 			job, jobErr := a.store.LoraTrainingJobByID(ctx, lease.LoraTrainingJobID)
 			if jobErr != nil {
@@ -276,9 +305,7 @@ func (a *App) refreshQuickGenerationMiningLeases(ctx context.Context) (int64, er
 			continue
 		}
 		if lease.PromptID == "" {
-			if time.Since(lease.CreatedAt) > 2*time.Minute {
-				a.releaseMiningPause(ctx, lease.ID)
-			}
+			// Age alone cannot prove that an unbound inference request stopped.
 			continue
 		}
 		status, statusErr := a.fetchGenerationStatus(ctx, lease.PromptID, lease.UserID)

@@ -38,10 +38,11 @@ Before composing the caption, inspect the whole frame and silently verify every 
 For concept_type "character", let the trigger represent the stable identity and emphasize what varies in this frame. For "style", describe both the depicted content and the visible medium, rendering, palette, texture, and light. For "object" or "product", let the trigger represent the item and emphasize viewpoint, arrangement, state, context, composition, and light. Describe visible adult nudity or erotic presentation factually when present, without inventing acts or hidden anatomy.`
 
 type CaptionResult struct {
-	Caption string
-	Model   string
-	Usage   Usage
-	Policy  RequestPolicy
+	Execution ExecutionOutcome `json:"-"`
+	Caption   string
+	Model     string
+	Usage     Usage
+	Policy    RequestPolicy
 }
 
 type captionModelResult struct {
@@ -60,7 +61,9 @@ func LoraCaptionInstructionSnapshot() (string, string) {
 	return loraCaptionInstruction, hex.EncodeToString(hash[:])
 }
 
-func (c *Client) CaptionImageWithInstruction(ctx context.Context, triggerWord, conceptType string, image []byte, mimeType, instruction string) (CaptionResult, error) {
+func (c *Client) CaptionImageWithInstruction(ctx context.Context, triggerWord, conceptType string, image []byte, mimeType, instruction string) (output CaptionResult, err error) {
+	execution := ExecutionNotDispatched
+	defer func() { output.Execution = execution }()
 	if instruction == "" || len(instruction) > 20000 {
 		return CaptionResult{}, errors.New("некорректная сохранённая инструкция описания")
 	}
@@ -126,6 +129,7 @@ func (c *Client) CaptionImageWithInstruction(ctx context.Context, triggerWord, c
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
+	execution = ExecutionUnconfirmed
 	response, err := c.httpClientFor(requestPolicy).Do(request)
 	if err != nil {
 		return CaptionResult{Model: c.visionModel, Policy: requestPolicy}, fmt.Errorf("локальная модель недоступна: %w", err)
@@ -144,6 +148,9 @@ func (c *Client) CaptionImageWithInstruction(ctx context.Context, triggerWord, c
 	var result chatResponse
 	if err := json.Unmarshal(responseBody, &result); err != nil {
 		return CaptionResult{Model: c.visionModel, Policy: requestPolicy}, fmt.Errorf("некорректный ответ локальной модели: %w", err)
+	}
+	if result.Done {
+		execution = ExecutionCompleted
 	}
 	content := stripModelEnvelope(result.Message.Content)
 	if content == "" {
