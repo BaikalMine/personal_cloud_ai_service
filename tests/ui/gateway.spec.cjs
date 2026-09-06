@@ -318,7 +318,10 @@ test("controlled generation batches stay clear and usable at every viewport", as
   await settlePage(page);
   await expect(group).toHaveScreenshot("generation-batch-group.png", { stylePath: componentVisualStyle });
   await assertNoViewportOverflow(page, `${testInfo.project.name} generation batch workbench`);
-  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.evaluate(() => {
+    window.scrollTo(0, 0);
+    document.getElementById("studio-editor").scrollTo(0, 0);
+  });
   await settlePage(page);
   await expect(page).toHaveScreenshot("generation-batch-workbench.png", { fullPage: true, stylePath: visualStyle });
 

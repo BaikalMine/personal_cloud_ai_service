@@ -8,6 +8,7 @@ const storeModule = require("../../static/generation-store.js");
 const wizard = require("../../static/generation-wizard.js");
 const media = require("../../static/generation-media.js");
 const summary = require("../../static/generation-summary.js");
+const output = require("../../static/generation-output.js");
 const video = require("../../static/generation-video.js");
 const assistant = require("../../static/generation-assistant.js");
 const batch = require("../../static/generation-batch.js");
@@ -340,7 +341,7 @@ class FakeElement {
   getBoundingClientRect() { return { left: 0, width: 24 }; }
 }
 
-const moduleAPIs = { store: storeModule, wizard, media, summary, video, assistant, batch, job, recipes, history, lightbox };
+const moduleAPIs = { store: storeModule, wizard, media, summary, output, video, assistant, batch, job, recipes, history, lightbox };
 
 const pageContextWithout = (omittedModule) => {
   const elements = new Map();

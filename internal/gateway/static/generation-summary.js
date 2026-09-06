@@ -144,16 +144,16 @@
   const buildSummary = ({
     family = "", templateID = "", workflowName = "", modelName = "", videoMode = "frames",
     references = [], hasAudio = false, hasVideo = false, output = "", duration = "", loraCount = 0,
-    heavyOptions = [],
+    heavyOptions = [], outputSummary = null,
   } = {}) => {
     const outputText = [compactText(output), compactText(duration)].filter(Boolean).join(" · ") || "Параметры не выбраны";
     const heavy = heavyOptions.filter(Boolean);
     return {
-      title: compactText(workflowName, "Текущая конфигурация"),
+      title: outputSummary?.compact || compactText(workflowName, "Текущая конфигурация"),
       facts: [
         { label: "Модель", value: compactText(modelName, "Не выбрана") },
         { label: "Режим", value: modeLabel({ family, templateID, videoMode, references }) },
-        { label: "Результат", value: outputText },
+        ...(outputSummary?.facts || [{ label: "Результат", value: outputText }]),
         { label: "Материалы", value: materialSummary(references, { hasAudio, hasVideo }) },
         { label: "LoRA", value: loraCount ? `${loraCount} ${plural(loraCount, "подключена", "подключены", "подключено")}` : "Нет" },
       ],

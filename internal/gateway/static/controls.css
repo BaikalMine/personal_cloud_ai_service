@@ -73,7 +73,7 @@ input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; flex: 0
 .ui-segmented--cards .ui-segment small { color: var(--muted); font-size: var(--font-size-utility); font-weight: 400; }
 .ui-segment:hover { transform: none; border-color: var(--line); background: var(--surface-raised); color: var(--text); box-shadow: none; }
 .ui-segment[aria-pressed="true"], .ui-segment.is-active, .ui-segment:has(input:checked) { border-color: var(--color-success-border); background: var(--color-success-bg); color: var(--color-success); }
-.ui-segment:focus-visible { border-color: var(--cyan); box-shadow: var(--focus-ring); }
+.ui-segment:focus-visible, .ui-segment:has(> input:focus-visible) { border-color: var(--cyan); box-shadow: var(--focus-ring); }
 .ui-segment:disabled, .ui-segment[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
 
 button, .button {

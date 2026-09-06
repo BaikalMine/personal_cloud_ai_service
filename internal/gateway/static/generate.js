@@ -479,7 +479,7 @@
     });
     const [sourceWidth, sourceHeight] = miniMaxAspectDimensions();
     const scale = Math.min(1, quality / Math.max(1, sourceWidth, sourceHeight));
-    const multiple = (value) => Math.max(32, Math.floor(value / 32) * 32);
+    const multiple = (value) => Math.max(32, Math.floor(Math.round(value) / 32) * 32);
     const targetWidth = calculated?.width || multiple(sourceWidth * scale);
     const targetHeight = calculated?.height || multiple(sourceHeight * scale);
     const sourceLabel = primaryImageSize ? "пропорции Фото 1" : `формат ${miniMaxVideoAspect?.value || "9:16"}`;
@@ -1650,14 +1650,38 @@
     return options;
   };
 
-  const generationOutputLabel = (family) => {
-    if (family === "minimax_h3") return miniMaxVideoResolutionPreview?.textContent || `${miniMaxVideoQuality?.value || "720"}p`;
-    if (family === "krea2") return `${outputMegapixels?.value || "1.9"} Мп`;
-    if (family === "flux2" && templateID.value === "image-to-image") {
-      if (preserveOriginalSize?.checked) return "Размер исходного фото";
-      return `${width?.value || "1024"} × ${height?.value || "1024"}`;
+  const generationOutputSummary = (family, references) => {
+    const output = generationModules.output;
+    if (!output) return null;
+    const names = ["width", "height", "aspect_ratio", "output_megapixels", "dimension_multiple", "max_longest_side", "base_megapixels",
+      "preserve_original_size", "edit_use_custom_size", "edit_aspect_preset", "edit_swap_dimensions", "edit_proportion",
+      "source_megapixels", "upscale_factor", "flux_upscale_mode", "video_duration_seconds", "video_rife_enabled",
+      "video_rife_multiplier", "video_rtx_enabled", "video_rtx_scale"];
+    const values = Object.fromEntries(names.map(name => {
+      const control = namedControlCandidates(name).find(item => !item.disabled);
+      return [name, control?.type === "checkbox" ? control.checked : control?.value];
+    }));
+    const hasPrimary = references.some(item => Number(item.number) === 1);
+    const sourceSize = hasPrimary ? primaryImageSize : null;
+    const videoSize = hasPrimary && !sourceSize ? null : generationModules.video?.scaledResolution?.({
+      sourceSize, aspect: miniMaxVideoAspect?.value || "9:16", swap: Boolean(miniMaxVideoSwap?.checked),
+      maxResolution: Number(miniMaxVideoQuality?.value) || 720,
+    });
+    const config = currentBatchConfig();
+    const validation = generationModules.batch?.validate(config, generationModules.batch.parameterOptions(batchContext()));
+    let variants = [values];
+    let variation = "";
+    if (config.enabled && config.mode === "parameter") {
+      if (validation?.valid && validation.option) {
+        const { from, to, count, option } = validation;
+        variants = Array.from({ length: count }, (_, index) => ({ ...values,
+          [option.name]: Number((Math.round((from + (to - from) * index / (count - 1)) / option.step) * option.step).toFixed(6)),
+        }));
+        variation = `${option.label}: ${from.toLocaleString("ru-RU")} → ${to.toLocaleString("ru-RU")}`;
+      } else variation = "Проверьте параметр и диапазон";
     }
-    return `${width?.value || "1024"} × ${height?.value || "1024"}`;
+    const plans = variants.map(variant => output.plan({ family, templateID: templateID.value, values: variant, sourceSize, videoSize }));
+    return output.facts(plans, { video: family === "minimax_h3", count: config.enabled ? config.count : 1, variation });
   };
 
   const syncGenerationSummary = () => {
@@ -1684,8 +1708,7 @@
       references,
       hasAudio,
       hasVideo,
-      output: generationOutputLabel(family),
-      duration: family === "minimax_h3" ? `${form.elements.video_duration_seconds?.value || "5"} сек.` : "",
+      outputSummary: generationOutputSummary(family, references),
       loraCount,
       heavyOptions: selectedHeavyOptions(family),
     });
@@ -4487,13 +4510,13 @@
   });
   form.addEventListener("input", (event) => {
     if (event.target?.name in profileValues("balanced") || event.target?.closest(".studio-basic-settings, .studio-models")) clearProfileFeedback();
-    syncGenerationSummary();
     syncBatchBuilder();
+    syncGenerationSummary();
   });
   form.addEventListener("change", (event) => {
     if (event.target?.name in profileValues("balanced") || event.target?.closest(".studio-basic-settings, .studio-models")) clearProfileFeedback();
-    syncGenerationSummary();
     syncBatchBuilder();
+    syncGenerationSummary();
   });
   batchParameter?.addEventListener("change", () => syncBatchBuilder({ resetRange: true }));
   batchCompareClose?.addEventListener("click", () => batchCompare?.close?.());

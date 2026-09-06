@@ -59,7 +59,8 @@
     const [sourceWidth, sourceHeight] = dimensionsForAspect({ sourceSize, aspect, swap });
     const quality = Math.max(multiple, Number(maxResolution) || 480);
     const scale = Math.min(1, quality / Math.max(1, sourceWidth, sourceHeight));
-    const round = (value) => Math.max(multiple, Math.floor((value + 1e-6) / multiple) * multiple);
+    // Match miniMaxH3VideoDimensions: round pixels before aligning the latent.
+    const round = (value) => Math.max(multiple, Math.floor(Math.round(value) / multiple) * multiple);
     return { width: round(sourceWidth * scale), height: round(sourceHeight * scale), sourceWidth, sourceHeight };
   };
 

@@ -81,7 +81,7 @@
       { name: "video_duration_seconds", label: "Длительность видео", min: 5, max: 15, step: 5, available: video },
       { name: "video_sparse_budget", label: "Бюджет Sparse Attention", min: 0.05, max: 1, step: 0.05, available: video && Boolean(context.sparseAttention) },
       { name: "video_rife_multiplier", label: "Множитель кадров RIFE", min: 2, max: 4, step: 1, available: video && Boolean(context.rife) },
-      { name: "video_rtx_scale", label: "Масштаб RTX", min: 1, max: 4, step: 0.25, available: video && Boolean(context.rtx) },
+      { name: "video_rtx_scale", label: "Масштаб RTX", min: 1, max: 2, step: 0.25, available: video && Boolean(context.rtx) },
       { name: "video_color_strength", label: "Сила ColorMatch", min: 0, max: 1, step: 0.05, available: video && Boolean(context.colorMatch) },
       { name: "video_sharpen_strength", label: "Сила резкости видео", min: 0, max: Number(context.sharpenMax) || 1, step: 0.05, available: video && Boolean(context.sharpen) },
       { name: "video_output_crf", label: "Качество H.264 (CRF)", min: 1, max: 51, step: 1, available: video },
