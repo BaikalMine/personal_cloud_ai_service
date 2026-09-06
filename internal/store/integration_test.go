@@ -1071,11 +1071,11 @@ func assertGenerationBatchLifecycle(t *testing.T, ctx context.Context, db *sql.D
 		t.Fatalf("atomic batch children=%d want=3 err=%v", childRows, err)
 	}
 
-	first, err := repository.ClaimNextGenerationBatchJob(ctx, 2)
+	first, err := repository.ClaimNextGenerationDispatch(ctx, "batch-first", 2)
 	if err != nil || first.BatchID == nil || *first.BatchID != batch.ID || first.BatchPosition != 1 || first.State != domain.GenerationJobPreparing {
 		t.Fatalf("claim first batch job: job=%+v err=%v", first, err)
 	}
-	if _, err := repository.ClaimNextGenerationBatchJob(ctx, 2); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := repository.ClaimNextGenerationDispatch(ctx, "batch-blocked", 2); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("active sibling did not block next claim: %v", err)
 	}
 	first, _, err = repository.TransitionGenerationJob(ctx, first.ID, domain.GenerationJobTransitionParams{State: domain.GenerationJobWaitingForResources, Message: "Ожидаем ресурсы"})
@@ -1122,7 +1122,7 @@ func assertGenerationBatchLifecycle(t *testing.T, ctx context.Context, db *sql.D
 		t.Fatalf("foreign batch winner error=%v, want sql.ErrNoRows", err)
 	}
 
-	second, err := repository.ClaimNextGenerationBatchJob(ctx, 2)
+	second, err := repository.ClaimNextGenerationDispatch(ctx, "batch-second", 2)
 	if err != nil || second.BatchPosition != 2 {
 		t.Fatalf("claim second batch job: job=%+v err=%v", second, err)
 	}
@@ -1163,7 +1163,7 @@ func assertGenerationBatchLifecycle(t *testing.T, ctx context.Context, db *sql.D
 	if _, err := repository.SetGenerationBatchWinner(ctx, ownerID, batch.PublicID, second.PublicID); !errors.Is(err, store.ErrGenerationBatchWinnerConflict) {
 		t.Fatalf("cancelled batch child became winner: %v", err)
 	}
-	if _, err := repository.ClaimNextGenerationBatchJob(ctx, 2); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := repository.ClaimNextGenerationDispatch(ctx, "batch-cancelled", 2); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("cancelled batch still dispatched work: %v", err)
 	}
 }

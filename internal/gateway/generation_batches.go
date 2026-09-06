@@ -366,11 +366,11 @@ func generationBatchState(batch domain.GenerationBatch) string {
 			return "failed"
 		}
 	}
-	if batch.ActiveCount > 0 {
-		return "running"
-	}
 	if batch.CancellationRequestedAt != nil {
 		return "cancelling"
+	}
+	if batch.ActiveCount > 0 {
+		return "running"
 	}
 	return "queued"
 }
@@ -650,8 +650,8 @@ func (a *App) handleGenerationBatchCancel(w http.ResponseWriter, r *http.Request
 		return
 	}
 	a.audit(cancelCtx, &user.ID, "quick_generation_batch_cancelled", "generation_batch", &batch.ID, a.clientIP(r), r.UserAgent(), map[string]any{"batch_id": batch.PublicID, "changed": changed})
-	response := map[string]any{"batch": view, "cancelled": len(cancelErrors) == 0}
-	if len(cancelErrors) > 0 {
+	response := map[string]any{"batch": view, "cancelled": view.State == "cancelled"}
+	if len(cancelErrors) > 0 || view.FinishedCount < view.TotalCount {
 		response["message"] = "Отмена принята. Активный вариант будет остановлен после подтверждения ComfyUI."
 	}
 	writeJSON(w, http.StatusAccepted, response)
@@ -691,11 +691,11 @@ func (a *App) handleGenerationBatchWinner(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"batch": view})
 }
 
-func (a *App) dispatchGenerationBatchJobs(ctx context.Context) (int64, error) {
+func (a *App) dispatchGenerationJobs(ctx context.Context) (int64, error) {
 	if a.store == nil || a.contentCipher == nil {
 		return 0, nil
 	}
-	job, err := a.store.ClaimNextGenerationBatchJob(ctx, maxActiveGenerationBatchJobs)
+	job, err := a.store.ClaimNextGenerationDispatch(ctx, newRequestID(), maxActiveGenerationBatchJobs)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, nil
 	}
@@ -704,7 +704,7 @@ func (a *App) dispatchGenerationBatchJobs(ctx context.Context) (int64, error) {
 	}
 	jobCtx := generationJobTraceContext(ctx, job)
 	if job.UserID == nil {
-		a.failGenerationJob(jobCtx, job, "generation_owner_deleted", "Владелец пакета удалён", errors.New("generation owner was deleted"))
+		a.failGenerationJob(jobCtx, job, "generation_owner_deleted", "Владелец задания удалён", errors.New("generation owner was deleted"))
 		return 1, nil
 	}
 	user, err := a.store.UserByID(jobCtx, *job.UserID)
@@ -716,86 +716,112 @@ func (a *App) dispatchGenerationBatchJobs(ctx context.Context) (int64, error) {
 		return 1, nil
 	}
 	if _, linkErr := a.store.LinkGenerationJobAssistantEvents(jobCtx, job.ID, user.ID, job.CorrelationID); linkErr != nil {
-		log.Printf("link batch generation job %s assistant audit: %v", job.PublicID, linkErr)
+		log.Printf("link generation job %s assistant audit: %v", job.PublicID, linkErr)
 	}
 	payload, err := a.decodeGenerationSavedPayload(job.PayloadCipher)
 	if err != nil {
-		a.failGenerationJob(jobCtx, job, "generation_batch_payload_failed", "Не удалось восстановить параметры варианта", err)
+		a.failGenerationJob(jobCtx, job, "generation_batch_payload_failed", "Не удалось восстановить параметры генерации", err)
 		return 1, nil
 	}
 	form := generationJobFormValues(payload.Values)
 	input, err := parseGenerationValues(jobCtx, form)
 	if err != nil {
-		a.failGenerationJob(jobCtx, job, "generation_batch_payload_invalid", "Параметры варианта больше не поддерживаются", err)
+		a.failGenerationJob(jobCtx, job, "generation_batch_payload_invalid", "Параметры генерации больше не поддерживаются", err)
 		return 1, nil
 	}
 	preparation, err := a.prepareGeneration(jobCtx, &user, input, false)
 	if err != nil {
-		a.failGenerationJob(jobCtx, job, "generation_batch_preflight_failed", "Workflow варианта не прошёл проверку", err)
+		a.failGenerationJob(jobCtx, job, "generation_batch_preflight_failed", "Workflow не прошёл проверку", err)
 		return 1, nil
 	}
 	input, definition, prompt := preparation.Input, preparation.Definition, preparation.Prompt
-	if generationJobInputCount(input) > 0 {
-		job, _, err = a.store.TransitionGenerationJob(jobCtx, job.ID, domain.GenerationJobTransitionParams{State: domain.GenerationJobUploading, Message: "Проверяем референсы варианта"})
+	if job.State == domain.GenerationJobPreparing && generationJobInputCount(input) > 0 {
+		job, _, err = a.store.TransitionGenerationJob(jobCtx, job.ID, domain.GenerationJobTransitionParams{State: domain.GenerationJobUploading, Message: "Проверяем референсы"})
 		if err != nil {
-			a.failGenerationJob(jobCtx, job, "generation_batch_input_state_failed", "Не удалось закрепить референсы варианта", err)
+			a.failGenerationJob(jobCtx, job, "generation_batch_input_state_failed", "Не удалось закрепить референсы", err)
 			return 1, nil
 		}
 	}
-	job, err = a.store.PrepareGenerationJob(jobCtx, job.ID, domain.PreparedGenerationJob{
-		TemplateID: input.TemplateID, WorkflowID: input.PresetID, ModelName: input.ModelName, Seed: input.Seed,
-		PayloadCipher: job.PayloadCipher, Dependencies: generationJobDependencies(input, &user), InputCount: generationJobInputCount(input),
-	})
-	if err != nil {
-		a.failGenerationJob(jobCtx, job, "generation_batch_prepare_failed", "Не удалось подготовить вариант", err)
-		return 1, nil
-	}
-	job, _, err = a.store.TransitionGenerationJob(jobCtx, job.ID, domain.GenerationJobTransitionParams{State: domain.GenerationJobWaitingForResources, Message: "Ожидаем ресурсы для варианта"})
-	if err != nil {
-		a.failGenerationJob(jobCtx, job, "generation_batch_resource_state_failed", "Не удалось подготовить ресурсы варианта", err)
-		return 1, nil
+	if job.State != domain.GenerationJobWaitingForResources {
+		job, err = a.store.PrepareGenerationJob(jobCtx, job.ID, domain.PreparedGenerationJob{
+			TemplateID: input.TemplateID, WorkflowID: input.PresetID, ModelName: input.ModelName, Seed: input.Seed,
+			PayloadCipher: job.PayloadCipher, Dependencies: generationJobDependencies(input, &user), InputCount: generationJobInputCount(input),
+		})
+		if err != nil {
+			a.failGenerationJob(jobCtx, job, "generation_batch_prepare_failed", "Не удалось подготовить генерацию", err)
+			return 1, nil
+		}
+		job, _, err = a.store.TransitionGenerationJob(jobCtx, job.ID, domain.GenerationJobTransitionParams{State: domain.GenerationJobWaitingForResources, Message: "Ожидаем ресурсы для генерации"})
+		if err != nil {
+			a.failGenerationJob(jobCtx, job, "generation_batch_resource_state_failed", "Не удалось подготовить ресурсы генерации", err)
+			return 1, nil
+		}
 	}
 	current, err := a.store.GenerationJobByPublicID(jobCtx, user.ID, job.PublicID)
-	if err == nil && current.CancellationRequestedAt != nil {
+	if err != nil {
+		return 0, err
+	}
+	if current.DispatchToken != job.DispatchToken || current.State.Terminal() {
+		return 0, nil
+	}
+	job = current
+	if current.CancellationRequestedAt != nil {
 		_, _, _ = a.continueGenerationJobCancellation(jobCtx, current)
 		return 1, nil
 	}
-	miningLease, miningWarning, err := a.pauseMiningForQuickGeneration(jobCtx, &user, job.ID)
+	var miningLease *domain.QuickGenerationMiningLease
+	promptID, err := a.submitComfyPrompt(jobCtx, user.ID, job.PublicID, user.QueuePriority, prompt, func(sendCtx context.Context) error {
+		var warning string
+		var pauseErr error
+		miningLease, warning, pauseErr = a.pauseMiningForQuickGeneration(sendCtx, &user, job.ID)
+		if pauseErr != nil {
+			return pauseErr
+		}
+		if warning != "" {
+			log.Printf("generation %s mining policy: %s", job.PublicID, warning)
+		}
+		return a.store.BeginGenerationJobSubmission(sendCtx, job.ID, job.DispatchToken)
+	})
+	// The worker timeout must not erase a receipt or turn an uncertain send into
+	// a failed job. Persist the handoff independently of the expired request.
+	receiptCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	jobCtx = generationJobTraceContext(receiptCtx, job)
 	if err != nil {
-		a.failGenerationJob(jobCtx, job, "mining_pause_failed", "Не удалось освободить ресурсы для варианта", err)
-		return 1, nil
-	}
-	if miningWarning != "" {
-		log.Printf("batch generation %s mining priority: %s", job.PublicID, miningWarning)
-	}
-	promptID, err := a.submitComfyPrompt(jobCtx, user.ID, job.PublicID, user.QueuePriority, prompt)
-	if err != nil {
-		a.failGenerationJob(jobCtx, job, "comfy_submission_failed", "ComfyUI не принял вариант", err)
-		return 1, nil
+		if errors.Is(err, errComfyPromptAdmission) {
+			return 0, a.store.PostponeGenerationDispatch(jobCtx, job.ID, job.DispatchToken)
+		}
+		if errors.Is(err, errComfyPromptRejected) {
+			if rejectErr := a.store.RejectGenerationJobSubmission(jobCtx, job.ID, job.DispatchToken); rejectErr != nil {
+				return 1, errors.Join(err, rejectErr)
+			}
+		}
+		a.failGenerationJob(jobCtx, job, "comfy_submission_failed", "ComfyUI не подтвердил запуск", err)
+		return 1, err
 	}
 	jobCtx = traceContext(jobCtx, job.CorrelationID, job.ID, promptID)
 	if err := a.attachMiningPauseToGeneration(jobCtx, miningLease, promptID); err != nil {
-		log.Printf("attach mining-pause lease to batch generation %s: %v", promptID, err)
+		log.Printf("attach mining-pause lease to generation %s: %v", promptID, err)
 	}
 	a.rememberGeneration(promptID, user.ID)
 	bound, bindErr := a.store.BindGenerationJobPrompt(jobCtx, job.ID, promptID)
 	if bindErr != nil {
-		log.Printf("bind batch generation job %s to prompt %s: %v", job.PublicID, promptID, bindErr)
+		log.Printf("bind generation job %s to prompt %s: %v", job.PublicID, promptID, bindErr)
 		return 1, nil
 	}
 	job = bound
 	if _, commitErr := a.store.CommitQuickGenerationForJob(jobCtx, job.ID); commitErr != nil {
-		log.Printf("commit batch quota for generation job %s: %v", job.PublicID, commitErr)
+		log.Printf("commit quota for generation job %s: %v", job.PublicID, commitErr)
 	}
 	a.recordGenerationEvent(jobCtx, job.ID, user.ID, promptID, definition, input)
 	a.rememberGenerationVariant(jobCtx, job.ID, user.ID, promptID, input, form)
 	if linkErr := a.store.LinkGenerationJobContentEvent(jobCtx, job.ID, user.ID, promptID); linkErr != nil {
-		log.Printf("link batch generation job %s content projection: %v", job.PublicID, linkErr)
+		log.Printf("link generation job %s content projection: %v", job.PublicID, linkErr)
 	}
 	if linkErr := a.store.LinkGenerationJobVariant(jobCtx, job.ID, promptID); linkErr != nil {
-		log.Printf("link batch generation job %s variant projection: %v", job.PublicID, linkErr)
+		log.Printf("link generation job %s variant projection: %v", job.PublicID, linkErr)
 	}
-	if _, _, transitionErr := a.store.TransitionGenerationJob(jobCtx, job.ID, domain.GenerationJobTransitionParams{State: domain.GenerationJobQueued, Message: "Вариант поставлен в очередь ComfyUI"}); transitionErr != nil {
+	if _, _, transitionErr := a.store.TransitionGenerationJob(jobCtx, job.ID, domain.GenerationJobTransitionParams{State: domain.GenerationJobQueued, Message: "Генерация поставлена в очередь ComfyUI"}); transitionErr != nil {
 		return 1, transitionErr
 	}
 	return 1, nil

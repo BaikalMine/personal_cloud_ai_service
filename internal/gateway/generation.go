@@ -446,7 +446,7 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 		writeGenerationJobError(w, status, job, err.Error())
 		return
 	}
-	input, definition, prompt := preparation.Input, preparation.Definition, preparation.Prompt
+	input = preparation.Input
 	inputCount := generationJobInputCount(input)
 	if inputCount > 0 {
 		job, _, err = a.store.TransitionGenerationJob(jobCtx, job.ID, domain.GenerationJobTransitionParams{
@@ -496,49 +496,15 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 		writeGenerationJobError(w, status, job, message)
 		return
 	}
-	miningLease, miningWarning, err := a.pauseMiningForQuickGeneration(jobCtx, user, job.ID)
+	queuedJob, err := a.store.QueueGenerationJobDispatch(jobCtx, job.ID)
 	if err != nil {
-		message := "Не удалось освободить ресурсы для приоритетной генерации"
-		job = a.failGenerationJob(jobCtx, job, "mining_pause_failed", message, err)
-		writeGenerationJobError(w, http.StatusServiceUnavailable, job, message+": "+err.Error())
+		log.Printf("publish generation job %s for dispatch: %v", job.PublicID, err)
+		response := a.generationJobResponse(jobCtx, job)
+		response["message"] = "Задание сохранено. Проверяем постановку в очередь; повторная отправка не требуется."
+		writeJSON(w, http.StatusAccepted, response)
 		return
 	}
-	promptID, err := a.submitComfyPrompt(jobCtx, user.ID, job.PublicID, user.QueuePriority, prompt)
-	if err != nil {
-		job = a.failGenerationJob(jobCtx, job, "comfy_submission_failed", "ComfyUI не принял workflow", err)
-		writeGenerationJobError(w, http.StatusBadGateway, job, "ComfyUI не принял workflow: "+err.Error())
-		return
-	}
-	jobCtx = traceContext(jobCtx, job.CorrelationID, job.ID, promptID)
-	if err := a.attachMiningPauseToGeneration(jobCtx, miningLease, promptID); err != nil {
-		log.Printf("attach mining-pause lease to generation %s: %v", promptID, err)
-	}
-	a.rememberGeneration(promptID, user.ID)
-	boundJob, bindErr := a.store.BindGenerationJobPrompt(jobCtx, job.ID, promptID)
-	if bindErr != nil {
-		log.Printf("bind generation job %s to prompt %s: %v", job.PublicID, promptID, bindErr)
-	} else {
-		job = boundJob
-		jobCtx = generationJobTraceContext(jobCtx, job)
-		if _, commitErr := a.store.CommitQuickGenerationForJob(jobCtx, job.ID); commitErr != nil {
-			log.Printf("commit quota for generation job %s: %v", job.PublicID, commitErr)
-		}
-		a.recordGenerationEvent(jobCtx, job.ID, user.ID, promptID, definition, input)
-		a.rememberGenerationVariant(jobCtx, job.ID, user.ID, promptID, input, r.Form)
-		if linkErr := a.store.LinkGenerationJobContentEvent(jobCtx, job.ID, user.ID, promptID); linkErr != nil {
-			log.Printf("link generation job %s content projection: %v", job.PublicID, linkErr)
-		}
-		if linkErr := a.store.LinkGenerationJobVariant(jobCtx, job.ID, promptID); linkErr != nil {
-			log.Printf("link generation job %s variant projection: %v", job.PublicID, linkErr)
-		}
-		if queuedJob, _, transitionErr := a.store.TransitionGenerationJob(jobCtx, job.ID, domain.GenerationJobTransitionParams{
-			State: domain.GenerationJobQueued, Message: "Генерация поставлена в очередь ComfyUI",
-		}); transitionErr != nil {
-			log.Printf("queue generation job %s: %v", job.PublicID, transitionErr)
-		} else {
-			job = queuedJob
-		}
-	}
+	job = queuedJob
 	bytesIn := r.ContentLength
 	if bytesIn < 0 {
 		bytesIn = 0
@@ -546,21 +512,10 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 	a.recordProxyRequest(jobCtx, user.ID, "comfyui", http.MethodPost, quickGenerationTelemetryPath(requestID), http.StatusAccepted, time.Since(started), bytesIn, 0, false, a.clientIP(r), r.UserAgent())
 	a.incProxyCount("comfyui", http.StatusAccepted)
 	response := a.generationJobResponse(jobCtx, job)
-	response["prompt_id"] = promptID
-	if bindErr != nil {
-		response["state"] = "submitting"
-		response["message"] = "ComfyUI принял генерацию. Восстанавливаем серверную запись."
-	}
 	if quota, quotaErr := a.generationQuotaView(jobCtx, user.ID); quotaErr != nil {
 		log.Printf("load quick generation quota for user %d: %v", user.ID, quotaErr)
 	} else {
 		response["quota"] = quota
-	}
-	if miningLease != nil && miningLease.ResumeMining && miningWarning == "" {
-		response["mining_paused"] = true
-	}
-	if miningWarning != "" {
-		response["mining_warning"] = miningWarning
 	}
 	writeJSON(w, http.StatusAccepted, response)
 }
@@ -802,7 +757,7 @@ func (a *App) handleRecoverGeneration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jobCtx := generationJobTraceContext(r.Context(), job)
-	if job.PromptID == "" && !job.State.Terminal() {
+	if job.PromptID == "" && !job.State.Terminal() && (job.DispatchQueuedAt == nil || job.SubmissionStartedAt != nil) {
 		recovered, found, recoverErr := a.recoverGenerationJobPrompt(jobCtx, job)
 		if recoverErr != nil {
 			logGateway(jobCtx, slog.LevelError, "generation_job_recovery_failed", "Failed to recover generation job prompt",
@@ -830,7 +785,16 @@ func (a *App) handleRecoverGeneration(w http.ResponseWriter, r *http.Request) {
 	statusCode := http.StatusOK
 	if job.PromptID == "" && !job.State.Terminal() {
 		statusCode = http.StatusAccepted
-		response["message"] = "Запуск ещё подтверждается. Проверяем очередь ComfyUI."
+		if job.CancellationRequestedAt != nil {
+			response["message"] = "Отмена запрошена. Проверяем завершение передачи в ComfyUI."
+		} else if job.DispatchQueuedAt != nil && job.SubmissionStartedAt == nil {
+			response["message"] = "Задание сохранено и ожидает запуска на сервере."
+			if job.DispatchUntil != nil && job.StatusMessage != "" {
+				response["message"] = job.StatusMessage
+			}
+		} else {
+			response["message"] = "Запуск ещё подтверждается. Проверяем очередь ComfyUI."
+		}
 	}
 	writeJSON(w, statusCode, response)
 }
@@ -1138,7 +1102,7 @@ func (a *App) handleGenerationQueue(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, overview)
 }
 
-func (a *App) submitComfyPrompt(ctx context.Context, userID int64, jobPublicID string, priority bool, prompt map[string]any) (promptID string, err error) {
+func (a *App) submitComfyPrompt(ctx context.Context, userID int64, jobPublicID string, priority bool, prompt map[string]any, beforeSend func(context.Context) error) (promptID string, err error) {
 	started := time.Now()
 	defer func() {
 		a.observeServiceCall(ctx, dependencyComfyUI, "submit_prompt", started, err, false, "comfy_submit_failed", "")
@@ -1167,6 +1131,12 @@ func (a *App) submitComfyPrompt(ctx context.Context, userID int64, jobPublicID s
 	if a.cfg.ComfyUIUpstreamAuthHeader != "" {
 		request.Header.Set("Authorization", a.cfg.ComfyUIUpstreamAuthHeader)
 	}
+	if beforeSend == nil {
+		return "", errors.New("generation dispatch confirmation is required")
+	}
+	if err := beforeSend(requestCtx); err != nil {
+		return "", err
+	}
 	response, err := (&http.Client{Timeout: 20 * time.Second, CheckRedirect: rejectUpstreamRedirect}).Do(request)
 	if err != nil {
 		return "", err
@@ -1177,6 +1147,9 @@ func (a *App) submitComfyPrompt(ctx context.Context, userID int64, jobPublicID s
 		return "", err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		if comfyPromptValidationRejected(response.StatusCode, responseBody) {
+			return "", fmt.Errorf("%w: %s", errComfyPromptRejected, truncate(string(responseBody), 300))
+		}
 		return "", fmt.Errorf("HTTP %d: %s", response.StatusCode, truncate(string(responseBody), 300))
 	}
 	var result struct {
@@ -2205,6 +2178,10 @@ func (a *App) refreshTrackedGenerationStatuses(ctx context.Context) (int64, erro
 			continue
 		}
 		if job.PromptID == "" {
+			if job.SubmissionRejectedAt != nil && job.CancellationRequestedAt == nil {
+				a.failGenerationJob(jobCtx, job, "comfy_submission_failed", "ComfyUI отклонил workflow", errors.New(job.ErrorMessage))
+				continue
+			}
 			if job.CancellationRequestedAt != nil {
 				if _, _, cancelErr := a.continueGenerationJobCancellation(jobCtx, job); cancelErr != nil {
 					logGateway(jobCtx, slog.LevelError, "generation_job_cancellation_failed", "Failed to cancel generation job without prompt",
@@ -2213,6 +2190,9 @@ func (a *App) refreshTrackedGenerationStatuses(ctx context.Context) (int64, erro
 					)
 					reconciliationErrors = append(reconciliationErrors, fmt.Errorf("cancel %s: %w", job.PublicID, cancelErr))
 				}
+				continue
+			}
+			if job.DispatchQueuedAt != nil && job.SubmissionStartedAt == nil {
 				continue
 			}
 			recovered, found, recoverErr := a.recoverGenerationJobPrompt(jobCtx, job)
@@ -2225,7 +2205,7 @@ func (a *App) refreshTrackedGenerationStatuses(ctx context.Context) (int64, erro
 				continue
 			}
 			if !found {
-				if now.Sub(job.StateChangedAt) > 2*time.Minute {
+				if job.SubmissionStartedAt == nil && now.Sub(job.StateChangedAt) > 2*time.Minute {
 					if _, expireErr := a.expireGenerationJob(jobCtx, job, "ComfyUI не подтвердил запуск"); expireErr != nil {
 						logGateway(jobCtx, slog.LevelError, "generation_job_expiration_failed", "Failed to expire unconfirmed generation job",
 							"job_public_id", job.PublicID,

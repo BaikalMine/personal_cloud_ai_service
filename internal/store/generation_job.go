@@ -23,7 +23,7 @@ const generationJobColumns = `
 	error_code,error_message,attempt,dependencies,input_count,state_changed_at,
 	started_at,finished_at,resources_released_at,quota_reserved_on,quota_committed_at,
 	cancellation_requested_at,cancellation_confirmed_at,created_at,updated_at,
-	batch_id,batch_position,experiment_value`
+	batch_id,batch_position,experiment_value,dispatch_queued_at,dispatch_token,dispatch_until,submission_started_at,submission_rejected_at,dispatch_closed_at`
 
 type generationJobScanner interface {
 	Scan(dest ...any) error
@@ -44,6 +44,7 @@ func scanGenerationJob(scanner generationJobScanner) (domain.GenerationJob, erro
 		&startedAt, &finishedAt, &resourcesReleasedAt, &quotaReservedOn, &quotaCommittedAt,
 		&cancellationRequestedAt, &cancellationConfirmedAt, &job.CreatedAt, &job.UpdatedAt,
 		&batchID, &job.BatchPosition, &job.ExperimentValue,
+		&job.DispatchQueuedAt, &job.DispatchToken, &job.DispatchUntil, &job.SubmissionStartedAt, &job.SubmissionRejectedAt, &job.DispatchClosedAt,
 	)
 	if err != nil {
 		return domain.GenerationJob{}, err
@@ -569,6 +570,7 @@ func (s *Store) ConfirmGenerationJobCancellation(ctx context.Context, jobID int6
 		SET cancellation_confirmed_at=now(),status_message='Отмена подтверждена',updated_at=now()
 		WHERE id=$1 AND cancellation_requested_at IS NOT NULL AND cancellation_confirmed_at IS NULL
 		  AND state NOT IN ('completed','failed','cancelled','expired')
+		  AND (prompt_id IS NOT NULL OR submission_started_at IS NULL OR submission_rejected_at IS NOT NULL)
 		RETURNING `+generationJobColumns, jobID))
 	if errors.Is(err, sql.ErrNoRows) {
 		job, err = scanGenerationJob(tx.QueryRowContext(ctx, `SELECT `+generationJobColumns+` FROM generation_jobs WHERE id=$1`, jobID))

@@ -1599,7 +1599,7 @@ func TestSubmitComfyPromptInjectsUserClientID(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := &App{cfg: Config{ComfyUIUpstream: upstream, SessionSecret: "01234567890123456789012345678901"}}
-	promptID, err := app.submitComfyPrompt(context.Background(), 17, "job_test_abcdef012345", false, map[string]any{"1": map[string]any{"class_type": "Test"}})
+	promptID, err := app.submitComfyPrompt(context.Background(), 17, "job_test_abcdef012345", false, map[string]any{"1": map[string]any{"class_type": "Test"}}, func(context.Context) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}

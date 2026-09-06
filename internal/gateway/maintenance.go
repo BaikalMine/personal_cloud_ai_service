@@ -45,8 +45,8 @@ func (a *App) maintenanceWorkerSpecs() []maintenanceWorkerSpec {
 			RetryDelay: 30 * time.Second, MaxBackoff: 5 * time.Minute, Run: a.deleteExpiredFailedLoraTrainingJobs,
 		},
 		{
-			Key: "generation_batches", Name: "Пакеты вариантов", Interval: 2 * time.Second, Timeout: 45 * time.Second,
-			RetryDelay: 5 * time.Second, MaxBackoff: time.Minute, Run: a.dispatchGenerationBatchJobs,
+			Key: "generation_batches", Name: "Запуск генераций и пакетов", Interval: 2 * time.Second, Timeout: 45 * time.Second,
+			RetryDelay: 5 * time.Second, MaxBackoff: time.Minute, Run: a.dispatchGenerationJobs,
 		},
 		{
 			Key: "generation_jobs", Name: "Задания генераций", Interval: generationRefreshInterval, Timeout: 20 * time.Second,

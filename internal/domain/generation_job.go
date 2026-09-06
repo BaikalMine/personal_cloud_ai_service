@@ -116,6 +116,12 @@ type GenerationJob struct {
 	CancellationConfirmedAt *time.Time
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
+	DispatchQueuedAt        *time.Time
+	DispatchToken           string
+	DispatchUntil           *time.Time
+	DispatchClosedAt        *time.Time
+	SubmissionStartedAt     *time.Time
+	SubmissionRejectedAt    *time.Time
 }
 
 type GenerationJobTransition struct {

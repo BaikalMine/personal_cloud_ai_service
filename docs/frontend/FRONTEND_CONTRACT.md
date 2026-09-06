@@ -102,7 +102,7 @@ unframed option row for processing modules, not a nested card.
 - A mode change retains inactive media and its role in the draft with a visible notice. It must exclude that media from generation, preflight and assistant payloads. Only an explicit remove action clears a source.
 - Preflight, assistant and launch share coalesced media uploads. A changed selection invalidates an in-flight preparation or preflight. Repeated submit events may not create duplicate jobs.
 - Internal same-tab navigation waits for the latest dirty draft, including edits made during an in-flight save. Save errors, conflicts and unsaved files keep the form open and reveal its recovery controls. Native unload warnings remain for reload/closing; new-tab, download and fragment links keep their native behavior.
-- The previous result remains visible while preparing the next job. The complete cross-job task workspace and the compact recent-results strip remain separate roadmap work, not implied by the existing generation history.
+- The previous result remains visible while preparing the next job and after a rejected HTTP launch. Once the new job is accepted, clear the old media from the active result area; its history is unchanged. A saved job waiting before ComfyUI shows one status/countdown and a reachable Cancel action, without animated progress or a duplicate status panel. Unknown sends remain pending until confirmed. The complete cross-job task workspace and the compact recent-results strip remain separate roadmap work, not implied by the existing generation history.
 - The primary path uses user-facing intent and result language. Internal branch and node names belong in exact settings or diagnostics, not in the main decision flow.
 
 ## Contextual Assistant Contract

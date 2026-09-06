@@ -55,6 +55,10 @@ func (a *App) generationJobResponse(ctx context.Context, job domain.GenerationJo
 		"job_id": job.PublicID, "request_id": job.RequestID, "correlation_id": job.CorrelationID, "job_state": job.State,
 		"state": generationJobClientState(job), "message": job.StatusMessage,
 	}
+	if job.PromptID == "" && !job.State.Terminal() {
+		response["dispatch_waiting"] = job.DispatchQueuedAt != nil && job.SubmissionStartedAt == nil
+		response["submission_unconfirmed"] = job.SubmissionStartedAt != nil && job.SubmissionRejectedAt == nil
+	}
 	if job.PromptID != "" {
 		response["prompt_id"] = job.PromptID
 		if !job.State.Terminal() {
@@ -392,6 +396,13 @@ func (a *App) continueGenerationJobCancellation(ctx context.Context, job domain.
 		return job, false, errors.New("generation job owner was deleted")
 	}
 	if job.PromptID == "" {
+		if job.SubmissionStartedAt != nil && job.SubmissionRejectedAt == nil {
+			recovered, found, err := a.recoverGenerationJobPrompt(ctx, job)
+			if err != nil || !found {
+				return job, false, err
+			}
+			return a.continueGenerationJobCancellation(ctx, recovered)
+		}
 		confirmed, _, err := a.store.ConfirmGenerationJobCancellation(ctx, job.ID)
 		if err != nil {
 			return job, false, err
@@ -509,6 +520,10 @@ func (a *App) advanceGenerationJob(ctx context.Context, job domain.GenerationJob
 
 func (a *App) releaseGenerationJobResources(ctx context.Context, job domain.GenerationJob) (domain.GenerationJob, bool, error) {
 	ctx = generationJobTraceContext(ctx, job)
+	fenced, err := a.store.FenceGenerationJobResourceRelease(ctx, job.ID, job.DispatchToken)
+	if err != nil || !fenced {
+		return job, false, err
+	}
 	if _, err := a.store.ReleaseQuickGenerationForJob(ctx, job.ID); err != nil {
 		return job, false, err
 	}
@@ -538,8 +553,15 @@ func (a *App) failGenerationJob(ctx context.Context, job domain.GenerationJob, c
 	}
 	job = released
 	if !complete {
+		waitingMessage := message + ". Восстанавливаем ресурсы"
+		if current, readErr := a.store.GenerationJobByID(ctx, job.ID); readErr == nil {
+			job = current
+			if current.SubmissionStartedAt != nil && current.SubmissionRejectedAt == nil && current.PromptID == "" {
+				waitingMessage = "Проверяем исход передачи в ComfyUI. Повторный запуск и освобождение ресурсов отложены до подтверждения."
+			}
+		}
 		updated, _, updateErr := a.store.TransitionGenerationJob(ctx, job.ID, domain.GenerationJobTransitionParams{
-			State: job.State, Message: message + ". Восстанавливаем ресурсы",
+			State: job.State, Message: waitingMessage, ErrorCode: code, ErrorMessage: technical,
 		})
 		if updateErr == nil {
 			job = updated

@@ -291,6 +291,7 @@
   let progressSocket = null;
   let liveProgressReceived = false;
   let activeGenerationID = "";
+  let activeGenerationJobID = "";
   let activeGenerationRequestID = "";
   let pendingParentJobID = "";
   let generationJobEvents = null;
@@ -528,13 +529,14 @@
   const persistActiveGeneration = () => {
     if (!activeGenerationRequestID) return;
     try {
-      window.localStorage.setItem(activeGenerationStorageKey, JSON.stringify({ requestID: activeGenerationRequestID, promptID: activeGenerationID, savedAt: Date.now() }));
+      window.localStorage.setItem(activeGenerationStorageKey, JSON.stringify({ requestID: activeGenerationRequestID, promptID: activeGenerationID, jobID: activeGenerationJobID, savedAt: Date.now() }));
     } catch (_) {
       // Private browsing can reject storage; the current tab can still poll normally.
     }
   };
   const clearActiveGeneration = () => {
     activeGenerationID = "";
+    activeGenerationJobID = "";
     activeGenerationRequestID = "";
     try { window.localStorage.removeItem(activeGenerationStorageKey); } catch (_) {}
   };
@@ -4576,16 +4578,20 @@
     if (!requestID) return false;
     activeGenerationRequestID = requestID;
     persistActiveGeneration();
+    renderOutputs([]);
     result.hidden = false;
     studio?.show("result");
     runProgress.hidden = false;
     result.classList.remove("has-error");
     resultTitle.textContent = "Восстанавливаем генерацию";
-    setGenerationActions({ cancel: Boolean(activeGenerationID) });
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
+    setGenerationActions({ cancel: Boolean(activeGenerationID || activeGenerationJobID) });
+    for (let attempt = 0; attempt < attempts || activeGenerationJobID; attempt += 1) {
+      if (activeGenerationRequestID !== requestID) return false;
+      let waitingMessage = "";
       try {
         const response = await fetch(`/generate/recover?request_id=${encodeURIComponent(requestID)}`, { credentials: "same-origin" });
         const payload = await response.json().catch(() => ({}));
+        if (activeGenerationRequestID !== requestID) return false;
         if (response.status === 404) {
           clearActiveGeneration();
           setGenerationActions({ retry: true });
@@ -4595,6 +4601,25 @@
           return false;
         }
         if (!response.ok) throw new Error(payload.error || "Не удалось восстановить запуск");
+        activeGenerationJobID = payload.job_id || activeGenerationJobID;
+        persistActiveGeneration();
+        setGenerationActions({ cancel: Boolean(activeGenerationID || activeGenerationJobID) });
+        if (!payload.prompt_id && ["error", "failed", "cancelled", "expired", "completed"].includes(payload.state)) {
+          resultTitle.textContent = payload.state === "cancelled" ? "Генерация отменена" : "Запуск завершён";
+          resultStatus.textContent = payload.message || "Задание завершено.";
+          result.classList.toggle("has-error", ["error", "failed", "expired"].includes(payload.state));
+          runProgress.hidden = true;
+          clearActiveGeneration();
+          setGenerationActions({ retry: true });
+          refreshJobs();
+          return true;
+        }
+        if (!payload.prompt_id && activeGenerationJobID) {
+          resultTitle.textContent = payload.state === "cancelling" ? "Отменяем генерацию" : payload.dispatch_waiting ? "В очереди Gateway" : "Проверяем запуск";
+          waitingMessage = payload.message || "Задание сохранено на сервере.";
+          setGenerationProgress(resultTitle.textContent, waitingMessage, null, "queue");
+          runProgress.hidden = true;
+        }
         if (payload.prompt_id) {
           activeGenerationID = payload.prompt_id;
           activeGenerationRequestID = payload.request_id || requestID;
@@ -4613,10 +4638,10 @@
         // The request id remains in local storage, so a page reload can continue recovery.
       }
       const retryAfter = Math.min(15000, 1500 * (attempt + 1));
-      setGenerationProgress("Восстанавливаем запуск", "ComfyUI не получит дубликат задачи", null);
+      if (!waitingMessage) setGenerationProgress("Проверяем запуск", "Повторная отправка не требуется", null, "queue");
       await pauseWithCountdown(
         retryAfter,
-        (seconds) => { resultStatus.textContent = `Подтверждаем запуск в Gateway. Повторяем через ${seconds} сек.`; },
+        (seconds) => { resultStatus.textContent = `${waitingMessage || "Связь с Gateway временно потеряна."} Проверка через ${seconds} сек.`; },
         () => activeGenerationRequestID === requestID,
       );
     }
@@ -4726,14 +4751,21 @@
   retryGeneration?.addEventListener("click", () => form.requestSubmit());
   cancelGeneration?.addEventListener("click", async () => {
     const promptID = activeGenerationID;
-    if (!promptID || cancelGeneration.disabled) return;
+    const jobID = activeGenerationJobID;
+    if ((!promptID && !jobID) || cancelGeneration.disabled) return;
     cancelGeneration.disabled = true;
     cancelGeneration.textContent = "Отменяем...";
     try {
-      const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", prompt_id: promptID });
-      const response = await fetch("/generate/cancel", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body, credentials: "same-origin" });
+      const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", ...(promptID ? { prompt_id: promptID } : { job_id: jobID }) });
+      const response = await fetch(promptID ? "/generate/cancel" : "/generate/jobs/cancel", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body, credentials: "same-origin" });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "Не удалось отменить генерацию");
+      if (!promptID && !payload.cancelled && !["cancelled", "completed", "failed", "expired", "error"].includes(payload.job?.state)) {
+        resultTitle.textContent = "Отмена запрошена";
+        resultStatus.textContent = payload.message || "Ожидаем подтверждения остановки.";
+        refreshJobs();
+        return;
+      }
       clearActiveGeneration();
       closeProgressSocket();
       resultTitle.textContent = payload.cancelled ? "Генерация отменена" : "Генерация завершена";
@@ -4803,10 +4835,11 @@
     studio?.show("result");
     activeGenerationRequestID = newGenerationRequestID();
     activeGenerationID = "";
+    activeGenerationJobID = "";
     persistActiveGeneration();
     setGenerationActions();
     resultTitle.textContent = "Генерация выполняется";
-    resultStatus.textContent = "Ставим задачу в очередь ComfyUI...";
+    resultStatus.textContent = "Сохраняем задание в очереди Gateway...";
     result.classList.remove("has-error");
     runProgress.hidden = false;
     setGenerationProgress("Подготовка", "Проверяем параметры схемы генерации", null);
@@ -4827,10 +4860,12 @@
         runProgress.hidden = true;
         return;
       }
+      renderOutputs([]);
       pendingParentJobID = "";
       updateGenerationQuota(payload.quota);
       refreshJobs();
       activeGenerationRequestID = payload.request_id || activeGenerationRequestID;
+      activeGenerationJobID = payload.job_id || "";
       if (!payload.prompt_id) {
         await recoverGeneration(activeGenerationRequestID);
         return;
@@ -4900,6 +4935,7 @@
   if (savedGeneration?.requestID) {
     activeGenerationRequestID = savedGeneration.requestID;
     activeGenerationID = savedGeneration.promptID || "";
+    activeGenerationJobID = savedGeneration.jobID || "";
     if (activeGenerationID) {
       result.hidden = false;
       studio?.show("result");

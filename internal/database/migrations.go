@@ -1425,6 +1425,22 @@ var migrationCatalog = []migration{
 			`ALTER TABLE quick_generation_mining_leases ADD COLUMN resume_ready BOOLEAN NOT NULL DEFAULT FALSE`,
 		},
 	},
+	{
+		version: 60, name: "durable_generation_dispatch", statements: []string{
+			`ALTER TABLE generation_jobs ADD COLUMN dispatch_queued_at TIMESTAMPTZ,
+			 ADD COLUMN dispatch_token TEXT NOT NULL DEFAULT '',
+			 ADD COLUMN dispatch_until TIMESTAMPTZ,
+			 ADD COLUMN dispatch_closed_at TIMESTAMPTZ,
+			 ADD COLUMN submission_started_at TIMESTAMPTZ,
+			 ADD COLUMN submission_rejected_at TIMESTAMPTZ`,
+			// Older unbound jobs may already have reached ComfyUI. Never redispatch them.
+			`UPDATE generation_jobs SET submission_started_at=updated_at
+			 WHERE prompt_id IS NULL AND state IN ('preparing','uploading','waiting_for_resources')`,
+			`CREATE INDEX generation_jobs_dispatch_idx ON generation_jobs(created_at,id)
+			 WHERE prompt_id IS NULL AND submission_started_at IS NULL
+			 AND state IN ('draft','preparing','uploading','waiting_for_resources')`,
+		},
+	},
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
