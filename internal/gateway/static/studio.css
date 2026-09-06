@@ -20,12 +20,6 @@
 .studio-models .generation-model-picker { display: block; margin: 0; padding: 0; border: 0; }
 .studio-editor .generation-prompt-fields { grid-template-columns: minmax(0, 1fr); margin: 0; }
 .studio-editor .generation-prompt-fields textarea { min-height: 160px; resize: vertical; }
-.studio-editor .prompt-assistant { margin: -8px 0 0; padding: 0 0 16px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; }
-.studio-editor .prompt-assistant-toggle { padding: 0; border: 0; background: transparent; }
-.studio-editor .prompt-assistant-toggle small { display: none; }
-.studio-editor .prompt-assistant-controls { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
-.studio-editor .prompt-assistant-diff-grid { grid-template-columns: minmax(0, 1fr); }
-.studio-editor .prompt-assistant-actions { flex-wrap: wrap; }
 .studio-editor .generation-profile-picker { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .studio-editor .generation-profile-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; }
 .studio-editor .generation-profile-button { min-height: 44px; padding: 8px; }

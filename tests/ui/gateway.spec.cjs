@@ -187,7 +187,7 @@ test("video prompt assistant can derive an I2VA prompt from the opening frame", 
   await page.locator('[data-image-slot="1"] [data-gallery-image-picker-open]').click();
   await page.getByRole("button", { name: "Выбрать AI-Gateway-Krea2-portrait.png" }).click();
   await expect(page.locator("#positive-prompt")).toHaveValue("");
-  await page.locator("#prompt-assistant-enabled").check();
+  await page.locator("#prompt-assistant-open").click();
   await page.locator("#prompt-assistant-improve").click();
 
   await expect(page.locator("#prompt-assistant-review")).toBeVisible();
@@ -343,7 +343,7 @@ test("prompt assistant review stays readable at every viewport", async ({ page }
   await expect(page.locator('.generation-workflow-choice.is-selected[data-preset-id="photoflow-flux2-edit"]')).toBeVisible();
   await expect(page.locator('[data-image-slot="1"] [data-image-name]')).toHaveText("AI-Gateway-Krea2-portrait.png");
   await page.locator("#positive-prompt").fill("Сохранить внешность и композицию, заменить куртку на красную кожаную.");
-  await page.locator("#prompt-assistant-enabled").check();
+  await page.locator("#prompt-assistant-open").click();
   await page.locator("#prompt-assistant-improve").click();
 
   const review = page.locator("#prompt-assistant-review");
@@ -351,15 +351,18 @@ test("prompt assistant review stays readable at every viewport", async ({ page }
   await expect(page.locator("#prompt-assistant-reference-list li")).toHaveCount(1);
   await expect(page.locator("#prompt-assistant-reference-count")).toHaveText("1 источник");
   await expect(page.locator("#prompt-assistant-review-meta")).toContainText("460 токенов");
+  await page.locator("#prompt-assistant-diff > summary").click();
   await expect(page.locator("#prompt-assistant-diff-suggestion ins").first()).toBeVisible();
   await expect(page.locator("#prompt-assistant-draft")).toHaveValue(/Preserve the subject/);
+  await page.locator("#prompt-assistant-diff > summary").click();
   await assertNoViewportOverflow(page, `${testInfo.project.name} prompt assistant review`);
   await page.evaluate(() => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     window.scrollTo(0, 0);
+    document.querySelector(".assistant-panel-body").scrollTo(0, 0);
   });
   await settlePage(page);
-  await expect(page).toHaveScreenshot("prompt-assistant-review.png", { fullPage: true, stylePath: visualStyle });
+  await expect(page.locator("#prompt-assistant")).toHaveScreenshot("prompt-assistant-review.png", { stylePath: visualStyle });
 
   await page.locator("#prompt-assistant-apply").click();
   await expect(review).toBeHidden();

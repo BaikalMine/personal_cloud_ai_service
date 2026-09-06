@@ -9,6 +9,7 @@ const open = async (page) => {
   await page.locator(".studio-saved > summary").click();
 };
 const save = async (page) => {
+  if (await page.locator("#prompt-assistant").isVisible()) await page.keyboard.press("Escape");
   if (await page.locator("#studio-settings").isVisible()) await page.keyboard.press("Escape");
   if (!(await page.locator(".studio-saved").getAttribute("open") !== null)) await page.locator(".studio-saved > summary").click();
   await page.locator("#generation-draft-save").click();
@@ -25,7 +26,7 @@ test("draft restores prompt, LoRA, seed, optional settings and manual assistant 
   await page.locator('input[name="seed"]:enabled').fill("123456");
   await page.locator('input[name="detail_enabled"]').uncheck();
   await page.keyboard.press("Escape");
-  await page.locator("#prompt-assistant-enabled").check();
+  await page.locator("#prompt-assistant-open").click();
   await page.locator("#prompt-assistant-improve").click();
   await expect(page.locator("#prompt-assistant-review")).toBeVisible();
   await page.locator("#prompt-assistant-draft").fill("My edited draft: a white ceramic vase, fine texture.");

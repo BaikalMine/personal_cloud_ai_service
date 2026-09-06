@@ -1,5 +1,6 @@
 {{define "lora_training"}}
 {{template "head" .}}
+<link rel="stylesheet" href="/static/lora-caption-panel.css?v={{.AssetVersion}}">
 {{template "nav" .}}
 <main class="page lora-training-page" id="main-content" data-lora-training-page data-csrf="{{.CSRF}}">
   <section class="hero lora-training-hero">
@@ -116,9 +117,25 @@
     </section>
   </div>
   <dialog class="ui-dialog dataset-dialog" data-dataset-dialog aria-labelledby="dataset-dialog-title"><header><h2 id="dataset-dialog-title" data-dataset-dialog-title>Версии</h2><button type="button" class="ghost dataset-icon" data-dataset-dialog-close aria-label="Закрыть" title="Закрыть"><i data-lucide="x" aria-hidden="true"></i></button></header><div class="dataset-dialog-content" data-dataset-dialog-content></div></dialog>
+  <dialog class="caption-frame-panel" data-caption-panel aria-labelledby="caption-frame-title">
+    <header class="caption-frame-header"><div><h2 id="caption-frame-title" data-caption-title>Подпись кадра</h2><p data-caption-name></p></div><button type="button" class="ghost dataset-icon" data-caption-close aria-label="Закрыть редактор кадра" title="Закрыть"><i data-lucide="x" aria-hidden="true"></i></button></header>
+    <div class="caption-frame-content">
+      <div class="caption-frame-media"><div class="caption-frame-image"><img data-caption-image alt=""></div><div class="caption-frame-strip" data-caption-strip role="group" aria-label="Кадры набора"></div></div>
+      <div class="caption-frame-editor">
+        <p class="caption-frame-meta" data-caption-meta></p>
+        <label for="caption-frame-text">Подпись</label><code class="caption-frame-trigger" data-caption-trigger aria-label="Триггер в начале подписи"></code>
+        <textarea id="caption-frame-text" data-caption-text rows="8" maxlength="1000" placeholder="Ракурс, одежда, фон, свет"></textarea>
+        <p class="caption-frame-status" data-caption-status role="status" aria-live="polite"></p>
+        <p class="ui-status-banner is-error" data-caption-feedback role="alert" hidden></p>
+        <button type="button" class="ghost" data-caption-describe><i data-lucide="sparkles" aria-hidden="true"></i><span data-caption-action-label>Описать кадр</span></button>
+      </div>
+    </div>
+    <footer class="caption-frame-actions"><div><button type="button" class="ghost dataset-icon" data-caption-previous title="Предыдущий кадр" aria-label="Предыдущий кадр"><i data-lucide="arrow-left" aria-hidden="true"></i></button><button type="button" class="ghost dataset-icon" data-caption-next title="Следующий кадр" aria-label="Следующий кадр"><i data-lucide="arrow-right" aria-hidden="true"></i></button></div><div><span class="caption-frame-save" data-caption-save-state role="status" aria-live="polite"></span><button type="button" data-caption-save><i data-lucide="save" aria-hidden="true"></i>Сохранить</button></div></footer>
+  </dialog>
 </main>
 <script src="/static/lora-dataset-state.js?v={{.AssetVersion}}"></script>
 <script src="/static/lora-caption-state.js?v={{.AssetVersion}}"></script>
+<script src="/static/lora-caption-panel.js?v={{.AssetVersion}}"></script>
 <script src="/static/lora-dataset-editor.js?v={{.AssetVersion}}"></script>
 <script src="/static/lora-training.js?v={{.AssetVersion}}"></script>
 </body></html>

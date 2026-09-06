@@ -133,6 +133,42 @@ test("draft save error leaves work dirty and allows a retry", async () => {
   assert.equal(f.remote().values.positive_prompt, "keep me");
 });
 
+test("navigation settles the latest edit after an in-flight autosave", async () => {
+  const f = fixture(), gate = deferred();
+  let held = false;
+  const c = f.client({ transport: async (op, body) => {
+    if (op === "save" && !held) { held = true; await gate.promise; }
+    return f.server(op, body);
+  }});
+  assert.equal(await c.controller.settle(), false);
+  await c.controller.load();
+  c.edit("first"); c.controller.flush(); await Promise.resolve();
+  c.edit("latest");
+  const leaving = c.controller.settle();
+  gate.resolve();
+  assert.equal(await leaving, true);
+  assert.equal(f.remote().values.positive_prompt, "latest");
+  assert.equal(c.controller.snapshot().dirty, false);
+  assert.equal(f.requests.filter(request => request.op === "save").length, 2);
+});
+
+test("navigation cannot settle a failed or conflicted draft", async () => {
+  const f = fixture();
+  const a = f.client(), b = f.client();
+  await a.controller.load(); await b.controller.load();
+  a.edit("remote work"); await a.controller.flush();
+  b.edit("local work");
+  assert.equal(await b.controller.settle(), false);
+  assert.equal(b.controller.snapshot().status, "conflict");
+  assert.equal(await b.controller.settle(), false);
+  assert.equal(f.remote().values.positive_prompt, "remote work");
+  const c = f.client({ transport: (op, body) => op === "save" ? Promise.reject(new Error("offline")) : f.server(op, body) });
+  await c.controller.load(); c.edit("keep on page");
+  assert.equal(await c.controller.settle(), false);
+  assert.equal(c.controller.snapshot().status, "error");
+  assert.equal(c.text(), "keep on page");
+});
+
 test("unsupported draft is retained as a conflict, not replaced with defaults", async () => {
   const f = fixture({ revision: 2, values: { model: "unavailable" } });
   const c = f.client({ apply: () => { throw new Error("model unavailable"); } });

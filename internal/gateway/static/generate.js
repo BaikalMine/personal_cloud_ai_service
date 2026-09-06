@@ -137,6 +137,12 @@
   const promptAssistantDraftLimit = document.getElementById("prompt-assistant-draft-limit");
   const promptAssistantApply = document.getElementById("prompt-assistant-apply");
   const promptAssistantKeep = document.getElementById("prompt-assistant-keep");
+  const promptAssistantOpen = document.getElementById("prompt-assistant-open");
+  const promptAssistantStale = document.getElementById("prompt-assistant-stale");
+  const assistantCorrections = new Map();
+  let assistantContext = "";
+  let assistantRequestSerial = 0;
+  let assistantRequestBusy = false;
   let assistantDecisionPromise = Promise.resolve();
   const model = document.getElementById("generation-model");
   const steps = document.getElementById("generation-steps");
@@ -1802,6 +1808,81 @@
     }
     promptAssistantState.textContent = message;
     promptAssistantState.dataset.state = state;
+    const launchState = document.getElementById("prompt-assistant-launch-state");
+    if (launchState) launchState.textContent = { loading: "Готовится вариант", review: "Вариант готов", approved: "Выбор сохранён", stale: "Вариант неактуален", error: "Нужна проверка" }[state] || "";
+  };
+
+  const assistantContextKey = () => JSON.stringify({
+    workflow: generationWorkflowID?.value, model: model?.value, mode: templateID.value,
+    videoMode: miniMaxMode(), duration: form.elements.video_duration_seconds?.value,
+    profile: promptAssistantTemplate?.value, think: promptAssistantThink?.checked,
+    images: selectedReferenceMetadata().map(ref => [ref.number, ref.role, previewURLs.get(ref.number) || ref.sourceName]),
+    audio: miniMaxAudioIsAvailable() ? miniMaxAudioFile?.files?.[0]?.name || uploadedAudio : "",
+    video: miniMaxReferencesAreAvailable() ? miniMaxVideoFile?.files?.[0]?.name || uploadedVideo : "",
+  });
+  const assistantSourceForIdentifier = identifier => {
+    const number = Number(String(identifier).match(/(?:Picture|image)\s*(\d+)/i)?.[1]);
+    const references = selectedReferenceMetadata();
+    const reference = templateID.value === "minimax-h3-video" ? references[number - 1] : references.find(item => item.number === number);
+    return reference ? { slot: reference.number, value: uploadedImages.get(reference.number) || "" } : null;
+  };
+  const invalidatePromptAssistant = () => {
+    const state = assistantSlice.get();
+    if (state.status === "idle" || state.stale) return;
+    assistantSlice.dispatch({ type: "INVALIDATE" }, current => ({ ...current, stale: true, approved: false, action: "", status: "stale" }));
+    if (promptAssistantStale) promptAssistantStale.hidden = false;
+    if (promptAssistantApply) promptAssistantApply.disabled = true;
+    setPromptAssistantState("Подготовьте новый вариант для текущей модели и материалов.", "stale");
+    markDraftDirty();
+  };
+  const renderAssistantSources = () => {
+    const list = document.getElementById("prompt-assistant-source-list");
+    const section = document.getElementById("prompt-assistant-sources");
+    if (!list || !section) return;
+    const references = selectedReferenceMetadata();
+    section.hidden = references.length === 0;
+    list.replaceChildren(...references.map((reference, index) => {
+      const item = document.createElement("li");
+      item.className = "assistant-source";
+      const img = document.createElement("img");
+      const src = previewURLs.get(reference.number);
+      if (src) img.src = src;
+      img.alt = `Фото ${reference.number}`;
+      const text = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = templateID.value === "minimax-h3-video" ? `Picture ${index + 1} · Фото ${reference.number}` : `Фото ${reference.number}`;
+      const role = document.createElement("span");
+      role.textContent = promptAssistantRoleLabels[reference.role] || reference.role;
+      text.append(title, role);
+      item.append(img, text);
+      return item;
+    }));
+    const files = [
+      [miniMaxAudioIsAvailable() && (uploadedAudio || miniMaxAudioFile?.files?.length), "Audio 1", miniMaxAudioName?.textContent, "Голос и звук"],
+      [miniMaxReferencesAreAvailable() && (uploadedVideo || miniMaxVideoFile?.files?.length), "Video 1", miniMaxVideoName?.textContent, "Движение и темп"],
+    ];
+    files.filter(([active]) => active).forEach(([, id, name, role]) => {
+      const item = document.createElement("li");
+      item.className = "assistant-source assistant-source-file";
+      const text = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = `${id} · ${role}`;
+      const filename = document.createElement("span");
+      filename.textContent = name || id;
+      text.append(title, filename);
+      item.append(text);
+      list.append(item);
+    });
+    section.hidden = list.children.length === 0;
+  };
+  const openPromptAssistant = () => {
+    if (!promptAssistant) return;
+    studio?.show("configure");
+    if (promptAssistantEnabled) promptAssistantEnabled.checked = true;
+    if (promptAssistantReview) promptAssistantReview.hidden = !Boolean(promptAssistantDraft?.value);
+    syncPromptAssistant();
+    renderAssistantSources();
+    if (!promptAssistant.open) promptAssistant.showModal();
   };
 
   const promptAssistantRoleLabels = {
@@ -1858,6 +1939,25 @@
         item.append(heading, summary, usage, status);
       } else {
         item.append(heading, summary, usage);
+        const correction = document.createElement("details");
+        correction.className = "assistant-correction";
+        const label = document.createElement("summary");
+        label.textContent = "Исправить наблюдение";
+        const field = document.createElement("textarea");
+        field.maxLength = 500;
+        field.rows = 2;
+        field.setAttribute("aria-label", `Уточнение для ${reference.id}`);
+        field.placeholder = "Например: волосы светлые, а не тёмные";
+        const savedCorrection = assistantCorrections.get(reference.id);
+        field.value = savedCorrection && savedCorrection.source === reference.source_value ? savedCorrection.text : "";
+        field.dataset.assistantCorrection = reference.id;
+        field.addEventListener("input", () => {
+          assistantCorrections.set(reference.id, { text: field.value, source: reference.source_value || "" });
+          invalidatePromptAssistant();
+          markDraftDirty();
+        });
+        correction.append(label, field);
+        item.append(correction);
       }
       return item;
     }));
@@ -1896,6 +1996,9 @@
   };
 
   const resetPromptAssistantReview = () => {
+    assistantRequestSerial++;
+    assistantContext = "";
+    assistantCorrections.clear();
     assistantSlice.dispatch({ type: "RESET" }, () => ({
       status: "idle", approved: false, original: "", suggestion: "", action: "", correlationID: "", references: [], usage: {}, draftEdited: false, error: "",
     }));
@@ -1904,6 +2007,8 @@
     renderPromptAssistantReferences([]);
     renderPromptAssistantDiff("", "");
     if (promptAssistantReviewMeta) promptAssistantReviewMeta.textContent = "";
+    if (promptAssistantStale) promptAssistantStale.hidden = true;
+    if (promptAssistantApply) promptAssistantApply.disabled = true;
   };
 
   const syncPromptAssistant = () => {
@@ -1918,8 +2023,13 @@
     if (promptAssistantDraft) promptAssistantDraft.maxLength = promptCharacterLimit;
     if (promptAssistantDraftLimit) promptAssistantDraftLimit.textContent = `Можно изменить перед применением. До ${promptCharacterLimit} символов.`;
     promptAssistant.hidden = !templateID.value;
-    promptAssistantControls.hidden = !promptAssistantEnabled.checked;
+    promptAssistantControls.hidden = false;
     promptAssistantTemplate.disabled = isVideo;
+    document.getElementById("prompt-assistant-template-field").hidden = isVideo;
+    const family = selectedGenerationWorkflow()?.dataset.family || "";
+    document.getElementById("prompt-assistant-mode").textContent = isVideo
+      ? `MiniMax H3 · ${miniMaxMode() === "references" ? "REF2VA" : frameAssistantMode}`
+      : `${family === "flux2" ? "Flux2" : "Krea2"} · ${isEdit ? "Редактирование фото" : "Изображение по тексту"}`;
     [...promptAssistantTemplate.options].forEach((option) => {
       const imageOnly = option.dataset.imageOnly !== undefined;
       const videoOnly = option.dataset.videoOnly !== undefined;
@@ -1930,8 +2040,11 @@
     const selectedAssistantTemplate = promptAssistantTemplate.selectedOptions[0];
     if ((isVideo && selectedAssistantTemplate?.value !== videoProfile) || (!isEdit && selectedAssistantTemplate?.dataset.imageOnly !== undefined) || (!isVideo && selectedAssistantTemplate?.dataset.videoOnly !== undefined)) {
       promptAssistantTemplate.value = isVideo ? videoProfile : "workflow-default";
-      resetPromptAssistantReview();
     }
+    if (isEdit && family === "flux2" && promptAssistantTemplate.value === "workflow-default") promptAssistantTemplate.value = "flux-edit";
+    if (isEdit && family === "krea2" && promptAssistantTemplate.value === "flux-edit") promptAssistantTemplate.value = "workflow-default";
+    if (!restoringDraft && assistantContext && assistantContext !== assistantContextKey()) invalidatePromptAssistant();
+    if (promptAssistantApply) promptAssistantApply.disabled = assistantSlice.get().stale || !assistantSlice.get().correlationID || !promptAssistantDraft?.value.trim() || assistantRequestBusy;
     if (promptAssistantDescription) promptAssistantDescription.textContent = isVideo
       ? miniMaxMode() === "references"
         ? "REF2VA-ассистент сначала разберёт каждый свободный референс и свяжет его роль с Picture, Video или Audio."
@@ -1944,6 +2057,14 @@
     if (!promptAssistantEnabled.checked) {
       resetPromptAssistantReview();
       setPromptAssistantState("Ассистент выключен. Используется ваш исходный промт.");
+    } else if (assistantSlice.get().stale) {
+      setPromptAssistantState("Подготовьте новый вариант для текущей модели и материалов.", "stale");
+    } else if (assistantRequestBusy) {
+      setPromptAssistantState("Ассистент готовит вариант. Панель можно закрыть.", "loading");
+    } else if (assistantSlice.get().status === "error") {
+      setPromptAssistantState(assistantSlice.get().error || "Не удалось подготовить вариант. Попробуйте ещё раз.", "error");
+    } else if (assistantSlice.get().approved) {
+      setPromptAssistantState(assistantSlice.get().action === "kept_original" ? "Используется ваш исходный текст." : "Вариант применён. Его можно снова отредактировать.", "approved");
     } else if (!promptAssistantReview?.hidden) {
       setPromptAssistantState("Проверьте вариант и примените его либо оставьте свой промт.", "review");
     } else {
@@ -1951,7 +2072,7 @@
         ? miniMaxMode() === "references"
           ? "REF2VA-ассистент подготовит Context-IR со строгой картой свободных референсов."
           : `${frameAssistantMode}-ассистент подготовит структуру MiniMax H3 v5 для текущего количества точных кадров.`
-        : "Вариант будет создан локальной моделью e4b и затем выгружен из видеопамяти.");
+        : "Ассистент подготовит вариант по текущему тексту и выбранным материалам.");
     }
   };
 
@@ -2159,19 +2280,26 @@
     });
   });
 
+  promptAssistantOpen?.addEventListener("click", openPromptAssistant);
+  document.getElementById("prompt-assistant-close")?.addEventListener("click", () => promptAssistant.close());
+  document.getElementById("prompt-assistant-edit")?.addEventListener("click", () => promptAssistantDraft?.focus());
+  promptAssistant?.addEventListener("close", () => {
+    if (assistantSlice.get().status === "idle" && promptAssistantEnabled) promptAssistantEnabled.checked = false;
+    promptAssistantOpen?.focus({ preventScroll: true });
+    markDraftDirty();
+  });
   promptAssistantEnabled?.addEventListener("change", syncPromptAssistant);
   promptAssistantTemplate?.addEventListener("change", () => {
-    resetPromptAssistantReview();
+    invalidatePromptAssistant();
     syncPromptAssistant();
   });
   promptAssistantThink?.addEventListener("change", () => {
-    resetPromptAssistantReview();
+    invalidatePromptAssistant();
     syncPromptAssistant();
   });
   positive?.addEventListener("input", () => {
-    if (promptAssistantEnabled?.checked && !promptAssistantReview?.hidden) {
-		resetPromptAssistantReview();
-		setPromptAssistantState("Исходный промт изменён. Подготовьте новый вариант.", "review");
+    if (promptAssistantEnabled?.checked && !assistantSlice.get().approved && assistantSlice.get().status !== "idle") {
+		invalidatePromptAssistant();
 		return;
     }
 	if (["applied", "edited_after_apply"].includes(assistantSlice.get().action)) {
@@ -2193,25 +2321,34 @@
 	promptAssistantDraft?.addEventListener("input", () => {
 	  assistantSlice.dispatch({ type: "DRAFT_EDITED" }, (state) => ({ ...state, draftEdited: true }));
 	  renderPromptAssistantDiff(assistantSlice.get().original, promptAssistantDraft.value);
+      if (promptAssistantApply) promptAssistantApply.disabled = assistantSlice.get().stale || !assistantSlice.get().correlationID || !promptAssistantDraft.value.trim() || assistantRequestBusy;
 	});
 
   promptAssistantImprove?.addEventListener("click", async () => {
+    if (assistantRequestBusy) return;
+    if (assistantSlice.get().draftEdited && !window.confirm("Заменить отредактированный вариант новым ответом?")) return;
     const original = positive?.value.trim() || "";
     const mode = templateID.value;
     const canUseVisualOnlyVideo = mode === "minimax-h3-video" && selectedReferenceMetadata().length > 0;
-    resetPromptAssistantReview();
     if ((!original && !canUseVisualOnlyVideo) || (mode !== "text-to-image" && mode !== "image-to-image" && mode !== "minimax-h3-video")) {
       setPromptAssistantState(mode === "minimax-h3-video"
         ? "Введите промт или добавьте хотя бы одно фото, которое ассистент сможет разобрать."
         : "Сначала выберите схему генерации и введите позитивный промт.", "error");
-      positive?.focus();
       return;
     }
+    const serial = ++assistantRequestSerial;
+    const context = assistantContextKey();
+    assistantContext = context;
+    assistantRequestBusy = true;
+    if (promptAssistantApply) promptAssistantApply.disabled = true;
+    if (promptAssistantStale) promptAssistantStale.hidden = true;
     promptAssistantImprove.disabled = true;
     promptAssistantImprove.classList.add("is-loading");
     assistantSlice.dispatch({ type: "REQUEST_START", original }, (state) => ({
       ...state,
       status: "loading",
+      stale: false,
+      draftEdited: false,
       approved: false,
       original,
       suggestion: "",
@@ -2219,9 +2356,13 @@
       correlationID: "",
       error: "",
     }));
-    setPromptAssistantState(promptAssistantThink?.checked ? "Локальная модель e4b обдумывает и дорабатывает промт..." : "Локальная модель e4b дорабатывает промт...", "loading");
+    setPromptAssistantState(promptAssistantThink?.checked ? "Локальная модель обдумывает и дорабатывает промт..." : "Локальная модель дорабатывает промт...", "loading");
     try {
       await prepareActiveMedia();
+      if (serial !== assistantRequestSerial || context !== assistantContextKey() || original !== positive.value.trim()) {
+        invalidatePromptAssistant();
+        return;
+      }
       const body = new URLSearchParams({
         csrf: form.elements.csrf?.value || "",
         prompt: original,
@@ -2242,6 +2383,10 @@
       promptAssistantReferences().forEach((reference) => {
         body.set(`image_role_${reference.number}`, reference.role);
       });
+      assistantCorrections.forEach((correction, identifier) => {
+        const source = assistantSourceForIdentifier(identifier);
+        if (source?.value && source.value === correction.source) body.set(`image_correction_${source.slot}`, correction.text);
+      });
       const response = await fetch("/generate/prompt-assistant", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
@@ -2249,7 +2394,15 @@
         credentials: "same-origin",
       });
       const payload = await response.json().catch(() => ({}));
+      if (serial !== assistantRequestSerial) return;
+      if (context !== assistantContextKey() || original !== positive.value.trim() || assistantSlice.get().stale || assistantSlice.get().draftEdited) {
+        invalidatePromptAssistant();
+        return;
+      }
       if (!response.ok || !payload.prompt) throw new Error(payload.error || "Не удалось подготовить вариант");
+      payload.references = (Array.isArray(payload.references) ? payload.references : []).map(reference => ({
+        ...reference, source_value: assistantSourceForIdentifier(reference.id)?.value || "",
+      }));
       promptAssistantDraft.value = payload.prompt;
       assistantSlice.dispatch({
         type: "REQUEST_SUCCESS",
@@ -2269,18 +2422,26 @@
       }));
 	  renderPromptAssistantReview(payload, original);
       promptAssistantReview.hidden = false;
-      setPromptAssistantState(`Вариант подготовлен моделью ${payload.model || "e4b"}. Подтвердите или отредактируйте его.`, "review");
-      promptAssistantDraft.focus({ preventScroll: true });
+      promptAssistantApply.disabled = false;
+      setPromptAssistantState(`Вариант подготовлен: ${payload.model || "локальная модель"}. Подтвердите или отредактируйте его.`, "review");
+      if (promptAssistant.open) promptAssistantDraft.focus({ preventScroll: true });
+      markDraftDirty();
     } catch (error) {
+      if (serial !== assistantRequestSerial) return;
       assistantSlice.dispatch({ type: "REQUEST_ERROR", error: error.message }, (state) => ({ ...state, status: "error", error: error.message || "Request failed" }));
       setPromptAssistantState(error.message || "Не удалось подготовить вариант", "error");
     } finally {
+      assistantRequestBusy = false;
       promptAssistantImprove.disabled = false;
       promptAssistantImprove.classList.remove("is-loading");
     }
   });
 
   promptAssistantApply?.addEventListener("click", async () => {
+    if (assistantSlice.get().stale || assistantRequestBusy || assistantContext !== assistantContextKey()) {
+      invalidatePromptAssistant();
+      return;
+    }
     const suggestion = promptAssistantDraft?.value.trim() || "";
     if (!suggestion) {
       setPromptAssistantState("Вариант ассистента пуст. Отредактируйте его или оставьте свой промт.", "error");
@@ -2288,21 +2449,25 @@
     }
 	const edited = suggestion !== assistantSlice.get().suggestion;
 	const requestedDecision = edited ? "edited_after_apply" : "applied";
+    const serial = assistantRequestSerial;
+    const currentPrompt = positive.value;
 	promptAssistantApply.disabled = true;
 	promptAssistantKeep.disabled = true;
 	try {
 	  assistantDecisionPromise = persistPromptAssistantDecision(requestedDecision, suggestion);
 	  const savedDecision = await assistantDecisionPromise;
+      if (serial !== assistantRequestSerial || assistantSlice.get().stale || assistantContext !== assistantContextKey() || currentPrompt !== positive.value) return;
 	  positive.value = suggestion;
 	  assistantSlice.dispatch({ type: "APPLY", edited: savedDecision === "edited_after_apply" }, (state) => ({ ...state, status: "approved", approved: true, action: savedDecision, draftEdited: edited }));
 	  promptAssistantReview.hidden = true;
 	  setPromptAssistantState(savedDecision === "edited_after_apply" ? "Ваш отредактированный вариант применён." : "Вариант ассистента применён.", "approved");
-	  positive.focus({ preventScroll: true });
+      markDraftDirty();
+      promptAssistant.close();
 	} catch (error) {
 	  assistantSlice.dispatch({ type: "DECISION_ERROR", error: error.message }, (state) => ({ ...state, status: "error", approved: false, error: error.message }));
 	  setPromptAssistantState(error.message || "Не удалось сохранить выбор", "error");
 	} finally {
-	  promptAssistantApply.disabled = false;
+	  promptAssistantApply.disabled = assistantSlice.get().stale;
 	  promptAssistantKeep.disabled = false;
 	}
   });
@@ -2311,11 +2476,18 @@
 	promptAssistantApply.disabled = true;
 	promptAssistantKeep.disabled = true;
 	try {
-	  assistantDecisionPromise = persistPromptAssistantDecision("kept_original", assistantSlice.get().original);
-	  await assistantDecisionPromise;
+      if (!assistantSlice.get().stale && assistantSlice.get().correlationID) {
+        assistantDecisionPromise = persistPromptAssistantDecision("kept_original", positive.value.trim());
+        await assistantDecisionPromise;
+      }
+      assistantRequestSerial++;
+      if (assistantSlice.get().stale || !assistantSlice.get().correlationID) resetPromptAssistantReview();
 	  assistantSlice.dispatch({ type: "KEEP_ORIGINAL" }, (state) => ({ ...state, status: "approved", approved: true, action: "kept_original" }));
+	  assistantContext = assistantContextKey();
 	  promptAssistantReview.hidden = true;
 	  setPromptAssistantState("Оставлен ваш исходный промт. Генерацию можно запускать.", "approved");
+      markDraftDirty();
+      promptAssistant.close();
 	} catch (error) {
 	  assistantSlice.dispatch({ type: "DECISION_ERROR", error: error.message }, (state) => ({ ...state, status: "error", approved: false, error: error.message }));
 	  setPromptAssistantState(error.message || "Не удалось сохранить выбор", "error");
@@ -2699,7 +2871,7 @@
       if (templateID.value === "image-to-image" && item.index === 1) item.role.value = "base_scene";
       syncReferenceMap();
       syncGenerationSummary();
-      if (promptAssistantEnabled?.checked) resetPromptAssistantReview();
+      if (promptAssistantEnabled?.checked) invalidatePromptAssistant();
     });
   });
 
@@ -3056,7 +3228,7 @@
     });
     body.set("template_id", selectedChoice()?.dataset.workflowId || "");
     body.set("generation_workflow", selectedGenerationWorkflow()?.dataset.presetId || "");
-    body.set("assistant_requested", assistant.original ? "true" : "false");
+    body.set("assistant_requested", assistant.original || assistant.correlationID ? "true" : "false");
 	body.set("assistant_applied", ["applied", "edited_after_apply"].includes(assistant.action) ? "true" : "false");
 	body.set("assistant_action", assistant.action);
     body.set("assistant_template_used", assistant.original ? (promptAssistantTemplate?.value || "") : "");
@@ -3122,6 +3294,8 @@
     body.set("assistant_think_used", String(Boolean(promptAssistantThink?.checked)));
     body.set("assistant_draft", promptAssistantDraft?.value || "");
     body.set("assistant_references", JSON.stringify(assistantSlice.get().references || []));
+    body.set("assistant_stale", String(Boolean(assistantSlice.get().stale)));
+    body.set("assistant_corrections", JSON.stringify(Object.fromEntries(assistantCorrections)));
     body.set("quality_preset", quality?.value || "");
     body.set("draft_step", String(wizardSlice.get().step || 1));
     body.set("draft_advanced", String(Boolean(generationAdvanced?.open)));
@@ -3227,7 +3401,7 @@
       if (promptAssistantThink) promptAssistantThink.checked = values.assistant_think_used === "true";
       syncMiniMaxAudioReference();
       syncPromptAssistant();
-      if (values.assistant_original_prompt && promptAssistantEnabled?.checked) {
+      if ((values.assistant_original_prompt || values.assistant_suggestion) && promptAssistantEnabled?.checked) {
         let references = [];
         try { references = JSON.parse(values.assistant_references || "[]"); } catch (_) {}
         assistantSlice.dispatch({ type: "REQUEST_START", original: values.assistant_original_prompt });
@@ -3235,8 +3409,15 @@
         if (["applied", "edited_after_apply"].includes(values.assistant_action)) assistantSlice.dispatch({ type: "APPLY", edited: values.assistant_action === "edited_after_apply" });
         else if (values.assistant_action === "kept_original") assistantSlice.dispatch({ type: "KEEP_ORIGINAL" });
         if (promptAssistantDraft) promptAssistantDraft.value = values.assistant_draft || values.assistant_suggestion || "";
+        if (promptAssistantDraft?.value !== values.assistant_suggestion) assistantSlice.dispatch({ type: "DRAFT_EDITED" });
+        try {
+          Object.entries(JSON.parse(values.assistant_corrections || "{}")).forEach(([key, value]) => {
+            if (value && typeof value.text === "string" && typeof value.source === "string") assistantCorrections.set(key, value);
+          });
+        } catch (_) {}
         if (promptAssistantReview) promptAssistantReview.hidden = assistantSlice.get().approved;
         renderPromptAssistantReview({ prompt: promptAssistantDraft?.value, references }, values.assistant_original_prompt);
+        if (values.assistant_stale === "true") invalidatePromptAssistant();
         setPromptAssistantState(assistantSlice.get().approved
           ? "Подтверждённый вариант восстановлен из черновика."
           : "Вариант восстановлен. Проверьте его и примените либо оставьте свой промт.", assistantSlice.get().approved ? "approved" : "review");
@@ -3245,6 +3426,7 @@
       syncGenerationSummary();
       syncImageSlots();
       syncStudioSelection();
+      assistantContext = assistantContextKey();
       showStep(Math.max(1, Math.min(3, Number(values.draft_step) || 2)));
     } finally { restoringDraft = false; }
   };
@@ -3253,6 +3435,10 @@
     draftController = generationModules.draft?.bindUI?.({
       document, window, capture: captureGenerationDraft, apply: applyGenerationDraft,
       hasUnsavedFiles: () => pendingDraftFiles({ all: true }).length > 0,
+      onNavigationBlocked: () => {
+        document.dispatchEvent(new CustomEvent("workspace-overlay", { detail: "draft" }));
+        studio?.show("configure");
+      },
       transport: async (operation, body) => {
         if (body) body.set("csrf", form.elements.csrf?.value || "");
         const response = await fetch(operation === "delete" ? "/generate/draft/delete" : "/generate/draft", {
@@ -4243,7 +4429,9 @@
     }
   };
 
+  let generationPageActive = true;
   const connectGenerationJobEvents = () => {
+    if (!generationPageActive) return;
     generationJobEvents?.close();
     if (!("EventSource" in window)) {
       setJobsConnectionState(false);
@@ -4512,11 +4700,13 @@
     if (event.target?.name in profileValues("balanced") || event.target?.closest(".studio-basic-settings, .studio-models")) clearProfileFeedback();
     syncBatchBuilder();
     syncGenerationSummary();
+    if (!event.target.closest("#prompt-assistant") && assistantContext && assistantContext !== assistantContextKey()) invalidatePromptAssistant();
   });
   form.addEventListener("change", (event) => {
     if (event.target?.name in profileValues("balanced") || event.target?.closest(".studio-basic-settings, .studio-models")) clearProfileFeedback();
     syncBatchBuilder();
     syncGenerationSummary();
+    if (!event.target.closest("#prompt-assistant") && assistantContext && assistantContext !== assistantContextKey()) invalidatePromptAssistant();
   });
   batchParameter?.addEventListener("change", () => syncBatchBuilder({ resetRange: true }));
   batchCompareClose?.addEventListener("click", () => batchCompare?.close?.());
@@ -4581,7 +4771,7 @@
     }
     if (promptAssistantEnabled?.checked && !assistantSlice.get().approved) {
       setPromptAssistantState("Перед генерацией подтвердите вариант ассистента или выберите «Оставить мой промт».", "error");
-      promptAssistant?.scrollIntoView({ block: "center", behavior: "smooth" });
+      openPromptAssistant();
       return;
     }
 	const assistantBeforeLaunch = assistantSlice.get();
@@ -4594,7 +4784,7 @@
 	  } catch (error) {
 		assistantSlice.dispatch({ type: "DECISION_ERROR", error: error.message }, (state) => ({ ...state, status: "error", approved: false, error: error.message }));
 		setPromptAssistantState(error.message || "Не удалось сохранить выбор", "error");
-		promptAssistant?.scrollIntoView({ block: "center", behavior: "smooth" });
+		openPromptAssistant();
 		return;
 	  }
 	}
@@ -4724,6 +4914,15 @@
   window.setInterval(refreshQueueOverview, 5000);
   window.setInterval(() => refreshJobs().catch(() => {}), 30000);
   window.setInterval(() => refreshVariants().catch(() => {}), 30000);
-  window.addEventListener("beforeunload", () => generationJobEvents?.close(), { once: true });
+  window.addEventListener("pagehide", () => {
+    generationPageActive = false;
+    generationJobEvents?.close();
+    generationJobEvents = null;
+  });
+  window.addEventListener("pageshow", event => {
+    if (!event.persisted || generationPageActive) return;
+    generationPageActive = true;
+    refreshJobs().finally(connectGenerationJobEvents);
+  });
   generationStore?.emit?.("page:ready", { root, modules: root.dataset.generationModules });
 })();

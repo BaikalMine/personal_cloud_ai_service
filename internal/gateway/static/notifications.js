@@ -21,6 +21,9 @@
     let pendingLoad = false;
     let preferences = { in_app_enabled: true, success_enabled: true, browser_enabled: false };
     let events = null;
+    let pageActive = true;
+    let lifecycle = 0;
+    let loadController = null;
     const focusTrap = window.AIGatewayDialogFocus?.createFocusTrap?.({ root: panel });
 
     const setConnection = (label, state = "") => {
@@ -129,17 +132,22 @@
     };
 
     const load = async () => {
+      if (!pageActive) return;
       if (loading) {
         pendingLoad = true;
         return;
       }
       loading = true;
+      const cycle = lifecycle;
+      loadController = new AbortController();
       try {
         const response = await fetch("/notifications?limit=20", {
           credentials: "same-origin",
           cache: "no-store",
+          signal: loadController.signal,
         });
         const payload = await response.json().catch(() => ({}));
+        if (!pageActive || cycle !== lifecycle) return;
         if (!response.ok) throw new Error(payload.error || "Не удалось загрузить уведомления");
         const items = Array.isArray(payload.notifications) ? payload.notifications : [];
         preferences = payload.preferences || preferences;
@@ -153,6 +161,7 @@
         initialized = true;
         render(items, payload.summary || {});
       } catch (error) {
+        if (!pageActive || cycle !== lifecycle) return;
         setConnection("Обновления временно недоступны", "offline");
         if (list && !initialized) {
           const empty = document.createElement("p");
@@ -162,6 +171,7 @@
         }
       } finally {
         loading = false;
+        loadController = null;
         if (pendingLoad) {
           pendingLoad = false;
           load();
@@ -237,6 +247,7 @@
     });
 
     const connect = () => {
+      if (!pageActive) return;
       if (!("EventSource" in window)) {
         setConnection("Обновляем периодически", "offline");
         return;
@@ -259,8 +270,22 @@
     };
 
     load().finally(connect);
-    window.setInterval(load, 30000);
-    window.addEventListener("beforeunload", () => events?.close(), { once: true });
+    let poll = window.setInterval(load, 30000);
+    window.addEventListener("pagehide", () => {
+      pageActive = false;
+      lifecycle++;
+      pendingLoad = false;
+      window.clearInterval(poll);
+      events?.close();
+      events = null;
+      loadController?.abort();
+    });
+    window.addEventListener("pageshow", event => {
+      if (!event.persisted || pageActive) return;
+      pageActive = true;
+      load().finally(connect);
+      poll = window.setInterval(load, 30000);
+    });
   }
 
   const settings = document.querySelector("[data-notification-settings]");

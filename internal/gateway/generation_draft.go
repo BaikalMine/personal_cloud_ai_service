@@ -61,7 +61,7 @@ func generationDraftValues(form url.Values) (map[string]string, error) {
 	for name, entries := range form {
 		allowed := allowedGenerationRecipeField(name) || allowedGenerationReferenceJobField(name)
 		switch name {
-		case "assistant_requested", "assistant_applied", "assistant_action", "assistant_template_used", "assistant_think_used", "assistant_original_prompt", "assistant_suggestion", "assistant_enabled", "assistant_draft", "assistant_references", "correlation_id", "quality_preset", "draft_step", "draft_advanced", "batch_enabled", "batch_mode", "batch_count", "batch_parameter", "batch_from", "batch_to":
+		case "assistant_requested", "assistant_applied", "assistant_action", "assistant_template_used", "assistant_think_used", "assistant_original_prompt", "assistant_suggestion", "assistant_enabled", "assistant_draft", "assistant_references", "assistant_stale", "assistant_corrections", "correlation_id", "quality_preset", "draft_step", "draft_advanced", "batch_enabled", "batch_mode", "batch_count", "batch_parameter", "batch_from", "batch_to":
 			allowed = true
 		}
 		if !allowed || len(entries) == 0 {

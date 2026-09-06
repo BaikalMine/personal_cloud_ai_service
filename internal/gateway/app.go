@@ -43,6 +43,7 @@ var staticJavaScriptAssetPaths = []string{
 	"static/lora-training.js",
 	"static/lora-dataset-state.js",
 	"static/lora-caption-state.js",
+	"static/lora-caption-panel.js",
 	"static/lora-dataset-editor.js",
 	"static/vendor/lucide.js",
 	"static/generate.js",
@@ -73,15 +74,17 @@ var staticJavaScriptAssets = func() map[string]string {
 }()
 
 var staticCSSAssets = map[string]string{
-	"/static/theme.css":         "static/theme.css",
-	"/static/style.css":         "static/style.css",
-	"/static/controls.css":      "static/controls.css",
-	"/static/studio.css":        "static/studio.css",
-	"/static/shell.css":         "static/shell.css",
-	"/static/notifications.css": "static/notifications.css",
+	"/static/theme.css":                "static/theme.css",
+	"/static/style.css":                "static/style.css",
+	"/static/controls.css":             "static/controls.css",
+	"/static/studio.css":               "static/studio.css",
+	"/static/generation-assistant.css": "static/generation-assistant.css",
+	"/static/lora-caption-panel.css":   "static/lora-caption-panel.css",
+	"/static/shell.css":                "static/shell.css",
+	"/static/notifications.css":        "static/notifications.css",
 }
 
-var frontendAssetPaths = append([]string{"static/theme.css", "static/style.css", "static/controls.css", "static/studio.css", "static/shell.css", "static/notifications.css"}, staticJavaScriptAssetPaths...)
+var frontendAssetPaths = append([]string{"static/theme.css", "static/style.css", "static/controls.css", "static/studio.css", "static/generation-assistant.css", "static/lora-caption-panel.css", "static/shell.css", "static/notifications.css"}, staticJavaScriptAssetPaths...)
 
 type Templates struct {
 	*template.Template

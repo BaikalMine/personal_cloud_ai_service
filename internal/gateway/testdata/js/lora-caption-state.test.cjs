@@ -1,7 +1,17 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { matches, latest, reconcile, createPoller } = require("../../static/lora-caption-state.js");
+const { captionBody, withTrigger, matches, latest, reconcile, createPoller } = require("../../static/lora-caption-state.js");
 const copy = (value) => JSON.parse(JSON.stringify(value));
+test("caption editor keeps a single leading trigger without removing unrelated words", () => {
+  assert.equal(captionBody("person_x, a portrait", "person_x"), "a portrait");
+  assert.equal(captionBody("PERSON_X: a portrait", "person_x"), "a portrait");
+  assert.equal(captionBody("person_xyz in daylight", "person_x"), "person_xyz in daylight");
+  assert.equal(captionBody("a photo of person_x", "person_x"), "a photo of person_x");
+  assert.equal(withTrigger("person_x, a portrait ", "person_x"), "person_x, a portrait ");
+  assert.equal(withTrigger("person_x, ", "person_x"), "");
+  assert.equal(withTrigger("  ", "person_x"), "");
+  assert.equal(withTrigger("blue coat", ""), "blue coat");
+});
 const fixture = () => {
   const manifest = { settings: { trigger_word: "person_x", concept_type: "character" }, images: [{ id: "frame", asset_id: "asset", caption: "", caption_revision: "first" }] };
   const job = { job_id: "job", dataset_id: "set", image_id: "frame", created_at: "2026-09-05T12:00:00Z", state: "completed", caption: "person_x, light hair", source: { image: copy(manifest.images[0]), trigger_word: "person_x", concept_type: "character" } };

@@ -430,6 +430,10 @@ func (a *App) promptAssistantImageReferences(ctx context.Context, userID int64, 
 		if filename == "" {
 			continue
 		}
+		correction, err := promptAssistantImageCorrection(r, number)
+		if err != nil {
+			return nil, err
+		}
 		if err := a.validateGenerationImage(filename, userID); err != nil {
 			return nil, err
 		}
@@ -462,7 +466,7 @@ func (a *App) promptAssistantImageReferences(ctx context.Context, userID int64, 
 			// Keep the assistant's <Picture N> identifiers in that same order.
 			referenceNumber = len(references) + 1
 		}
-		references = append(references, promptassistant.ImageReference{Number: referenceNumber, Role: role, MIMEType: mimeType, Image: image})
+		references = append(references, promptassistant.ImageReference{Number: referenceNumber, Role: role, MIMEType: mimeType, Image: image, Correction: correction})
 	}
 	return references, nil
 }
@@ -476,4 +480,15 @@ func promptAssistantImageRole(r *http.Request, number int) (promptassistant.Imag
 		return "", fmt.Errorf("некорректная роль для изображения %d", number)
 	}
 	return role, nil
+}
+
+func promptAssistantImageCorrection(r *http.Request, number int) (string, error) {
+	value := strings.TrimSpace(r.Form.Get(fmt.Sprintf("image_correction_%d", number)))
+	if utf8.RuneCountInString(value) > 500 {
+		return "", fmt.Errorf("уточнение для фото %d должно содержать не более 500 символов", number)
+	}
+	if err := validateGenerationPrompt(value); err != nil {
+		return "", err
+	}
+	return value, nil
 }

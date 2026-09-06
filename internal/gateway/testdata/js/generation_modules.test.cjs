@@ -193,6 +193,18 @@ test("generation batches expose controlled parameters for every supported family
   assert.equal(minimax.find((item) => item.name === "video_sharpen_strength").max, 3);
 });
 
+test("stale assistant answers retain their text but cannot be approved", () => {
+  let state = assistant.reduce(undefined, { type: "REQUEST_START", original: "My original" });
+  state = assistant.reduce(state, { type: "REQUEST_SUCCESS", suggestion: "Proposal", correlationID: "old" });
+  state = assistant.reduce(state, { type: "DRAFT_EDITED" });
+  state = assistant.reduce(state, { type: "INVALIDATE" });
+  assert.equal(state.original, "My original");
+  assert.equal(state.suggestion, "Proposal");
+  assert.equal(state.draftEdited, true);
+  assert.equal(assistant.reduce(state, { type: "APPLY" }).approved, false);
+  assert.equal(assistant.reduce(state, { type: "KEEP_ORIGINAL" }).stale, false);
+});
+
 test("generation batches enforce quota, distinct values, and two-result comparison", () => {
   const options = batch.parameterOptions({ family: "krea2", templateID: "text-to-image" });
   assert.equal(batch.validate({ enabled: true, mode: "seeds", count: 4 }, options, { totalLimit: 3, totalRemaining: 3 }).valid, false);

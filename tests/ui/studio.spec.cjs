@@ -83,7 +83,7 @@ test("inactive references stay in the draft but not in generation or assistant r
     assistantBody = new URLSearchParams(route.request().postData());
     return route.fulfill({ json: { prompt: "A person in a sunny garden.", model: "preview" } });
   });
-  await page.locator("#prompt-assistant-enabled").check();
+  await page.locator("#prompt-assistant-open").click();
   await page.locator("#prompt-assistant-improve").click();
   await expect(page.locator("#prompt-assistant-review")).toBeVisible();
   expect(assistantBody.has("input_image_3")).toBe(false);

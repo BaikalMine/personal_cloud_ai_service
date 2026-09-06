@@ -21,13 +21,14 @@ func TestGenerationDraftValues(t *testing.T) {
 		"positive_prompt": {"  unfinished\n"}, "lora_1": {"Krea2/model.safetensors"},
 		"lora_model_strength_1": {"0,"}, "video_sage_attention": {"false"}, "batch_count": {"12"},
 		"assistant_enabled": {"true"}, "assistant_draft": {"edited suggestion"}, "image_role_4": {"style"},
+		"assistant_stale": {"true"}, "assistant_corrections": {`{"Picture 1":{"text":"light hair","source":"owned.png"}}`},
 		"csrf": {"secret"}, "client_request_id": {"request"}, "input_audio": {"private/path"},
 		"input_image_2": {"private/path"}, "user_id": {"99"}, "unrecognized": {"value"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(values) != 8 || values["positive_prompt"] != "  unfinished\n" || values["lora_model_strength_1"] != "0," {
+	if len(values) != 10 || values["positive_prompt"] != "  unfinished\n" || values["lora_model_strength_1"] != "0," || values["assistant_stale"] != "true" || !strings.Contains(values["assistant_corrections"], "light hair") {
 		t.Fatalf("draft fields: %#v", values)
 	}
 	if _, err := generationDraftValues(url.Values{"positive_prompt": {strings.Repeat("x", (64<<10)+1)}}); err == nil {

@@ -113,9 +113,17 @@
         return true;
       } catch (error) { publish("error", error.message); return false; }
     };
-    return { load, markDirty, flush, useRemote, keepLocal, remove, snapshot };
+    const settle = async () => {
+      if (!ready || status === "conflict") return false;
+      // A save already in flight may not contain the most recent edit.
+      while (inFlight || epoch !== savedEpoch) {
+        if (!await flush()) return false;
+      }
+      return true;
+    };
+    return { load, markDirty, flush, settle, useRemote, keepLocal, remove, snapshot };
   };
-  const bindUI = ({ document, window, transport, capture, apply, onSaved = () => {}, hasUnsavedFiles = () => false }) => {
+  const bindUI = ({ document, window, transport, capture, apply, onSaved = () => {}, hasUnsavedFiles = () => false, onNavigationBlocked = () => {} }) => {
     const bar = document.getElementById("generation-draft-bar");
     if (!bar) return null;
     const status = document.getElementById("generation-draft-status");
@@ -166,6 +174,36 @@
     });
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden") controller.flush();
+    });
+    let navigating = false;
+    document.addEventListener("click", async (event) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const link = event.target.closest?.("a[href]");
+      if (!link || link.hasAttribute("download") || (link.target && link.target !== "_self")) return;
+      const destination = new URL(link.href, window.location.href);
+      if (destination.origin !== window.location.origin || !["http:", "https:"].includes(destination.protocol)) return;
+      if (destination.pathname === window.location.pathname && destination.search === window.location.search && destination.hash) return;
+      if (!controller.snapshot().dirty && !hasUnsavedFiles()) return;
+      event.preventDefault();
+      if (navigating) return;
+      navigating = true;
+      const reveal = (message = "") => {
+        onNavigationBlocked();
+        const disclosure = bar.closest("details");
+        if (disclosure) disclosure.open = true;
+        if (message) status.textContent = message;
+        bar.scrollIntoView({ block: "nearest" });
+        (controller.snapshot().status === "conflict" ? remote : save).focus();
+      };
+      try {
+        if (!await controller.settle()) { reveal(); return; }
+        if (hasUnsavedFiles()) {
+          reveal("Материалы ещё не сохранены. Дождитесь загрузки или удалите их перед переходом.");
+          return;
+        }
+        window.location.assign(destination.href);
+      } catch (error) { reveal(error.message || "Не удалось сохранить черновик перед переходом."); }
+      finally { navigating = false; }
     });
     return controller;
   };

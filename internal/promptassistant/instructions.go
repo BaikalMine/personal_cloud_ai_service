@@ -41,13 +41,14 @@ type VideoContext struct {
 	VideoReference  bool
 }
 
-// ImageReference describes the role a user assigned to a numbered image in an
-// image-editing request. The prompt assistant receives roles, not image bytes.
+// ImageReference keeps each attached image and the user's observations scoped
+// to the same numbered source.
 type ImageReference struct {
-	Number   int
-	Role     ImageReferenceRole
-	MIMEType string `json:"-"`
-	Image    []byte `json:"-"`
+	Number     int
+	Role       ImageReferenceRole
+	MIMEType   string `json:"-"`
+	Image      []byte `json:"-"`
+	Correction string `json:"correction,omitempty"`
 }
 
 type ImageReferenceRole string

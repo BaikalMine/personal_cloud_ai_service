@@ -5,6 +5,22 @@
   if (root) root.AIGatewayLoraCaptions = api;
 })(typeof window !== "undefined" ? window : null, function (createID) {
   const active = (job) => job && ["queued", "running"].includes(job.state);
+  const captionBody = (caption, trigger) => {
+    const text = String(caption || "");
+    const start = text.trimStart();
+    const word = String(trigger || "").trim();
+    if (word && start.slice(0, word.length).toLowerCase() === word.toLowerCase() &&
+        (!start[word.length] || /[\s,.;:!?-]/u.test(start[word.length]))) {
+      return start.slice(word.length).replace(/^[\s,.;:!?-]+/u, "");
+    }
+    return text;
+  };
+  const withTrigger = (body, trigger) => {
+    const text = captionBody(body, trigger);
+    if (!text.trim()) return "";
+    const word = String(trigger || "").trim();
+    return word ? `${word}, ${text.trimStart()}` : text;
+  };
   const matches = (manifest, item, job) => {
     const source = job?.source;
     return Boolean(source && item && !item.excluded && item.id === source.image.id &&
@@ -64,5 +80,5 @@
     };
     return { state, select, refresh, resume: () => { disposed = false; select(state.datasetID, true); }, dispose: () => { disposed = true; epoch++; stop(); } };
   };
-  return { active, matches, latest, reconcile, createPoller };
+  return { active, captionBody, withTrigger, matches, latest, reconcile, createPoller };
 });

@@ -16,6 +16,7 @@
     usage: {},
     draftEdited: false,
     error: "",
+    stale: false,
     ...overrides,
   });
 
@@ -38,9 +39,12 @@
         };
       case "REQUEST_ERROR":
         return { ...state, status: "error", error: String(action.error || "Request failed") };
+      case "INVALIDATE":
+        return { ...state, stale: true, approved: false, action: "", status: "stale" };
 		case "DECISION_ERROR":
 		  return { ...state, status: "error", approved: false, error: String(action.error || "Decision was not saved") };
       case "APPLY":
+		if (state.stale) return state;
 		return {
 		  ...state,
 		  status: "approved",
@@ -48,7 +52,7 @@
 		  action: action.edited || state.draftEdited ? "edited_after_apply" : "applied",
 		};
       case "KEEP_ORIGINAL":
-        return { ...state, status: "approved", approved: true, action: "kept_original" };
+        return { ...state, status: "approved", approved: true, stale: false, action: "kept_original" };
 		case "DRAFT_EDITED":
 		  return { ...state, draftEdited: true };
       case "PROMPT_EDITED":

@@ -101,8 +101,22 @@ unframed option row for processing modules, not a nested card.
 - Device upload and personal-library selection are two sources for the same reference slot. Slot count, roles and exact settings come from workflow capabilities rather than duplicated model-specific UI.
 - A mode change retains inactive media and its role in the draft with a visible notice. It must exclude that media from generation, preflight and assistant payloads. Only an explicit remove action clears a source.
 - Preflight, assistant and launch share coalesced media uploads. A changed selection invalidates an in-flight preparation or preflight. Repeated submit events may not create duplicate jobs.
+- Internal same-tab navigation waits for the latest dirty draft, including edits made during an in-flight save. Save errors, conflicts and unsaved files keep the form open and reveal its recovery controls. Native unload warnings remain for reload/closing; new-tab, download and fragment links keep their native behavior.
 - The previous result remains visible while preparing the next job. The complete cross-job task workspace and the compact recent-results strip remain separate roadmap work, not implied by the existing generation history.
 - The primary path uses user-facing intent and result language. Internal branch and node names belong in exact settings or diagnostics, not in the main decision flow.
+
+## Contextual Assistant Contract
+
+- Generation assistance opens from the prompt in a native dialog. The active workflow selects the video profile. The original text is changed only after an explicit Apply action; closing the dialog preserves the editable proposal.
+- The panel lists active source images and their roles. Audio/video entries describe available workflow materials, not a promise that the assistant inspected their contents.
+- A changed source, mode, model or original prompt invalidates the old proposal without deleting it. A late response must not overwrite new input or steal focus from a closed panel.
+- Per-photo corrections belong to the source asset as well as its picture number. Neither the submitted correction nor the visible correction field may inherit a previous image's observation after replacement.
+- `generation-assistant.css` owns the generation panel. Header and actions remain outside the scrolling body; diff and technical metadata are secondary disclosures.
+- The LoRA caption panel uses the existing dataset controller and durable caption jobs. It never creates a second dataset or uploads an already saved image again. Navigation selects a stable image ID, not a captured array position.
+- The complete photo remains visible with `object-fit: contain`. Trigger and editable caption body are separate in the panel but stored as one trigger-first caption. Clearing the body leaves an empty caption eligible for the empty-only series.
+- Manual caption edits update the caption revision. A response for an older revision, asset or trigger cannot replace the manual caption. Retry/cancel targets the selected job; next/previous and the filmstrip do not start requests.
+- Caption errors and save/conflict states remain visible inside the panel. Closing or switching frames retains edits. The series summary names the running frame and distinguishes errors, cancelled, skipped and unapplied responses.
+- `lora-caption-panel.js` owns presentation only, with dataset state and requests remaining in the editor/controller. `lora-caption-panel.css` owns its layout; shared controls and theme tokens stay authoritative.
 
 ## Media Library Contract
 

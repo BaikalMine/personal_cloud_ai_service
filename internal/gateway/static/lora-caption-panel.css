@@ -1,0 +1,40 @@
+.caption-frame-panel { width: min(1180px, calc(100vw - 48px)); max-width: none; height: min(880px, calc(100dvh - 48px)); max-height: none; padding: 0; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface); color: var(--color-text); }
+.caption-frame-panel[open] { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+.caption-frame-panel::backdrop { background: var(--color-overlay); }
+.caption-frame-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 24px; border-bottom: 1px solid var(--color-border); }
+.caption-frame-header h2 { margin: 0; font-size: 20px; }
+.caption-frame-header p { margin: 4px 0 0; font-size: 13px; color: var(--color-text-secondary); overflow-wrap: anywhere; }
+.caption-frame-content { min-height: 0; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(320px, 1fr); }
+.caption-frame-media { min-height: 0; min-width: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; padding: 16px; gap: 12px; background: var(--color-input); }
+.caption-frame-image { min-height: 0; min-width: 0; position: relative; }
+.caption-frame-image img { position: absolute; width: 100%; height: 100%; object-fit: contain; }
+.caption-frame-strip { min-width: 0; display: flex; gap: 8px; overflow-x: auto; padding: 4px; }
+.caption-frame-thumb { position: relative; flex: 0 0 56px; width: 56px; height: 72px; padding: 3px; border-radius: 4px; border: 2px solid transparent; background: var(--color-surface); }
+.caption-frame-thumb[aria-pressed="true"] { border-color: var(--color-action); }
+.caption-frame-thumb img { width: 100%; height: 100%; object-fit: contain; }
+.caption-frame-thumb span { position: absolute; left: 0; bottom: 0; min-width: 20px; padding: 1px 3px; background: var(--color-surface); color: var(--color-text); font-size: 12px; }
+.caption-frame-editor { min-width: 0; min-height: 0; overflow-y: auto; padding: 24px; border-left: 1px solid var(--color-border); }
+.caption-frame-meta { margin: 0 0 20px; color: var(--color-text-secondary); font-size: 13px; }
+.caption-frame-editor label { display: block; margin-bottom: 8px; font-size: 14px; font-weight: 600; }
+.caption-frame-trigger { display: block; overflow-wrap: anywhere; padding: 12px; background: var(--color-input); border: 1px solid var(--color-border-control); border-bottom: 0; border-radius: 6px 6px 0 0; color: var(--color-action); font-size: 14px; }
+.caption-frame-trigger.is-missing { color: var(--color-danger); }
+.caption-frame-editor textarea { display: block; width: 100%; min-height: 224px; margin: 0; border-radius: 0 0 6px 6px; font-size: 15px; line-height: 1.6; resize: vertical; }
+.caption-frame-status { margin: 12px 0 20px; font-size: 13px; color: var(--color-text-secondary); }
+.caption-frame-status.is-error, .caption-frame-save.is-error { color: var(--color-danger); }
+.caption-frame-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 24px; border-top: 1px solid var(--color-border); }
+.caption-frame-actions > div { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.caption-frame-save { color: var(--color-text-secondary); font-size: 12px; }
+.lora-dataset-media button { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.lora-dataset-media button:hover { background: transparent; }
+.lora-dataset-media button:focus-visible { outline-offset: -3px; }
+@media (max-width: 759px) {
+  .caption-frame-panel { width: 100vw; height: 100dvh; margin: 0; border: 0; border-radius: 0; }
+  .caption-frame-content { display: block; overflow-y: auto; }
+  .caption-frame-media { height: 320px; }
+  .caption-frame-editor { padding: 16px; overflow: visible; border-left: 0; border-top: 1px solid var(--color-border); }
+  .caption-frame-header, .caption-frame-actions { padding: 12px 16px; }
+  .caption-frame-actions { padding-bottom: max(12px, env(safe-area-inset-bottom)); gap: 8px; }
+  .caption-frame-actions > div:last-child { flex-wrap: wrap; justify-content: flex-end; gap: 4px 8px; }
+  .caption-frame-save { max-width: 160px; }
+  .caption-frame-editor textarea { font-size: 16px; min-height: 160px; }
+}

@@ -219,6 +219,13 @@ func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt
 			return Result{}, fmt.Errorf("%w: формат изображения %d", ErrUnsupportedImage, reference.Number)
 		}
 		payload.Messages[1].Images = append(payload.Messages[1].Images, base64.StdEncoding.EncodeToString(reference.Image))
+		if note := strings.TrimSpace(reference.Correction); note != "" {
+			metadata, _ := json.Marshal(struct {
+				Picture    int    `json:"picture"`
+				Correction string `json:"user_correction"`
+			}{reference.Number, note})
+			payload.Messages[1].Content += "\n\nReference-specific user observation (only for this picture; do not transfer it to another source):\n" + string(metadata)
+		}
 	}
 	if len(payload.Messages[1].Images) > 0 {
 		if !c.VisionConfigured() {

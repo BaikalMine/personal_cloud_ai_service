@@ -18,6 +18,7 @@
 {{template "nav" .}}
 <main class="page generation-page" id="main-content" data-comfy-generation data-workflow-capabilities-url="/generate/capabilities" data-selected-workflow="{{.SelectedWorkflow}}" data-preview-output="{{.PreviewOutputURL}}" data-generation-retention="{{.Retention.GenerationHistoryLabel}}" data-media-retention="{{.Retention.GenerationMediaLabel}}" data-generation-image-daily-limit="{{.GenerationQuota.Image.DailyLimit}}" data-generation-image-daily-remaining="{{.GenerationQuota.Image.DailyRemaining}}" data-generation-image-total-limit="{{.GenerationQuota.Image.TotalLimit}}" data-generation-image-total-remaining="{{.GenerationQuota.Image.TotalRemaining}}" data-generation-video-daily-limit="{{.GenerationQuota.Video.DailyLimit}}" data-generation-video-daily-remaining="{{.GenerationQuota.Video.DailyRemaining}}" data-generation-video-total-limit="{{.GenerationQuota.Video.TotalLimit}}" data-generation-video-total-remaining="{{.GenerationQuota.Video.TotalRemaining}}" data-max-video-generation-quality="{{.MaxVideoGenerationQuality}}">
   <link rel="stylesheet" href="/static/studio.css?v={{.AssetVersion}}">
+  <link rel="stylesheet" href="/static/generation-assistant.css?v={{.AssetVersion}}">
   <header class="studio-heading">
     <h1>Создать</h1>
     <a class="button ghost" href="/gallery"><i data-lucide="images" aria-hidden="true"></i>Мои результаты</a>
@@ -33,7 +34,7 @@
       <div id="studio-editor">
         {{template "studio_scenarios" .}}
         {{template "studio_prompt" .}}
-        {{template "studio_assistant" .}}
+        <div class="studio-assistant-launch"><button type="button" class="button ghost" id="prompt-assistant-open" aria-haspopup="dialog" aria-controls="prompt-assistant"><i data-lucide="sparkles" aria-hidden="true"></i>Улучшить описание</button><span id="prompt-assistant-launch-state" role="status"></span></div>
         {{template "studio_video_mode" .}}
         {{template "studio_sources" .}}
         <p class="studio-held-media" id="studio-held-media" role="status" hidden></p>
@@ -68,6 +69,7 @@
         </details>
       </div>
       {{template "studio_dock" .}}
+      {{template "studio_assistant" .}}
       <dialog class="studio-settings ui-dialog" id="studio-settings" aria-labelledby="studio-settings-title">
         <header class="studio-settings-heading"><h2 id="studio-settings-title">Параметры и обработка</h2><button type="button" class="button ghost icon-button" id="studio-settings-close" aria-label="Закрыть параметры"><i data-lucide="x" aria-hidden="true"></i></button></header>
         {{template "studio_advanced" .}}

@@ -151,7 +151,7 @@
           <summary><span>Мини-гайд: генерация из текста</span><small>Промт, качество, LoRA и апскейл: четыре практические подсказки.</small></summary>
           <div class="workflow-mini-guide-grid">
             <section><strong>Промт задаёт сцену</strong><p>Сначала назовите главный объект, затем действие или позу, окружение, свет и стиль. Один чёткий сюжет даёт более стабильный результат, чем несколько несвязанных идей в одной строке.</p></section>
-            <section><strong>Негативный промт</strong><p>Используйте его для постоянных нежелательных дефектов: размытия, лишних конечностей, текста или водяных знаков. Не повторяйте там то, что уже попросили в позитивном промте.</p></section>
+            <section><strong>Негативный промпт</strong><p>Для Krea2 по тексту негативный промпт не нужен. Опишите нужную сцену, композицию, свет и детали в основном промпте.</p></section>
             <section><strong>Качество и размер</strong><p>Начните с «Оптимального» профиля. Повышайте мегапиксели только для финального кадра: это увеличивает детализацию, время генерации и потребление видеопамяти.</p></section>
             <section><strong>LoRA и апскейл</strong><p>Подключайте LoRA по одной и начинайте с рекомендованной силы. Апскейл улучшает финальные детали, но не исправляет исходную композицию: сначала добейтесь удачного базового изображения.</p></section>
           </div>
@@ -181,7 +181,7 @@
             <section><strong>REF2VA · свободные референсы</strong><p>Этот режим тоже создаёт видео по промту и может работать без файлов. До четырёх фото передают внешность, одежду, предметы, стиль или сцену; видео — движение и работу камеры; аудио — голос, музыку или окружение.</p></section>
             <section><strong>Размер кадра</strong><p>При наличии Фото 1 его пропорции используются по умолчанию. Качество 480–1440 ограничивает длинную сторону, а обе стороны выравниваются до 32 px. Без фото выберите формат кадра вручную.</p></section>
             <section><strong>Модели и Turbo</strong><p>Gateway сам подключает подходящую внутреннюю ветку для выбранного способа. Внешний Turbo опционален; модели со встроенным Turbo получают подходящее число шагов автоматически.</p></section>
-            <section><strong>Промт-ассистент</strong><p>Ассистент получает тот же режим и порядок файлов, что MiniMax: точные первый и последний кадры либо до четырёх свободных фото. Он анализирует каждый материал и собирает один редактируемый план. Для видео и аудио явно напишите, что брать: движение, сцену, голос, музыку или окружение.</p></section>
+            <section><strong>Промпт-ассистент</strong><p>Ассистент учитывает режим MiniMax: точные первый и последний кадры либо до четырёх свободных референсов. Он анализирует выбранные фото и собирает редактируемый план. Для аудио и видео укажите, что переносить: голос, музыку, движение или сцену. Их наличие учитывается, но содержимое этих файлов ассистент не анализирует.</p></section>
             <section><strong>Длительность и память</strong><p>5–15 секунд — основной проверенный диапазон; более длинные ролики экспериментальны и заметно тяжелее. Memory Optimization и очистка VRAM включены. Low VRAM Attention и Chunk FeedForward из v5 оставлены опциональными для случаев нехватки памяти.</p></section>
             <section><strong>RIFE, RTX и Sharpen</strong><p>RIFE добавляет промежуточные кадры, RTX увеличивает разрешение, Sharpen подчёркивает детали. Они выполняются именно в таком порядке. Все этапы опциональны: сначала получите удачный базовый ролик, затем включайте нужные улучшения.</p></section>
             <section><strong>Звук и экспорт</strong><p>MiniMax генерирует финальную аудиодорожку вместе с видео. Аудиофайл или звук видеореференса используются как ориентир в режиме свободных референсов. Gateway сохраняет H.264 с yuv420p, чтобы ролик открывался в браузере и на Android.</p></section>
@@ -224,31 +224,29 @@
 {{end}}
 
 {{define "studio_assistant"}}
-<section class="prompt-assistant" id="prompt-assistant" aria-live="polite">
-        <label class="prompt-assistant-toggle ui-choice"><input type="checkbox" id="prompt-assistant-enabled"><span><strong>Промт-ассистент</strong><small id="prompt-assistant-description">Локальная модель подготовит вариант, но генерация начнётся только после вашего подтверждения.</small></span></label>
-        <div class="prompt-assistant-controls" id="prompt-assistant-controls" hidden>
-          <label class="ui-field"><span class="ui-field-label">Шаблон ассистента</span><select id="prompt-assistant-template"><option value="workflow-default">Универсальный</option><option value="photographic">Редакционная фотография</option><option value="realistic">Естественный реализм</option><option value="anime">Иллюстрация и аниме</option><option value="nsfw">NSFW (Контент для взрослых)</option><option value="flux-edit" data-image-only>Перенос внешности и редактирование</option><option value="minimax-h3-fl2va" data-video-only data-video-mode="frames">MiniMax H3 · T2VA / I2VA / FL2VA</option><option value="minimax-h3-ref2va" data-video-only data-video-mode="references">MiniMax H3 REF2VA · свободные референсы</option></select></label>
-          <label class="prompt-assistant-think"><input type="checkbox" id="prompt-assistant-think"><span>Режим рассуждений</span></label>
-          <button type="button" class="button ghost" id="prompt-assistant-improve">Подготовить вариант</button>
-          <p class="prompt-assistant-state" id="prompt-assistant-state">Вариант будет создан локальной моделью e4b и затем выгружен из видеопамяти.</p>
-          <div class="prompt-assistant-review" id="prompt-assistant-review" hidden>
-            <header class="prompt-assistant-review-heading"><div><span>Проверка варианта</span><strong>Что понял и изменил ассистент</strong></div><small id="prompt-assistant-review-meta"></small></header>
-            <section class="prompt-assistant-reference-review" id="prompt-assistant-reference-review" hidden aria-labelledby="prompt-assistant-reference-title">
-              <div class="prompt-assistant-section-heading"><h3 id="prompt-assistant-reference-title">Референсы</h3><span id="prompt-assistant-reference-count"></span></div>
-              <ol id="prompt-assistant-reference-list"></ol>
-            </section>
-            <section class="prompt-assistant-diff" aria-labelledby="prompt-assistant-diff-title">
-              <div class="prompt-assistant-section-heading"><h3 id="prompt-assistant-diff-title">Сравнение промта</h3><span><i class="is-removed"></i>Убрано <i class="is-added"></i>Добавлено</span></div>
-              <div class="prompt-assistant-diff-grid">
-                <article><h4>Ваш текст</h4><div id="prompt-assistant-diff-original"></div></article>
-                <article><h4>Вариант ассистента</h4><div id="prompt-assistant-diff-suggestion"></div></article>
-              </div>
-            </section>
-            <label class="ui-field prompt-assistant-draft"><span class="ui-field-label">Итоговый вариант</span><textarea id="prompt-assistant-draft" rows="7" maxlength="4000"></textarea><small id="prompt-assistant-draft-limit">Можно изменить перед применением. До 4000 символов.</small></label>
-            <div class="prompt-assistant-actions"><button type="button" class="button" id="prompt-assistant-apply">Применить в промт</button><button type="button" class="button ghost" id="prompt-assistant-keep">Оставить мой промт</button></div>
-          </div>
-        </div>
+<dialog class="assistant-panel" id="prompt-assistant" aria-labelledby="prompt-assistant-title">
+  <header class="assistant-panel-header"><div><h2 id="prompt-assistant-title">Улучшить описание</h2><p id="prompt-assistant-mode"></p></div><button type="button" class="button ghost icon-button" id="prompt-assistant-close" aria-label="Закрыть ассистента" title="Закрыть"><i data-lucide="x" aria-hidden="true"></i></button></header>
+  <input type="checkbox" id="prompt-assistant-enabled" hidden>
+  <div class="assistant-panel-body" id="prompt-assistant-controls">
+    <p id="prompt-assistant-description" class="assistant-description"></p>
+    <section class="assistant-sources" id="prompt-assistant-sources" aria-label="Материалы для ассистента" hidden><ol id="prompt-assistant-source-list"></ol></section>
+    <details class="assistant-disclosure" id="prompt-assistant-options"><summary>Настройки ассистента</summary><div>
+      <label class="ui-field" id="prompt-assistant-template-field"><span class="ui-field-label">Стиль описания</span><select id="prompt-assistant-template"><option value="workflow-default">По текущей задаче</option><option value="photographic">Редакционная фотография</option><option value="realistic">Естественный реализм</option><option value="anime">Иллюстрация и аниме</option><option value="nsfw">NSFW (Контент для взрослых)</option><option value="flux-edit" data-image-only>Перенос внешности и редактирование</option><option value="minimax-h3-fl2va" data-video-only data-video-mode="frames">MiniMax H3 · T2VA / I2VA / FL2VA</option><option value="minimax-h3-ref2va" data-video-only data-video-mode="references">MiniMax H3 REF2VA · свободные референсы</option></select></label>
+      <label class="ui-choice"><input type="checkbox" id="prompt-assistant-think"><span>Режим рассуждений</span></label>
+    </div></details>
+    <div class="assistant-request"><button type="button" class="button ghost" id="prompt-assistant-improve"><i data-lucide="sparkles" aria-hidden="true"></i>Подготовить вариант</button><p class="assistant-state" id="prompt-assistant-state" role="status"></p></div>
+    <p class="assistant-stale" id="prompt-assistant-stale" role="status" hidden>Контекст изменился. Этот вариант неактуален; ваши правки сохранены.</p>
+    <div class="assistant-review" id="prompt-assistant-review" hidden>
+      <section class="assistant-observations" id="prompt-assistant-reference-review" hidden aria-labelledby="prompt-assistant-reference-title">
+        <div class="assistant-section-heading"><h3 id="prompt-assistant-reference-title">Что распознано</h3><span id="prompt-assistant-reference-count"></span></div><ol id="prompt-assistant-reference-list"></ol>
       </section>
+      <div class="ui-field assistant-draft"><div class="assistant-section-heading"><label for="prompt-assistant-draft" class="ui-field-label">Вариант текста</label><button type="button" class="button ghost icon-button" id="prompt-assistant-edit" aria-label="Редактировать вариант" title="Редактировать"><i data-lucide="pencil" aria-hidden="true"></i></button></div><textarea id="prompt-assistant-draft" rows="9" maxlength="4000"></textarea><small id="prompt-assistant-draft-limit">До 4000 символов.</small></div>
+      <details class="assistant-disclosure" id="prompt-assistant-diff"><summary>Сравнение с исходным текстом</summary><div class="assistant-diff-grid"><article><h3>Ваш текст</h3><div id="prompt-assistant-diff-original" tabindex="0"></div></article><article><h3>Вариант ассистента</h3><div id="prompt-assistant-diff-suggestion" tabindex="0"></div></article></div></details>
+      <details class="assistant-disclosure"><summary>Технические сведения</summary><p id="prompt-assistant-review-meta"></p></details>
+    </div>
+  </div>
+  <footer class="assistant-panel-actions"><button type="button" class="button ghost" id="prompt-assistant-keep">Оставить мой текст</button><button type="button" class="button" id="prompt-assistant-apply" disabled>Применить</button></footer>
+</dialog>
 {{end}}
 
 {{define "studio_editor_profile"}}

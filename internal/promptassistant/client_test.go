@@ -57,6 +57,26 @@ func TestEnhanceRejectsEmptyPrompt(t *testing.T) {
 	}
 }
 
+func TestReferenceCorrectionIsUserDataForOnePicture(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body chatRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(body.Messages[0].Content, "Light hair") || !strings.Contains(body.Messages[1].Content, `"picture":2,"user_correction":"Light hair, not dark."`) {
+			t.Fatalf("correction scope or role lost: %+v", body.Messages)
+		}
+		writeAssistantResponse(t, w, `{"prompt":"Preserve image 2 with light hair.","references":[{"id":"Picture 2","summary":"Light hair.","use":"Keep appearance."}]}`)
+	}))
+	defer server.Close()
+	base, _ := url.Parse(server.URL)
+	client := NewClient(base, "test:e4b").WithVisionModel("test:vision", time.Minute, "30s")
+	_, err := client.EnhanceResult(context.Background(), ModeImageToImage, ProfileFluxEdit, "Keep the person", []ImageReference{{Number: 2, Role: ImageReferenceIdentity, Image: []byte("two"), MIMEType: "image/png", Correction: "Light hair, not dark."}}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestEnhanceCanEnableThinking(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body chatRequest

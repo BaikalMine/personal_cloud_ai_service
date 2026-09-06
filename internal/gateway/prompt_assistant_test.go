@@ -2,10 +2,28 @@ package gateway
 
 import (
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"ai-access-gateway/internal/promptassistant"
 )
+
+func TestPromptAssistantImageCorrectionIsScopedAndBounded(t *testing.T) {
+	r := httptest.NewRequest("POST", "/", nil)
+	r.Form = map[string][]string{"image_correction_2": {"  Light hair, not dark.  "}}
+	value, err := promptAssistantImageCorrection(r, 2)
+	if err != nil || value != "Light hair, not dark." {
+		t.Fatalf("correction %q: %v", value, err)
+	}
+	value, err = promptAssistantImageCorrection(r, 1)
+	if err != nil || value != "" {
+		t.Fatalf("correction leaked to another image: %q %v", value, err)
+	}
+	r.Form.Set("image_correction_2", strings.Repeat("x", 501))
+	if _, err = promptAssistantImageCorrection(r, 2); err == nil {
+		t.Fatal("unbounded correction")
+	}
+}
 
 func TestPromptAssistantImageReferencesAcceptsKnownRolesInOrder(t *testing.T) {
 	request := httptest.NewRequest("POST", "/generate/prompt-assistant", nil)

@@ -24,6 +24,7 @@
   let uploading = false;
   let captionAction = false;
   let captionPoller;
+  let captionPanel;
   let previousTrigger = defaults.settings.trigger_word;
   let outputEdited = false;
   const id = window.AIGatewayLoraDataset.createID;
@@ -42,6 +43,7 @@
     target.classList.toggle("is-error", error); target.classList.toggle("is-success", !error);
     const modalStatus = dialogContent.querySelector("[data-dialog-status]");
     if (modalStatus) { modalStatus.textContent = message; modalStatus.classList.toggle("is-error", error); }
+    captionPanel?.refresh();
   };
   const request = async (suffix, method = "GET", data, options = {}) => {
     const multipart = data instanceof FormData;
@@ -58,6 +60,7 @@
   };
   const controller = window.AIGatewayLoraDataset.createController({ request, defaults, onChange: (state, kind) => {
     if (kind === "load") {
+      captionPanel?.close();
       for (const name of fields) for (const input of form.querySelectorAll(`[name="${name}"]`)) {
         if (input.type === "radio") input.checked = input.value === String(state.manifest.settings[name]);
         else input.value = state.manifest.settings[name] ?? "";
@@ -79,6 +82,17 @@
   const busy = () => Boolean(operation || uploading || captionAction || state.status === "loading");
   const captionJobs = () => captionPoller && captionPoller.state.datasetID === state.dataset?.id ? captionPoller.state.jobs : [];
   const captionActive = () => captionJobs().some(captions.active);
+  const editCaption = (key, value) => {
+    const item = state.manifest.images.find(image => image.id === key);
+    if (!item || !state.ready || operation) return;
+    item.caption = value; item.caption_revision = id(); delete item.caption_job_id;
+    captionStates.set(key, "Изменено вручную");
+    const card = cards.get(key);
+    const field = card?.querySelector("textarea");
+    if (field) { if (field.value !== value) field.value = value; field.setCustomValidity(""); }
+    if (card) card.querySelector("[data-lora-caption-item-status]").textContent = "Изменено вручную";
+    controller.touch();
+  };
   const renderState = () => {
     const blocked = busy();
     const dirtyFiles = files.size > 0;
@@ -115,6 +129,7 @@
         const mark = document.createElement("i"); mark.dataset.lucide = captions.active(job) ? "square" : ["failed", "cancelled"].includes(job?.state) ? "rotate-cw" : "sparkles"; describe.replaceChildren(mark);
       }
     }
+    captionPanel?.refresh();
     icons();
   };
   const assetFor = (item) => state.assets[item.asset_id] || {};
@@ -132,13 +147,15 @@
         card = node("article", "", "lora-dataset-item"); card.dataset.fileKey = item.id;
         const media = node("div", "", "lora-dataset-media");
         const img = document.createElement("img"); img.loading = "lazy"; img.decoding = "async";
-        media.append(img, node("span", ""));
+        const openFrame = node("button", ""); openFrame.type = "button"; openFrame.dataset.captionOpen = "";
+        openFrame.addEventListener("click", () => captionPanel?.open(item.id, openFrame));
+        openFrame.append(img); media.append(openFrame, node("span", ""));
         const body = node("div", "", "lora-dataset-body");
         const heading = node("div", "", "lora-dataset-heading"); const identity = node("div", ""); identity.append(node("strong", ""), node("small", ""));
         const describe = iconButton("sparkles", "Описать кадр", () => void describeImages([item.id])); describe.dataset.loraCaptionOne = "";
         heading.append(identity, describe);
         const caption = document.createElement("textarea"); caption.name = "caption"; caption.rows = 4; caption.maxLength = 1000; caption.placeholder = "Ракурс, одежда, фон, свет";
-        caption.addEventListener("input", () => { const current = state.manifest.images.find((image) => image.id === item.id); if (!current) return; current.caption = caption.value; current.caption_revision = id(); delete current.caption_job_id; caption.setCustomValidity(""); captionStates.set(item.id, "Изменено вручную"); card.querySelector("[data-lora-caption-item-status]").textContent = "Изменено вручную"; controller.touch(); });
+        caption.addEventListener("input", () => editCaption(item.id, caption.value));
         const status = node("small", "", "lora-caption-item-status"); status.dataset.loraCaptionItemStatus = "";
         body.append(heading, caption, status);
         const footer = node("footer", "", "dataset-item-actions");
@@ -155,6 +172,8 @@
       const src = urls.get(item.id) || `/api/lora-datasets/assets/${encodeURIComponent(item.asset_id)}`;
       if (image.getAttribute("src") !== src) image.src = src;
       image.alt = `Кадр ${index + 1}: ${itemName(item)}`;
+      card.querySelector("[data-caption-open]").setAttribute("aria-label", `Открыть кадр ${index + 1}`);
+      card.querySelector("[data-caption-open]").title = `Редактировать кадр ${index + 1}`;
       card.querySelector(".lora-dataset-media > span").textContent = String(index + 1).padStart(2, "0");
       const title = card.querySelector("strong"); title.textContent = itemName(item); title.title = itemName(item);
       card.querySelector(".lora-dataset-heading small").textContent = `${asset.width ? `${asset.width} × ${asset.height} · ` : ""}${formatBytes(file?.size || asset.size_bytes)}`;
@@ -307,7 +326,11 @@
     const waiting = jobs.filter(captions.active).length;
     const failed = jobs.filter((job) => job.state === "failed").length;
     const cancelled = jobs.filter((job) => job.state === "cancelled").length;
-    captionMessage(`Готово ${completed} из ${jobs.length}.${waiting ? ` В работе и очереди: ${waiting}.` : ""}${failed ? ` Ошибок: ${failed}. Повторите нужный кадр.` : ""}${cancelled ? ` Отменено: ${cancelled}.` : ""}`, Boolean(failed));
+    const current = jobs.find(job => job.state === "running");
+    const currentIndex = current ? state.manifest.images.findIndex(item => item.id === current.image_id) + 1 : 0;
+    const skipped = state.manifest.images.filter(item => item.excluded || (item.caption.trim() && !jobs.some(job => job.image_id === item.id))).length;
+    const unapplied = jobs.filter(job => job.state === "completed" && state.manifest.images.find(item => item.id === job.image_id)?.caption_job_id !== job.job_id).length;
+    captionMessage(`Готово ${completed} из ${jobs.length}.${currentIndex ? ` Анализируется кадр ${currentIndex}.` : ""}${waiting ? ` В работе и очереди: ${waiting}.` : ""}${failed ? ` Ошибок: ${failed}. Повторите нужный кадр.` : ""}${cancelled ? ` Отменено: ${cancelled}.` : ""}${skipped ? ` Пропущено заполненных или исключённых: ${skipped}.` : ""}${unapplied ? ` Ответов не применено: ${unapplied}.` : ""}`, Boolean(failed));
   };
   captionPoller = captions.createPoller({
     request: (datasetID, signal) => request(`/${datasetID}/captions`, "GET", undefined, { signal }),
@@ -323,6 +346,7 @@
   };
   const describeImages = async (keys, onlyEmpty = false, cancelSeries = false) => {
     if (busy() || files.size) return;
+    feedback("");
     const one = keys.length === 1 && !onlyEmpty ? captions.latest(captionJobs()).get(keys[0]) : null;
     const cancelling = cancelSeries || captions.active(one);
     if (!cancelling) {
@@ -346,6 +370,35 @@
       await captionPoller.refresh();
     } finally { captionAction = false; applyCaptionResults(); renderItems(); renderCaptionSummary(); }
   };
+  const captionRoot = find("[data-caption-panel]");
+  if (captionRoot && window.AIGatewayLoraCaptionPanel) captionPanel = window.AIGatewayLoraCaptionPanel.create({
+    root: captionRoot,
+    view: key => {
+      const items = state.manifest.images.map(item => ({ ...item, name: itemName(item), src: urls.get(item.id) || `/api/lora-datasets/assets/${encodeURIComponent(item.asset_id)}` }));
+      const item = items.find(value => value.id === key);
+      const card = cards.get(key);
+      const job = captions.latest(captionJobs()).get(key);
+      const action = card?.querySelector("[data-lora-caption-one]");
+      const trigger = state.manifest.settings.trigger_word.trim();
+      const triggerMissing = trigger.length < 2 || trigger.length > 80;
+      return {
+        items, trigger, editable: state.ready && !operation,
+        error: find("[data-dataset-feedback]").classList.contains("is-error") ? find("[data-dataset-feedback]").textContent : "",
+        canSave: state.ready && !busy() && state.status !== "conflict",
+        saveState: find("[data-dataset-status]").textContent, saveError: ["error", "conflict"].includes(state.status),
+        item: item && {
+          ...item, meta: `${card?.querySelector(".lora-dataset-heading small")?.textContent || ""}${item.excluded ? " · Исключён из обучения" : ""}`,
+          status: triggerMissing && !captions.active(job) ? "Укажите триггер в настройках набора." : card?.querySelector("[data-lora-caption-item-status]")?.textContent || "",
+          statusError: job?.state === "failed", active: Boolean(captions.active(job)),
+          actionLabel: !job && item.caption.trim() ? "Описать заново" : action?.getAttribute("aria-label") || "Описать кадр",
+          actionDisabled: (action?.disabled ?? true) || (triggerMissing && !captions.active(job)),
+        },
+      };
+    },
+    edit: editCaption,
+    describe: key => describeImages([key]),
+    save: () => controller.flush(),
+  });
   fileInput.addEventListener("change", () => { const incoming = [...fileInput.files]; fileInput.value = ""; void addFiles(incoming); });
   const dropzone = find("[data-lora-dropzone]");
   for (const eventName of ["dragenter", "dragover", "dragleave", "drop"]) dropzone.addEventListener(eventName, (event) => { event.preventDefault(); dropzone.classList.toggle("is-dragging", eventName === "dragenter" || eventName === "dragover"); if (eventName === "drop") void addFiles(event.dataTransfer?.files || []); });
