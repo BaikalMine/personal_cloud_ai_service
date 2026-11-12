@@ -99,6 +99,9 @@ even at a 128K context; compact discovery reduces the initial estimate to 11K.
 No model context size or output budget is falsified to work around that clamp.
 
 Ghidra 12.1.4 and a full OpenJDK 21 are bundled for headless native analysis.
+Build the REA overlay from the repository root with
+`docker build --build-context ghidra=<archive-directory> -f integrations/harness/rea.Dockerfile .`.
+The named context must contain `ghidra_12.1.4_PUBLIC_20260921.zip`; it is not committed.
 The official release archive is verified with SHA-256
 `ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db`.
 Ghidra uses a 2 GiB heap and the Harness container receives 4 GiB total memory.

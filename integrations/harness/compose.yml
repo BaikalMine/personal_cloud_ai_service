@@ -24,6 +24,7 @@ services:
       HARNESS_MODEL_KEY: ${HARNESS_MODEL_KEY:?required}
       HARNESS_MODEL_URL: http://gateway-harness:8090/internal/harness/v1
       HARNESS_MODELS: ${HARNESS_MODELS:?required}
+      HARNESS_TASK_RETENTION: ${HARNESS_TASK_RETENTION:-false}
     networks: [harness-private]
     volumes:
       - harness-data:/data

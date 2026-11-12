@@ -1,0 +1,3 @@
+- insert:
+    - id: gateway-harness-ui
+      name: '@ai-gateway/harness-ui'

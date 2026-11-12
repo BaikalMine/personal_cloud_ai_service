@@ -22,6 +22,17 @@ export function reviewReserve(db, now = Date.now()) {
   return db.prepare("SELECT COALESCE(SUM(reserve),0) AS bytes FROM memory_reviews WHERE state='applied' AND expires>?").get(now).bytes;
 }
 
+export function nextMemorySequence(db, table) {
+  const part = table === 'records' ? 'facts' : 'edges';
+  // Rollback must be able to restore deleted rows at their original position.
+  return db.prepare(`SELECT MAX(
+    COALESCE((SELECT MAX(seq) FROM ${table}),0),
+    COALESCE((SELECT MAX(json_extract(row.value,'$.seq'))
+      FROM memory_reviews, json_each(CASE WHEN state='applied' THEN payload ELSE '{}' END,'$.before.${part}') AS row
+      WHERE state='applied' AND expires>?),0)
+  ) + 1 AS seq`).get(Date.now()).seq;
+}
+
 function rowsFor(db, session, ids) {
   const marks=ids.map(()=>'?').join(',');
   const facts=db.prepare(`SELECT seq,json FROM records WHERE session=? AND id IN (${marks}) ORDER BY seq`).all(session,...ids);
@@ -101,9 +112,9 @@ function writePatch(db,session,current,next) {
   }
   for(const row of next.edges){
     const {id,fromId,toId,relation}=JSON.parse(row.json);
-    const result=db.prepare('INSERT INTO relations(seq,session,id,from_id,to_id,relation,json,bytes) VALUES(?,?,?,?,?,?,?,?)')
+    row.seq ??= nextMemorySequence(db,'relations');
+    db.prepare('INSERT INTO relations(seq,session,id,from_id,to_id,relation,json,bytes) VALUES(?,?,?,?,?,?,?,?)')
       .run(row.seq,session,id,fromId,toId,relation,row.json,Buffer.byteLength(row.json));
-    if(row.seq===null)row.seq=Number(result.lastInsertRowid);
   }
 }
 

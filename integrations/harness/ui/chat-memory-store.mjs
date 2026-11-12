@@ -4,7 +4,7 @@ import { isAbsolute, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { compileMemoryQuery, scoreMemoryRecord } from './chat-memory-search.mjs';
 import { normalizeMemorySources } from './chat-memory-sources.mjs';
-import { initMemoryReview, reviewReserve, reviewSelection, prepareMemoryReview, commitMemoryReview, undoMemoryReview } from './chat-memory-review-store.mjs';
+import { initMemoryReview, nextMemorySequence, reviewReserve, reviewSelection, prepareMemoryReview, commitMemoryReview, undoMemoryReview } from './chat-memory-review-store.mjs';
 
 const MAX_RECORD_BYTES = 16 * 1024;
 const MAX_LEGACY_BYTES = 1024 * 1024;
@@ -235,13 +235,14 @@ function transferMemory(db, source, target, expected) {
       result[key] = { added:count, skipped:total-count };
       if (count) {
         bytes += size + (db.prepare(`SELECT 1 FROM ${table} WHERE session = ? LIMIT 1`).get(target) ? 0 : 1);
-        inserts.push([`INSERT INTO ${table}(session, ${columns}) SELECT ?, ${columns} ${missing} ORDER BY src.seq`, args]);
+        inserts.push([table,`INSERT INTO ${table}(seq, session, ${columns})
+          SELECT ? + ROW_NUMBER() OVER (ORDER BY src.seq), ?, ${columns} ${missing} ORDER BY src.seq`, args]);
       }
     }
     result.fits = !bytes || accountUsage(db) + bytes <= MAX_ACCOUNT_BYTES;
     if (expected) {
       if (!result.fits) throw new Error('chat_memory_limit');
-      for (const [sql,args] of inserts) db.prepare(sql).run(target, ...args);
+      for (const [table,sql,args] of inserts) db.prepare(sql).run(nextMemorySequence(db, table)-1, target, ...args);
       if (inserts.length) bumpRevision(db, target);
       result.targetRevision = readRevision(db, target);
     }
@@ -399,7 +400,7 @@ export function createChatMemoryStore({ dshHome, lockTimeoutMs = 5000 } = {}) {
           const usage = accountUsage(db);
           const exists = db.prepare('SELECT 1 FROM records WHERE session = ? LIMIT 1').get(session);
           if (usage + Buffer.byteLength(json) + (exists ? 1 : 2) > MAX_ACCOUNT_BYTES) throw new Error('chat_memory_limit');
-          db.prepare('INSERT INTO records(session, id, json, bytes) VALUES (?, ?, ?, ?)').run(session, record.id, json, Buffer.byteLength(json));
+          db.prepare('INSERT INTO records(seq, session, id, json, bytes) VALUES (?, ?, ?, ?, ?)').run(nextMemorySequence(db, 'records'), session, record.id, json, Buffer.byteLength(json));
           bumpRevision(db, session);
           db.exec('COMMIT');
           return record;
@@ -451,7 +452,7 @@ export function createChatMemoryStore({ dshHome, lockTimeoutMs = 5000 } = {}) {
           const json = JSON.stringify(edge), bytes = Buffer.byteLength(json);
           const exists = db.prepare('SELECT 1 FROM relations WHERE session = ? LIMIT 1').get(session);
           if (accountUsage(db) + bytes + (exists ? 1 : 2) > MAX_ACCOUNT_BYTES) throw new Error('chat_memory_limit');
-          db.prepare('INSERT INTO relations(session, id, from_id, to_id, relation, json, bytes) VALUES (?, ?, ?, ?, ?, ?, ?)').run(session, edge.id, fromId, toId, relation, json, bytes);
+          db.prepare('INSERT INTO relations(seq, session, id, from_id, to_id, relation, json, bytes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(nextMemorySequence(db, 'relations'), session, edge.id, fromId, toId, relation, json, bytes);
           bumpRevision(db, session);
           db.exec('COMMIT');
           return edge;

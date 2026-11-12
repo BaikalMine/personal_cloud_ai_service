@@ -7,7 +7,6 @@ import { createInterface } from 'node:readline';
 import { createRequire } from 'node:module';
 import { isDeepStrictEqual } from 'node:util';
 import { COMPACTION_POLICY, modelPolicy, upgradeModelPolicy } from './model-policy.mjs';
-import { ensurePythonEnvironment } from './python-env.mjs';
 
 const publicUrl = new URL(process.env.HARNESS_PUBLIC_URL);
 const authorities = new Set([publicUrl.host, ...(process.env.HARNESS_TRUSTED_HOSTS || '').split(',').filter(Boolean)]);
@@ -15,7 +14,10 @@ const bootstrapKey = process.env.HARNESS_BOOTSTRAP_KEY;
 if (!bootstrapKey || bootstrapKey.length < 32 || !process.env.HARNESS_MODEL_KEY) throw new Error('Missing Harness credentials');
 const bind = process.env.HARNESS_BIND_HOST || Object.values(networkInterfaces()).flat().find(x => x.family === 'IPv4' && !x.internal)?.address;
 if (!bind) throw new Error('Missing private container interface');
-if (process.env.HARNESS_PYTHON_ENV === 'true') await ensurePythonEnvironment();
+if (process.env.HARNESS_PYTHON_ENV === 'true') {
+  const { ensurePythonEnvironment } = await import('./python-env.mjs');
+  await ensurePythonEnvironment();
+}
 
 const patchPath = `${process.env.DSH_HOME}/profiles/web/cordis.patch.yml`;
 await mkdir(`${process.env.DSH_HOME}/profiles/web`, { recursive: true });

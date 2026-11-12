@@ -8,7 +8,7 @@ USER node
 RUN npm install --prefix /opt/rea --ignore-scripts --no-audit --no-fund --save-exact \
       --fetch-retries=1 --fetch-timeout=60000 rea-agents@6.3.0
 USER root
-COPY artifacts/rea-6.3.0-inspection/ghidra_12.1.4_PUBLIC_20260921.zip /tmp/ghidra.zip
+COPY --from=ghidra ghidra_12.1.4_PUBLIC_20260921.zip /tmp/ghidra.zip
 RUN echo 'ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db  /tmp/ghidra.zip' | sha256sum -c - \
     && unzip -q /tmp/ghidra.zip -d /opt/ghidra && rm /tmp/ghidra.zip
 ENV GHIDRA_INSTALL_DIR=/opt/ghidra/ghidra_12.1.4_PUBLIC JAVA_HOME=/usr/lib/jvm/java-21-openjdk

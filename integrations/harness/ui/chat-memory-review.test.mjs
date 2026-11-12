@@ -147,7 +147,7 @@ test('saved proposal opens repeatedly without the model and refuses changed evid
     assert.equal(input.mode,'discover');
     assert.equal(input.evidence.length,2);
     modelCalls++;
-    return {groups:[{ids:input.facts.map(item=>item.id),reason:'Общий предмет.',text:'Verified combined fact'}]};
+    return {groups:[{ids:input.facts.map(item=>item.id),reason:'Общий предмет.',text:'Verified combined fact',sourcesSupported:true}]};
   });
   const file=join(root,'sample.md'), text='The key is brass.\nThe key is in a blue box.\n';
   await writeFile(file,text);
@@ -176,10 +176,30 @@ test('saved proposal opens repeatedly without the model and refuses changed evid
   await writeFile(file,text);
   assert.equal((await call('apply',{draftId:first.id,confirm:true})).value.state,'applied');
   assert.equal((await store.list('owner'))[0].text,'Verified combined fact');
+  await store.add('owner','A new fact recorded after the merge');
+  const appended=(await store.list('owner')).at(-1);
   assert.equal((await call('undo',{operationId:first.id,confirm:true})).value.state,'undone');
-  assert.deepEqual(await store.list('owner'),before);
+  assert.deepEqual(await store.list('owner'),[...before,appended]);
   await error(call('scanPreview',args),'stale');
   assert.equal(modelCalls,1);
+});
+
+test('available source excerpts do not make an unsupported proposal applicable', {skip:process.platform==='win32'},async t=>{
+  const {store,root,call}=await fixture(t,async input=>{
+    assert.equal(input.mode,'discover');
+    assert.equal(input.evidence.length,2);
+    return {groups:[{ids:input.facts.map(fact=>fact.id),text:'Unsupported merge',sourcesSupported:false}]};
+  });
+  await writeFile(join(root,'sample.md'),'Two unrelated observations.\n');
+  const source={file:'sample.md',anchor:'Two unrelated observations.'};
+  await store.add('owner','First claim',undefined,{sources:[source]});
+  await store.add('owner','Second claim',undefined,{sources:[source]});
+  const {value:start}=await call('scan',{kind:'merge',semantic:true});
+  const result=await untilScanEnds(call,start.id);
+  const {value:preview}=await call('scanPreview',{scanId:start.id,groupIndex:result.groups[0].groupIndex});
+  assert.equal(preview.state,'unverified');
+  assert.equal(preview.id,undefined);
+  assert.equal((await store.list('owner')).length,2);
 });
 
 test('cancelling whole chat review aborts the model and never updates memory', {skip:process.platform==='win32'},async t=>{

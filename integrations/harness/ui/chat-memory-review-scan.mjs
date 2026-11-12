@@ -21,7 +21,7 @@ export async function scanMemoryReview(store,sessionId,kind,signal,{includeFacts
     const sources=record.sources??[];
     if(kind==='merge')add('exact:'+hash([record.text,sources]),record.id);
     for(const source of sources){
-      // Candidate generation only; preview verifies every source before asking the model.
+      // Candidate generation only; a nearby location does not establish evidence.
       const location=source.line_from?['lines',Math.floor((source.line_from-1)/12)]:
         source.anchor?['anchor',source.anchor]:null;
       if(location)add('source:'+hash([source.file,source.chapter??null,source.sha256??null,location]),record.id);
@@ -91,6 +91,6 @@ export function semanticReviewGroups(answer,facts,kind) {
     }else if(kind==='link'&&ids.includes(group.fromId)&&ids.includes(group.toId)&&group.fromId!==group.toId&&relations.has(group.relation)){
       proposal={kind,fromId:group.fromId,toId:group.toId,relation:group.relation};
     }
-    return [{ids,reason:'semantic',note,proposal,label:Array.from(allowed.get(ids[0]).text.trim().replace(/\s+/g,' ')).slice(0,140).join('')}];
+    return [{ids,reason:'semantic',note,proposal,sourcesSupported:group.sourcesSupported===true,label:Array.from(allowed.get(ids[0]).text.trim().replace(/\s+/g,' ')).slice(0,140).join('')}];
   });
 }

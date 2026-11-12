@@ -1,6 +1,7 @@
 ARG BASE=ai-gateway-harness-admin:memory-nodes-r2
 FROM ${BASE}
 USER root
+COPY tools/merge-native-ru-022.cjs tools/extract-locales.cjs /opt/harness/integration/tools/
 COPY --chown=node:node ui/index.mjs ui/build.mjs ui/chat-memory-store.mjs ui/chat-memory-tools.mjs ui/chat-memory-tools.test.mjs ui/chat-memory-client.js ui/chat-memory-awareness*.mjs ui/ru-chat-memory.json ui/mobile.css ui/chat-memory-review*.mjs ui/chat-memory-review-client.js ui/patch-memory-compaction.mjs /opt/harness/node_modules/@ai-gateway/harness-ui/
 RUN node /opt/harness/node_modules/@ai-gateway/harness-ui/patch-memory-compaction.mjs \
     && node --check /opt/harness/node_modules/@deepseek-ai/dsh-compaction-basic/lib/index.js \
