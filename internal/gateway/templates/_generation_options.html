@@ -107,6 +107,22 @@
                 </div>
               </div>
             </section>
+            <section class="video-enhancement" data-aihub-settings data-aihub-fg hidden>
+              <label class="ui-choice--row video-enhancement-toggle ui-choice" title="Промежуточные кадры без изменения скорости видео и звука"><input name="aihub_fg_enabled" type="checkbox" value="true"><span><strong>Плавность движения</strong></span><b>DLSS FG</b></label>
+              <div class="video-enhancement-settings video-enhancement-settings--compact" data-aihub-fg-controls hidden>
+                <div class="ui-field-grid video-enhancement-fields">
+                  <label class="ui-field"><span class="ui-field-label">Частота кадров</span><select name="aihub_fg_multiplier"><option value="2" selected>48 FPS · 2×</option><option value="3">72 FPS · 3×</option><option value="4">96 FPS · 4×</option></select></label>
+                </div>
+              </div>
+            </section>
+            <section class="video-enhancement" data-aihub-settings hidden>
+              <label class="ui-choice--row video-enhancement-toggle ui-choice" title="Экспериментальная community-реализация DLSS, без изменения размера кадра"><input name="aihub_dlss_enabled" type="checkbox" value="true"><span><strong>DLSS 5</strong></span><b>1x</b></label>
+              <div class="video-enhancement-settings video-enhancement-settings--compact" data-aihub-dlss-controls hidden>
+                <div class="ui-field-grid video-enhancement-fields">
+                  <label class="ui-field"><span class="ui-field-label">Сила DLSS</span><input name="aihub_dlss_strength" type="number" min="0.1" max="1" step="0.05" value="1"></label>
+                </div>
+              </div>
+            </section>
             <section class="video-enhancement">
               <label class="ui-choice--row video-enhancement-toggle ui-choice"><input name="video_rtx_enabled" type="checkbox" value="true"><span><strong>Финальный апскейл</strong><small>Увеличивает детализацию ролика средствами NVIDIA.</small><em class="workflow-load-note"><b>Время +++</b><b>VRAM +++</b></em></span><b>RTX</b></label>
               <div class="video-enhancement-settings video-enhancement-settings--compact">
@@ -335,7 +351,7 @@
 {{end}}
 
 {{define "studio_lora_krea"}}
-<section class="workflow-settings-section krea-text-workflow-field">
+<section class="workflow-settings-section krea-lora-settings">
           <input type="hidden" name="loras_configured" value="true">
           <div class="workflow-settings-heading"><div><strong>LoRA <span class="field-help" tabindex="0" data-tooltip="Дополнительные адаптеры стиля и деталей. Начните с одной LoRA, затем добавляйте следующую при необходимости.">?</span></strong><small>Список сгруппирован в Gateway, файлы ComfyUI остаются на своих местах.</small></div></div>
           <div class="lora-list">
@@ -354,13 +370,39 @@
 {{end}}
 
 {{define "studio_upscale_image"}}
-<section class="workflow-settings-section krea-workflow-field">
+<section class="workflow-settings-section krea-workflow-field krea-photoflow-settings">
           <div class="workflow-settings-heading"><div><strong>Апскейл <span class="field-help" tabindex="0" data-tooltip="Увеличивает картинку до итогового разрешения и добавляет детали. Автоматическая сила перерисовки подбирает мягкое значение по размеру кадра.">?</span></strong><small>Второй проход после масштабирования изображения.</small><span class="workflow-load-note"><b>Время ++</b><b>VRAM ++</b></span></div><label class="setting-toggle krea-text-workflow-field ui-choice ui-choice--compact"><input name="upscale_auto_denoise" id="generation-auto-denoise" type="checkbox" value="true" checked><span>Автонастройка перерисовки</span></label></div>
           <div class="ui-field-grid generation-fields"><label class="ui-field"><span class="ui-field-label">Шаги</span><input name="upscale_steps" id="generation-upscale-steps" type="number" min="1" max="12" value="5"></label><label class="ui-field"><span class="ui-field-label">Сэмплер</span><select name="upscale_sampler" id="generation-upscale-sampler"><option value="euler_ancestral" selected>Euler Ancestral</option><option value="euler">Euler</option><option value="dpmpp_2m">DPM++ 2M</option><option value="dpmpp_2m_sde">DPM++ 2M SDE</option></select></label><label class="ui-field"><span class="ui-field-label">Denoise <span class="field-help" tabindex="0" data-tooltip="Насколько апскейл может изменить исходный результат. Низкое значение сохраняет композицию, высокое сильнее перерисовывает её.">?</span></span><input name="upscale_denoise" id="generation-upscale-denoise" type="number" min="0.01" max="0.5" step="0.01" value="0.18"></label></div>
         </section>
 {{end}}
 
+{{define "studio_krea_pro"}}
+<section class="workflow-settings-section krea-pro-settings" hidden>
+  <div class="ui-field-grid">
+    <label class="ui-field"><span class="ui-field-label">Задача Ultra</span><select name="krea_pro_mode"><option value="text">Текст в изображение</option><option value="references">Фото и промт</option><option value="identity">Сохранить внешность</option><option value="control">Depth ControlNet</option><option value="inpaint">Изменить область · маска в Фото 2</option><option value="outpaint">Расширить кадр</option></select></label>
+    <label class="ui-field"><span class="ui-field-label">Апскейлер</span><select name="krea_pro_upscaler"><option value="none">Без апскейла</option><option value="vosr" selected>VOSR2</option><option value="relay">RelayVSR</option></select></label>
+    <label class="ui-field"><span class="ui-field-label">VOSR2 · увеличение результата</span><select name="krea_pro_upscale"><option value="1">1× · без VOSR2</option><option value="2" selected>2× · VOSR2</option><option value="3">3× · VOSR2</option></select></label>
+    <label class="ui-field" hidden><span class="ui-field-label">RelayVSR · увеличение результата</span><select name="krea_pro_relay_scale" disabled><option value="2" selected>2×</option><option value="4">4×</option></select></label>
+    <label class="ui-choice"><input type="checkbox" name="krea_pro_match_source" value="true" checked><span>Пропорции исходного фото</span></label>
+  </div>
+</section>
+{{end}}
+
 {{define "studio_processing_krea"}}
+<section class="workflow-settings-section krea-pro-settings" hidden>
+  <input type="hidden" name="krea_pro_settings" value="">
+  <div data-krea-pro-controls></div>
+</section>
+<section class="workflow-settings-section krea-ultra-settings" hidden>
+  <div class="workflow-settings-heading"><strong>Krea2 · Ультра качество</strong></div>
+  <div class="ui-field-grid">
+    <label class="ui-field"><span class="ui-field-label">Начало второго прохода</span><input type="number" name="krea_ultra_step_swap" value="6" min="1" max="39" step="1"></label>
+    <label class="ui-field"><span class="ui-field-label">CFG второго прохода</span><input type="number" name="krea_ultra_low_cfg" value="1" min="1" max="3" step="0.1"></label>
+    <label class="ui-field"><span class="ui-field-label">Сила детализации</span><input type="number" name="krea_ultra_detail_amount" value="0.34" min="0" max="2" step="0.01"></label>
+    <label class="ui-field"><span class="ui-field-label">Шаг увеличения · Speed Boost</span><input type="number" name="krea_ultra_grow_step" value="4" min="1" max="39" step="1"></label>
+    <label class="ui-choice"><input type="checkbox" name="krea_ultra_speed_boost" value="true"><span>Speed Boost · экспериментальный</span></label>
+  </div>
+</section>
 <section class="workflow-settings-section krea-text-workflow-field krea-processing">
           <div class="workflow-settings-heading"><div><strong>Дополнительная обработка PhotoFlow</strong><small>Каждая ветка запускается независимо. Выключенный модуль не попадает в workflow и не расходует ресурсы.</small></div></div>
           <div class="krea-module-list">

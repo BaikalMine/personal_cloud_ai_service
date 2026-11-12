@@ -1441,9 +1441,216 @@ var migrationCatalog = []migration{
 			 AND state IN ('draft','preparing','uploading','waiting_for_resources')`,
 		},
 	},
+	{
+		version: 61, name: "gpu_runtime_source_fences", statements: []string{
+			`ALTER TABLE lora_training_jobs ADD COLUMN dispatch_token TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE gpu_work ADD COLUMN inference_completion TEXT NOT NULL DEFAULT ''
+			 CHECK(inference_completion IN ('','executor_terminal','request_not_dispatched'))`,
+		},
+	},
+	{
+		version: 62, name: "gpu_inference_resource_preparation", statements: []string{
+			`ALTER TABLE gpu_work DROP CONSTRAINT gpu_work_phase_check,
+			 ADD CONSTRAINT gpu_work_phase_check CHECK(phase IN ('reserved','preparing_resources','resources_ready','dispatching','running'))`,
+			// Older reserved inference may already be stopping the miner. Its
+			// phase cannot prove that no resource-side request is still in flight.
+			`UPDATE gpu_work SET phase='preparing_resources' WHERE kind IN ('lora_caption','prompt_assistant')
+			 AND state IN ('held','uncertain') AND phase='reserved' AND inference_completion=''`,
+			`ALTER TABLE quick_generation_mining_leases ADD COLUMN gpu_work_id TEXT REFERENCES gpu_work(id) ON DELETE RESTRICT`,
+			`CREATE UNIQUE INDEX quick_generation_mining_leases_gpu_work_idx ON quick_generation_mining_leases(gpu_work_id) WHERE gpu_work_id IS NOT NULL`,
+		},
+	},
+	{
+		version: 63, name: "durable_gpu_inference_executor", statements: []string{
+			`CREATE TABLE gpu_inference_requests (
+			 id TEXT PRIMARY KEY REFERENCES gpu_work(id) ON DELETE RESTRICT,
+			 lease_token TEXT NOT NULL CHECK(length(lease_token) BETWEEN 1 AND 96),
+			 request_hash TEXT NOT NULL CHECK(request_hash ~ '^[a-f0-9]{64}$'),
+			 request_cipher BYTEA,
+			 timeout_ms BIGINT NOT NULL CHECK(timeout_ms BETWEEN 1000 AND 3600000),
+			 state TEXT NOT NULL DEFAULT 'queued' CHECK(state IN ('queued','running','completed','not_dispatched','uncertain')),
+			 run_token TEXT NOT NULL DEFAULT '',
+			 response_status INTEGER NOT NULL DEFAULT 0 CHECK(response_status=0 OR response_status BETWEEN 100 AND 599),
+			 response_cipher BYTEA,
+			 completion_code TEXT NOT NULL DEFAULT '' CHECK(completion_code IN ('','executor_terminal','request_not_dispatched')),
+			 cancel_requested BOOLEAN NOT NULL DEFAULT false,
+			 created_at TIMESTAMPTZ NOT NULL DEFAULT now(), started_at TIMESTAMPTZ, finished_at TIMESTAMPTZ, result_expires_at TIMESTAMPTZ,
+			 CHECK((state='completed' AND completion_code='executor_terminal') OR
+			       (state='not_dispatched' AND completion_code='request_not_dispatched') OR
+			       (state IN ('queued','running','uncertain') AND completion_code='')),
+			 CHECK(state<>'queued' OR (request_cipher IS NOT NULL AND started_at IS NULL)),
+			 CHECK(state NOT IN ('running','uncertain','completed') OR (started_at IS NOT NULL AND run_token<>''))
+			)`,
+			`CREATE INDEX gpu_inference_requests_queued_idx ON gpu_inference_requests(created_at,id) WHERE state='queued'`,
+		},
+	},
+	{
+		version: 64, name: "lora_caption_inference_binding", statements: []string{
+			`ALTER TABLE lora_caption_jobs ADD COLUMN inference_work_id TEXT REFERENCES gpu_work(id) ON DELETE RESTRICT,
+			 ADD COLUMN inference_metadata_cipher BYTEA NOT NULL DEFAULT ''::bytea`,
+			`CREATE UNIQUE INDEX lora_caption_inference_work_idx ON lora_caption_jobs(inference_work_id) WHERE inference_work_id IS NOT NULL`,
+		},
+	},
+	{
+		version: 65, name: "prompt_assistant_jobs", statements: []string{
+			`CREATE TABLE prompt_assistant_jobs (
+			 id TEXT PRIMARY KEY REFERENCES gpu_work(id) ON DELETE RESTRICT,
+			 user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			 mode TEXT NOT NULL CHECK(mode IN ('text-to-image','image-to-image','minimax-h3-video')),
+			 request_hash TEXT NOT NULL, body_hash TEXT NOT NULL,
+			 request_cipher BYTEA NOT NULL, metadata_cipher BYTEA NOT NULL,
+			 result_cipher BYTEA NOT NULL DEFAULT ''::bytea,
+			 runtime_cipher BYTEA NOT NULL DEFAULT ''::bytea,
+			 state TEXT NOT NULL DEFAULT 'queued' CHECK(state IN ('queued','running','completed','failed','cancelled')),
+			 status TEXT NOT NULL DEFAULT 'В очереди ассистента', run_token TEXT NOT NULL DEFAULT '',
+			 cancel_requested BOOLEAN NOT NULL DEFAULT false,
+			 inference_work_id TEXT UNIQUE REFERENCES gpu_inference_requests(id) ON DELETE RESTRICT,
+			 content_event_id BIGINT REFERENCES content_events(id) ON DELETE SET NULL,
+			 created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			 available_at TIMESTAMPTZ NOT NULL DEFAULT now(), expires_at TIMESTAMPTZ NOT NULL DEFAULT now()+interval '24 hours',
+			 CHECK(length(id) BETWEEN 16 AND 64), CHECK(length(request_hash)=64 AND length(body_hash)=64)
+			)`,
+			`CREATE INDEX prompt_assistant_jobs_pending_idx ON prompt_assistant_jobs(available_at,created_at,id) WHERE state IN ('queued','running')`,
+			`CREATE INDEX prompt_assistant_jobs_user_idx ON prompt_assistant_jobs(user_id,created_at DESC)`,
+		},
+	},
+	{
+		version: 66, name: "lora_dataset_quality", statements: []string{
+			`ALTER TABLE lora_dataset_assets ADD COLUMN quality_cipher BYTEA NOT NULL DEFAULT ''::bytea CHECK(octet_length(quality_cipher)<=4096)`,
+		},
+	},
+	{
+		version: 67, name: "mining_command_revisions", statements: []string{
+			`CREATE SEQUENCE mining_command_revision_seq AS bigint MINVALUE 1 NO CYCLE`,
+		},
+	},
+	{
+		version: 68, name: "owned_inference_executors", statements: []string{
+			`CREATE TABLE gpu_inference_executors (
+			 id TEXT PRIMARY KEY CHECK(id ~ '^[a-f0-9]{64}$'),
+			 generation BIGINT NOT NULL CHECK(generation>0),
+			 session_token TEXT NOT NULL CHECK(session_token ~ '^[a-f0-9]{64}$'),
+			 updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`,
+			`ALTER TABLE gpu_inference_requests
+			 ADD COLUMN executor_id TEXT NOT NULL DEFAULT '',
+			 ADD COLUMN executor_generation BIGINT NOT NULL DEFAULT 0,
+			 ADD CONSTRAINT gpu_inference_executor_binding_check CHECK(
+			 (executor_id='' AND executor_generation=0) OR (executor_id ~ '^[a-f0-9]{64}$' AND executor_generation>0))`,
+			`ALTER TABLE gpu_inference_requests DROP CONSTRAINT gpu_inference_requests_state_check,
+			 DROP CONSTRAINT gpu_inference_requests_completion_code_check,
+			 DROP CONSTRAINT gpu_inference_requests_check,
+			 DROP CONSTRAINT gpu_inference_requests_check2,
+			 ADD CONSTRAINT gpu_inference_requests_state_check CHECK(state IN ('queued','running','completed','not_dispatched','uncertain','stopped')),
+			 ADD CONSTRAINT gpu_inference_requests_completion_code_check CHECK(completion_code IN ('','executor_terminal','request_not_dispatched','executor_stopped')),
+			 ADD CONSTRAINT gpu_inference_requests_outcome_check CHECK(
+			 (state='completed' AND completion_code='executor_terminal') OR
+			 (state='not_dispatched' AND completion_code='request_not_dispatched') OR
+			 (state='stopped' AND completion_code='executor_stopped' AND executor_id<>'') OR
+			 (state IN ('queued','running','uncertain') AND completion_code='')),
+			 ADD CONSTRAINT gpu_inference_requests_started_check CHECK(state NOT IN ('running','uncertain','completed','stopped') OR (started_at IS NOT NULL AND run_token<>''))`,
+			`ALTER TABLE gpu_work DROP CONSTRAINT gpu_work_inference_completion_check,
+			 ADD CONSTRAINT gpu_work_inference_completion_check CHECK(inference_completion IN ('','executor_terminal','request_not_dispatched','executor_stopped'))`,
+			`CREATE INDEX gpu_inference_requests_owner_idx ON gpu_inference_requests(executor_id,executor_generation,id)
+			 WHERE state IN ('running','uncertain') AND executor_id<>''`,
+		},
+	},
+	{
+		version: 69, name: "gpu_executor_permits", statements: []string{
+			`CREATE TABLE gpu_executor_permits (
+			 id TEXT PRIMARY KEY CHECK(id ~ '^[a-f0-9]{32}$'),
+			 resource_id TEXT NOT NULL REFERENCES gpu_resources(id),
+			 executor TEXT NOT NULL CHECK(executor='comfyui'),
+			 instance_id TEXT NOT NULL CHECK(instance_id ~ '^[a-f0-9]{32}$'),
+			 token_hash TEXT NOT NULL CHECK(token_hash ~ '^[a-f0-9]{64}$'),
+			 work_id TEXT REFERENCES gpu_work(id),
+			 work_lease_hash TEXT NOT NULL DEFAULT '',
+			 state TEXT NOT NULL DEFAULT 'reserved' CHECK(state IN ('reserved','running','closed')),
+			 completion_code TEXT NOT NULL DEFAULT '' CHECK(completion_code IN ('','not_started','quiesced')),
+			 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			 updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			 CHECK((work_id IS NULL AND work_lease_hash='') OR (work_id IS NOT NULL AND work_lease_hash ~ '^[a-f0-9]{64}$')),
+			 CHECK((state='closed' AND completion_code<>'') OR (state<>'closed' AND completion_code=''))
+			)`,
+			`CREATE UNIQUE INDEX gpu_executor_permits_active_resource_idx ON gpu_executor_permits(resource_id) WHERE state IN ('reserved','running')`,
+			`CREATE UNIQUE INDEX gpu_executor_permits_work_lease_idx ON gpu_executor_permits(work_id,work_lease_hash) WHERE work_id IS NOT NULL`,
+		},
+	},
+	{
+		version: 70, name: "owned_ollama_gpu_permits", statements: []string{
+			`ALTER TABLE gpu_executor_permits DROP CONSTRAINT gpu_executor_permits_executor_check,
+			 ADD CONSTRAINT gpu_executor_permits_executor_check CHECK(executor IN ('comfyui','ollama'))`,
+			`ALTER TABLE gpu_executor_permits ADD COLUMN owner_id TEXT REFERENCES gpu_inference_executors(id),
+			 ADD COLUMN owner_generation BIGINT NOT NULL DEFAULT 0,
+			 ADD COLUMN owner_token_hash TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE gpu_executor_permits ADD CONSTRAINT gpu_executor_permits_owned_check CHECK(
+			 (executor='comfyui' AND owner_id IS NULL AND owner_generation=0 AND owner_token_hash='') OR
+			 (executor='ollama' AND work_id IS NULL AND owner_id IS NOT NULL AND owner_generation>0 AND owner_token_hash ~ '^[a-f0-9]{64}$'))`,
+			`ALTER TABLE gpu_executor_permits DROP CONSTRAINT gpu_executor_permits_completion_code_check,
+			 ADD CONSTRAINT gpu_executor_permits_completion_code_check CHECK(completion_code IN ('','not_started','quiesced') OR (completion_code='owner_stopped' AND executor='ollama'))`,
+			`CREATE INDEX gpu_executor_permits_owner_idx ON gpu_executor_permits(owner_id,owner_generation) WHERE executor='ollama' AND state IN ('reserved','running')`,
+		},
+	},
+	taskReadModelMigration,
+	taskNotificationsMigration,
+	{
+		version: 73, name: "lora_training_provenance", statements: []string{
+			`ALTER TABLE lora_training_jobs ADD COLUMN provenance JSONB
+			 CHECK(provenance IS NULL OR (jsonb_typeof(provenance)='object' AND octet_length(provenance::text)<=16384))`,
+		},
+	},
+	loraVerificationMigration,
+	loraRepeatMigration,
+	generationExecutionMigration,
+	generationRepeatMigration,
+	mediaMeasurementMigration,
+	galleryDatasetImportMigration,
+	generationPostprocessMigration,
+	generationPostprocessInputsMigration,
+	generationVariantRetentionMigration,
+	inviteTemplatesMigration,
+	comfyCleanupReceiptsMigration,
+	comfyInputCleanupReceiptsMigration,
+	trainingStorageOperationsMigration,
+	comfyInputCleanupSizeMigration,
+	comfyStorageInventoryMigration,
+	generationInputReferencesMigration,
+	comfyStorageOperationsMigration,
+	comfyStorageRetentionMigration,
+	generationSubmissionMigration,
+	runtimeFenceMigration,
+	generationCollectionContextMigration,
+	promptAssistantModelAccessMigration,
+	modelInstallMigration,
+	inferenceProgressMigration,
+	miningFavoritesMigration,
+	harnessMiningMigration,
+	promptAssistantLongMigration,
+	promptAssistantLongTransportMigration,
+	harnessUltraMigration,
+	harnessUsersMigration,
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
+	if db == nil {
+		return fmt.Errorf("migration database is not configured")
+	}
+	return migrate(ctx, db)
+}
+
+// MigrateOnConnection preserves the release controller's exact lock-owning
+// session; a disconnected controller must not acquire a replacement connection.
+func MigrateOnConnection(ctx context.Context, conn *sql.Conn) error {
+	if conn == nil {
+		return fmt.Errorf("migration connection is not configured")
+	}
+	return migrate(ctx, conn)
+}
+
+type migrationTransactionStarter interface {
+	BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+}
+
+func migrate(ctx context.Context, db migrationTransactionStarter) error {
 	if err := validateMigrations(migrationCatalog); err != nil {
 		return err
 	}

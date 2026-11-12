@@ -5,18 +5,36 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const storeModule = require("../../static/generation-store.js");
+const feedback = require("../../static/generation-feedback.js");
 const wizard = require("../../static/generation-wizard.js");
 const media = require("../../static/generation-media.js");
+const payload = require("../../static/generation-payload.js");
+const submission = require("../../static/generation-submission.js");
 const summary = require("../../static/generation-summary.js");
 const output = require("../../static/generation-output.js");
 const video = require("../../static/generation-video.js");
 const assistant = require("../../static/generation-assistant.js");
+const assistantJobs = require("../../static/generation-assistant-jobs.js");
 const batch = require("../../static/generation-batch.js");
 const job = require("../../static/generation-job.js");
 const recipes = require("../../static/generation-recipes.js");
 const history = require("../../static/generation-history.js");
+const results = require("../../static/generation-results.js");
 const lightbox = require("../../static/generation-lightbox.js");
 const dialogFocus = require("../../static/dialog-focus.js");
+
+test("image edit assistant sends the selected workflow with its reference roles", () => {
+  for (const workflow of ["photoflow-krea2-edit", "photoflow-flux2-edit", "qwen-image21-edit"]) {
+    const profile = workflow === "qwen-image21-edit" ? "qwen21-edit" : workflow === "photoflow-flux2-edit" ? "flux-edit" : "krea2-edit";
+    const body = assistant.buildRequest({ prompt: "Change the coat", mode: "image-to-image", workflow, profile,
+      think: false, cfg: "1", images: [{ number: 1, role: "base_scene", value: "base.png" }, { number: 2, role: "wardrobe_object", value: "coat.png" }],
+      audio: { value: "" }, video: { value: "" } });
+    assert.equal(body.get("generation_workflow"), workflow);
+    assert.equal(body.get("assistant_template"), profile);
+    assert.equal(body.get("image_role_2"), "wardrobe_object");
+    assert.equal(body.get("input_image_2"), "coat.png");
+  }
+});
 
 test("generation store publishes named and global changes", () => {
   const store = storeModule.createStore({ wizard: { step: 1 } });
@@ -116,6 +134,16 @@ test("media keeps the role and source of every reference", () => {
     media.referenceMetadata({ templateID: "minimax-h3-video", videoMode: "references", slot: 4, role: "style", uploaded: "restored/style.png" }),
     { number: 4, role: "style", source: "restored", sourceID: "", sourceName: "restored/style.png" },
   );
+});
+
+test("media preserves distinct identities and roles for all nine AIHUB references", () => {
+  const references = Array.from({ length: 9 }, (_, i) => media.referenceMetadata({
+    templateID: "minimax-h3-video", videoMode: "references", slot: i + 1,
+    role: i === 8 ? "background" : "identity", uploaded: `owned/photo-${i + 1}.png`,
+  }));
+  assert.deepEqual(references.map(reference => reference.number), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  assert.equal(references[8].role, "background");
+  assert.equal(references[8].sourceName, "owned/photo-9.png");
 });
 
 test("generation guides cover every quick-generation family and video mode", () => {
@@ -318,6 +346,7 @@ class FakeClassList {
 
 class FakeElement {
   constructor(id = "") {
+    this.nodeType = 1;
     this.id = id;
     this.dataset = {};
     this.classList = new FakeClassList();
@@ -331,6 +360,7 @@ class FakeElement {
     this.innerHTML = "";
     this.files = [];
     this.options = [];
+    this.children = [];
     this.selectedOptions = [{ value: "", dataset: {} }];
   }
   addEventListener() {}
@@ -338,6 +368,8 @@ class FakeElement {
   append() {}
   prepend() {}
   replaceChildren() {}
+  insertBefore() {}
+  contains() { return false; }
   removeAttribute() {}
   setAttribute() {}
   getAttribute() { return null; }
@@ -353,7 +385,8 @@ class FakeElement {
   getBoundingClientRect() { return { left: 0, width: 24 }; }
 }
 
-const moduleAPIs = { store: storeModule, wizard, media, summary, output, video, assistant, batch, job, recipes, history, lightbox };
+const moduleAPIs = { store: storeModule, feedback, wizard, media, payload, submission, summary, output, video, assistant, assistantJobs, batch, job, recipes, history, results, lightbox };
+const requiredModules = ["payload", "submission", "assistant", "assistantJobs", "history", "results", "lightbox", "batch", "job", "feedback", "recipes"];
 
 const pageContextWithout = (omittedModule) => {
   const elements = new Map();
@@ -375,7 +408,8 @@ const pageContextWithout = (omittedModule) => {
     },
   });
   const root = element("generation-root");
-  root.dataset = { selectedWorkflow: "", previewOutput: "", generationRetention: "24 часа", mediaRetention: "24 часа" };
+  element("prompt-assistant").dataset.ownerId = "1";
+  root.dataset = { selectedWorkflow: "", previewOutput: "", generationOwner: "1", generationRetention: "24 часа", mediaRetention: "24 часа" };
   root.querySelector = () => null;
   root.querySelectorAll = () => [];
   const documentObject = {
@@ -403,6 +437,9 @@ const pageContextWithout = (omittedModule) => {
     requestAnimationFrame: (callback) => callback(),
   };
   class FakeEventSource { addEventListener() {} close() {} }
+  const live = require("../../static/live-events.js");
+  const liveEnvironment = { EventSource: FakeEventSource, document: documentObject, Math, setTimeout: () => 1, clearTimeout() {} };
+  windowObject.AIGatewayLiveEvents = { create: options => live.create(options, liveEnvironment), poll: (...args) => live.poll(...args, liveEnvironment) };
   class FakeOption { constructor(text, value) { this.text = text; this.value = value; this.dataset = {}; } }
   const fetcher = async (url) => ({
     ok: true,
@@ -411,6 +448,7 @@ const pageContextWithout = (omittedModule) => {
       if (String(url).includes("recipes")) return { recipes: [] };
       if (String(url).includes("variants")) return { variants: [] };
       if (String(url).includes("jobs")) return { jobs: [], revision: 0 };
+      if (String(url).includes("batches")) return { batches: [] };
       return {};
     },
   });
@@ -438,7 +476,7 @@ const pageContextWithout = (omittedModule) => {
 
 test("generation page initializes when any optional module is absent", async (t) => {
   const source = fs.readFileSync(path.join(__dirname, "../../static/generate.js"), "utf8");
-  for (const moduleName of Object.keys(moduleAPIs)) {
+  for (const moduleName of Object.keys(moduleAPIs).filter(name => !requiredModules.includes(name))) {
     await t.test(`without ${moduleName}`, async () => {
       const { context, root } = pageContextWithout(moduleName);
       vm.runInNewContext(source, context, { filename: "generate.js" });
@@ -447,4 +485,11 @@ test("generation page initializes when any optional module is absent", async (t)
       assert.equal(root.dataset.generationModules.split(",").includes(moduleName), false);
     });
   }
+});
+
+for (const required of requiredModules) test(`missing required ${required} module stops initialization before partial form actions`, () => {
+  const source = fs.readFileSync(path.join(__dirname, "../../static/generate.js"), "utf8");
+  const { context, root } = pageContextWithout(required);
+  vm.runInNewContext(source, context, { filename: "generate.js" });
+  assert.equal(root.dataset.generationClient, "unavailable");
 });

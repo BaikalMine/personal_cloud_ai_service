@@ -1,16 +1,49 @@
 {{define "admin_audit"}}
 {{template "head" .}}
 {{template "admin_nav" .}}
-<main class="page" id="main-content">
-  <section class="hero"><div><p class="eyebrow">Безопасность</p><h1>Журнал аудита</h1></div><a class="button ghost" href="/admin/audit/export" download>Скачать CSV</a></section>
-  <section class="panel">
-    <div class="panel-heading"><div><p class="section-kicker">Для администратора</p><h2>Последние события системы</h2><p class="panel-intro">События хранятся {{.Retention.AuditLogLabel}}. CSV-выгрузка содержит весь доступный журнал до текущего момента.</p></div></div>
-    <div class="table-scroll"><table><thead><tr><th>Время</th><th>Инициатор</th><th>Действие</th><th>Объект</th><th>IP</th><th>Детали</th></tr></thead><tbody>
-    {{range .Audits}}
-      <tr><td data-label="Время">{{formatTime .CreatedAt}}</td><td data-label="Инициатор">{{if .Actor}}{{.Actor}}{{else}}система{{end}}</td><td data-label="Действие">{{auditActionLabel .Action}}</td><td data-label="Объект">{{auditTargetLabel .TargetType}} {{if .TargetID.Valid}}#{{.TargetID.Int64}}{{end}}</td><td data-label="IP">{{.IP}}</td><td data-label="Детали" class="path">{{auditMetadataLabel .Metadata}}</td></tr>
-    {{else}}<tr><td colspan="6" class="muted">Событий аудита пока нет.</td></tr>{{end}}
-    </tbody></table></div>
+<link rel="stylesheet" href="/static/admin-security.css?v={{.AssetVersion}}">
+<main class="page security-page" id="main-content">
+  {{$error := .SecurityError}}
+  {{with .Audit}}
+  <header class="security-heading"><h1>Журнал аудита</h1><div class="security-actions"><a class="button secondary" href="{{.ExportURL}}" download><i data-lucide="download" aria-hidden="true"></i>Весь журнал CSV</a><a class="button ghost icon-button" href="{{.RefreshURL}}" aria-label="Обновить журнал" title="Обновить журнал"><i data-lucide="refresh-cw" aria-hidden="true"></i></a></div></header>
+  <form method="get" action="/admin/audit" class="security-filters security-filters-audit" aria-label="Фильтры журнала">
+    <input type="hidden" name="before" value="{{.Filter.Before.UTC.Format "2006-01-02T15:04:05.999999999Z07:00"}}">
+    <label class="ui-field security-search"><span class="ui-field-label" id="audit-search-label">Поиск по журналу</span><input type="search" name="q" value="{{.Filter.Search}}" maxlength="120" aria-labelledby="audit-search-label"></label>
+    <div class="security-filter-actions"><button type="submit" class="secondary"><i data-lucide="filter" aria-hidden="true"></i>Применить</button><a class="button ghost icon-button" href="{{.ResetURL}}" title="Сбросить фильтры" aria-label="Сбросить фильтры"><i data-lucide="filter-x" aria-hidden="true"></i></a></div>
+    <details class="security-filter-options" {{if or .Filter.Action .Filter.Target .FromText .ToText (eq .Filter.Sort "oldest")}}open{{end}}><summary>Дополнительные фильтры{{if or .Filter.Action .Filter.Target .FromText .ToText (eq .Filter.Sort "oldest")}}<span class="security-secondary">Выбраны</span>{{end}}</summary><div class="security-filter-grid">
+    <label class="ui-field"><span class="ui-field-label" id="audit-action-label">Действие</span><select name="action" aria-labelledby="audit-action-label"><option value="">Все действия</option>{{range .Actions}}<option value="{{.Value}}" {{if eq $.Audit.Filter.Action .Value}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>
+    <label class="ui-field"><span class="ui-field-label" id="audit-target-label">Объект</span><select name="target" aria-labelledby="audit-target-label"><option value="">Все объекты</option>{{range .Targets}}<option value="{{.Value}}" {{if eq $.Audit.Filter.Target .Value}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>
+    <label class="ui-field"><span class="ui-field-label" id="audit-from-label">С даты, UTC</span><input type="date" name="from" value="{{.FromText}}" aria-labelledby="audit-from-label"></label>
+    <label class="ui-field"><span class="ui-field-label" id="audit-to-label">По дату, UTC</span><input type="date" name="to" value="{{.ToText}}" aria-labelledby="audit-to-label"></label>
+    <label class="ui-field"><span class="ui-field-label" id="audit-sort-label">Порядок</span><select name="sort" aria-labelledby="audit-sort-label"><option value="newest" {{if eq .Filter.Sort "newest"}}selected{{end}}>Сначала новые</option><option value="oldest" {{if eq .Filter.Sort "oldest"}}selected{{end}}>Сначала старые</option></select></label>
+    </div></details>
+  </form>
+  <p class="security-note">До {{.Filter.Before.UTC.Format "02.01.2006 15:04:05"}} UTC. CSV содержит весь доступный журнал до этого момента, без фильтров. Срок хранения: {{$.Retention.AuditLogLabel}}.</p>
+  {{if $error}}
+  <section class="security-error" role="alert"><h2>Журнал не загружен</h2><p>{{$error}}</p><a class="button secondary" href="{{.CurrentURL}}"><i data-lucide="refresh-cw" aria-hidden="true"></i>Повторить</a></section>
+  {{else}}
+  <section id="security-results" aria-labelledby="security-results-title">
+    <div class="security-result-heading"><h2 id="security-results-title">События</h2><span>{{if .Total}}{{.First}}–{{.Last}} из {{.Total}}{{else}}0 событий{{end}}</span></div>
+    {{if .Items}}<table class="security-table"><thead><tr><th scope="col">Время, UTC</th><th scope="col">Инициатор</th><th scope="col">Действие / объект</th><th scope="col">Подробности</th></tr></thead><tbody>
+      {{range .Items}}<tr data-audit-id="{{.ID}}">
+        <td data-label="Время, UTC"><time>{{.CreatedAt.UTC.Format "02.01.2006 15:04:05"}}</time><span class="security-secondary">#{{.ID}}</span></td>
+        <td data-label="Инициатор"><strong>{{if .Actor}}{{.Actor}}{{else}}Не указан{{end}}</strong><span class="security-secondary">{{if .IP}}{{.IP}}{{else}}IP не указан{{end}}</span></td>
+        <td data-label="Действие"><strong>{{auditActionLabel .Action}}</strong><span class="security-secondary">{{auditTargetLabel .TargetType}}{{if .TargetID.Valid}} #{{.TargetID.Int64}}{{end}}</span></td>
+        <td data-label="Подробности"><details class="security-details"><summary>Событие #{{.ID}}</summary><dl><div><dt>Код действия</dt><dd>{{.Action}}</dd></div><div><dt>Тип объекта</dt><dd>{{.TargetType}}</dd></div>{{if .ActorID.Valid}}<div><dt>ID инициатора</dt><dd>{{.ActorID.Int64}}</dd></div>{{end}}<div><dt>Устройство</dt><dd>{{if .UserAgent}}{{.UserAgent}}{{else}}Не указано{{end}}</dd></div>{{if .RequestID}}<div><dt>ID запроса</dt><dd>{{.RequestID}}</dd></div>{{end}}{{if .CorrelationID}}<div><dt>ID цепочки</dt><dd>{{.CorrelationID}}</dd></div>{{end}}</dl><pre tabindex="0" aria-label="Метаданные события {{.ID}}">{{.MetadataJSON}}</pre></details></td>
+      </tr>{{end}}
+    </tbody></table>{{else}}<div class="security-empty"><h2>Событий не найдено</h2><p>Измените фильтры или обновите журнал.</p><a class="button ghost" href="{{.ResetURL}}"><i data-lucide="filter-x" aria-hidden="true"></i>Сбросить фильтры</a></div>{{end}}
+    {{template "security_pagination" .}}
   </section>
+  {{end}}{{end}}
 </main>
 </body></html>
+{{end}}
+
+{{define "security_pagination"}}
+<div class="security-pagination"><span>{{if .Total}}Страница {{.PageNumber}} из {{.PageCount}}{{else}}Нет записей{{end}}</span><nav aria-label="Страницы списка">
+{{if .FirstURL}}<a class="button ghost icon-button" href="{{.FirstURL}}" aria-label="Первая страница" title="Первая страница"><i data-lucide="chevrons-left" aria-hidden="true"></i></a>{{else}}<span class="button ghost icon-button is-disabled" role="link" aria-disabled="true" aria-label="Первая страница"><i data-lucide="chevrons-left" aria-hidden="true"></i></span>{{end}}
+{{if .PreviousURL}}<a class="button ghost icon-button" href="{{.PreviousURL}}" aria-label="Предыдущая страница" title="Предыдущая страница"><i data-lucide="chevron-left" aria-hidden="true"></i></a>{{else}}<span class="button ghost icon-button is-disabled" role="link" aria-disabled="true" aria-label="Предыдущая страница"><i data-lucide="chevron-left" aria-hidden="true"></i></span>{{end}}
+{{if .NextURL}}<a class="button ghost icon-button" href="{{.NextURL}}" aria-label="Следующая страница" title="Следующая страница"><i data-lucide="chevron-right" aria-hidden="true"></i></a>{{else}}<span class="button ghost icon-button is-disabled" role="link" aria-disabled="true" aria-label="Следующая страница"><i data-lucide="chevron-right" aria-hidden="true"></i></span>{{end}}
+{{if .LastURL}}<a class="button ghost icon-button" href="{{.LastURL}}" aria-label="Последняя страница" title="Последняя страница"><i data-lucide="chevrons-right" aria-hidden="true"></i></a>{{else}}<span class="button ghost icon-button is-disabled" role="link" aria-disabled="true" aria-label="Последняя страница"><i data-lucide="chevrons-right" aria-hidden="true"></i></span>{{end}}
+</nav></div>
 {{end}}

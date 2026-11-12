@@ -1,4 +1,11 @@
 (() => {
+  if (window.location.pathname === "/app") {
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("mining")) {
+      url.searchParams.delete("mining");
+      window.history.replaceState(window.history.state, "", url);
+    }
+  }
 
   const accountExpiryNodes = [...document.querySelectorAll("[data-account-expiry]")];
   if (accountExpiryNodes.length) {
@@ -28,6 +35,7 @@
 
 
   document.querySelectorAll('input[type="password"]').forEach((input) => {
+    if (input.closest("[data-auth-form], [data-account-password-form]")) return;
     const wrapper = document.createElement("span");
     wrapper.className = "password-field";
     input.parentNode.insertBefore(wrapper, input);
@@ -102,207 +110,6 @@
   };
   window.aiGatewaySensitiveContent = { reveal: revealSensitiveMedia };
 
-  const bindContentImageRetries = (root = document) => {
-    root.querySelectorAll(".content-gallery-preview img, .content-detail-media-grid img").forEach((image) => {
-      if (image.dataset.retryBound === "true") return;
-      image.dataset.retryBound = "true";
-      let retries = 0;
-      image.addEventListener("error", () => {
-        if (retries >= 2 || !image.src) return;
-        retries += 1;
-        const url = new URL(image.src, window.location.origin);
-        url.searchParams.set("retry", `${Date.now()}-${retries}`);
-        window.setTimeout(() => { image.src = url.toString(); }, 300 * retries);
-      });
-    });
-  };
-
-  const adminContentPage = document.querySelector("[data-admin-content-page]");
-  const contentGallery = document.querySelector("[data-admin-content-gallery]");
-  const contentDialog = document.getElementById("content-detail-dialog");
-  const contentDialogBody = document.getElementById("content-detail-body");
-  if (contentGallery && contentDialog && contentDialogBody) {
-    let contentDialogTrigger = null;
-    let contentDialogTaskKey = "";
-    const contentDialogFocusTrap = window.AIGatewayDialogFocus?.createFocusTrap({ root: contentDialog, documentRef: document }) || null;
-    const closeContentDialog = () => {
-      if (contentDialog.hidden) return;
-      contentDialogFocusTrap?.deactivate();
-      contentDialog.hidden = true;
-      contentDialogBody.replaceChildren();
-      document.body.classList.remove("content-detail-open");
-      if (!contentDialogFocusTrap) contentDialogTrigger?.focus({ preventScroll: true });
-      contentDialogTrigger = null;
-      contentDialogTaskKey = "";
-    };
-    const renderContentDialog = (trigger, preserveScroll = false) => {
-      if (!(trigger instanceof HTMLElement)) return false;
-      const taskKey = trigger.dataset.contentTaskOpen || "";
-      const detail = document.getElementById(`content-task-detail-${taskKey}`);
-      if (!(detail instanceof HTMLTemplateElement)) return false;
-      const scrollTop = preserveScroll ? contentDialogBody.scrollTop : 0;
-      contentDialogBody.replaceChildren(detail.content.cloneNode(true));
-      if (trigger.closest(".sensitive-media")?.classList.contains("is-revealed")) {
-        contentDialogBody.querySelectorAll(".sensitive-media").forEach((media) => media.classList.add("is-revealed"));
-      }
-      bindContentImageRetries(contentDialogBody);
-      contentDialogBody.scrollTop = scrollTop;
-      contentDialogTrigger = trigger;
-      contentDialogTaskKey = taskKey;
-      contentDialog.hidden = false;
-      document.body.classList.add("content-detail-open");
-      const closeButton = contentDialog.querySelector("[data-content-detail-close]");
-      if (contentDialogFocusTrap) {
-        contentDialogFocusTrap.activate({ trigger, initialFocus: closeButton, onEscape: closeContentDialog });
-      } else {
-        closeButton?.focus();
-      }
-      return true;
-    };
-    contentGallery.addEventListener("click", (event) => {
-      const trigger = event.target.closest("[data-content-task-open]");
-      if (!trigger) return;
-      if (revealSensitiveMedia(trigger)) return;
-      renderContentDialog(trigger);
-    });
-    contentDialog.querySelectorAll("[data-content-detail-close]").forEach((button) => button.addEventListener("click", closeContentDialog));
-    if (!contentDialogFocusTrap) document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") closeContentDialog();
-    });
-
-    if (adminContentPage && "EventSource" in window) {
-      const liveIndicator = adminContentPage.querySelector("[data-content-live-indicator]");
-      const liveLabel = adminContentPage.querySelector("[data-content-live-label]");
-      let contentRevision = Number(adminContentPage.dataset.contentRevision) || 0;
-      let refreshInFlight = false;
-      let refreshPending = false;
-      let retryTimer = 0;
-      const setLiveState = (state, label) => {
-        liveIndicator?.classList.toggle("is-connecting", state === "connecting");
-        liveIndicator?.classList.toggle("is-offline", state === "offline");
-        if (liveLabel) liveLabel.textContent = label;
-      };
-      const replaceChildrenFrom = (current, next) => {
-        if (!current || !next) return;
-        current.replaceChildren(...[...next.childNodes].map((node) => document.importNode(node, true)));
-      };
-      const contentTaskCard = (root, taskKey) => [...root.querySelectorAll("[data-content-task-key]")].find((card) => card.dataset.contentTaskKey === taskKey) || null;
-      const contentTaskDetail = (root, taskKey) => [...root.querySelectorAll("template[data-content-task-detail-key]")].find((detail) => detail.dataset.contentTaskDetailKey === taskKey) || null;
-      const reconcileContentGallery = (nextGallery) => {
-        const currentCards = new Map([...contentGallery.querySelectorAll("[data-content-task-key]")].map((card) => [card.dataset.contentTaskKey, card]));
-        const currentDetails = new Map([...contentGallery.querySelectorAll("template[data-content-task-detail-key]")].map((detail) => [detail.dataset.contentTaskDetailKey, detail]));
-        const revealed = new Set([...currentCards].filter(([, card]) => card.classList.contains("is-revealed")).map(([key]) => key));
-        const kept = new Set();
-        const changed = new Set();
-        const nextCards = [...nextGallery.querySelectorAll("[data-content-task-key]")];
-
-        if (nextCards.length === 0) {
-          const empty = nextGallery.querySelector("[data-content-empty]");
-          contentGallery.replaceChildren(empty ? document.importNode(empty, true) : document.createTextNode(""));
-          return changed;
-        }
-
-        nextCards.forEach((nextCard) => {
-          const taskKey = nextCard.dataset.contentTaskKey || "";
-          const nextDetail = contentTaskDetail(nextGallery, taskKey);
-          if (!taskKey || !nextDetail) return;
-          const currentCard = currentCards.get(taskKey);
-          const currentDetail = currentDetails.get(taskKey);
-          const unchanged = currentCard && currentDetail && currentCard.dataset.contentVersion === nextCard.dataset.contentVersion && currentDetail.dataset.contentVersion === nextDetail.dataset.contentVersion;
-          const card = unchanged ? currentCard : document.importNode(nextCard, true);
-          const detail = unchanged ? currentDetail : document.importNode(nextDetail, true);
-          if (!unchanged) changed.add(taskKey);
-          if (!currentCard) {
-            card.classList.add("is-new");
-            window.setTimeout(() => card.classList.remove("is-new"), 450);
-          }
-          if (revealed.has(taskKey)) card.classList.add("is-revealed");
-          contentGallery.append(card, detail);
-          kept.add(card);
-          kept.add(detail);
-        });
-        [...contentGallery.children].forEach((node) => {
-          if (!kept.has(node)) node.remove();
-        });
-        return changed;
-      };
-      const refreshContent = async () => {
-        if (refreshInFlight) {
-          refreshPending = true;
-          return;
-        }
-        refreshInFlight = true;
-        refreshPending = false;
-        let succeeded = false;
-        try {
-          const url = new URL(window.location.href);
-          url.searchParams.set("live", "1");
-          const response = await fetch(url, { credentials: "same-origin", cache: "no-store", headers: { Accept: "text/html" } });
-          if (!response.ok) throw new Error(`content refresh failed: ${response.status}`);
-          const nextDocument = new DOMParser().parseFromString(await response.text(), "text/html");
-          const nextPage = nextDocument.querySelector("[data-admin-content-page]");
-          const nextGallery = nextDocument.querySelector("[data-admin-content-gallery]");
-          const nextOverview = nextDocument.querySelector("[data-content-overview]");
-          const nextHeading = nextDocument.querySelector("[data-content-list-heading]");
-          if (!nextPage || !nextGallery || !nextOverview || !nextHeading) throw new Error("content refresh payload is incomplete");
-
-          const preserveAnchor = window.scrollY > 220 && contentDialog.hidden;
-          const anchor = preserveAnchor ? [...contentGallery.querySelectorAll("[data-content-task-key]")].find((card) => card.getBoundingClientRect().bottom > 0) : null;
-          const anchorKey = anchor?.dataset.contentTaskKey || "";
-          const anchorTop = anchor?.getBoundingClientRect().top || 0;
-
-          replaceChildrenFrom(document.querySelector("[data-content-overview]"), nextOverview);
-          replaceChildrenFrom(document.querySelector("[data-content-list-heading]"), nextHeading);
-          const changedTasks = reconcileContentGallery(nextGallery);
-          contentRevision = Number(nextPage.dataset.contentRevision) || contentRevision;
-          adminContentPage.dataset.contentRevision = String(contentRevision);
-          bindContentImageRetries(contentGallery);
-
-          if (anchorKey) {
-            const nextAnchor = contentTaskCard(contentGallery, anchorKey);
-            if (nextAnchor) window.scrollBy(0, nextAnchor.getBoundingClientRect().top - anchorTop);
-          }
-          if (!contentDialog.hidden && contentDialogTaskKey) {
-            const nextTrigger = contentTaskCard(contentGallery, contentDialogTaskKey)?.querySelector("[data-content-task-open]");
-            if (!nextTrigger) closeContentDialog();
-            else if (changedTasks.has(contentDialogTaskKey)) renderContentDialog(nextTrigger, true);
-          }
-          succeeded = true;
-          setLiveState("online", "Онлайн · задания обновляются сразу");
-        } catch (_) {
-          setLiveState("offline", "Не удалось обновить · повторяем подключение");
-        } finally {
-          refreshInFlight = false;
-          if (refreshPending) {
-            window.setTimeout(refreshContent, 0);
-          } else if (!succeeded) {
-            window.clearTimeout(retryTimer);
-            retryTimer = window.setTimeout(refreshContent, 1800);
-          }
-        }
-      };
-
-      const eventsURL = new URL("/admin/content/events", window.location.origin);
-      eventsURL.searchParams.set("since", String(contentRevision));
-      const contentEvents = new EventSource(eventsURL, { withCredentials: true });
-      contentEvents.addEventListener("open", () => setLiveState("online", "Онлайн · задания обновляются сразу"));
-      contentEvents.addEventListener("ready", (event) => {
-        const revision = Number(event.data);
-        if (Number.isFinite(revision)) contentRevision = Math.max(contentRevision, revision);
-        setLiveState("online", "Онлайн · задания обновляются сразу");
-      });
-      contentEvents.addEventListener("content", (event) => {
-        const revision = Number(event.data);
-        if (!Number.isFinite(revision) || revision <= contentRevision) return;
-        refreshPending = refreshInFlight;
-        refreshContent();
-      });
-      contentEvents.addEventListener("error", () => setLiveState("offline", "Связь потеряна · переподключаемся"));
-      window.addEventListener("beforeunload", () => contentEvents.close(), { once: true });
-    }
-  }
-
-  bindContentImageRetries();
 
   document.querySelectorAll("table").forEach((table) => {
     const labels = [...table.querySelectorAll("thead th")].map((cell) => cell.textContent.trim());
@@ -335,7 +142,10 @@
     };
     const renderOnlineUsers = (users) => {
       const target = systemMonitoring.querySelector("[data-online-users]");
-      systemMonitoring.querySelectorAll("[data-online-count]").forEach((node) => { node.textContent = String(users.length); });
+      systemMonitoring.querySelectorAll("[data-online-count]").forEach((node) => {
+        const limit = Number(node.dataset.onlineCountLimit);
+        node.textContent = (limit > 0 && users.length >= limit ? "≥" : "") + String(users.length);
+      });
       if (!target) return;
       target.replaceChildren();
       if (!users.length) {
@@ -467,7 +277,7 @@
         appendSegment();
       });
       svg.append(lines);
-      const markerGroup = svgNode("g", { class: "system-history-markers", "aria-label": "Запуски генераций" });
+      const markerGroup = svgNode("g", { class: "system-history-markers", role: "group", "aria-label": "Запуски генераций" });
       visibleMarkers.forEach((marker) => {
         const line = svgNode("line", {
           class: `is-${marker.state || "unknown"}`,
@@ -703,6 +513,10 @@
         setGauge("gpu_memory", gpuMemoryPercent, host.gpu_available ? bytes(host.gpu_memory_used_bytes) : "-", host.gpu_available ? `из ${bytes(host.gpu_memory_total_bytes)}` : "");
         const gpuName = systemMonitoring.querySelector("[data-gpu-name]");
         if (gpuName) gpuName.textContent = host.gpu_name || "Вычисления GPU";
+      } else {
+        ["cpu", "memory", "gpu", "gpu_memory"].forEach(key => setGauge(key, 0, "-", ""));
+        const gpuName = systemMonitoring.querySelector("[data-gpu-name]");
+        if (gpuName) gpuName.textContent = "Вычисления GPU";
       }
       renderOnlineUsers(overview.online_users || []);
       renderDependencies(overview.dependencies || []);
@@ -711,11 +525,21 @@
       systemMonitoring._markers = overview.generation_markers || [];
       renderHistory(systemMonitoring._history);
     };
+    let systemPageActive = true;
+    let systemAccessExpired = false;
+    let systemReadSequence = 0;
     const refreshSystem = async () => {
+      if (!systemPageActive || systemAccessExpired) return;
+      const sequence = ++systemReadSequence;
       try {
         const response = await fetch("/admin/system/overview", { headers: { Accept: "application/json" }, cache: "no-store" });
+        if (!systemPageActive || sequence !== systemReadSequence) return;
+        if (response.redirected || response.status === 401 || response.status === 403) {
+          systemAccessExpired = true; systemPoll.stop(); return;
+        }
         if (!response.ok) return;
-        renderSystem(await response.json());
+        const overview = await response.json();
+        if (systemPageActive && sequence === systemReadSequence) renderSystem(overview);
       } catch (_) {
         // The last valid dashboard state remains visible while the host agent restarts.
       }
@@ -723,60 +547,38 @@
     systemMonitoring._history = initialHistory;
     systemMonitoring._markers = initialMarkers;
     renderHistory(initialHistory);
-    refreshSystem();
-    window.setInterval(refreshSystem, 10000);
+    const systemPoll = window.AIGatewayLiveEvents.poll(refreshSystem, 10000, 60000);
+    const operationsOwnsRefresh = systemMonitoring.hasAttribute("data-operations-page");
+    if (operationsOwnsRefresh) {
+      systemMonitoring.addEventListener("operations:snapshot", event => renderSystem(event.detail));
+      systemMonitoring.addEventListener("operations:access-lost", () => { systemAccessExpired = true; });
+    } else {
+      refreshSystem();
+      systemPoll.start();
+    }
+    window.addEventListener("pagehide", () => { systemPageActive = false; systemReadSequence++; systemPoll.stop(); });
+    window.addEventListener("pageshow", () => {
+      if (systemPageActive || systemAccessExpired) return;
+      systemPageActive = true;
+      if (!operationsOwnsRefresh) { refreshSystem(); systemPoll.start(); }
+    });
+    document.addEventListener("visibilitychange", () => {
+      systemPoll.stop();
+      if (!systemPageActive || systemAccessExpired || operationsOwnsRefresh) return;
+      systemPoll.start(); if (!document.hidden) refreshSystem();
+    });
     refreshDependencyCountdowns();
-    window.setInterval(refreshDependencyCountdowns, 1000);
+    window.setInterval(() => { if (systemPageActive && !systemAccessExpired && !document.hidden) refreshDependencyCountdowns(); }, 1000);
     refreshWorkerCountdowns();
-    window.setInterval(refreshWorkerCountdowns, 1000);
+    window.setInterval(() => { if (systemPageActive && !systemAccessExpired && !document.hidden) refreshWorkerCountdowns(); }, 1000);
   }
 
-  const inviteComposer = document.querySelector("[data-invite-composer]");
-  if (inviteComposer instanceof HTMLFormElement) {
-    const accountTypes = Array.from(inviteComposer.querySelectorAll('input[name="account_type"]'));
-    const temporaryLifetime = inviteComposer.querySelector("[data-temporary-lifetime]");
-    const temporarySelect = temporaryLifetime?.querySelector("select");
-    const quickAccess = inviteComposer.querySelector("[data-quick-generation-access]");
-    const scenarios = inviteComposer.querySelector("[data-quick-scenarios]");
-    const quickPolicy = inviteComposer.querySelector("[data-quick-policy]");
-    const imagePolicy = inviteComposer.querySelector("[data-image-policy]");
-    const videoPolicy = inviteComposer.querySelector("[data-video-policy]");
-    const setPolicyEnabled = (target, enabled) => {
-      if (!(target instanceof HTMLElement)) return;
-      target.classList.toggle("is-disabled", !enabled);
-      target.querySelectorAll("input, select").forEach((control) => { control.disabled = !enabled; });
-    };
-    const syncInviteComposer = () => {
-      const temporary = accountTypes.some((input) => input instanceof HTMLInputElement && input.checked && input.value === "temporary");
-      if (temporaryLifetime instanceof HTMLElement) temporaryLifetime.hidden = !temporary;
-      if (temporarySelect instanceof HTMLSelectElement) temporarySelect.disabled = !temporary;
-      accountTypes.forEach((input) => input.closest(".invite-type-option")?.classList.toggle("is-selected", input instanceof HTMLInputElement && input.checked));
-
-      const quickEnabled = quickAccess instanceof HTMLInputElement && quickAccess.checked;
-      if (scenarios instanceof HTMLElement) {
-        scenarios.classList.toggle("is-disabled", !quickEnabled);
-        scenarios.querySelectorAll("input").forEach((input) => { input.disabled = !quickEnabled; });
-      }
-      const textToImage = inviteComposer.elements.grant_text_to_image;
-      const imageToImage = inviteComposer.elements.grant_image_to_image;
-      const video = inviteComposer.elements.grant_video;
-      const imageEnabled = quickEnabled && Boolean(textToImage?.checked || imageToImage?.checked);
-      const videoEnabled = quickEnabled && Boolean(video?.checked);
-      if (quickPolicy instanceof HTMLElement) quickPolicy.classList.toggle("is-disabled", !quickEnabled);
-      setPolicyEnabled(imagePolicy, imageEnabled);
-      setPolicyEnabled(videoPolicy, videoEnabled);
-      quickPolicy?.querySelectorAll(".invite-runtime-group input").forEach((input) => { input.disabled = !quickEnabled; });
-    };
-    accountTypes.forEach((input) => input.addEventListener("change", syncInviteComposer));
-    quickAccess?.addEventListener("change", syncInviteComposer);
-    scenarios?.addEventListener("change", syncInviteComposer);
-    syncInviteComposer();
-  }
 
   const approvedSubmissions = new WeakSet();
   const confirmDialog = document.createElement("dialog");
   confirmDialog.className = "confirm-dialog ui-dialog";
   confirmDialog.setAttribute("aria-labelledby", "confirm-dialog-title");
+  confirmDialog.setAttribute("aria-describedby", "confirm-dialog-message");
 
   const confirmBody = document.createElement("div");
   confirmBody.className = "confirm-dialog__body";
@@ -789,6 +591,7 @@
   confirmTitle.id = "confirm-dialog-title";
   confirmTitle.textContent = "\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0435";
   const confirmMessage = document.createElement("p");
+  confirmMessage.id = "confirm-dialog-message";
   confirmCopy.append(confirmTitle, confirmMessage);
   confirmBody.append(confirmMark, confirmCopy);
 
@@ -805,27 +608,42 @@
   confirmActions.append(cancelConfirm, acceptConfirm);
   confirmDialog.append(confirmBody, confirmActions);
   document.body.appendChild(confirmDialog);
+  const confirmationFocus = window.AIGatewayDialogFocus?.createFocusTrap?.({ root: confirmDialog });
+  const updateConfirmationScrollFocus = () => {
+    confirmBody.tabIndex = confirmBody.scrollHeight > confirmBody.clientHeight ? 0 : -1;
+  };
+  window.addEventListener("resize", () => {
+    if (confirmDialog.open) updateConfirmationScrollFocus();
+  });
 
   let pendingConfirmation = null;
   let confirmationTrigger = null;
   const closeConfirmation = () => {
+    const trigger = confirmationTrigger;
+    pendingConfirmation = null;
+    confirmationTrigger = null;
+    confirmationFocus?.deactivate({ restore: false });
     if (confirmDialog.open) confirmDialog.close();
+    if (trigger?.isConnected) trigger.focus({ preventScroll: true });
   };
   const requestConfirmation = (trigger, message, callback) => {
-    if (typeof confirmDialog.showModal !== "function") {
-      if (window.confirm(message)) callback();
-      return;
-    }
+    if (confirmDialog.open) return;
     pendingConfirmation = callback;
     confirmationTrigger = trigger;
     confirmMessage.textContent = message;
     confirmDialog.showModal();
+    updateConfirmationScrollFocus();
+    confirmationFocus?.activate({ trigger, initialFocus: cancelConfirm, onEscape: closeConfirmation });
     cancelConfirm.focus();
   };
   cancelConfirm.addEventListener("click", closeConfirmation);
+  confirmDialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeConfirmation();
+  });
   acceptConfirm.addEventListener("click", () => {
+    if (!confirmDialog.open) return;
     const callback = pendingConfirmation;
-    pendingConfirmation = null;
     closeConfirmation();
     callback?.();
   });
@@ -833,9 +651,8 @@
     if (event.target === confirmDialog) closeConfirmation();
   });
   confirmDialog.addEventListener("close", () => {
-    pendingConfirmation = null;
-    confirmationTrigger?.focus({ preventScroll: true });
-    confirmationTrigger = null;
+    // Native close events are queued and may arrive after the dialog reopens.
+    if (!confirmDialog.open) closeConfirmation();
   });
 
   document.addEventListener("submit", (event) => {
@@ -844,12 +661,25 @@
     if (!(form instanceof HTMLFormElement) || !(submitter instanceof HTMLElement)) return;
 
     if (submitter.dataset.confirm && !approvedSubmissions.has(submitter)) {
-      event.preventDefault();
-      requestConfirmation(submitter, submitter.dataset.confirm, () => {
-        approvedSubmissions.add(submitter);
-        form.requestSubmit(submitter);
-      });
-      return;
+      if (typeof confirmDialog.showModal !== "function") {
+        if (!window.confirm(submitter.dataset.confirm)) {
+          event.preventDefault();
+          return;
+        }
+      } else {
+        event.preventDefault();
+        requestConfirmation(submitter, submitter.dataset.confirm, () => {
+          if (!form.isConnected || !submitter.isConnected || submitter.form !== form || submitter.matches(":disabled")) return;
+          approvedSubmissions.add(submitter);
+          try {
+            form.requestSubmit(submitter);
+          } finally {
+            // Invalid forms do not emit submit; approval belongs to this attempt only.
+            approvedSubmissions.delete(submitter);
+          }
+        });
+        return;
+      }
     }
     approvedSubmissions.delete(submitter);
     window.setTimeout(() => {

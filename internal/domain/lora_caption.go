@@ -24,23 +24,27 @@ type LoraCaptionResult struct {
 }
 
 type LoraCaptionJob struct {
-	ID                 string    `json:"job_id"`
-	UserID             int64     `json:"-"`
-	DatasetID          string    `json:"dataset_id,omitempty"`
-	ImageID            string    `json:"image_id,omitempty"`
-	AssetID            string    `json:"-"`
-	RequestKey         string    `json:"-"`
-	InstructionVersion string    `json:"instruction_version"`
-	InputCipher        []byte    `json:"-"`
-	ResultCipher       []byte    `json:"-"`
-	State              string    `json:"state"`
-	Status             string    `json:"status"`
-	Error              string    `json:"error,omitempty"`
-	Attempts           int       `json:"attempts"`
-	RunToken           string    `json:"-"`
-	CancelRequested    bool      `json:"cancel_requested"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
-	ExpiresAt          time.Time `json:"expires_at"`
-	AvailableAt        time.Time `json:"available_at"`
+	ID                      string    `json:"job_id"`
+	UserID                  int64     `json:"-"`
+	DatasetID               string    `json:"dataset_id,omitempty"`
+	ImageID                 string    `json:"image_id,omitempty"`
+	AssetID                 string    `json:"-"`
+	RequestKey              string    `json:"-"`
+	InstructionVersion      string    `json:"instruction_version"`
+	InputCipher             []byte    `json:"-"`
+	ResultCipher            []byte    `json:"-"`
+	State                   string    `json:"state"`
+	Status                  string    `json:"status"`
+	Error                   string    `json:"error,omitempty"`
+	Attempts                int       `json:"attempts"`
+	RunToken                string    `json:"-"`
+	CancelRequested         bool      `json:"cancel_requested"`
+	CreatedAt               time.Time `json:"created_at"`
+	UpdatedAt               time.Time `json:"updated_at"`
+	ExpiresAt               time.Time `json:"expires_at"`
+	AvailableAt             time.Time `json:"available_at"`
+	InferenceWorkID         string    `json:"-"`
+	InferenceMetadataCipher []byte    `json:"-"`
+	RunVersion              int64     `json:"-"`
+	SeriesID                string    `json:"series_id,omitempty"`
 }

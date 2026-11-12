@@ -61,10 +61,12 @@ func (execRunner) Start(directory, name string, args ...string) error {
 }
 
 type ControllerImpl struct {
-	config Config
-	runner commandRunner
-	client *http.Client
-	mu     sync.Mutex
+	config         Config
+	runner         commandRunner
+	client         *http.Client
+	mu             sync.Mutex
+	runtimeBackend comfyRuntimeBackend
+	runtimeMonitor comfyRuntimeMonitor
 }
 
 func NewController(config Config) (*ControllerImpl, error) {
@@ -72,9 +74,10 @@ func NewController(config Config) (*ControllerImpl, error) {
 		return nil, err
 	}
 	return &ControllerImpl{
-		config: config,
-		runner: execRunner{},
-		client: &http.Client{Timeout: 20 * time.Second},
+		config:         config,
+		runner:         execRunner{},
+		client:         &http.Client{Timeout: 20 * time.Second},
+		runtimeBackend: nativeComfyRuntimeBackend{},
 	}, nil
 }
 

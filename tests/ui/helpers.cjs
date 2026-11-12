@@ -26,6 +26,16 @@ const installPreviewClock = async (page) => {
 
 const settlePage = async (page) => {
   await page.waitForLoadState("domcontentloaded");
+  if (await page.locator("[data-admin-content-page]").count()) {
+    await expect(page.locator("[data-admin-content-page]")).toHaveAttribute("data-content-state", "ready");
+  }
+  if (await page.locator("[data-operations-page]").count()) {
+    await expect(page.locator("[data-operations-page]")).toHaveAttribute("data-ops-state", "ready");
+  }
+  if (await page.locator("[data-training-page]").count()) {
+    await expect(page.locator("[data-training-page]")).toHaveAttribute("data-training-state", "ready");
+    await expect(page.locator("[data-training-gpu]:not([hidden])").filter({ hasText: /проверяем состояние|данные не получены/ })).toHaveCount(0);
+  }
   if (await page.locator("#generation-draft-bar").count()) {
     await expect(page.locator("#generation-draft-bar")).not.toHaveAttribute("data-state", /^(loading|dirty|saving)$/);
   }
@@ -83,4 +93,11 @@ const openStudioOptions = async (page) => {
   }
 };
 
-module.exports = { installPreviewClock, settlePage, assertNoViewportOverflow, expectFocusInside, openStudioOptions };
+const chooseWorkflow = async (page, id) => {
+  const dialog = page.locator("#studio-workflow-dialog");
+  if (!await dialog.isVisible()) await page.locator("#studio-workflow-open").click();
+  await dialog.locator(`[data-preset-id="${id}"]`).click();
+  await expect(dialog).not.toBeVisible();
+};
+
+module.exports = { installPreviewClock, settlePage, assertNoViewportOverflow, expectFocusInside, openStudioOptions, chooseWorkflow };

@@ -96,6 +96,71 @@ func TestContentTaskKeepsDeletedAuthorSnapshot(t *testing.T) {
 	}
 }
 
+func TestContentTaskRestoresLineageFromLinkedAssistant(t *testing.T) {
+	templates, err := ParseTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cipher, err := contentcrypto.NewCipher("lineage-regression-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	encrypt := func(text string) []byte {
+		value, err := cipher.Encrypt(text)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	for _, assistantMetadata := range []string{
+		`{"prompt_assistant":{"requested":true,"original_prompt":"User request","suggestion":"Assistant answer","applied":false}}`,
+		`{"prompt_assistant":{"requested":true}}`,
+		`{}`,
+	} {
+		for _, reverse := range []bool{false, true} {
+			for _, retainedText := range []bool{false, true} {
+				generationMetadata := `{"prompt_assistant":{"requested":true,"applied":true,"decision":"edited_after_apply","template":"realistic","think":true}}`
+				if retainedText {
+					generationMetadata = `{"prompt_assistant":{"requested":true,"applied":true,"decision":"edited_after_apply","template":"realistic","think":true,"original_prompt":"Recorded original","suggestion":"Recorded answer"}}`
+				}
+				rows := []domain.ContentEventRow{
+					{ID: 1, UserID: 7, Username: "alice", CorrelationID: "lineage-trace", Kind: "prompt_assistant", Service: "ollama", Model: "local-model", PromptCipher: encrypt("User request"), ResponseCipher: encrypt("Assistant answer"), MetadataCipher: encrypt(assistantMetadata)},
+					{ID: 2, UserID: 7, Username: "alice", CorrelationID: "lineage-trace", Kind: "comfyui_prompt", Service: "comfyui", PromptCipher: encrypt("Final edited prompt"), ResponseCipher: encrypt(""), MetadataCipher: encrypt(generationMetadata)},
+				}
+				if reverse {
+					rows[0], rows[1] = rows[1], rows[0]
+				}
+				app := &App{contentCipher: cipher}
+				views, _ := app.buildContentTaskViews(rows, nil, nil, "", "", 200)
+				if len(views) != 1 || views[0].Assistant == nil {
+					t.Fatal("lineage not grouped")
+				}
+				a := views[0].Assistant
+				original, suggestion := "User request", "Assistant answer"
+				if retainedText {
+					original, suggestion = "Recorded original", "Recorded answer"
+				}
+				if a.OriginalPrompt != original || a.Suggestion != suggestion || views[0].Prompt != "Final edited prompt" {
+					t.Fatalf("missing or overwritten lineage: %+v", a)
+				}
+				if !a.Applied || a.Decision != "edited_after_apply" || a.Template != "realistic" || !a.Think || a.Model != "local-model" {
+					t.Fatalf("generation decision overwritten: %+v", a)
+				}
+				var rendered bytes.Buffer
+				data := map[string]any{"Title": "History", "Retention": newRetentionPolicyView(Config{}.Retention), "RetentionStats": domain.ContentRetentionStats{}, "Events": views}
+				if err := templates.ExecuteTemplate(&rendered, "admin_content", data); err != nil {
+					t.Fatal(err)
+				}
+				for _, text := range []string{original, suggestion, "Final edited prompt"} {
+					if !strings.Contains(rendered.String(), ">"+text+"</pre>") {
+						t.Fatalf("lineage text missing from inspector: %q", text)
+					}
+				}
+			}
+		}
+	}
+}
+
 func TestContentTasksStayMergedByCorrelationAfterJobCleanup(t *testing.T) {
 	cipher, err := contentcrypto.NewCipher("content-task-correlation-test")
 	if err != nil {
@@ -117,6 +182,38 @@ func TestContentTasksStayMergedByCorrelationAfterJobCleanup(t *testing.T) {
 	views, _ := app.buildContentTaskViews(rows, nil, nil, "", "", 200)
 	if len(views) != 1 || views[0].Key != "trace-trace-retained-task" || views[0].Assistant == nil || views[0].Prompt != "editorial portrait" {
 		t.Fatalf("correlation-retained task views=%+v", views)
+	}
+}
+
+func TestAdminContentKeepsPromptLineageInsideInspector(t *testing.T) {
+	templates, err := ParseTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := map[string]any{
+		"Title": "AI content", "Retention": newRetentionPolicyView(Config{}.Retention),
+		"RetentionStats": domain.ContentRetentionStats{}, "Service": "ollama",
+		"Events": []ContentEventView{{
+			Key: "task-inspector", Version: "revision-1", Username: "alice", Service: "ollama",
+			Model: "Qwen", Prompt: "private-final-prompt", Metadata: "private-parameters",
+			Assistant: &ContentAssistantView{OriginalPrompt: "private-original-prompt", Suggestion: "private-assistant-answer", Decision: "kept_original"},
+		}},
+	}
+	var rendered bytes.Buffer
+	if err := templates.ExecuteTemplate(&rendered, "admin_content", data); err != nil {
+		t.Fatal(err)
+	}
+	html := rendered.String()
+	list := strings.SplitN(html, "<template", 2)[0]
+	for _, private := range []string{"private-final-prompt", "private-original-prompt", "private-assistant-answer", "private-parameters"} {
+		if strings.Contains(list, private) {
+			t.Fatalf("task list exposes inspector content %q", private)
+		}
+	}
+	for _, expected := range []string{`/static/admin-content.js`, `/static/admin-content.css`, `value="ollama" selected`, `data-content-tab="prompt"`, `data-content-tab="data"`, "private-original-prompt", "private-assistant-answer", "Оставлен исходный", "private-parameters"} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("missing inspector contract %q", expected)
+		}
 	}
 }
 
@@ -177,7 +274,7 @@ func TestAdminContentRendersArchivedAndFailedGenerationStates(t *testing.T) {
 	for _, expected := range []string{
 		"Медиа удалено по сроку хранения",
 		"Результат хранился 24 часа",
-		"Задание завершилось с ошибкой",
+		"content-detail-state is-error",
 		"Файл результата очищен по сроку хранения",
 		"ComfyUI отклонил workflow",
 	} {

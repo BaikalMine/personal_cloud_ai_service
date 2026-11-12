@@ -10,8 +10,34 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 )
+
+func TestRewriteComfyUploadChecksDeclaredFileSize(t *testing.T) {
+	for _, mismatch := range []int{0, 100, -1} {
+		payload := testPNG(t)
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		part, _ := writer.CreateFormFile("image", "sample.png")
+		_, _ = part.Write(payload)
+		_ = writer.Close()
+		r := httptest.NewRequest(http.MethodPost, "/upload/image", &body)
+		r.Header.Set("Content-Type", writer.FormDataContentType())
+		r.Header.Set("X-Upload-File-Size", strconv.Itoa(len(payload)+mismatch))
+		a := &App{cfg: Config{SessionSecret: "01234567890123456789012345678901"}}
+		err := a.rewriteComfyUpload(httptest.NewRecorder(), r, &User{ID: 42})
+		if mismatch == 0 {
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = r.Body.Close()
+		} else if err == nil || !strings.Contains(err.Error(), "не полностью") {
+			t.Fatalf("incomplete file accepted: %v", err)
+		}
+	}
+}
 
 func TestRewriteComfyUploadAddsUserNamespaceAndPreservesFile(t *testing.T) {
 	var body bytes.Buffer

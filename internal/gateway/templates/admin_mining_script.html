@@ -1,0 +1,16 @@
+{{define "admin_mining_script"}}
+{{template "head" .}}{{template "admin_nav" .}}{{template "admin_resource_assets" .}}
+<main class="page resource-page" id="main-content">
+  <header class="resource-head"><h1>{{.Miner.Name}}</h1><a class="button ghost" href="/admin/mining"><i data-lucide="arrow-left" aria-hidden="true"></i>Профили</a></header>
+  {{if .Error}}<p class="alert" role="alert">{{.Error}}</p>{{end}}
+  {{if .Saved}}<p class="success-box" role="status">BAT сохранён. Резервная копия создана. Майнер не запускался.</p>{{end}}
+  <section class="resource-script" aria-labelledby="script-title"><h2 id="script-title">Скрипт запуска</h2><p class="mining-script-path"><code>{{.Miner.ScriptPath}}</code></p>
+    <form method="post" action="/admin/mining/script" data-mining-editor>
+      <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="id" value="{{.Miner.ID}}"><input type="hidden" name="sha256" value="{{.Script.SHA256}}">
+      {{if not .Miner.ID}}<input type="hidden" name="path" value="{{.Miner.ScriptPath}}"><label class="ui-field"><span class="ui-field-label">Процесс майнера</span><select name="process" required><option value="">Выберите EXE</option>{{range .Processes}}<option value="{{.Name}}" {{if .Selected}}selected{{end}}>{{.Name}}</option>{{end}}</select></label>{{end}}
+      <label class="ui-field"><span class="ui-field-label">BAT / CMD</span><textarea class="mining-script-editor" name="content" rows="18" spellcheck="false" autocomplete="off" autocapitalize="off" maxlength="65536" {{if not .CanSave}}disabled{{end}}>{{.Script.Content}}</textarea></label>
+      <div class="mining-script-actions"><button type="submit" {{if not .CanSave}}disabled{{end}} data-confirm="Сохранить изменения BAT? Резервная копия будет создана автоматически. Майнер не будет запущен или остановлен."><i data-lucide="save" aria-hidden="true"></i>Сохранить</button><a class="button ghost" href="{{.EditorURL}}"><i data-lucide="rotate-ccw" aria-hidden="true"></i>Перечитать файл</a></div>
+    </form>
+  </section>
+</main></body></html>
+{{end}}

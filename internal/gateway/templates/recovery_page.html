@@ -1,0 +1,20 @@
+{{define "recovery_page"}}
+{{template "head" .}}
+{{if .CurrentUser}}{{if .AdminWorkspace}}{{template "admin_nav" .}}{{else}}{{template "nav" .}}{{end}}{{end}}
+<link rel="stylesheet" href="/static/auth-pages.css?v={{.AssetVersion}}">
+<script src="/static/auth-pages.js?v={{.AssetVersion}}" defer></script>
+<main class="{{if .CurrentUser}}page recovery-workspace{{else}}entry-page{{end}}" id="main-content" data-recovery-page>
+  <section class="recovery-content" aria-labelledby="recovery-title">
+    {{if not .CurrentUser}}<a class="entry-brand" href="/"><span aria-hidden="true">AI</span>AI Gateway</a>{{end}}
+    <div class="recovery-code"><i data-lucide="{{.Recovery.Icon}}" aria-hidden="true"></i><span>Ошибка {{.Recovery.Code}}</span></div>
+    <h1 id="recovery-title">{{.Recovery.Title}}</h1>
+    <p>{{.Recovery.Reason}}</p>
+    <div class="recovery-actions">
+      {{if .Recovery.RetryURL}}<a class="button" href="{{.Recovery.RetryURL}}"><i data-lucide="refresh-cw" aria-hidden="true"></i>{{.Recovery.RetryLabel}}</a>{{end}}
+      <button class="ghost" type="button" data-recovery-back hidden><i data-lucide="arrow-left" aria-hidden="true"></i>Назад</button>
+      {{if .CurrentUser}}<a class="button ghost" href="/app"><i data-lucide="layout-dashboard" aria-hidden="true"></i>Открыть рабочее пространство</a>{{else}}<a class="button ghost" href="/login"><i data-lucide="log-in" aria-hidden="true"></i>Перейти ко входу</a>{{end}}
+    </div>
+  </section>
+</main>
+</body></html>
+{{end}}

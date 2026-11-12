@@ -1,0 +1,33 @@
+{{define "admin_profile_activity"}}
+<section class="profile-band" aria-labelledby="profile-activity-heading">
+  <div class="panel-heading"><h2 id="profile-activity-heading">Активность</h2></div>
+  <dl class="profile-usage-facts">
+    <div><dt>Запросов за всё время</dt><dd>{{formatNumber .Stats.TotalRequests}}</dd></div>
+    <div><dt>Исходящий трафик</dt><dd>{{formatBytes .Stats.TotalBytesOut}}</dd></div>
+    <div><dt>Ошибки входа</dt><dd>{{formatNumber .Profile.FailedLoginCount}}</dd></div>
+  </dl>
+  <details class="ui-disclosure profile-service-history"><summary>Использование сервисов и последние 7 дней</summary>
+    <div class="table-scroll"><table><thead><tr><th>Сервис</th><th>Запросы</th><th>Передано</th><th>Ошибки</th></tr></thead><tbody>
+    {{range .Stats.ByService}}<tr><td data-label="Сервис"><a href="/admin/services/{{.Service}}">{{.Service}}</a></td><td data-label="Запросы">{{formatNumber .Requests}}</td><td data-label="Передано">{{formatBytes .Bytes}}</td><td data-label="Ошибки">{{formatNumber .Errors}}</td></tr>{{else}}<tr><td colspan="4" class="muted">Сервисами ещё не пользовались.</td></tr>{{end}}
+    </tbody></table></div>
+    {{template "chart" .Stats.Chart}}
+  </details>
+  {{$p := .ProfilePagination}}
+  <form method="get" action="/admin/users/{{.Profile.ID}}#profile-results" class="profile-list-filters profile-activity-filters">
+    <input type="hidden" name="tab" value="activity">
+    <label class="ui-field"><span class="ui-field-label">Поиск по адресу запроса</span><input type="search" name="q" maxlength="120" value="{{$p.Filter.Search}}"></label>
+    <label class="ui-field"><span class="ui-field-label">Сервис</span><select name="service"><option value="">Все</option><option value="comfyui" {{if eq $p.Filter.Service "comfyui"}}selected{{end}}>ComfyUI</option><option value="openwebui" {{if eq $p.Filter.Service "openwebui"}}selected{{end}}>OpenWebUI</option></select></label>
+    <label class="ui-field"><span class="ui-field-label">Результат</span><select name="result"><option value="">Любой</option><option value="success" {{if eq $p.Filter.Result "success"}}selected{{end}}>Без ошибки</option><option value="error" {{if eq $p.Filter.Result "error"}}selected{{end}}>Ошибка</option></select></label>
+    <label class="ui-field"><span class="ui-field-label">Сортировка</span><select name="sort"><option value="newest" {{if ne $p.Filter.Sort "oldest"}}selected{{end}}>Сначала новые</option><option value="oldest" {{if eq $p.Filter.Sort "oldest"}}selected{{end}}>Сначала старые</option></select></label>
+    <div class="profile-filter-actions"><button type="submit"><i data-lucide="search" aria-hidden="true"></i>Найти</button><a class="button ghost" href="{{$p.ResetURL}}">Сбросить</a></div>
+  </form>
+  <div id="profile-results" class="profile-results" tabindex="-1">
+    <p class="profile-list-count">Найдено запросов: {{formatNumber $p.Total}}</p>
+    <div class="table-scroll"><table class="profile-data-table"><thead><tr><th>Действие</th><th>Сервис</th><th>Результат</th><th>Время</th></tr></thead><tbody>
+      {{range .Activities}}<tr><td data-label="Действие"><details class="profile-row-details"><summary>{{.Summary}}</summary><dl class="key-values"><div><dt>Метод</dt><dd>{{.Method}}</dd></div><div><dt>Адрес</dt><dd>{{.Path}}</dd></div><div><dt>Передано</dt><dd>{{formatBytes .Bytes}}</dd></div><div><dt>Длительность</dt><dd>{{.Duration}} мс</dd></div></dl></details></td><td data-label="Сервис">{{.ServiceLabel}}</td><td data-label="Результат"><span class="badge {{if ge .Status 400}}danger{{else}}ok{{end}}">{{if ge .Status 400}}Ошибка{{else}}Без ошибки{{end}} · {{.Status}}</span></td><td data-label="Время">{{formatTime .CreatedAt}}</td></tr>
+      {{else}}<tr><td colspan="4" class="muted">Запросов с такими условиями нет.</td></tr>{{end}}
+    </tbody></table></div>
+    {{template "access_list_pagination" $p}}
+  </div>
+</section>
+{{end}}

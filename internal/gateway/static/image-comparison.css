@@ -1,0 +1,42 @@
+.image-comparison-layer,
+.image-comparison-labels,
+.image-comparison-divider,
+.image-comparison-notice { position: absolute; z-index: 2; }
+.image-comparison-layer { inset: 0; overflow: hidden; pointer-events: none; background: var(--color-media-bg); }
+.image-comparison-image { position: absolute; inset: 0 auto auto 0; max-width: none; max-height: none; object-fit: contain; transform-origin: top left; user-select: none; -webkit-user-drag: none; }
+.image-comparison-labels { display: flex; justify-content: space-between; gap: 8px; padding: 14px; box-sizing: border-box; pointer-events: none; }
+.image-comparison-label { padding: 6px 10px; border-radius: 4px; background: var(--color-media-label); color: var(--color-media-text); font-size: 12px; line-height: 1.4; }
+.image-comparison-label:last-child { margin-left: auto; }
+.image-comparison-divider { width: 48px; margin-left: -24px; cursor: col-resize; touch-action: none; outline-offset: -4px; }
+.image-comparison-divider::before { position: absolute; top: 0; bottom: 0; left: 23px; width: 2px; background: var(--color-media-accent); box-shadow: 0 0 0 1px var(--color-media-label); content: ""; }
+.image-comparison-grip { position: absolute; top: 50%; left: 0; display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; margin-top: -24px; box-sizing: border-box; border: 2px solid var(--color-media-accent); border-radius: 50%; background: var(--color-media-bg); color: var(--color-media-accent); box-shadow: 0 3px 14px var(--color-overlay); transition: transform 120ms ease; }
+.image-comparison-grip svg { width: 19px; height: 22px; flex: 0 0 19px; }
+.image-comparison-divider:hover .image-comparison-grip,
+.image-comparison-divider:focus-visible .image-comparison-grip { transform: scale(1.08); }
+.image-comparison-divider:active .image-comparison-grip { transform: scale(.96); }
+.image-comparison-divider:focus-visible { outline: 2px solid var(--color-media-text); border-radius: 4px; }
+.image-comparison-notice { right: 12px; bottom: 12px; left: 12px; width: fit-content; max-width: calc(100% - 24px); margin: 0 auto; padding: 8px 12px; border-radius: 4px; background: var(--color-media-label); color: var(--color-media-text); font-size: 12px; line-height: 1.5; pointer-events: none; }
+.image-comparison-layer[hidden], .image-comparison-labels[hidden], .image-comparison-divider[hidden], .image-comparison-notice[hidden], .image-comparison-label[hidden], .image-comparison-toggle[hidden] { display: none; }
+.image-comparison-toggle[aria-pressed="true"] { background: var(--color-success-bg); border-color: var(--color-success-border); color: var(--color-success); }
+.generation-lightbox .generation-lightbox-toolbar { flex-wrap: nowrap; gap: 10px; padding: 10px 12px; }
+.generation-lightbox-heading { min-width: 0; flex: 1; display: grid; gap: 3px; }
+.generation-lightbox-heading h2 { margin: 0; font-size: 17px; line-height: 1.4; }
+.generation-lightbox-heading > span { overflow: hidden; color: var(--muted); font-size: 12px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.generation-lightbox-toolbar > .icon-button { width: 44px; height: 44px; min-height: 44px; padding: 10px; flex: 0 0 44px; }
+.generation-lightbox .generation-lightbox-viewport { background: var(--color-media-bg); }
+.generation-lightbox-controls { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 12px max(8px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface); }
+.generation-lightbox .generation-lightbox-zoom { gap: 6px; min-height: 44px; padding: 0; border: 0; background: transparent; }
+.generation-lightbox-controls .icon-button { display: grid; place-items: center; box-sizing: border-box; width: 44px; height: 44px; min-height: 44px; padding: 10px; }
+.generation-lightbox .generation-lightbox-zoom output { width: 56px; flex: 0 0 56px; }
+.generation-lightbox .generation-lightbox-download { margin-left: 12px; }
+.generation-lightbox-zoom[hidden] + .generation-lightbox-download { margin-left: 0; }
+@media (max-width: 600px) {
+  .generation-lightbox .generation-lightbox-toolbar { gap: 6px; padding: max(8px, env(safe-area-inset-top)) 8px 8px; }
+  .generation-lightbox-controls { gap: 2px; padding-right: 4px; padding-left: 4px; }
+  .generation-lightbox .generation-lightbox-zoom { gap: 2px; }
+  .generation-lightbox .generation-lightbox-download { margin-left: 2px; }
+  .image-comparison-labels { padding: 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .image-comparison-grip { transition: none; }
+}

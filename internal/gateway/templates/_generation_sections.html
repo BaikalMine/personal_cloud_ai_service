@@ -1,4 +1,13 @@
 {{define "studio_notices"}}
+<section class="studio-job-source" id="generation-job-source" hidden aria-label="Параметры исходной задачи" tabindex="-1">
+    <p id="generation-job-source-message" role="status"></p>
+    <div class="studio-job-source-actions">
+      <button type="button" class="button ghost" id="generation-job-source-retry" hidden><i data-lucide="refresh-cw" aria-hidden="true"></i>Проверить снова</button>
+      <button type="button" class="button ghost" id="generation-job-source-replace" hidden><i data-lucide="replace" aria-hidden="true"></i>Заменить текущие параметры</button>
+      <button type="button" class="button ghost" id="generation-job-source-keep" hidden>Оставить мои параметры</button>
+      <a class="button ghost" id="generation-job-source-back"><i data-lucide="arrow-left" aria-hidden="true"></i>К исходной задаче</a>
+    </div>
+  </section>
 <section class="generation-repeat-notice" id="generation-repeat-notice" hidden aria-live="polite">
     <div><strong id="generation-repeat-title">Параметры перенесены</strong><span id="generation-repeat-message"></span></div>
     <button type="button" id="generation-repeat-dismiss" aria-label="Закрыть уведомление">&#10005;</button>
@@ -19,38 +28,118 @@
 
 {{define "studio_queue"}}
 <section class="generation-queue" id="generation-queue" hidden aria-live="polite"><span>Очередь сервера</span><strong id="generation-queue-title"></strong><small id="generation-queue-details"></small></section>
+<div class="ui-status-banner" id="generation-queue-feedback" hidden><p id="generation-queue-message" role="status"></p><button type="button" class="button ghost" id="generation-queue-refresh"><i data-lucide="refresh-cw" aria-hidden="true"></i>Обновить очередь</button><a class="button ghost" id="generation-queue-login" href="/login?next=%2Fgenerate" hidden><i data-lucide="log-in" aria-hidden="true"></i>Войти</a></div>
 {{end}}
 
 {{define "studio_scenarios"}}
-<div class="studio-tasks ui-segmented" role="group" aria-label="Что создать">
-        {{range .Workflows}}
+<div class="studio-tasks ui-segmented ui-segmented--compact" role="group" aria-label="Что создать">
+  {{range .Workflows}}{{if eq .ID "text-to-image"}}{{template "studio_scenario" .}}{{end}}{{end}}
+  {{range .Workflows}}{{if eq .ID "image-to-image"}}{{template "studio_scenario" .}}{{end}}{{end}}
+  {{range .Workflows}}{{if eq .ID "minimax-h3-video"}}{{template "studio_scenario" .}}{{end}}{{end}}
+</div>
+{{end}}
+
+{{define "studio_scenario"}}
         <button class="ui-segment scenario-choice" type="button" aria-pressed="false" title="{{if .Restriction}}{{.Restriction}}{{else}}{{.Description}}{{end}}" data-workflow-id="{{.ID}}" data-requires-image="{{.RequiresImage}}" data-allows-images="{{.AllowsImages}}" {{if .Restricted}}disabled{{end}}>
-          <strong>{{if .AllowsImages}}Видео{{else if .RequiresImage}}Редактировать фото{{else}}Изображение{{end}}</strong>
+          <i data-lucide="{{if .AllowsImages}}video{{else if .RequiresImage}}pencil{{else}}image{{end}}" aria-hidden="true"></i>
+          <strong>{{if .AllowsImages}}Видео{{else if .RequiresImage}}Правка фото{{else}}Изображение{{end}}</strong>
         </button>
-        {{end}}
-      </div>
 {{end}}
 
 {{define "studio_workflows"}}
-<div class="studio-workflows generation-workflow-choices" role="group" aria-label="Способ обработки">
+<div class="studio-workflow-picker">
+<span class="studio-section-label" id="studio-workflow-label">Схема генерации</span>
+<button class="button ghost studio-workflow-trigger" id="studio-workflow-open" type="button" aria-labelledby="studio-workflow-label studio-workflow-current" aria-haspopup="dialog" aria-expanded="false" aria-controls="studio-workflow-dialog">
+  <i data-lucide="workflow" aria-hidden="true"></i>
+  <span id="studio-workflow-current">Выберите схему</span>
+  <i data-lucide="chevrons-up-down" aria-hidden="true"></i>
+</button>
+<dialog class="studio-workflow-dialog ui-dialog" id="studio-workflow-dialog" aria-labelledby="studio-workflow-title">
+  <header class="ui-dialog__toolbar"><h2 id="studio-workflow-title">Схема генерации</h2><button class="button ghost icon-button" type="button" id="studio-workflow-close" aria-label="Закрыть выбор схемы"><i data-lucide="x" aria-hidden="true"></i></button></header>
+  <div class="studio-workflows generation-workflow-choices" role="group" aria-label="Доступные схемы">
         {{range .GenerationPresets}}
-        <button class="workflow-choice generation-workflow-choice" type="button" data-preset-id="{{.ID}}" data-template-id="{{.TemplateID}}" data-family="{{.Family}}" data-default-model-id="{{.ModelID}}" data-available="{{if and .Available (not .Restricted)}}true{{else}}false{{end}}" data-default-steps="{{.DefaultSteps}}" data-default-cfg="{{.DefaultCFG}}" data-default-sampler="{{.DefaultSampler}}" data-default-scheduler="{{.DefaultScheduler}}" data-default-lora-strength="{{.LoraStrength}}" data-requires-image="{{.RequiresImage}}" data-allows-images="{{.AllowsImages}}" data-max-input-images="{{.MaxInputImages}}" {{if or (not .Available) .Restricted}}disabled{{end}}>
-          <span><strong>{{.Name}}</strong>{{if .Reason}}<small>{{.Reason}}</small>{{end}}{{if .Restriction}}<small>{{.Restriction}}</small>{{end}}</span>
+        <button class="button ghost workflow-choice generation-workflow-choice" type="button" title="{{.Name}}" data-preset-id="{{.ID}}" data-template-id="{{.TemplateID}}" data-family="{{.Family}}" data-default-model-id="{{.ModelID}}" data-available="{{if and .Available (not .Restricted)}}true{{else}}false{{end}}" data-default-steps="{{.DefaultSteps}}" data-default-cfg="{{.DefaultCFG}}" data-default-sampler="{{.DefaultSampler}}" data-default-scheduler="{{.DefaultScheduler}}" data-default-lora-strength="{{.LoraStrength}}" data-requires-image="{{.RequiresImage}}" data-allows-images="{{.AllowsImages}}" data-max-input-images="{{.MaxInputImages}}" {{if or (not .Available) .Restricted}}disabled{{end}}>
+          <span><strong>{{if eq .ID "minimax-h3-video"}}MiniMax H3{{else if eq .ID "aihub-minimax-h3"}}AIHUB{{else if eq .ID "krea2-ultra"}}Krea2 · Ультра{{else if eq .ID "krea2-pro"}}Krea2 · Ультра полный{{else}}{{.Name}}{{end}}</strong>{{if .Reason}}<small>{{.Reason}}</small>{{end}}{{if .Restriction}}<small>{{.Restriction}}</small>{{end}}</span>
+          <i data-lucide="check" aria-hidden="true"></i>
         </button>
         {{end}}
-      </div>
+  </div>
+</dialog>
+</div>
 <p class="generation-model-note" id="generation-workflow-note" hidden>Для выбранного сценария пока нет готовой схемы генерации.</p>
 {{end}}
 
 {{define "studio_model"}}
 <section class="generation-model-picker" id="generation-model-field" hidden>
         <label class="ui-field"><span class="ui-field-label">Выберите модель
-          </span><select name="model" id="generation-model" required><option value="">Выберите модель</option>{{range .QuickModels}}<option value="{{.ID}}" data-family="{{.Family}}" data-available="{{.Available}}" data-default-steps="{{.DefaultSteps}}" data-default-cfg="{{.DefaultCFG}}" data-default-sampler="{{.DefaultSampler}}" data-default-scheduler="{{.DefaultScheduler}}" data-default-lora-strength="{{.LoraStrength}}" data-video-integrated-turbo="{{.VideoIntegratedTurbo}}" data-video-reference-only="{{.VideoReferenceOnly}}" data-default-video-shift="{{.DefaultVideoShift}}" data-default-audio-shift="{{.DefaultAudioShift}}" {{if not .Available}}disabled{{end}}>{{.DisplayName}}{{if .Reason}} — {{.Reason}}{{end}}</option>{{end}}</select>
+          </span><select name="model" id="generation-model" required><option value="">Выберите модель</option>{{range .QuickModels}}<option value="{{.ID}}" data-family="{{.Family}}" data-available="{{.Available}}" data-aihub-only="{{.AIHubOnly}}" data-default-steps="{{.DefaultSteps}}" data-default-cfg="{{.DefaultCFG}}" data-default-sampler="{{.DefaultSampler}}" data-default-scheduler="{{.DefaultScheduler}}" data-default-lora-strength="{{.LoraStrength}}" data-video-integrated-turbo="{{.VideoIntegratedTurbo}}" data-video-reference-only="{{.VideoReferenceOnly}}" data-default-video-shift="{{.DefaultVideoShift}}" data-default-audio-shift="{{.DefaultAudioShift}}" {{if not .Available}}disabled{{end}}>{{.DisplayName}}{{if .Reason}} — {{.Reason}}{{end}}</option>{{end}}</select>
         </label>
       </section>
 {{end}}
 
+{{define "studio_aihub_mode"}}
+<section class="workflow-settings-section aihub-settings" data-aihub-settings hidden>
+  <strong class="studio-section-label">Результат AIHUB</strong>
+  <div class="minimax-mode-segments ui-segmented ui-segmented--compact" role="radiogroup" aria-label="Результат AIHUB">
+    <label class="ui-segment"><input type="radio" name="aihub_mode" value="photo"><span class="minimax-mode-option"><b>Видео<br>по фото</b></span></label>
+    <label class="ui-segment"><input type="radio" name="aihub_mode" value="video" checked><span class="minimax-mode-option"><b>Видео<br>по видео</b></span></label>
+    <label class="ui-segment"><input type="radio" name="aihub_mode" value="carousel"><span class="minimax-mode-option"><b>Карусель</b></span></label>
+  </div>
+  <label class="ui-field" data-aihub-mode="video"><span class="ui-field-label">Задача по видео</span><select name="aihub_task"><option value="reference">Новая сцена по референсу</option><option value="replace_character">Заменить персонажа</option><option value="replace_clothing">Заменить одежду</option></select></label>
+  <label class="setting-toggle ui-choice" data-aihub-mode="video">
+    <input name="aihub_match_duration" id="aihub-match-duration" type="checkbox" value="true">
+    <span><strong>Длительность как у видеореференса</strong><small id="aihub-duration-status" aria-live="polite">Весь ролик · до 30 секунд</small></span>
+  </label>
+  <label class="setting-toggle ui-choice" data-aihub-mode="video photo"><input type="checkbox" name="aihub_half_resolution" value="true"><span>Черновое разрешение · ½ по сторонам</span></label>
+</section>
+{{end}}
 {{define "studio_video_mode"}}
+{{template "studio_minimax_mode" .}}
+{{end}}
+
+{{define "studio_aihub_audio"}}
+<section class="workflow-settings-section aihub-audio-settings" data-aihub-settings hidden aria-label="Звук видео">
+  <div class="ui-field-grid" data-aihub-mode="video photo">
+    <label class="ui-field"><span class="ui-field-label">Источник звука</span><select name="aihub_audio_source"><option value="native">Вместе с видео · H3</option><option value="original">Оставить звук видеореференса</option><option value="ltx">Отдельная озвучка · LTX 2.5</option></select></label>
+    <label class="ui-choice"><input type="checkbox" name="aihub_voice_conversion" value="true"><span>Заменить голос · Seed-VC</span></label>
+    <label class="ui-choice" data-aihub-external-audio><input type="checkbox" name="aihub_audio_reference" value="true"><span>Передать выбранный звук в H3</span></label>
+    <label class="ui-choice" data-aihub-external-audio><input type="checkbox" name="aihub_t8" value="true"><span>Зафиксировать звук при генерации · T8</span></label>
+  </div>
+  <div class="ui-field-grid" data-aihub-ltx>
+    <label class="ui-field"><span class="ui-field-label">Промпт звука · LTX</span><textarea name="aihub_audio_prompt" rows="4" maxlength="12000" placeholder='Женский голос спокойно говорит: «Доброе утро». Тихий шум улицы, без музыки.'></textarea></label>
+  </div>
+</section>
+<details class="ui-disclosure aihub-advanced" data-aihub-settings hidden>
+  <summary><span class="ui-disclosure-label">Параметры AIHUB</span><i data-lucide="chevron-down" aria-hidden="true"></i></summary>
+  <div class="ui-field-grid">
+    <label class="ui-field"><span class="ui-field-label">Шаги H3</span><input type="number" name="aihub_steps" value="6" min="6" max="8" step="1"></label>
+  </div>
+  <div class="ui-field-grid" data-aihub-ltx>
+    <label class="ui-field"><span class="ui-field-label">Исключить из звука</span><textarea name="aihub_audio_negative" rows="2" maxlength="4000"></textarea></label>
+    <label class="ui-choice"><input type="checkbox" name="aihub_audio_enhance" value="true"><span>Уточнить промпт звука · Gemma</span></label>
+  </div>
+    <div class="ui-field-grid" data-aihub-mode="carousel">
+    <label class="ui-field"><span class="ui-field-label">Обработка карусели</span><select name="aihub_carousel_pipeline"><option value="v2" selected>H3 + доработка · V2</option><option value="legacy">H3 · прежняя</option></select></label>
+    <label class="ui-field" data-aihub-carousel-v2><span class="ui-field-label">Модель доработки</span><select name="aihub_carousel_refiner"><option value="flux">FLUX.2 Klein 9B</option><option value="qwen21">Qwen Image 2.1</option></select></label>
+    <label class="ui-field" data-aihub-carousel-v2><span class="ui-field-label">Источник</span><select name="aihub_carousel_source"><option value="video">Видеореференс</option><option value="prompt">Промпт и фото</option></select></label>
+    <label class="ui-field" data-aihub-carousel-v2><span class="ui-field-label">Количество фотографий</span><input type="number" name="aihub_photo_count" value="12" min="1" max="24" step="1"></label>
+    <label class="ui-field" data-aihub-carousel-v2><span class="ui-field-label">Случайность отбора</span><input type="range" name="aihub_photo_randomness" value="1" min="0" max="1" step="0.1" aria-label="Случайность отбора кадров"></label>
+    </div>
+    <div class="ui-field-grid" data-aihub-carousel-legacy>
+    <label class="ui-field"><span class="ui-field-label">Кадры видеореференса</span><input type="number" name="aihub_photo_frames" value="50" min="22" max="124" step="1"></label>
+    <label class="ui-field"><span class="ui-field-label">Интервал отбора кадров</span><input type="number" name="aihub_photo_stride" value="8" min="1" max="32" step="1"></label>
+    <label class="ui-field"><span class="ui-field-label">Пропустить первые кадры</span><input type="number" name="aihub_photo_skip" value="5" min="0" max="20" step="1"></label>
+    <label class="ui-field"><span class="ui-field-label">Латентный апскейл</span><input type="number" name="aihub_latent_scale" value="2" min="1" max="2" step="0.05"></label>
+  </div>
+  <div class="ui-field-grid" data-aihub-mode="video">
+    <label class="ui-field"><span class="ui-field-label">Маска видеореференса</span><select name="aihub_mask"><option value="none">Без маски</option><option value="sam3">SAM3</option><option value="sapiens">Sapiens2</option></select></label>
+    <label class="ui-field" data-aihub-sam><span class="ui-field-label">Объект маски</span><input name="aihub_mask_prompt" value="person" maxlength="500"></label>
+  </div>
+  <label class="ui-choice" data-aihub-mode="video photo"><input type="checkbox" name="aihub_remove_background" value="true"><span>Удалить фон первого фото</span></label>
+</details>
+{{end}}
+
+{{define "studio_minimax_mode"}}
 <section class="minimax-video-mode" id="minimax-video-mode" hidden>
         <strong class="studio-section-label">Способ создания видео</strong>
         <div class="minimax-mode-segments ui-segmented" role="radiogroup" aria-label="Способ создания видео MiniMax H3">
@@ -79,7 +168,8 @@
               <small class="field-hint">Задаёт голос, музыку или окружение. Финальную дорожку синтезирует MiniMax H3.</small>
             </section>
             <section class="minimax-media-card" id="minimax-video-reference">
-              <label class="upload-zone" for="minimax-video-file"><span class="upload-slot-label">Видео · необязательно</span><span class="upload-icon upload-icon-video" aria-hidden="true">▶</span><strong>Добавить видеореференс</strong><small>MP4, WEBM, MOV или MKV · до 512 МБ</small><input id="minimax-video-file" type="file" accept="video/mp4,video/webm,video/quicktime,video/x-matroska"></label>
+              <label class="upload-zone" for="minimax-video-file"><span class="upload-slot-label">Видео · необязательно</span><span class="upload-icon upload-icon-video" aria-hidden="true">▶</span><strong>Добавить видеореференс</strong><small>MP4, WEBM, MOV или MKV · до 512 МБ</small><input id="minimax-video-file" type="file" accept=".mp4,.webm,.mov,.mkv,video/mp4,video/webm,video/quicktime,video/x-matroska"></label>
+              <label class="button ghost studio-device studio-video-browse" for="minimax-video-browse"><i data-lucide="folder-open" aria-hidden="true"></i><span>Из файлов / Загрузки</span><input id="minimax-video-browse" type="file" aria-label="Выбрать видео из файлов"></label>
               <div class="upload-preview minimax-video-upload-preview" id="minimax-video-preview" hidden><video id="minimax-video-preview-media" controls playsinline preload="metadata"></video><span><strong id="minimax-video-name"></strong><small id="minimax-video-state">Готово к загрузке</small></span><button class="upload-remove" type="button" id="minimax-video-remove" aria-label="Удалить видеореференс">×</button><button class="button ghost studio-fragment-play" type="button" id="minimax-video-play" disabled><i data-lucide="play" aria-hidden="true"></i>Смотреть фрагмент</button><small id="minimax-video-playback-status" role="status"></small></div>
               <small class="field-hint">Передаёт движение, сцену или ритм как отдельный видеореференс.</small>
               <div class="ui-field-grid minimax-video-reference-options">
@@ -141,8 +231,26 @@
   </div>
   <label class="ui-field image-reference-role"><span class="ui-field-label">Роль в промте</span><select data-image-role><option value="base_scene">Основной кадр и композиция</option><option value="identity">Внешность и лицо</option><option value="wardrobe_object">Одежда, предмет или материал</option><option value="pose_composition">Поза и ракурс</option><option value="style">Стиль, свет и цвет</option><option value="background">Фон и окружение</option><option value="details" selected>Текст и мелкие детали</option></select></label>
 </section>
+          {{template "studio_extra_source" 5}}
+          {{template "studio_extra_source" 6}}
+          {{template "studio_extra_source" 7}}
+          {{template "studio_extra_source" 8}}
+          {{template "studio_extra_source" 9}}
+          {{template "studio_extra_source" 10}}
         </div>
       </div>
+{{end}}
+
+{{define "studio_extra_source"}}
+<section class="source-image-card studio-source" data-image-slot="{{.}}" hidden>
+  <strong class="studio-source-label" data-image-slot-label>Фото {{.}}</strong>
+  <div class="upload-preview" data-image-preview hidden><button type="button" class="studio-source-preview" data-image-preview-open aria-label="Открыть фото {{.}}"><img data-image-preview-image alt="Фото {{.}}"></button><span><strong data-image-name></strong><small data-image-state>Готово к загрузке</small></span><button class="upload-remove" type="button" data-remove-image aria-label="Удалить фото {{.}}"><i data-lucide="x" aria-hidden="true"></i></button></div>
+  <div class="studio-source-actions">
+    <label class="button ghost studio-device" for="source-image-{{.}}"><i data-lucide="upload" aria-hidden="true"></i><span>С устройства</span><input id="source-image-{{.}}" data-image-file type="file" accept="image/png,image/jpeg,image/webp"></label>
+    <div data-gallery-image-picker-choice hidden><button class="button ghost" type="button" data-gallery-image-picker-open><i data-lucide="images" aria-hidden="true"></i><span>Из результатов</span></button></div>
+  </div>
+  <label class="ui-field image-reference-role"><span class="ui-field-label">Роль в промте</span><select data-image-role><option value="identity">Внешность и лицо</option><option value="wardrobe_object">Одежда, предмет или материал</option><option value="pose_composition">Поза и ракурс</option><option value="style">Стиль, свет и цвет</option><option value="background">Фон и окружение</option><option value="details" selected>Текст и мелкие детали</option></select></label>
+</section>
 {{end}}
 
 {{define "studio_guides"}}
@@ -208,14 +316,17 @@
           <button type="button" class="button ghost" id="generation-recipe-delete" disabled>Удалить</button>
           <label class="ui-field generation-recipe-save"><span class="ui-field-label">Сохранить текущие настройки</span><input id="generation-recipe-name" maxlength="80" placeholder="Например: портрет для соцсетей"></label>
           <button type="button" class="button ghost" id="generation-recipe-save">Сохранить</button>
-          <small id="generation-recipe-state" aria-live="polite"></small>
+          <button type="button" class="button ghost" id="generation-recipe-refresh"><i data-lucide="refresh-cw" aria-hidden="true"></i>Обновить наборы</button>
+          <small class="ui-status-banner" id="generation-recipe-state" aria-live="polite" hidden></small>
+          <div class="ui-status-banner" id="generation-recipe-feedback" hidden><p id="generation-recipe-message" role="status"></p><a class="button ghost" id="generation-recipe-login" href="/login?next=%2Fgenerate" hidden><i data-lucide="log-in" aria-hidden="true"></i>Войти</a></div>
         </div>
 {{end}}
 
 {{define "studio_prompt"}}
 <div class="generation-prompt-fields">
-        <label class="ui-field"><span class="ui-field-label"><span id="generation-positive-prompt-label">Позитивный промт</span></span><textarea name="positive_prompt" id="positive-prompt" rows="6" maxlength="4000" placeholder="Например: портрет в мягком вечернем свете, высокая детализация" required></textarea></label>
+        <div class="ui-field"><div class="studio-prompt-heading"><label class="ui-field-label" id="generation-positive-prompt-label" for="positive-prompt">Позитивный промт</label><div class="studio-prompt-actions"><button type="button" class="button ghost icon-button" id="generation-prompt-undo-clear" title="Вернуть очищенный промпт" aria-label="Вернуть очищенный промпт" hidden><i data-lucide="undo-2" aria-hidden="true"></i></button><button type="button" class="button ghost icon-button" id="generation-prompt-clear" title="Очистить позитивный и негативный промпты" aria-label="Очистить промпты" disabled><i data-lucide="eraser" aria-hidden="true"></i></button></div></div><textarea name="positive_prompt" id="positive-prompt" rows="6" maxlength="4000" placeholder="Например: портрет в мягком вечернем свете, высокая детализация" required></textarea></div>
         <label class="ui-field" id="generation-negative-prompt-field"><span class="ui-field-label">Негативный промт</span><textarea name="negative_prompt" id="negative-prompt" rows="6" maxlength="4000" placeholder="Например: blurry, low quality, deformed hands"></textarea></label>
+        <p class="muted" id="generation-negative-cfg-note" hidden>При CFG 1 негативный промт не влияет на результат. Чтобы использовать его, задайте CFG больше 1 в дополнительных параметрах: генерация может занять больше времени и памяти.</p>
       </div>
 {{end}}
 
@@ -224,23 +335,29 @@
 {{end}}
 
 {{define "studio_assistant"}}
-<dialog class="assistant-panel" id="prompt-assistant" aria-labelledby="prompt-assistant-title">
+<dialog class="assistant-panel" id="prompt-assistant" aria-labelledby="prompt-assistant-title" data-durable-jobs="{{if .PromptAssistantDurableJobs}}true{{else}}false{{end}}" data-owner-id="{{.CurrentUser.ID}}">
   <header class="assistant-panel-header"><div><h2 id="prompt-assistant-title">Улучшить описание</h2><p id="prompt-assistant-mode"></p></div><button type="button" class="button ghost icon-button" id="prompt-assistant-close" aria-label="Закрыть ассистента" title="Закрыть"><i data-lucide="x" aria-hidden="true"></i></button></header>
   <input type="checkbox" id="prompt-assistant-enabled" hidden>
   <div class="assistant-panel-body" id="prompt-assistant-controls">
     <p id="prompt-assistant-description" class="assistant-description"></p>
     <section class="assistant-sources" id="prompt-assistant-sources" aria-label="Материалы для ассистента" hidden><ol id="prompt-assistant-source-list"></ol></section>
     <details class="assistant-disclosure" id="prompt-assistant-options"><summary>Настройки ассистента</summary><div>
-      <label class="ui-field" id="prompt-assistant-template-field"><span class="ui-field-label">Стиль описания</span><select id="prompt-assistant-template"><option value="workflow-default">По текущей задаче</option><option value="photographic">Редакционная фотография</option><option value="realistic">Естественный реализм</option><option value="anime">Иллюстрация и аниме</option><option value="nsfw">NSFW (Контент для взрослых)</option><option value="flux-edit" data-image-only>Перенос внешности и редактирование</option><option value="minimax-h3-fl2va" data-video-only data-video-mode="frames">MiniMax H3 · T2VA / I2VA / FL2VA</option><option value="minimax-h3-ref2va" data-video-only data-video-mode="references">MiniMax H3 REF2VA · свободные референсы</option></select></label>
+      <label class="ui-field" id="prompt-assistant-model-field" {{if not .PromptAssistantModels}}hidden{{end}}><span class="ui-field-label">Модель ассистента</span><select id="prompt-assistant-model" aria-describedby="prompt-assistant-model-status" data-load-error="{{if .PromptAssistantModelsUnavailable}}true{{else}}false{{end}}"><option value="">Стандартная</option>{{range .PromptAssistantModels}}<option value="{{.ID}}" data-available="true" data-vision="{{.Vision}}">{{.Label}}</option>{{end}}</select></label>
+      <p id="prompt-assistant-model-status" class="muted" role="status" hidden></p>
+      <label class="ui-field" id="prompt-assistant-template-field"><span class="ui-field-label">Стиль описания</span><select id="prompt-assistant-template"><option value="workflow-default">По текущей задаче</option><option value="photographic">Редакционная фотография</option><option value="realistic">Естественный реализм</option><option value="anime">Иллюстрация и аниме</option><option value="nsfw">NSFW (Контент для взрослых)</option><option value="flux-edit" data-flux-edit>FLUX.2 · редактирование</option><option value="krea2-edit" data-krea-edit>Krea2 · редактирование</option><option value="qwen21-edit" data-qwen-edit>Qwen · редактирование фото</option><option value="minimax-h3-fl2va" data-video-only data-video-mode="frames">MiniMax H3 · T2VA / I2VA / FL2VA</option><option value="minimax-h3-ref2va" data-video-only data-video-mode="references">MiniMax H3 REF2VA · свободные референсы</option></select></label>
       <label class="ui-choice"><input type="checkbox" id="prompt-assistant-think"><span>Режим рассуждений</span></label>
     </div></details>
-    <div class="assistant-request"><button type="button" class="button ghost" id="prompt-assistant-improve"><i data-lucide="sparkles" aria-hidden="true"></i>Подготовить вариант</button><p class="assistant-state" id="prompt-assistant-state" role="status"></p></div>
+    <div class="assistant-request"><div class="assistant-request-actions"><button type="button" class="button ghost" id="prompt-assistant-improve"><i data-lucide="sparkles" aria-hidden="true"></i>Подготовить вариант</button><button type="button" class="button ghost" id="prompt-assistant-cancel" hidden><i data-lucide="square" aria-hidden="true"></i>Отменить запрос</button></div><p class="assistant-state" id="prompt-assistant-state" role="status"></p></div>
+    <section class="assistant-live" id="prompt-assistant-live" aria-labelledby="prompt-assistant-live-phase" hidden><header><strong id="prompt-assistant-live-phase"></strong><output id="prompt-assistant-live-time"></output></header><div class="assistant-live-metrics"><span id="prompt-assistant-live-tokens"></span><span id="prompt-assistant-live-speed" hidden></span></div><pre id="prompt-assistant-live-text" tabindex="0" aria-label="Промпт в процессе подготовки" hidden></pre></section>
+    <details class="assistant-disclosure" id="prompt-assistant-saved-response" hidden><summary>Ответ сохранённого запроса</summary><div class="assistant-saved-text" id="prompt-assistant-saved-text" tabindex="0"></div></details>
     <p class="assistant-stale" id="prompt-assistant-stale" role="status" hidden>Контекст изменился. Этот вариант неактуален; ваши правки сохранены.</p>
     <div class="assistant-review" id="prompt-assistant-review" hidden>
       <section class="assistant-observations" id="prompt-assistant-reference-review" hidden aria-labelledby="prompt-assistant-reference-title">
         <div class="assistant-section-heading"><h3 id="prompt-assistant-reference-title">Что распознано</h3><span id="prompt-assistant-reference-count"></span></div><ol id="prompt-assistant-reference-list"></ol>
       </section>
       <div class="ui-field assistant-draft"><div class="assistant-section-heading"><label for="prompt-assistant-draft" class="ui-field-label">Вариант текста</label><button type="button" class="button ghost icon-button" id="prompt-assistant-edit" aria-label="Редактировать вариант" title="Редактировать"><i data-lucide="pencil" aria-hidden="true"></i></button></div><textarea id="prompt-assistant-draft" rows="9" maxlength="4000"></textarea><small id="prompt-assistant-draft-limit">До 4000 символов.</small></div>
+      <label class="ui-field assistant-draft" id="prompt-assistant-negative-review" hidden><span class="ui-field-label">Негативный промт</span><textarea id="prompt-assistant-negative-draft" rows="4" maxlength="4000" placeholder="Что исключить из результата"></textarea></label>
+      <div class="ui-field assistant-draft" id="prompt-assistant-audio-review" hidden><label for="prompt-assistant-audio-text" class="ui-field-label">Озвучка LTX</label><textarea id="prompt-assistant-audio-text" rows="5" readonly></textarea></div>
       <details class="assistant-disclosure" id="prompt-assistant-diff"><summary>Сравнение с исходным текстом</summary><div class="assistant-diff-grid"><article><h3>Ваш текст</h3><div id="prompt-assistant-diff-original" tabindex="0"></div></article><article><h3>Вариант ассистента</h3><div id="prompt-assistant-diff-suggestion" tabindex="0"></div></article></div></details>
       <details class="assistant-disclosure"><summary>Технические сведения</summary><p id="prompt-assistant-review-meta"></p></details>
     </div>
@@ -268,10 +385,13 @@
 <details class="studio-option-group" data-studio-option-group="lora"><summary><span>LoRA</span><i data-lucide="chevron-down" aria-hidden="true"></i></summary><div class="studio-option-content">
 {{template "studio_lora_krea" .}}
 {{template "studio_lora_flux" .}}
+{{template "studio_moss_loras" .}}
+{{template "studio_qwen_loras" .}}
 {{template "studio_video_loras" .}}
 </div></details>
 <details class="studio-option-group" data-studio-option-group="processing"><summary><span>Обработка результата</span><i data-lucide="chevron-down" aria-hidden="true"></i></summary><div class="studio-option-content">
 {{template "studio_processing_video" .}}
+{{template "studio_moss_finishing" .}}
 {{template "studio_upscale_flux" .}}
 {{template "studio_upscale_krea_edit" .}}
 {{template "studio_upscale_image" .}}
@@ -305,13 +425,13 @@
 
 {{define "studio_image_size"}}
 <div class="studio-basic-settings" {{if not .CanUseAdvancedGenerationSettings}}hidden inert{{end}}>
-<section class="workflow-settings-section image-edit-field studio-source-size"><div class="generation-fields"><input type="hidden" name="edit_use_custom_size" value="true"><label class="edit-size-toggle ui-choice ui-choice--compact"><input name="preserve_original_size" id="generation-preserve-original-size" type="checkbox" value="true" checked><span id="generation-preserve-original-label">Сохранить размер исходного фото</span></label><output class="original-resolution-note" id="generation-original-resolution">Выберите основное фото: его размер будет подставлен автоматически.</output></div></section>
+<section class="workflow-settings-section image-edit-field studio-source-size"><div class="generation-fields"><input type="hidden" name="edit_use_custom_size" value="true"><label class="edit-size-toggle ui-choice ui-choice--compact"><input name="preserve_original_size" id="generation-preserve-original-size" type="checkbox" value="true" checked><span id="generation-preserve-original-label">Сохранить размер исходного фото</span></label><label class="ui-field qwen-edit-resolution-field" hidden><span class="ui-field-label">Целевое разрешение, Мп</span><input id="generation-qwen-edit-megapixels" type="number" min="0.3" max="4.27" step="0.01" value="1"></label><output class="original-resolution-note" id="generation-original-resolution">Выберите основное фото: его размер будет подставлен автоматически.</output></div></section>
 {{template "studio_size_image" .}}
 </div>
 {{end}}
 
 {{define "studio_preflight"}}
-<section class="generation-preflight" id="generation-preflight" hidden aria-live="polite"><div class="generation-preflight-heading"><div><strong>Проверка перед запуском</strong><small id="generation-preflight-summary"></small></div><button type="button" class="button ghost" id="generation-preflight-repeat">Проверить ещё раз</button></div><div class="generation-preflight-checks" id="generation-preflight-checks"></div></section>
+<section class="generation-preflight" id="generation-preflight" hidden aria-live="polite"><div class="generation-preflight-heading"><div><strong>Проверка перед запуском</strong><small id="generation-preflight-summary"></small></div><button type="button" class="button ghost" id="generation-preflight-repeat">Проверить ещё раз</button><a class="button ghost" id="generation-preflight-login" href="/login?next=%2Fgenerate" hidden><i data-lucide="log-in" aria-hidden="true"></i>Войти</a></div><div class="generation-preflight-checks" id="generation-preflight-checks"></div></section>
 {{end}}
 
 {{define "studio_batch"}}
@@ -352,31 +472,54 @@
 
 {{define "studio_result"}}
 <section class="generation-result panel" id="generation-result" hidden aria-live="polite">
-    <div class="panel-heading"><div><p class="section-kicker">Результат</p><h2 id="generation-result-title">Генерация выполняется</h2></div></div>
+    <div class="panel-heading"><div><p class="section-kicker">Результат</p><h2 id="generation-result-title" tabindex="-1">Генерация выполняется</h2></div></div>
     <p class="generation-status" id="generation-status"></p>
     <div class="generation-run-progress" id="generation-run-progress" hidden>
       <div class="generation-run-progress-head"><strong id="generation-stage">Подготовка</strong><span id="generation-stage-detail"></span></div>
       <div class="generation-run-progress-track" role="progressbar" id="generation-progressbar" aria-label="Ход генерации" aria-valuemin="0" aria-valuemax="100"><span id="generation-progressbar-fill"></span></div>
     </div>
-    <div class="generation-output-grid" id="generation-output-grid"></div>
     <div class="generation-result-actions" id="generation-result-actions" hidden>
-      <button type="button" class="button ghost" id="generation-retry">Повторить</button>
-      <button type="button" class="button danger" id="generation-cancel">Отменить генерацию</button>
+      <button type="button" class="button" id="generation-view-result" hidden><i data-lucide="expand" aria-hidden="true"></i><span>Смотреть результат</span></button>
+      <a class="button ghost" id="generation-open-task" href="/tasks" aria-label="Открыть задачу" title="Открыть задачу" hidden><i data-lucide="list-checks" aria-hidden="true"></i><span>Задача</span></a>
+      <button type="button" class="button ghost" id="generation-retry"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>Повторить</span></button>
+      <button type="button" class="button ghost icon-button" id="generation-repeat-now" title="Повторить сразу" aria-label="Повторить сразу" hidden><i data-lucide="play" aria-hidden="true"></i></button>
+      <a class="button ghost" id="generation-login" href="/login?next=%2Fgenerate" hidden><i data-lucide="log-in" aria-hidden="true"></i>Войти</a>
+      <button type="button" class="button danger" id="generation-cancel" aria-label="Отменить генерацию" title="Отменить генерацию"><i data-lucide="square" aria-hidden="true"></i><span>Отменить</span></button>
     </div>
+    <p class="muted" id="generation-previous-result" hidden>Предыдущий результат</p>
+    <div class="generation-output-grid" id="generation-output-grid"></div>
   </section>
+{{end}}
+
+{{define "studio_history_inspector"}}
+<section id="generation-recent-inspector" class="studio-recent-inspector" aria-labelledby="generation-recent-title" hidden>
+  <header class="studio-recent-heading">
+    <div class="studio-recent-heading-copy">
+      <h2 id="generation-recent-title" tabindex="-1">Выбранный результат</h2>
+      <span id="generation-batch-viewer-status" class="generation-batch-viewer-status" hidden></span>
+    </div>
+    <a class="button ghost" id="generation-recent-task" href="/tasks"><i data-lucide="list-checks" aria-hidden="true"></i>В задачах</a>
+    <button type="button" class="button ghost icon-button" id="generation-recent-close" title="Закрыть выбранный результат" aria-label="Закрыть выбранный результат"><i data-lucide="x" aria-hidden="true"></i></button>
+    <button type="button" class="button ghost icon-button" id="generation-batch-viewer-more" title="Дополнительные действия" aria-label="Дополнительные действия" aria-controls="generation-batch-viewer-details" aria-expanded="false" hidden><i data-lucide="ellipsis" aria-hidden="true"></i></button>
+  </header>
+  <div class="generation-variant-list generation-job-list studio-recent-detail" id="generation-variant-list" tabindex="0" role="region" aria-label="Сведения о выбранном запуске"></div>
+</section>
 {{end}}
 
 {{define "studio_history"}}
 <section class="generation-variants generation-jobs panel" id="generation-variants" aria-live="polite">
     <div class="generation-history-toolbar ui-toolbar ui-toolbar--plain">
-      <div class="generation-history-title"><p class="section-kicker">Быстрая генерация</p><h2>Задания генерации</h2><small id="generation-variant-count">Подключаем обновления...</small></div>
-      <div class="generation-variant-filters">
-        <label class="ui-field"><span class="ui-field-label"><span>Статус</span></span><select id="generation-variant-state"><option value="">Все</option><option value="submitting">Подготовка</option><option value="queued">В очереди</option><option value="running">В работе</option><option value="cancelling">Отменяется</option><option value="completed">Готово</option><option value="error">С ошибкой</option><option value="cancelled">Отменено</option><option value="expired">Истекло</option></select></label>
-        <label class="ui-field"><span class="ui-field-label"><span>Сценарий</span></span><select id="generation-variant-template"><option value="">Все сценарии</option><option value="text-to-image">Текст в изображение</option><option value="image-to-image">Фото и промт</option><option value="minimax-h3-video">Видео</option></select></label>
-      </div>
-      <button type="button" class="button ghost generation-history-toggle" id="generation-history-toggle" aria-expanded="true">Свернуть</button>
+      <div class="generation-history-title"><h2>Последние результаты</h2><small id="generation-variant-count" role="status">Подключаем обновления...</small></div>
+      <a class="button ghost" href="/tasks" id="generation-recent-all"><i data-lucide="list-checks" aria-hidden="true"></i>Все задачи</a>
+      <button type="button" class="button ghost icon-button" id="generation-history-toggle" title="Свернуть последние результаты" aria-label="Свернуть последние результаты" aria-controls="generation-history-content" aria-expanded="true"><i data-lucide="chevron-up" aria-hidden="true"></i></button>
     </div>
-    <div class="generation-history-content" id="generation-history-content"><div class="generation-variant-list generation-job-list" id="generation-variant-list"><p class="generation-variant-empty">Загружаем задания...</p></div></div>
+    <section class="ui-status-banner is-error" id="generation-history-error" hidden>
+      <p id="generation-history-error-message" role="status"></p>
+      <button type="button" class="button ghost" id="generation-history-refresh"><i data-lucide="refresh-cw" aria-hidden="true"></i>Обновить задания</button>
+      <a class="button ghost" id="generation-history-login" href="/login?next=%2Fgenerate" hidden><i data-lucide="log-in" aria-hidden="true"></i>Войти</a>
+    </section>
+    <div class="generation-history-content" id="generation-history-content"><div class="studio-recent-list" id="generation-recent-list" role="group" aria-label="Недавние запуски"><p class="generation-variant-empty">Загружаем задания...</p></div></div>
+    <noscript><p>Для запуска генерации нужен JavaScript. <a href="/tasks">Открыть задачи</a></p></noscript>
   </section>
 {{end}}
 
@@ -389,7 +532,7 @@
         <div class="generation-image-picker-actions"><button class="generation-image-picker-refresh" id="generation-image-picker-refresh" type="button" aria-label="Обновить изображения" title="Обновить изображения">&#8635;</button><button class="generation-image-picker-close" type="button" data-gallery-image-picker-close aria-label="Закрыть">&#10005;</button></div>
       </header>
       <div class="generation-image-picker-body">
-        <p class="generation-image-picker-state" id="generation-image-picker-state">Загружаем ваши изображения...</p>
+        <div class="ui-status-banner" id="generation-image-picker-feedback"><p id="generation-image-picker-state" role="status">Загружаем ваши изображения...</p><a class="button ghost" id="generation-image-picker-login" href="/login?next=%2Fgenerate" hidden><i data-lucide="log-in" aria-hidden="true"></i>Войти</a></div>
         <div class="generation-image-picker-grid" id="generation-image-picker-grid" aria-live="polite"></div>
       </div>
     </section>
@@ -397,12 +540,29 @@
 {{end}}
 
 {{define "studio_lightbox"}}
-<div class="generation-lightbox" id="generation-lightbox" hidden role="dialog" aria-modal="true" aria-label="Просмотр результата">
+<div class="generation-lightbox" id="generation-lightbox" hidden role="dialog" aria-modal="true" aria-labelledby="generation-lightbox-title">
     <button class="generation-lightbox-backdrop" type="button" tabindex="-1" data-lightbox-close aria-label="Закрыть просмотр"></button>
     <div class="generation-lightbox-window ui-dialog">
-      <div class="generation-lightbox-toolbar ui-dialog__toolbar"><span id="generation-lightbox-name"></span><a class="button generation-lightbox-download" id="generation-lightbox-download" download>Скачать оригинал</a><button class="generation-lightbox-close" type="button" data-lightbox-close aria-label="Закрыть">&#10005;</button></div>
-      <img id="generation-lightbox-image" alt="Результат генерации в полном размере">
-      <video id="generation-lightbox-video" controls playsinline hidden></video>
+      <div class="generation-lightbox-toolbar ui-dialog__toolbar">
+        <button class="icon-button ghost generation-lightbox-back" type="button" data-lightbox-close title="Вернуться к результатам" aria-label="Вернуться к результатам"><i data-lucide="arrow-left" aria-hidden="true"></i></button>
+        <div class="generation-lightbox-heading"><h2 id="generation-lightbox-title">Результат</h2><span id="generation-lightbox-name"></span></div>
+        <button class="icon-button ghost image-comparison-toggle" id="generation-lightbox-compare" type="button" hidden aria-pressed="false" title="Сравнить с оригиналом" aria-label="Сравнить с оригиналом"><i data-lucide="columns-2" aria-hidden="true"></i></button>
+        <button class="icon-button ghost generation-lightbox-close" type="button" data-lightbox-close title="Закрыть просмотр" aria-label="Закрыть просмотр"><i data-lucide="x" aria-hidden="true"></i></button>
+      </div>
+      <div class="generation-lightbox-viewport" id="generation-lightbox-viewport" tabindex="0" aria-label="Просмотр изображения; жест двумя пальцами изменяет масштаб">
+        <img id="generation-lightbox-image" alt="Результат генерации в полном размере" draggable="false">
+        <video id="generation-lightbox-video" controls playsinline hidden></video>
+      </div>
+      <div class="generation-lightbox-controls">
+      <div class="generation-lightbox-zoom" id="generation-lightbox-zoom">
+        <button class="icon-button ghost" type="button" data-lightbox-zoom="out" title="Уменьшить" aria-label="Уменьшить"><i data-lucide="minus" aria-hidden="true"></i></button>
+        <output id="generation-lightbox-scale" aria-live="off">100%</output>
+        <button class="icon-button ghost" type="button" data-lightbox-zoom="in" title="Увеличить" aria-label="Увеличить"><i data-lucide="plus" aria-hidden="true"></i></button>
+        <button class="icon-button ghost" type="button" data-lightbox-zoom="actual" title="Исходный размер 1:1" aria-label="Исходный размер 1:1"><i data-lucide="scan" aria-hidden="true"></i></button>
+        <button class="icon-button ghost" type="button" data-lightbox-zoom="fit" title="Вписать изображение" aria-label="Вписать изображение"><i data-lucide="maximize" aria-hidden="true"></i></button>
+      </div>
+      <a class="icon-button ghost generation-lightbox-download" id="generation-lightbox-download" download title="Скачать результат" aria-label="Скачать результат"><i data-lucide="download" aria-hidden="true"></i></a>
+      </div>
     </div>
   </div>
 {{end}}
@@ -425,6 +585,18 @@
           <label class="ui-field"><span class="ui-field-label"><span class="field-label">Имя файла</span></span><input name="video_filename" type="text" maxlength="80" value="AI-Gateway-MiniMaxH3"><small class="field-hint">Без расширения</small></label>
           <label class="setting-toggle ui-choice" id="minimax-video-turbo-control"><input name="video_turbo" id="minimax-video-turbo" type="checkbox" value="true"><span><strong id="minimax-video-turbo-title">Turbo MiniMax H3</strong><small id="minimax-video-turbo-description">Опциональная официальная LoRA v4: 4–8 шагов для быстрых проб.</small></span></label>
           <label class="ui-field minimax-reference-field"><span class="ui-field-label"><span class="field-label">Размер референсов <span class="field-help" tabindex="0" data-tooltip="По размеру кадра экономит память. Максимальная детализация лучше сохраняет черты, текст и аксессуары, но для 1440p/2160p может требовать существенно больше VRAM.">?</span></span></span><select name="video_reference_size" id="minimax-video-reference-size"><option value="match">По размеру кадра · рекомендуем</option><option value="max">Максимальная детализация</option></select></label>
+        </div>
+        <div class="minimax-long-only" id="minimax-long-control">
+          <label class="setting-toggle ui-choice"><input name="video_long_enabled" id="minimax-long-enabled" type="checkbox" value="true"><span><strong>Длинное видео · продолжение</strong><small>Связанные части по 15 секунд · экспериментальный режим</small></span></label>
+          <div id="minimax-long-fields" hidden>
+            <div class="ui-field-grid generation-fields">
+              <label class="ui-field"><span class="ui-field-label">Количество частей</span><input name="video_long_parts" id="minimax-long-parts" type="number" min="2" max="20" step="1" value="2"></label>
+              <label class="ui-field"><span class="ui-field-label">Контекст продолжения <span class="field-help" tabindex="0" data-tooltip="Последние видимые кадры и звук предыдущей части. В киномонтаже сохраняются сцена и действие, но меняется ракурс. Полностью исключить дрейф внешности и ошибки сюжета нельзя.">?</span></span><select name="video_long_context"><option value="39">39 кадров · 1,625 с</option><option value="22">22 кадра · 0,917 с</option></select></label>
+              <label class="ui-field minimax-long-transition"><span class="ui-field-label">Стыки частей</span><select name="video_long_transition"><option value="continuous">Плавное продолжение</option><option value="cinematic">Киномонтаж · смена ракурса</option></select></label>
+            </div>
+            <output class="resolution-preview" id="minimax-long-summary" aria-live="polite">2 × 15 с = 30 с · 24 FPS</output>
+            <details class="minimax-long-plan"><summary>План частей <span id="minimax-long-plan-status"></span></summary><ol id="minimax-long-plan"></ol></details>
+          </div>
         </div>
         <div class="minimax-aspect-controls">
           <div class="setting-toggle minimax-source-aspect-note" id="minimax-source-aspect-control"><input name="video_use_source_aspect" id="minimax-use-source-aspect" type="hidden" value="true"><span><strong>Пропорции Фото 1 · автоматически</strong><small>Если фото добавлено, MiniMax всегда использует его исходное соотношение сторон.</small></span></div>
@@ -460,6 +632,12 @@
 <input type="hidden" name="input_image_2" id="input-image-2">
 <input type="hidden" name="input_image_3" id="input-image-3">
 <input type="hidden" name="input_image_4" id="input-image-4">
+<input type="hidden" name="input_image_5" id="input-image-5">
+<input type="hidden" name="input_image_6" id="input-image-6">
+<input type="hidden" name="input_image_7" id="input-image-7">
+<input type="hidden" name="input_image_8" id="input-image-8">
+<input type="hidden" name="input_image_9" id="input-image-9">
+<input type="hidden" name="input_image_10" id="input-image-10">
 <input type="hidden" name="input_audio" id="input-audio">
 <input type="hidden" name="input_video" id="input-video">
 {{end}}

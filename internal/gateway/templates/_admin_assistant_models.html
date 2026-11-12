@@ -1,0 +1,21 @@
+{{define "admin_assistant_models"}}
+{{if ne .Profile.Role "admin"}}
+<section class="profile-band" id="profile-assistant-models">
+  <details class="ui-disclosure" {{if .AssistantModelStatus}}open{{end}}>
+    <summary>Модели промт-ассистента</summary>
+    {{if eq .AssistantModelStatus "changed"}}<p class="ui-status-banner is-success" role="status">Разрешение модели сохранено.</p>{{end}}
+    <div class="profile-assistant-models">
+      {{range .AssistantModels}}
+      <form method="post" class="profile-assistant-model" data-assistant-model="{{.ID}}">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        <input type="hidden" name="action" value="update_assistant_model">
+        <input type="hidden" name="assistant_model" value="{{.ID}}">
+        <label class="ui-choice"><input type="checkbox" name="granted" value="1" {{if .Granted}}checked{{end}}><span><strong>{{.Label}}</strong><small>{{if not .Available}}Нет в каталоге{{else if .Granted}}Доступ разрешён{{else}}Доступ не разрешён{{end}}</small></span></label>
+        <button type="submit" class="ghost" aria-label="Сохранить разрешение: {{.Label}}"><i data-lucide="save" aria-hidden="true"></i>Сохранить</button>
+      </form>
+      {{else}}<p class="muted">Дополнительные модели не настроены.</p>{{end}}
+    </div>
+  </details>
+</section>
+{{end}}
+{{end}}

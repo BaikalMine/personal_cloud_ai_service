@@ -1,0 +1,82 @@
+{{define "invite_composer"}}
+{{$f := inviteForm .InviteForm}}
+<link rel="stylesheet" href="/static/admin-access.css?v={{.AssetVersion}}">
+<script src="/static/admin-access.js?v={{.AssetVersion}}" defer></script>
+<template data-invite-defaults>{{inviteDefaultsJSON}}</template>
+<section class="access-workspace" aria-labelledby="invite-create-heading">
+  <div class="panel-heading"><h2 id="invite-create-heading">Новое приглашение</h2></div>
+  {{if .Error}}<p class="ui-status-banner is-error" role="alert">{{.Error}}</p>{{end}}
+  <div class="access-templates" data-access-templates hidden>
+    <div class="ui-toolbar ui-toolbar--plain">
+      <label class="ui-field"><span class="ui-field-label">Шаблон доступа</span><select data-template-choice><option value="custom">Свои настройки</option><option value="photo">Фото</option><option value="photo-video">Фото и видео</option><option value="training">Обучение</option><option value="harness">Только Harness</option></select></label>
+      <button type="button" class="ghost" data-template-apply><i data-lucide="check" aria-hidden="true"></i>Применить</button>
+      <button type="button" class="ghost" data-template-open><i data-lucide="folder-open" aria-hidden="true"></i>Сохранённые</button>
+      <span data-template-current>Свои настройки</span>
+    </div>
+    <div data-template-status role="status"></div>
+  </div>
+  <form method="post" action="{{if .InviteAction}}{{.InviteAction}}{{else}}/admin/invites{{end}}" class="access-composer" data-admin-invite-form>
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="queue_policy_version" value="2">
+    <input type="hidden" name="limit_form_version" value="2">
+    <input type="hidden" name="invite_review" value="{{.ReviewDigest}}">
+    <input type="hidden" name="selected_template_id" value="{{$f.Value "selected_template_id"}}">
+    <input type="hidden" name="selected_template_revision" value="{{$f.Value "selected_template_revision"}}">
+    <input type="hidden" name="selected_template_name" value="{{$f.Value "selected_template_name"}}">
+    <div class="access-editor">
+      <fieldset class="access-section"><legend>Возможности</legend>
+        <label class="ui-choice ui-choice--row ui-choice--compact"><input name="grant_quick_generation" type="checkbox" {{if $f.Checked "grant_quick_generation"}}checked{{end}}><span>Генерация</span></label>
+        <div class="access-capabilities" data-generation-capabilities>
+          <label class="ui-choice ui-choice--row ui-choice--compact"><input name="grant_text_to_image" type="checkbox" {{if $f.Checked "grant_text_to_image"}}checked{{end}}><span>Фото по тексту</span></label>
+          <label class="ui-choice ui-choice--row ui-choice--compact"><input name="grant_image_to_image" type="checkbox" {{if $f.Checked "grant_image_to_image"}}checked{{end}}><span>Редактирование фото</span></label>
+          <label class="ui-choice ui-choice--row ui-choice--compact"><input name="grant_video" type="checkbox" {{if $f.Checked "grant_video"}}checked{{end}}><span>Видео</span></label>
+        </div>
+        <label class="ui-choice ui-choice--row ui-choice--compact"><input name="grant_train_image_lora" type="checkbox" {{if $f.Checked "grant_train_image_lora"}}checked{{end}}><span>Обучение LoRA для изображений</span></label>
+        <label class="ui-choice ui-choice--row ui-choice--compact"><input name="grant_harness" type="checkbox" {{if $f.Checked "grant_harness"}}checked{{end}}><span>Harness</span></label>
+      </fieldset>
+      <fieldset class="access-section"><legend>Лимиты и ресурсы</legend>
+        {{template "access_quota_fields" $f}}
+        <label class="ui-field access-quality"><span class="ui-field-label">Максимум базового качества видео</span><select name="max_video_generation_quality"><option value="480" {{if eq ($f.Value "max_video_generation_quality") "480"}}selected{{end}}>480p</option><option value="720" {{if or (eq ($f.Value "max_video_generation_quality") "720") (eq ($f.Value "max_video_generation_quality") "")}}selected{{end}}>720p</option><option value="1080" {{if eq ($f.Value "max_video_generation_quality") "1080"}}selected{{end}}>1080p</option><option value="1440" {{if eq ($f.Value "max_video_generation_quality") "1440"}}selected{{end}}>1440p</option></select><small>Финальный апскейл не входит в этот предел.</small></label>
+        <div class="access-capabilities">
+          <label class="ui-choice ui-choice--row ui-choice--compact"><input name="grant_advanced_generation_settings" type="checkbox" {{if $f.Checked "grant_advanced_generation_settings"}}checked{{end}}><span>Точные настройки генерации</span></label>
+          <label class="ui-choice ui-choice--row ui-choice--compact"><input name="queue_priority" type="checkbox" {{if $f.Checked "queue_priority"}}checked{{end}}><span>Приоритетная очередь</span></label>
+          <label class="ui-choice ui-choice--row ui-choice--compact"><input name="pause_mining_for_quick_generation" type="checkbox" {{if $f.Checked "pause_mining_for_quick_generation"}}checked{{end}}><span>Приостанавливать майнинг</span></label>
+        </div>
+      </fieldset>
+      <fieldset class="access-section"><legend>Сроки и активации</legend>
+        <div class="ui-field-grid access-lifetimes">
+          <label class="ui-field"><span class="ui-field-label">Ссылка действует, часов</span><input name="invite_ttl_hours" type="number" min="1" max="2160" value="{{$f.Value "invite_ttl_hours"}}" required></label>
+          <label class="ui-field"><span class="ui-field-label">Количество активаций</span><input name="max_uses" type="number" min="1" max="10000" value="{{$f.Value "max_uses"}}" required></label>
+          <label class="ui-field"><span class="ui-field-label">Тип аккаунта</span><select name="account_type"><option value="permanent" {{if ne ($f.Value "account_type") "temporary"}}selected{{end}}>Постоянный</option><option value="temporary" {{if eq ($f.Value "account_type") "temporary"}}selected{{end}}>Временный</option></select></label>
+          <label class="ui-field" data-account-lifetime><span class="ui-field-label">Аккаунт будет удалён через, часов</span><input name="temporary_account_hours" type="number" min="1" max="8760" value="{{or ($f.Value "temporary_account_hours") "168"}}"><small>С момента регистрации. История и медиа хранятся по своим срокам.</small></label>
+        </div>
+      </fieldset>
+      <details class="ui-disclosure access-save-template" data-template-save-area hidden><summary>Сохранить настройки как шаблон</summary>
+        <label class="ui-field"><span class="ui-field-label">Имя шаблона</span><input data-template-name name="template_name" maxlength="80" value="{{$f.Value "template_name"}}" autocomplete="off"></label>
+        <div class="ui-toolbar ui-toolbar--plain"><button type="button" class="ghost" data-template-save><i data-lucide="save" aria-hidden="true"></i>Сохранить новый</button><button type="button" class="ghost" data-template-update disabled><i data-lucide="save" aria-hidden="true"></i>Обновить выбранный</button></div>
+      </details>
+    </div>
+    <aside class="access-summary" aria-labelledby="invite-summary-heading">
+      <h3 id="invite-summary-heading">Итог приглашения</h3>
+      <p class="access-review-state" data-review-state>{{if .InviteReviewed}}Проверено. Можно создать ссылку.{{else}}Проверьте доступ перед созданием ссылки.{{end}}</p>
+      <div data-access-summary>{{if .InviteReviewed}}{{template "access_summary" .InviteReview.Access}}{{else}}<p class="muted">Итог появится после проверки.</p>{{end}}</div>
+      <dl class="access-facts" data-lifetime-summary>{{if .InviteReviewed}}<div><dt>Ссылка</dt><dd>{{.InviteReview.LinkLifetimeHours}} ч</dd></div><div><dt>Аккаунт</dt><dd>{{if .InviteReview.AccountLifetimeSeconds}}{{accountLifetimeLabel .InviteReview.AccountLifetimeSeconds}} после регистрации{{else}}Постоянный{{end}}</dd></div><div><dt>Активации</dt><dd>{{.InviteReview.MaxUses}}</dd></div>{{end}}</dl>
+      <button type="submit" name="action" value="{{if .InviteReviewed}}create{{else}}review{{end}}" data-invite-submit><i data-lucide="{{if .InviteReviewed}}link{{else}}check{{end}}" aria-hidden="true"></i><span>{{if .InviteReviewed}}Создать приглашение{{else}}Проверить приглашение{{end}}</span></button>
+    </aside>
+  </form>
+</section>
+<dialog class="ui-dialog access-template-dialog" data-template-dialog aria-labelledby="template-dialog-title">
+  <div class="access-template-heading"><h2 id="template-dialog-title">Сохранённые шаблоны</h2><button class="icon-button ghost" type="button" data-template-close aria-label="Закрыть" title="Закрыть"><i data-lucide="x" aria-hidden="true"></i></button></div>
+  <form data-template-search-form><label class="ui-field"><span class="ui-field-label">Поиск по имени</span><input type="search" maxlength="80" data-template-search></label><button type="submit" class="icon-button ghost" aria-label="Найти" title="Найти"><i data-lucide="search" aria-hidden="true"></i></button></form>
+  <p data-template-list-status role="status"></p><div data-template-list></div>
+  <div class="access-template-pagination"><button type="button" class="icon-button ghost" data-template-prev aria-label="Предыдущая страница" title="Предыдущая страница"><i data-lucide="chevron-left" aria-hidden="true"></i></button><span data-template-count></span><button type="button" class="icon-button ghost" data-template-next aria-label="Следующая страница" title="Следующая страница"><i data-lucide="chevron-right" aria-hidden="true"></i></button></div>
+</dialog>
+{{end}}
+
+{{define "access_quota_fields"}}
+<div class="access-quota-grid">{{range .Quotas}}
+  <div class="access-quota" data-access-quota><label class="ui-field" for="{{.Name}}-limit"><span class="ui-field-label">{{.Label}}</span><input id="{{.Name}}-limit" name="{{.Name}}_limit" type="number" min="1" max="{{.Maximum}}" value="{{.Value}}" inputmode="numeric"></label><label class="ui-choice ui-choice--row ui-choice--compact"><input name="{{.Name}}_unlimited" type="checkbox" {{if .Unlimited}}checked{{end}}><span>Без ограничения</span></label></div>
+{{end}}</div>
+{{end}}
+
+{{define "access_summary"}}<dl class="access-facts">{{range accessSummary .}}<div><dt>{{.Label}}</dt><dd data-access-fact="{{.Key}}">{{.Value}}</dd></div>{{end}}</dl>{{end}}

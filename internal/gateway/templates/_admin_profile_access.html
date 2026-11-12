@@ -1,0 +1,65 @@
+{{define "admin_profile_access"}}
+<script src="/static/admin-access.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/admin-user-access.js?v={{.AssetVersion}}" defer></script>
+<section class="profile-band" aria-labelledby="profile-access-heading">
+  <div class="panel-heading"><h2 id="profile-access-heading">Доступ и лимиты</h2></div>
+  {{if eq .AccessStatus "changed"}}<p class="ui-status-banner is-success" role="status">Права доступа обновлены.</p>{{end}}
+  {{if .AccessError}}<p class="ui-status-banner is-error" role="alert">{{.AccessError}} Изменения не сохранены.</p>{{end}}
+  {{if eq .AccessStatus "invalid_limits"}}<p class="ui-status-banner is-error" role="alert">Проверьте лимиты генераций.</p>{{end}}
+  {{if .Profile.Disabled}}<p class="ui-status-banner is-warning">Аккаунт отключён. Настроенные права начнут действовать после включения.</p>{{else if eq .EffectiveAccess.State "expired"}}<p class="ui-status-banner is-warning">Срок аккаунта истёк. Изменение прав не продлевает его действие.</p>{{end}}
+  {{if .EffectiveAccess}}<div class="profile-effective-access"><p><strong>Действующий доступ:</strong> {{.EffectiveAccess.Label}}</p>{{if .EffectiveAccess.Quotas}}<details class="ui-disclosure"><summary>Остаток квот</summary><div class="profile-current-quotas">{{template "access_list_quotas" .EffectiveAccess.Quotas}}</div></details>{{end}}</div>{{end}}
+  {{if eq .Profile.Role "admin"}}
+    <p class="access-note">Администратору доступны все сервисы и обучение LoRA.</p>
+    {{template "access_summary" (or .EffectiveAccess.Settings .Profile.AccessSettings)}}
+    <form method="post" action="/admin/users/{{.Profile.ID}}?tab=access" class="access-composer" data-admin-resource-form>
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="action" value="update_generation_resources">
+      <fieldset class="access-section"><legend>Ресурсы генерации</legend>
+        <label class="ui-choice ui-choice--row ui-choice--compact"><input name="queue_priority" type="checkbox" {{if .Profile.QueuePriority}}checked{{end}}><span>Приоритетная очередь</span></label>
+        <label class="ui-choice ui-choice--row ui-choice--compact"><input name="pause_mining_for_quick_generation" type="checkbox" {{if .Profile.PauseMiningForQuickGeneration}}checked{{end}}><span>Автоматически приостанавливать майнинг</span></label>
+      </fieldset>
+      <div class="profile-access-submit"><button type="submit"><i data-lucide="save" aria-hidden="true"></i>Сохранить настройки ресурсов</button></div>
+    </form>
+  {{else}}
+  {{$f := userAccessForm .Profile .AccessForm}}
+  <form method="post" action="/admin/users/{{.Profile.ID}}?tab=access" class="access-composer" data-admin-user-access-form>
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="queue_policy_version" value="2">
+    <input type="hidden" name="limit_form_version" value="2">
+    <div class="access-editor">
+      <fieldset class="access-section"><legend>Возможности</legend>
+        <label class="ui-choice ui-choice--row ui-choice--compact"><input name="can_use_quick_generation" type="checkbox" {{if $f.Checked "can_use_quick_generation"}}checked{{end}}><span>Генерация</span></label>
+        <div class="access-capabilities" data-generation-capabilities>
+          <label class="ui-choice ui-choice--row ui-choice--compact"><input name="can_generate_text_to_image" type="checkbox" {{if $f.Checked "can_generate_text_to_image"}}checked{{end}}><span>Фото по тексту</span></label>
+          <label class="ui-choice ui-choice--row ui-choice--compact"><input name="can_generate_image_to_image" type="checkbox" {{if $f.Checked "can_generate_image_to_image"}}checked{{end}}><span>Редактирование фото</span></label>
+          <label class="ui-choice ui-choice--row ui-choice--compact"><input name="can_generate_video" type="checkbox" {{if $f.Checked "can_generate_video"}}checked{{end}}><span>Видео</span></label>
+        </div>
+        <label class="ui-choice ui-choice--row ui-choice--compact"><input name="can_train_image_lora" type="checkbox" {{if $f.Checked "can_train_image_lora"}}checked{{end}}><span>Обучение LoRA для изображений</span></label>
+        <label class="ui-choice ui-choice--row ui-choice--compact"><input name="can_use_harness" type="checkbox" {{if $f.Checked "can_use_harness"}}checked{{end}}><span>Harness</span></label>
+        <label class="ui-choice ui-choice--row ui-choice--compact"><input name="can_manage_mining" type="checkbox" {{if $f.Checked "can_manage_mining"}}checked{{end}}><span>Управление майнингом</span></label>
+      </fieldset>
+      <fieldset class="access-section"><legend>Лимиты и ресурсы</legend>
+        {{template "access_quota_fields" $f}}
+        <p class="profile-quota-usage">Использовано всего: фото {{.Profile.GenerationTotalUsed}}, видео {{.Profile.VideoGenerationTotalUsed}}.</p>
+        <label class="ui-field access-quality"><span class="ui-field-label">Максимум базового качества видео</span><select name="max_video_generation_quality">{{if not $f.SupportedVideoQuality}}<option value="{{$f.Value "max_video_generation_quality"}}" selected>Недоступное значение: {{$f.Value "max_video_generation_quality"}}</option>{{end}}<option value="480" {{if eq ($f.Value "max_video_generation_quality") "480"}}selected{{end}}>480p</option><option value="720" {{if eq ($f.Value "max_video_generation_quality") "720"}}selected{{end}}>720p</option><option value="1080" {{if eq ($f.Value "max_video_generation_quality") "1080"}}selected{{end}}>1080p</option><option value="1440" {{if eq ($f.Value "max_video_generation_quality") "1440"}}selected{{end}}>1440p</option></select><small>Финальный апскейл не входит в этот предел.</small></label>
+        <div class="access-capabilities">
+          <label class="ui-choice ui-choice--row ui-choice--compact"><input name="can_use_advanced_generation_settings" type="checkbox" {{if $f.Checked "can_use_advanced_generation_settings"}}checked{{end}}><span>Точные настройки генерации</span></label>
+          <label class="ui-choice ui-choice--row ui-choice--compact"><input name="queue_priority" type="checkbox" {{if $f.Checked "queue_priority"}}checked{{end}}><span>Приоритетная очередь</span></label>
+          <label class="ui-choice ui-choice--row ui-choice--compact"><input name="pause_mining_for_quick_generation" type="checkbox" {{if $f.Checked "pause_mining_for_quick_generation"}}checked{{end}}><span>Приостанавливать майнинг</span></label>
+        </div>
+      </fieldset>
+    </div>
+    <aside class="access-summary" aria-labelledby="profile-access-summary-heading">
+      <h3 id="profile-access-summary-heading">Настроенные права</h3>
+      <p class="access-review-state" data-user-access-status role="status">{{if .AccessError}}Проверьте значения перед сохранением.{{else if .AccessReviewed}}Проверено. Изменения ещё не сохранены.{{else}}Текущие настройки пользователя.{{end}}</p>
+      <div data-access-summary>{{if not .AccessError}}{{template "access_summary" (or .AccessReview .Profile.AccessSettings)}}{{end}}</div>
+      <dl class="access-facts"><div><dt>Управление майнингом</dt><dd data-user-mining-summary>{{if $f.Checked "can_manage_mining"}}Разрешено{{else}}Нет доступа{{end}}</dd></div></dl>
+      <div class="profile-access-submit">
+        <button type="submit" name="action" value="update_access"><i data-lucide="save" aria-hidden="true"></i>Сохранить права</button>
+        <button type="submit" name="action" value="review_access" class="ghost" data-user-access-review><i data-lucide="check" aria-hidden="true"></i>Проверить изменения</button>
+      </div>
+    </aside>
+  </form>
+  {{end}}
+</section>
+{{end}}

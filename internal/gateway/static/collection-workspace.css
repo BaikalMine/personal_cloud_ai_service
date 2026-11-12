@@ -1,0 +1,48 @@
+.studio-collection, .gallery-collection-context { min-width: 0; border-block: 1px solid var(--line); padding-block: 12px; }
+.studio-collection { position: relative; margin-block: 12px; }
+.collection-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 44px 44px; gap: 6px; align-items: end; }
+.collection-toolbar .ui-field { margin: 0; min-width: 0; }
+.collection-toolbar select { width: 100%; min-width: 0; text-overflow: ellipsis; }
+.collection-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.studio-collection > .collection-actions { margin-top: 8px; }
+.collection-actions :is(button, .button), .collection-toolbar button { min-height: 44px; font-size: 12px; letter-spacing: 0; }
+.collection-actions :is(button, .button) { padding-inline: 10px; }
+:is(.collection-actions, .collection-toolbar, .collection-name-dialog) .icon-button { display: inline-flex; flex: 0 0 44px; align-items: center; justify-content: center; width: 44px; min-width: 44px; height: 44px; padding: 0; }
+:is(.collection-actions, .collection-toolbar, .collection-name-dialog) svg { width: 18px; height: 18px; flex-shrink: 0; }
+.collection-status { margin: 10px 0 0; padding-left: 10px; border-left: 3px solid var(--color-info-border); color: var(--text-soft); font-size: 12px; overflow-wrap: anywhere; }
+.collection-status[data-tone="error"] { border-left-color: var(--color-danger-border); color: var(--color-danger-text); }
+.collection-snapshot { margin-top: 8px; min-width: 0; }
+.collection-snapshot > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; cursor: pointer; font-size: 12px; color: var(--text-soft); }
+.collection-snapshot > summary svg { width: 16px; height: 16px; flex-shrink: 0; }
+.collection-snapshot[open] > summary svg { transform: rotate(180deg); }
+.collection-context { padding-bottom: 8px; min-width: 0; }
+.collection-context h3 { margin: 16px 0 6px; font-size: 12px; color: var(--muted); font-weight: 600; }
+.collection-context-meta { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; margin: 8px 0; font-size: 12px; }
+.collection-context-meta dt { color: var(--muted); }
+.collection-context-meta dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.collection-context-prompt { max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-size: 13px; line-height: 1.6; }
+.collection-context-empty { margin: 8px 0; font-size: 12px; color: var(--muted); }
+.collection-context-loras, .collection-context-assets { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 12px; }
+.collection-context-loras li { overflow-wrap: anywhere; }
+.collection-context-assets li { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 10px; align-items: center; min-width: 0; }
+.collection-context-assets img, .collection-asset-icon { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; background: var(--surface-raised); }
+.collection-asset-icon { display: grid; place-items: center; color: var(--muted); }
+.collection-asset-icon svg { width: 18px; height: 18px; }
+.collection-context-assets a, .collection-context-assets span { overflow-wrap: anywhere; }
+.collection-context-assets a { display: flex; align-items: center; min-height: 44px; }
+.collection-context-assets small { display: block; margin-top: 3px; color: var(--muted); }
+.collection-context-assets .collection-empty-item { display: block; color: var(--muted); }
+.gallery-collection-context { margin-bottom: 16px; border-top: 0; padding-top: 0; }
+.gallery-collection-context > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.gallery-collection-context h2 { margin: 0; min-width: 0; font-size: 17px; overflow-wrap: anywhere; }
+.gallery-collection-context > header .collection-actions { flex-shrink: 0; }
+.gallery-collection-context .collection-context-assets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.collection-name-dialog { width: min(440px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 20px; border-radius: 8px; }
+.collection-name-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.collection-name-dialog h2 { margin: 0; font-size: 18px; overflow-wrap: anywhere; }
+.collection-name-dialog footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+.collection-name-dialog input { width: 100%; min-width: 0; }
+@media (max-width: 600px) {
+  .gallery-collection-context > header { align-items: start; flex-direction: column; }
+  .gallery-collection-context .collection-context-assets { grid-template-columns: minmax(0, 1fr); }
+}

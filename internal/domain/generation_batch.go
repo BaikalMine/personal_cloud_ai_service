@@ -5,12 +5,13 @@ import "time"
 type GenerationBatchMode string
 
 const (
-	GenerationBatchSeeds     GenerationBatchMode = "seeds"
-	GenerationBatchParameter GenerationBatchMode = "parameter"
+	GenerationBatchSeeds            GenerationBatchMode = "seeds"
+	GenerationBatchParameter        GenerationBatchMode = "parameter"
+	GenerationBatchLoraVerification GenerationBatchMode = "lora_verification"
 )
 
 func (mode GenerationBatchMode) Valid() bool {
-	return mode == GenerationBatchSeeds || mode == GenerationBatchParameter
+	return mode == GenerationBatchSeeds || mode == GenerationBatchParameter || mode == GenerationBatchLoraVerification
 }
 
 // GenerationBatch groups a controlled set of durable generation jobs. Its
@@ -45,6 +46,7 @@ type GenerationBatch struct {
 	FailedCount             int
 	CancelledCount          int
 	ExpiredCount            int
+	MissingCount            int
 }
 
 type CreateGenerationBatchJobParams struct {
@@ -58,6 +60,8 @@ type CreateGenerationBatchJobParams struct {
 }
 
 type CreateGenerationBatchParams struct {
+	CollectionID     int64
+	LoraVerification *CreateLoraVerificationParams
 	PublicID         string
 	UserID           int64
 	UsernameSnapshot string

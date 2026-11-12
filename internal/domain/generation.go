@@ -71,8 +71,26 @@ type GenerationMediaCollection struct {
 	ID        int64
 	Name      string
 	ItemCount int64
+	Revision  int64
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+type GenerationCollectionContext struct {
+	Collection     GenerationMediaCollection
+	UserID         int64
+	PayloadCipher  []byte
+	ContextSavedAt *time.Time
+}
+
+type SaveGenerationCollectionContextParams struct {
+	UserID                int64
+	CollectionID          int64
+	ExpectedRevision      int64
+	ExpectedDraftRevision int64
+	Name                  string
+	PayloadCipher         []byte
+	ReplaceContext        bool
 }
 
 type GenerationMediaReferenceRecord struct {

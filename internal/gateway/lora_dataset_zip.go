@@ -178,6 +178,25 @@ func readLoraDatasetZIPEntry(entry *zip.File, limit int64) ([]byte, error) {
 	return data, nil
 }
 
+func discoverLoraDatasetZIPImages(entries map[string]*zip.File) []loraDatasetZIPImage {
+	names := []string{}
+	foldedNames := make(map[string]string, len(entries))
+	for name := range entries {
+		foldedNames[strings.ToLower(name)] = name
+		switch strings.ToLower(path.Ext(name)) {
+		case ".png", ".jpg", ".jpeg", ".webp":
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	images := make([]loraDatasetZIPImage, 0, len(names))
+	for _, name := range names {
+		caption := foldedNames[strings.ToLower(strings.TrimSuffix(name, path.Ext(name))+".txt")]
+		images = append(images, loraDatasetZIPImage{File: name, Caption: caption})
+	}
+	return images
+}
+
 func (a *App) importLoraDataset(ctx context.Context, row domain.LoraDatasetRow, revision int64, archive *zip.Reader) (domain.LoraDatasetRow, error) {
 	if row.Revision != revision {
 		return row, store.ErrLoraDatasetConflict
@@ -200,21 +219,7 @@ func (a *App) importLoraDataset(ctx context.Context, row domain.LoraDatasetRow, 
 			return row, datasetInputError("Неизвестный формат dataset.json.")
 		}
 	} else {
-		names := []string{}
-		for name := range entries {
-			switch strings.ToLower(path.Ext(name)) {
-			case ".png", ".jpg", ".jpeg", ".webp":
-				names = append(names, name)
-			}
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			caption := strings.TrimSuffix(name, path.Ext(name)) + ".txt"
-			if entries[caption] == nil {
-				caption = ""
-			}
-			portable.Images = append(portable.Images, loraDatasetZIPImage{File: name, Caption: caption})
-		}
+		portable.Images = discoverLoraDatasetZIPImages(entries)
 	}
 	if len(portable.Images) > domain.LoraDatasetMaxImages {
 		return row, store.ErrLoraDatasetQuota

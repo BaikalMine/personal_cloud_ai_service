@@ -1,0 +1,46 @@
+{{define "lora_library"}}
+{{template "head" .}}
+<link rel="stylesheet" href="/static/tasks.css?v={{.AssetVersion}}">
+<link rel="stylesheet" href="/static/lora-library.css?v={{.AssetVersion}}">
+<script src="/static/task-model.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/lora-library.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/lora-repeat.js?v={{.AssetVersion}}" defer></script>
+{{template "nav" .}}
+<main class="page task-page lora-library" id="main-content" data-lora-library data-owner="{{.CurrentUser.ID}}" data-csrf="{{.CSRF}}">
+  <header class="task-page-heading">
+    <div><h1>Мои LoRA</h1><p class="muted" data-library-count>Загрузка...</p></div>
+    <div class="lora-library-actions"><button type="button" class="ghost task-icon-button" data-library-refresh title="Обновить библиотеку" aria-label="Обновить библиотеку"><i data-lucide="refresh-cw" aria-hidden="true"></i></button><a class="button" href="/train-lora?new=1"><i data-lucide="plus" aria-hidden="true"></i>Новое обучение</a></div>
+  </header>
+  {{if .Message}}<p class="ui-status-banner" role="status">{{.Message}}</p>{{end}}
+  <form class="task-filters" data-library-filters>
+    <fieldset class="ui-segmented ui-segmented--compact lora-library-tabs"><legend class="visually-hidden">Библиотека</legend>
+      <label class="ui-segment"><input type="radio" name="view" value="loras" checked><span>Мои LoRA</span></label>
+      <label class="ui-segment"><input type="radio" name="view" value="datasets"><span>Наборы</span></label>
+    </fieldset>
+    <div class="ui-field-grid lora-library-filters">
+      <label class="ui-field"><span class="ui-field-label">Поиск</span><input type="search" name="search" maxlength="200" placeholder="Название или ID" autocomplete="off"></label>
+      <label class="ui-field" data-library-state-field><span class="ui-field-label">Состояние</span><select name="state"><option value="">Все состояния</option><option value="completed">Готово</option><option value="queued">В очереди</option><option value="waiting_for_resources">Ожидание ресурсов</option><option value="preparing">Подготовка</option><option value="uploading">Передача</option><option value="caching">Кеширование</option><option value="running">Обучение</option><option value="installing">Установка</option><option value="failed">Ошибка</option><option value="cancelled">Отменено</option></select></label>
+    </div>
+  </form>
+  <p class="ui-status-banner is-error" data-library-error role="alert" hidden></p>
+  <div class="task-workspace">
+    <section class="task-results" aria-label="Библиотека LoRA и наборов">
+      <div class="task-list" data-library-list aria-busy="true"><p class="ui-empty-state">Загрузка...</p></div>
+      <div class="task-list-footer"><button class="ghost" type="button" data-library-more hidden>Показать ещё</button><span class="muted" data-library-loaded></span></div>
+      <noscript><p class="ui-status-banner">Библиотека недоступна без JavaScript.</p><a href="/train-lora?new=1">Открыть обучение</a></noscript>
+    </section>
+    <aside class="task-selection-placeholder" data-library-placeholder><i data-lucide="layers" aria-hidden="true"></i><h2>LoRA не выбрана</h2></aside>
+    <dialog class="task-inspector ui-dialog" data-library-inspector aria-labelledby="lora-library-title">
+      <header class="task-inspector-heading"><div><p class="muted">Обучение LoRA</p><h2 id="lora-library-title" tabindex="-1">LoRA</h2></div><button type="button" class="ghost task-icon-button" data-library-close title="Вернуться к списку" aria-label="Вернуться к списку"><i data-lucide="arrow-left" aria-hidden="true"></i></button></header>
+      <div class="task-inspector-body" data-library-body></div>
+      <footer class="task-inspector-actions" data-library-actions></footer>
+    </dialog>
+  </div>
+  <dialog id="lora-repeat-confirm" class="ui-dialog lora-repeat-dialog" aria-labelledby="lora-repeat-title">
+    <header><h2 id="lora-repeat-title" tabindex="-1">Обучить заново</h2><button type="button" class="ghost task-icon-button" data-repeat-close title="Закрыть повтор обучения" aria-label="Закрыть повтор обучения"><i data-lucide="x" aria-hidden="true"></i></button></header>
+    <div class="lora-repeat-content"><p data-repeat-message role="status"></p><div data-repeat-facts></div></div>
+    <footer><a class="button ghost" data-repeat-dataset hidden><i data-lucide="images" aria-hidden="true"></i>Исходный набор</a><button type="button" class="ghost" data-repeat-prepare hidden><i data-lucide="refresh-cw" aria-hidden="true"></i>Подготовить повтор</button><button type="button" class="ghost" data-repeat-recover hidden><i data-lucide="refresh-cw" aria-hidden="true"></i>Проверить запуск</button><button type="button" data-repeat-enqueue hidden><i data-lucide="play" aria-hidden="true"></i>Запустить обучение</button><a class="button" data-repeat-task hidden><i data-lucide="list-checks" aria-hidden="true"></i>Открыть задачу</a></footer>
+  </dialog>
+</main>
+</body></html>
+{{end}}

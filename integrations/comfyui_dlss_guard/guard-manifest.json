@@ -1,0 +1,25 @@
+{
+  "upstream_commit": "796ed5927a202ba50b5c929cd08e16b365041162",
+  "files": [
+    {
+      "path": "dlss5/session.py",
+      "before_sha256": "f8f64fb03ec9ee6d1ebf5f1b8b5c5f7184d640fcec8a41aa1271f2f49585c03a",
+      "after_sha256": "264b3ebbfd27a8aa7df2120c5eb365bee4424aee946daee13bb5d67c29fc405b"
+    },
+    {
+      "path": "nodes/enhance_images.py",
+      "before_sha256": "d1b07c0a7e70819538f1246370edace991e161708590b093e83a8ff8a4629f26",
+      "after_sha256": "7d85151b85d13988e78575525417776ccaecd7969913a9d3c5a412578aefd2d8"
+    },
+    {
+      "path": "nodes/enhance_video.py",
+      "before_sha256": "8d08bc794b4e2acd4c98855fb050972b052c7f9e0aa1057e1f46e0984958e5fa",
+      "after_sha256": "b7ad91b662977fdedd860922f1b1e7ee51f0cee623497267f3ffc329aa29f931"
+    },
+    {
+      "path": "dlss5/lifecycle.py",
+      "before_sha256": null,
+      "after_sha256": "3e9639352d5b2a7eefaecda152f358d26e66d4863e8ef87926b799b4237f9106"
+    }
+  ]
+}

@@ -121,6 +121,12 @@ func (a *App) handleSuggestionsPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) renderSuggestionsPage(w http.ResponseWriter, r *http.Request, status int, form featureSuggestionForm, errorMessage, message string) {
+	w.Header().Set("Cache-Control", "no-store")
+	if errorMessage != "" && form.ID > 0 && form.JSONName == "" {
+		if row, err := a.store.FeatureSuggestionByIDForUser(r.Context(), form.ID, a.currentUser(r).ID); err == nil && row.Status == "draft" {
+			form.JSONName, form.JSONSize = row.JSONName, row.JSONSizeBytes
+		}
+	}
 	rows, err := a.store.ListFeatureSuggestionsByUser(r.Context(), a.currentUser(r).ID, 50)
 	if err != nil {
 		http.Error(w, "не удалось загрузить предложения", http.StatusInternalServerError)
@@ -281,8 +287,17 @@ func (a *App) handleSuggestionDelete(w http.ResponseWriter, r *http.Request, raw
 		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "не удалось прочитать форму", http.StatusBadRequest)
+		return
+	}
 	if !a.validCSRF(r) {
 		http.Error(w, "проверка безопасности не пройдена", http.StatusForbidden)
+		return
+	}
+	if len(r.PostForm["confirm_delete"]) != 1 || r.PostForm.Get("confirm_delete") != "1" {
+		http.Error(w, "подтвердите удаление черновика", http.StatusBadRequest)
 		return
 	}
 	id, err := strconv.ParseInt(strings.Trim(rawID, "/"), 10, 64)
@@ -337,10 +352,13 @@ func (a *App) featureSuggestionView(row domain.FeatureSuggestionRow) (featureSug
 	item := featureSuggestionView{
 		FeatureSuggestionRow: row, Description: description, KindLabel: featureSuggestionKindLabel(row.Kind),
 		StatusLabel: statusLabel, StatusClass: statusClass, StatusHint: statusHint,
-		ScanStatusLabel: featureSuggestionScanStatusLabel(row.ScanStatus), AttachmentCount: len(row.Scans),
+		ScanStatusLabel: featureSuggestionScanStatusLabel(row.ScanStatus), AttachmentCount: len(links),
 		CanEdit: row.Status == "draft", CanRetry: row.Status == "review" && len(row.Scans) > 0,
 		CanAccept: row.Status == "review" && (row.ScanStatus == "none" || row.ScanStatus == "clean"),
 		CanReject: row.Status == "review",
+	}
+	if row.JSONName != "" {
+		item.AttachmentCount++
 	}
 	if len(row.ReviewCommentCipher) > 0 {
 		item.ReviewComment, err = a.contentCipher.Decrypt(row.ReviewCommentCipher)

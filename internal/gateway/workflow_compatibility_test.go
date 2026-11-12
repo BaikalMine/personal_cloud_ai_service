@@ -14,6 +14,29 @@ func TestValidateComfyPromptAcceptsRTXDynamicBranch(t *testing.T) {
 	}
 }
 
+func TestValidateComfyPromptAcceptsQwenAutogrowImages(t *testing.T) {
+	info := map[string]comfyNodeInfo{
+		"TextEncodeQwenImage21": comfyNodeInfoFromJSON(t, `{"input":{"required":{"images":["COMFY_AUTOGROW_V3",{"template":{"input":{"required":{"image":["IMAGE",{}]}},"names":["image_1","image_2"],"min":0}}]}},"output":["CONDITIONING"]}`),
+		"LoadImage":             comfyNodeInfoFromJSON(t, `{"input":{"required":{"image":["STRING"]}},"output":["IMAGE"]}`),
+	}
+	catalog := buildComfySchemaCatalog(info, time.Time{}, "qwen")
+	text := map[string]any{"4": map[string]any{"class_type": "TextEncodeQwenImage21", "inputs": map[string]any{}}}
+	if issues := validateComfyPrompt(catalog, text); len(issues) != 0 {
+		t.Fatalf("empty optional autogrow: %#v", issues)
+	}
+	edit := map[string]any{
+		"4":  map[string]any{"class_type": "TextEncodeQwenImage21", "inputs": map[string]any{"images.image_1": []any{"10", 0}}},
+		"10": map[string]any{"class_type": "LoadImage", "inputs": map[string]any{"image": "test.png"}},
+	}
+	if issues := validateComfyPrompt(catalog, edit); len(issues) != 0 {
+		t.Fatalf("image autogrow: %#v", issues)
+	}
+	edit["4"].(map[string]any)["inputs"].(map[string]any)["images.image_1"] = []any{"404", 0}
+	if issues := validateComfyPrompt(catalog, edit); !hasCompatibilityIssue(issues, "missing_source_node", "") {
+		t.Fatalf("missing autogrow reference was accepted: %#v", issues)
+	}
+}
+
 func TestComfyScalarIntAcceptsNegativeSeed(t *testing.T) {
 	if !comfyScalarTypeMatches("INT", -1) {
 		t.Fatal("negative ComfyUI seed was rejected")

@@ -145,6 +145,9 @@ func (s *Store) CreateGenerationJob(ctx context.Context, params domain.CreateGen
 		return domain.GenerationJob{}, false, err
 	}
 	if created {
+		if err := bindGenerationCollectionJob(ctx, tx, params.UserID, params.CollectionID, job.ID); err != nil {
+			return domain.GenerationJob{}, false, err
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO generation_job_transitions(job_id,correlation_id,from_state,to_state,message,attempt)
 			VALUES($1,$2,'','draft',$3,1)`, job.ID, job.CorrelationID, job.StatusMessage); err != nil {
 			return domain.GenerationJob{}, false, err
@@ -181,6 +184,13 @@ func (s *Store) ClaimGenerationJob(ctx context.Context, params domain.CreateGene
 		return domain.GenerationJob{}, false, err
 	}
 	defer tx.Rollback()
+	receipt, err := lockGenerationSubmission(ctx, tx, params.UserID, "single", params.RequestID)
+	if err != nil {
+		return domain.GenerationJob{}, false, err
+	}
+	if receipt.Closed {
+		return domain.GenerationJob{}, false, ErrGenerationSubmissionClosed
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO generation_requests(user_id,request_id,correlation_id)
 		VALUES($1,$2,$3) ON CONFLICT(user_id,request_id) DO NOTHING`, params.UserID, params.RequestID, params.CorrelationID); err != nil {
 		return domain.GenerationJob{}, false, err
@@ -188,6 +198,9 @@ func (s *Store) ClaimGenerationJob(ctx context.Context, params domain.CreateGene
 	job, err := scanGenerationJob(tx.QueryRowContext(ctx, `SELECT `+generationJobColumns+`
 		FROM generation_jobs WHERE user_id=$1 AND request_id=$2 FOR UPDATE`, params.UserID, params.RequestID))
 	if err == nil {
+		if err := bindGenerationSubmission(ctx, tx, receipt, job.PublicID); err != nil {
+			return domain.GenerationJob{}, false, err
+		}
 		if _, err := tx.ExecContext(ctx, `UPDATE generation_requests SET job_id=$1,correlation_id=$4
 			WHERE user_id=$2 AND request_id=$3 AND job_id IS NULL`, job.ID, params.UserID, params.RequestID, job.CorrelationID); err != nil {
 			return domain.GenerationJob{}, false, err
@@ -199,6 +212,9 @@ func (s *Store) ClaimGenerationJob(ctx context.Context, params domain.CreateGene
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return domain.GenerationJob{}, false, err
+	}
+	if receipt.PublicID != "" {
+		return domain.GenerationJob{}, false, ErrGenerationSubmissionExpired
 	}
 	if params.ParentJobID != nil {
 		var parentExists bool
@@ -243,7 +259,13 @@ func (s *Store) ClaimGenerationJob(ctx context.Context, params domain.CreateGene
 		WHERE user_id=$2 AND request_id=$3`, job.ID, params.UserID, params.RequestID, job.CorrelationID); err != nil {
 		return domain.GenerationJob{}, false, err
 	}
+	if err := bindGenerationSubmission(ctx, tx, receipt, job.PublicID); err != nil {
+		return domain.GenerationJob{}, false, err
+	}
 	if created {
+		if err := bindGenerationCollectionJob(ctx, tx, params.UserID, params.CollectionID, job.ID); err != nil {
+			return domain.GenerationJob{}, false, err
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO generation_job_transitions(job_id,correlation_id,from_state,to_state,message,attempt)
 			VALUES($1,$2,'',$3,$4,1)`, job.ID, job.CorrelationID, job.State, job.StatusMessage); err != nil {
 			return domain.GenerationJob{}, false, err
@@ -301,6 +323,12 @@ func (s *Store) PrepareGenerationJob(ctx context.Context, jobID int64, prepared 
 		return domain.GenerationJob{}, ErrGenerationJobStateConflict
 	}
 	if err != nil {
+		return domain.GenerationJob{}, err
+	}
+	if job.UserID == nil {
+		return domain.GenerationJob{}, ErrGenerationInputUnavailable
+	}
+	if err := bindGenerationInputReferences(ctx, tx, jobID, *job.UserID, prepared.InputNames); err != nil {
 		return domain.GenerationJob{}, err
 	}
 	if err := incrementGenerationJobRevision(ctx, tx); err != nil {

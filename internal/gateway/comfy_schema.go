@@ -66,16 +66,19 @@ type comfyNodeSchema struct {
 	Optional          map[string]comfyInputSchema
 	Hidden            map[string]comfyInputSchema
 	Outputs           []string
+	VideoFormats      map[string]map[string]comfyInputSchema
 }
 
 type comfyInputSchema struct {
-	Name           string
-	Type           string
-	Choices        []any
-	Default        any
-	Min            *float64
-	Max            *float64
-	DynamicOptions map[string]comfyDynamicOption
+	Name             string
+	Type             string
+	Choices          []any
+	Default          any
+	Min              *float64
+	Max              *float64
+	DynamicOptions   map[string]comfyDynamicOption
+	AutogrowRequired map[string]comfyInputSchema
+	AutogrowMin      int
 }
 
 type comfyDynamicOption struct {
@@ -225,12 +228,59 @@ func buildComfySchemaCatalog(info map[string]comfyNodeInfo, fetchedAt time.Time,
 		if node.DisplayName == "" {
 			node.DisplayName = classType
 		}
+		if classType == "VHS_VideoCombine" {
+			node.VideoFormats = parseComfyVideoFormats(nodeInfo.Input.Required["format"])
+		}
 		if encoded, err := json.Marshal(nodeInfo); err == nil {
 			node.SchemaFingerprint = hashBytes(encoded)
 		}
 		nodes[classType] = node
 	}
 	return comfySchemaCatalog{Nodes: nodes, FetchedAt: fetchedAt, Fingerprint: fingerprint}
+}
+
+func parseComfyVideoFormats(raw json.RawMessage) map[string]map[string]comfyInputSchema {
+	var parts []json.RawMessage
+	if json.Unmarshal(raw, &parts) != nil || len(parts) < 2 {
+		return nil
+	}
+	var options struct {
+		Formats map[string]json.RawMessage `json:"formats"`
+	}
+	if json.Unmarshal(parts[1], &options) != nil {
+		return nil
+	}
+	result := make(map[string]map[string]comfyInputSchema)
+	for format, rawWidgets := range options.Formats {
+		var widgets [][]json.RawMessage
+		if json.Unmarshal(rawWidgets, &widgets) != nil {
+			continue
+		}
+		fields := make(map[string]comfyInputSchema)
+		valid := true
+		for _, widget := range widgets {
+			var name string
+			if len(widget) < 2 || json.Unmarshal(widget[0], &name) != nil || name == "" {
+				valid = false
+				break
+			}
+			if _, duplicate := fields[name]; duplicate {
+				valid = false
+				break
+			}
+			encoded, _ := json.Marshal(widget[1:])
+			field, ok := parseComfyInputSchema(name, encoded)
+			if !ok {
+				valid = false
+				break
+			}
+			fields[name] = field
+		}
+		if valid {
+			result[format] = fields
+		}
+	}
+	return result
 }
 
 func parseComfyOutputTypes(raw []json.RawMessage) []string {
@@ -328,6 +378,18 @@ func parseComfyInputSchema(name string, raw json.RawMessage) (comfyInputSchema, 
 				schema.Choices = append(schema.Choices, key)
 				schema.DynamicOptions[key] = comfyDynamicOption{Key: key, Required: parseComfyInputMap(option.Inputs.Required), Optional: parseComfyInputMap(option.Inputs.Optional)}
 			}
+		}
+	}
+	if schema.Type == "COMFY_AUTOGROW_V3" {
+		var template struct {
+			Input struct {
+				Required map[string]json.RawMessage `json:"required"`
+			} `json:"input"`
+			Min int `json:"min"`
+		}
+		if json.Unmarshal(options["template"], &template) == nil {
+			schema.AutogrowRequired = parseComfyInputMap(template.Input.Required)
+			schema.AutogrowMin = template.Min
 		}
 	}
 	return schema, true

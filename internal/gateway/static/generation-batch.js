@@ -59,7 +59,7 @@
   const parameterOptions = (context = {}) => {
     const family = String(context.family || "");
     const template = String(context.templateID || "");
-    const image = family === "krea2" || family === "flux2";
+    const image = family === "krea2" || family === "flux2" || family === "moss";
     const krea = family === "krea2";
     const flux = family === "flux2";
     const video = family === "minimax_h3";
@@ -105,6 +105,9 @@
   const validate = (config = {}, options = [], quota = {}) => {
     if (!config.enabled) return { valid: true, count: 1, error: "" };
     const count = boundedCount(config.count);
+    if (String(config.count ?? "").trim() === "" || !Number.isInteger(Number(config.count)) || Number(config.count) < MIN_COUNT || Number(config.count) > MAX_COUNT) {
+      return { valid: false, count, error: `Укажите целое количество вариантов от ${MIN_COUNT} до ${MAX_COUNT}.` };
+    }
     const remaining = remainingQuota(quota);
     if (remaining < count) return { valid: false, count, error: `Доступно запусков: ${remaining}. Уменьшите количество вариантов.` };
     if (config.mode === "seeds") return { valid: true, count, error: "" };

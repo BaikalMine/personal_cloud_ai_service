@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,22 +21,24 @@ import (
 )
 
 type generationGalleryItemView struct {
-	VariantID    int64
-	JobID        string
-	RequestID    string
-	TemplateID   string
-	WorkflowID   string
-	WorkflowName string
-	Scenario     string
-	ModelName    string
-	Prompt       string
-	Seed         int64
-	State        string
-	ErrorMessage string
-	CreatedAt    time.Time
-	HasMedia     bool
-	CompareCount int
-	Media        generationMediaView
+	Postprocess     *postprocessView
+	PostprocessJSON string
+	VariantID       int64
+	JobID           string
+	RequestID       string
+	TemplateID      string
+	WorkflowID      string
+	WorkflowName    string
+	Scenario        string
+	ModelName       string
+	Prompt          string
+	Seed            int64
+	State           string
+	ErrorMessage    string
+	CreatedAt       time.Time
+	HasMedia        bool
+	CompareCount    int
+	Media           generationMediaView
 }
 
 type generationPickerImageView struct {
@@ -84,7 +87,8 @@ func (a *App) handleGenerationGalleryPage(w http.ResponseWriter, r *http.Request
 		"ErrorCount":         generationGalleryFlagCount(items, "error"),
 		"CanUseImageToImage": user.CanUseQuickGenerationType("image-to-image"),
 		"CanUseMiniMaxVideo": user.CanUseQuickGenerationType("minimax-h3-video"),
-		"CanReuseImages":     user.CanUseQuickGenerationType("image-to-image") || user.CanUseQuickGenerationType("minimax-h3-video"),
+		"CanTrainImageLora":  user.Role == "admin" || user.CanTrainImageLora,
+		"CanReuseImages":     user.CanUseQuickGenerationType("image-to-image") || user.CanUseQuickGenerationType("minimax-h3-video") || user.CanTrainImageLora || user.Role == "admin",
 	})
 }
 
@@ -153,6 +157,27 @@ func (a *App) handleGenerationLibraryImages(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	user := a.currentUser(r)
+	if r.URL.Query().Has("media") {
+		id, err := strconv.ParseInt(r.URL.Query().Get("media"), 10, 64)
+		if err != nil || id <= 0 || len(r.URL.Query()) != 1 || len(r.URL.Query()["media"]) != 1 {
+			writeGenerationError(w, http.StatusBadRequest, "Некорректный результат.")
+			return
+		}
+		item, err := a.store.UserGenerationMediaByID(r.Context(), user.ID, id)
+		if errors.Is(err, sql.ErrNoRows) || err == nil && item.MediaType != "image" {
+			http.NotFound(w, r)
+			return
+		}
+		if err != nil {
+			writeGenerationError(w, http.StatusServiceUnavailable, "Не удалось проверить результат.")
+			return
+		}
+		view := generationPickerImageView{ID: item.ID, URL: "/generate/library/" + strconv.FormatInt(item.ID, 10), Filename: item.OriginalName,
+			ModelName: generationModelLabel(item.ModelName), CreatedUnix: item.CreatedAt.UnixMilli(), ExpiresUnix: item.ExpiresAt.UnixMilli(),
+			Sensitive: item.Sensitive || item.VisualPending, Pinned: item.Pinned, Favorite: item.Favorite}
+		writeJSON(w, http.StatusOK, map[string]any{"media_id": strconv.FormatInt(id, 10), "images": []generationPickerImageView{view}})
+		return
+	}
 	items, err := a.generationLibraryImageViews(r.Context(), user.ID, "/generate/library/")
 	if err != nil {
 		writeGenerationError(w, http.StatusInternalServerError, "не удалось загрузить изображения")
@@ -549,6 +574,13 @@ func generationGalleryItems(variants []generationVariantView) []generationGaller
 			Prompt: prompt, Seed: variant.Seed, State: variant.State, ErrorMessage: variant.ErrorMessage,
 			CreatedAt: variant.CreatedAt, CompareCount: len(variant.Media),
 		}
+		if variant.Operation == "postprocess" {
+			base.Postprocess = variant.Postprocess
+			encoded, _ := json.Marshal(variant.Postprocess)
+			base.PostprocessJSON = string(encoded)
+			base.ModelName = postprocessLabel(variant.TemplateID)
+			base.WorkflowName, base.Scenario, base.Prompt = "Обработка готового файла", postprocessLabel(variant.TemplateID), ""
+		}
 		if len(variant.Media) == 0 && (variant.State == "error" || variant.State == "failed") {
 			items = append(items, base)
 			continue
@@ -629,6 +661,12 @@ func generationWorkflowLabel(workflowID string) string {
 		return "Krea2 · фото и промт"
 	case "photoflow-flux2-edit":
 		return "Flux2 · фото и промт"
+	case "qwen-image21":
+		return "Qwen Image 2.1 · текст в изображение"
+	case mossPresetID:
+		return "MOSS Image · текст в изображение"
+	case "qwen-image21-edit":
+		return "Qwen Image 2.1 · редактирование"
 	case "minimax-h3-video":
 		return "MiniMax H3 · видео"
 	default:

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"ai-access-gateway/internal/buildinfo"
 	"ai-access-gateway/internal/mining"
 )
 
@@ -29,8 +30,14 @@ type Controller interface {
 }
 
 type Server struct {
-	tokenHash  [32]byte
-	controller Controller
+	tokenHash          [32]byte
+	controller         Controller
+	requireFencing     bool
+	session            string
+	commandGate        chan struct{}
+	commandRevision    int64
+	commandUnconfirmed bool
+	unconfirmedMiner   mining.Request
 }
 
 func NewServer(token string, controller Controller) (*Server, error) {
@@ -40,18 +47,24 @@ func NewServer(token string, controller Controller) (*Server, error) {
 	if controller == nil {
 		return nil, errors.New("controller is required")
 	}
-	return &Server{tokenHash: sha256.Sum256([]byte(strings.TrimSpace(token))), controller: controller}, nil
+	return &Server{tokenHash: sha256.Sum256([]byte(strings.TrimSpace(token))), controller: controller, session: commandSession(), commandGate: make(chan struct{}, 1)}, nil
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
+	mux.Handle("/v1/build", s.authenticate(buildinfo.Handler(buildinfo.MiningAgent)))
 	mux.Handle("/v1/state", s.authenticate(http.HandlerFunc(s.handleState)))
 	mux.Handle("/v1/script", s.authenticate(http.HandlerFunc(s.handleScript)))
+	mux.Handle("/v1/files", s.authenticate(http.HandlerFunc(s.handleFiles)))
+	mux.Handle("/v1/inventory", s.authenticate(http.HandlerFunc(s.handleInventory)))
+	mux.Handle("/v1/script/save", s.authenticate(http.HandlerFunc(s.handleSaveScript)))
 	mux.Handle("/v1/start", s.authenticate(http.HandlerFunc(s.handleStart)))
 	mux.Handle("/v1/stop", s.authenticate(http.HandlerFunc(s.handleStop)))
 	mux.Handle("/v1/update", s.authenticate(http.HandlerFunc(s.handleUpdate)))
 	mux.Handle("/v1/system", s.authenticate(http.HandlerFunc(s.handleSystem)))
+	mux.Handle("/v2/session", s.authenticate(http.HandlerFunc(s.handleSession)))
+	mux.Handle("/v2/command", s.authenticate(http.HandlerFunc(s.handleFenced)))
 	return securityHeaders(mux)
 }
 
@@ -132,6 +145,10 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
+	if s.requireFencing {
+		http.Error(w, "command protocol 2 required", http.StatusConflict)
+		return
+	}
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
 		return
@@ -163,6 +180,10 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request, command func(context.Context, mining.Request) (mining.State, error)) {
+	if s.requireFencing {
+		http.Error(w, "command protocol 2 required", http.StatusConflict)
+		return
+	}
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
 		return

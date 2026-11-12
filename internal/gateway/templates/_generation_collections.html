@@ -1,0 +1,58 @@
+{{define "collection_assets"}}
+<link rel="stylesheet" href="/static/collection-workspace.css?v={{.AssetVersion}}">
+<script src="/static/generation-collections.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/collection-workspace.js?v={{.AssetVersion}}" defer></script>
+{{end}}
+
+{{define "collection_context"}}
+<div class="collection-context" data-collection-record hidden>
+  <p class="collection-context-empty" data-collection-empty hidden>Настройки ещё не сохранены</p>
+  <div data-collection-facts hidden>
+    <dl class="collection-context-meta"><dt>Модель</dt><dd data-collection-model></dd><dt>Сохранено</dt><dd data-collection-date></dd></dl>
+    <h3>Промпт</h3><p class="collection-context-prompt" data-collection-prompt tabindex="0"></p>
+    <h3>LoRA</h3><ul class="collection-context-loras" data-collection-loras></ul>
+    <h3>Исходники</h3><ul class="collection-context-assets" data-collection-assets></ul>
+  </div>
+</div>
+{{end}}
+
+{{define "studio_collection"}}
+<section class="studio-collection" data-collection-studio aria-label="Рабочая коллекция">
+  <h2 class="visually-hidden">Рабочая коллекция</h2>
+  <input type="hidden" name="collection_id" id="generation-collection-id" value="">
+  <div class="collection-toolbar">
+    <label class="ui-field"><span class="ui-field-label">Коллекция результатов</span><select data-collection-select aria-label="Коллекция результатов"><option value="">Без коллекции</option></select></label>
+    <button type="button" class="button ghost icon-button" data-collection-create aria-label="Создать коллекцию" title="Создать коллекцию"><i data-lucide="folder-plus" aria-hidden="true"></i></button>
+    <button type="button" class="button ghost icon-button" data-collection-refresh aria-label="Обновить коллекции" title="Обновить коллекции"><i data-lucide="refresh-cw" aria-hidden="true"></i></button>
+  </div>
+  <div class="collection-actions" data-collection-actions hidden>
+    <button type="button" class="button ghost" data-collection-save><i data-lucide="save" aria-hidden="true"></i>Сохранить настройки</button>
+    <button type="button" class="button ghost" data-collection-open><i data-lucide="folder-open" aria-hidden="true"></i>Открыть настройки</button>
+    <a class="button ghost icon-button" data-collection-results aria-label="Результаты коллекции" title="Результаты коллекции"><i data-lucide="images" aria-hidden="true"></i></a>
+  </div>
+  <p class="collection-status" data-collection-status role="status" hidden></p>
+  <details class="collection-snapshot" data-collection-snapshot hidden><summary>Сохранённые настройки<i data-lucide="chevron-down" aria-hidden="true"></i></summary>{{template "collection_context" .}}</details>
+</section>
+{{end}}
+
+{{define "gallery_collection"}}
+<section class="gallery-collection-context" data-collection-gallery aria-label="Контекст коллекции" hidden>
+  <header><h2 data-collection-title></h2><div class="collection-actions">
+    <a class="button" data-collection-studio-link><i data-lucide="arrow-up-right" aria-hidden="true"></i>В студию</a>
+    <button type="button" class="button ghost icon-button" data-collection-rename aria-label="Переименовать коллекцию" title="Переименовать коллекцию"><i data-lucide="pencil" aria-hidden="true"></i></button>
+    <button type="button" class="button ghost icon-button" data-collection-refresh aria-label="Обновить коллекцию" title="Обновить коллекцию"><i data-lucide="refresh-cw" aria-hidden="true"></i></button>
+  </div></header>
+  <p class="collection-status" data-collection-status role="status" hidden></p>
+  <details class="collection-snapshot" data-collection-snapshot open><summary>Сохранённые настройки<i data-lucide="chevron-down" aria-hidden="true"></i></summary>{{template "collection_context" .}}</details>
+</section>
+{{end}}
+
+{{define "collection_dialog"}}
+<dialog class="collection-name-dialog ui-dialog" data-collection-name-dialog aria-labelledby="collection-name-title">
+  <header><h2 id="collection-name-title">Коллекция</h2><button type="button" class="button ghost icon-button" data-collection-dialog-close aria-label="Закрыть" title="Закрыть"><i data-lucide="x" aria-hidden="true"></i></button></header>
+  <label class="ui-field"><span class="ui-field-label">Название</span><input type="text" data-collection-name maxlength="80" autocomplete="off" required></label>
+  <p class="collection-status" data-collection-dialog-status role="status" hidden></p>
+  <button type="button" class="button ghost" data-collection-dialog-refresh hidden><i data-lucide="refresh-cw" aria-hidden="true"></i>Обновить состояние</button>
+  <footer><button type="button" class="button ghost" data-collection-dialog-cancel>Отмена</button><button type="button" class="button" data-collection-dialog-submit>Сохранить</button></footer>
+</dialog>
+{{end}}

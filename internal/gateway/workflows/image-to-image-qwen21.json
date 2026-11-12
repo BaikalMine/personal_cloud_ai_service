@@ -1,0 +1,9 @@
+{
+  "id": "image-to-image-qwen21",
+  "name": "Qwen Image 2.1: редактирование",
+  "description": "Редактирует первое фото и учитывает до девяти дополнительных референсов.",
+  "requires_image": true,
+  "allows_images": true,
+  "max_input_images": 10,
+  "builder": "qwen21_edit"
+}

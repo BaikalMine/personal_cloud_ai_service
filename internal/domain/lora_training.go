@@ -35,6 +35,7 @@ func (state LoraTrainingState) Cancellable() bool {
 }
 
 type LoraTrainingJob struct {
+	Provenance               *LoraTrainingProvenance
 	ID                       int64
 	PublicID                 string
 	UserID                   *int64
@@ -65,6 +66,7 @@ type LoraTrainingJob struct {
 	Message                  string
 	ErrorMessage             string
 	AgentJobID               string
+	DispatchToken            string
 	AgentSubmissionStartedAt *time.Time
 	ArtifactName             string
 	ArtifactBytes            int64

@@ -139,6 +139,7 @@ type GenerationJobTransition struct {
 }
 
 type CreateGenerationJobParams struct {
+	CollectionID     int64
 	PublicID         string
 	CorrelationID    string
 	UserID           int64
@@ -148,6 +149,9 @@ type CreateGenerationJobParams struct {
 }
 
 type PreparedGenerationJob struct {
+	// Nil means the encrypted payload's inputs have not been inventoried.
+	// A non-nil empty slice is a verified input-free request.
+	InputNames    []string
 	TemplateID    string
 	WorkflowID    string
 	ModelName     string

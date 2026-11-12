@@ -25,6 +25,7 @@ import (
 	"ai-access-gateway/internal/domain"
 	"ai-access-gateway/internal/loratraining"
 	"ai-access-gateway/internal/security"
+	"ai-access-gateway/internal/store"
 )
 
 func datasetTestPNG(t *testing.T, width, height int) []byte {
@@ -142,6 +143,64 @@ func assertLoraDatasetAPI(t *testing.T, ctx context.Context, db *sql.DB, app *Ap
 		return response.Asset
 	}
 	asset := upload(imageBytes, http.StatusCreated)
+	qualityURL := "/api/lora-datasets/assets/" + asset.ID + "/quality"
+	var qualityResponse struct {
+		AssetID string             `json:"asset_id"`
+		Hash    string             `json:"sha256"`
+		Quality loraDatasetQuality `json:"quality"`
+	}
+	if err := json.Unmarshal(post(userID, qualityURL, map[string]any{}, http.StatusOK).Body.Bytes(), &qualityResponse); err != nil {
+		t.Fatal(err)
+	}
+	if qualityResponse.AssetID != asset.ID || qualityResponse.Hash != asset.Hash || qualityResponse.Quality.Version != 1 {
+		t.Fatalf("invalid quality response: %+v", qualityResponse)
+	}
+	savedQuality, err := app.store.LoraDatasetAsset(ctx, userID, asset.ID)
+	app.restoreLoraDatasetQuality(&savedQuality)
+	if err != nil || !savedQuality.Quality.Valid() {
+		t.Fatalf("quality was not persisted: %+v %v", savedQuality.Quality, err)
+	}
+	foreignAsset := asset
+	foreignAsset.UserID = foreignID
+	if bytes.Contains(savedQuality.QualityCipher, []byte(`"colors"`)) {
+		t.Fatal("quality persisted in plaintext")
+	}
+	if err := app.store.SaveLoraDatasetQuality(ctx, foreignAsset, savedQuality.QualityCipher); !errors.Is(err, store.ErrLoraDatasetAsset) {
+		t.Fatalf("foreign quality write: %v", err)
+	}
+	post(foreignID, qualityURL, map[string]any{}, http.StatusNotFound)
+	request(userID, http.MethodPost, qualityURL, []byte(`{}`), "application/json", "", http.StatusForbidden)
+	request(userID, http.MethodGet, qualityURL, nil, "", "", http.StatusNotFound)
+	func() {
+		limiter := app.mediaByteLimiter()
+		reserved := limiter.snapshot().Capacity - chunkedMediaMemoryReservation
+		release, ok := limiter.tryAcquire(reserved)
+		if !ok {
+			t.Fatal("cannot reserve test image budget")
+		}
+		defer release()
+		post(userID, qualityURL, map[string]any{}, http.StatusOK)
+		if _, err := db.ExecContext(ctx, `UPDATE lora_dataset_assets SET quality_cipher=$2 WHERE id=$1`, asset.ID, []byte("invalid-derived-state")); err != nil {
+			t.Fatal(err)
+		}
+		post(userID, qualityURL, map[string]any{}, http.StatusTooManyRequests)
+		if limiter.snapshot().InUse != reserved {
+			t.Fatal("quality failure leaked decode reservation")
+		}
+		entries, err := os.ReadDir(app.mediaSpoolDir())
+		if err != nil || len(entries) != 0 {
+			t.Fatalf("quality failure leaked spool: %v %v", entries, err)
+		}
+	}()
+	cancelled, cancel := context.WithCancel(ctx)
+	post(userID, qualityURL, map[string]any{}, http.StatusOK)
+	cancel()
+	if _, err := app.analyzeLoraDatasetAsset(cancelled, asset); err == nil {
+		t.Fatal("cancelled quality analysis succeeded")
+	}
+	if app.mediaByteLimiter().snapshot().InUse != 0 {
+		t.Fatal("cancelled quality analysis leaked memory reservation")
+	}
 	if asset.Width != 768 || asset.Height != 768 || asset.MIMEType != "image/png" {
 		t.Fatalf("uploaded metadata: %+v", asset)
 	}

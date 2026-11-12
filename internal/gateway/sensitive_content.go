@@ -38,7 +38,7 @@ func containsSensitiveContent(values ...string) bool {
 }
 
 func (a *App) classifyPendingSensitiveContent(ctx context.Context) {
-	if a.store == nil || a.contentCipher == nil {
+	if a.cfg.ReleaseValidation != nil || a.store == nil || a.contentCipher == nil {
 		return
 	}
 	items, err := a.store.ListUnclassifiedSensitiveContent(ctx, 500)

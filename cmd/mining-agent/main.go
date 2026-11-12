@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"ai-access-gateway/internal/buildinfo"
 	"ai-access-gateway/internal/miningagent"
 )
 
@@ -21,11 +22,19 @@ type config struct {
 	LogFile                string   `json:"log_file"`
 	MinerLogFile           string   `json:"miner_log_file"`
 	AllowedArchivePrefixes []string `json:"allowed_archive_prefixes"`
+	RequireFencedCommands  bool     `json:"require_fenced_commands"`
 }
 
 func main() {
 	configPath := flag.String("config", "mining-agent.json", "path to the agent configuration file")
+	version := flag.Bool("version-json", false, "print the running build and API contracts without starting services")
 	flag.Parse()
+	if *version {
+		if err := buildinfo.Write(os.Stdout, buildinfo.MiningAgent); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if err := run(*configPath); err != nil {
 		log.Fatal(err)
 	}
@@ -44,11 +53,21 @@ func run(configPath string) error {
 	log.SetOutput(logFile)
 	log.SetFlags(log.Ldate | log.Ltime | log.LUTC)
 
-	controller, err := miningagent.NewController(settings.MiningRoot, settings.MinerLogFile, settings.AllowedArchivePrefixes...)
+	createController := miningagent.NewController
+	if settings.RequireFencedCommands {
+		createController = miningagent.NewOwnedController
+	}
+	controller, err := createController(settings.MiningRoot, settings.MinerLogFile, settings.AllowedArchivePrefixes...)
 	if err != nil {
 		return err
 	}
+	if closer, ok := controller.(interface{ Close() error }); ok {
+		defer closer.Close()
+	}
 	agent, err := miningagent.NewServer(settings.Token, controller)
+	if settings.RequireFencedCommands {
+		agent, err = miningagent.NewFencedServer(settings.Token, controller)
+	}
 	if err != nil {
 		return err
 	}

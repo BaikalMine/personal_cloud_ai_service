@@ -1,57 +1,33 @@
 {{define "admin_suggestions"}}
 {{template "head" .}}
 {{template "admin_nav" .}}
-<main class="page admin-suggestions-page" id="main-content">
-  <section class="hero admin-suggestion-hero">
-    <div><p class="eyebrow">Входящие запросы</p><h1>Предложения</h1><p class="hero-copy">Проверяйте материалы, оставляйте решение пользователю и передавайте принятые идеи в работу вручную.</p></div>
-    <div class="admin-suggestion-service-state"><span class="badge {{if .PublicIntakeEnabled}}ok{{else}}neutral{{end}}">Приём {{if .PublicIntakeEnabled}}включён{{else}}скрыт{{end}}</span><span class="badge {{if .VirusTotalConfigured}}ok{{else}}danger{{end}}">VirusTotal {{if .VirusTotalConfigured}}подключён{{else}}не настроен{{end}}</span></div>
-  </section>
-
-  {{if .Message}}<p class="success-box ui-status-banner is-success" aria-live="polite">{{.Message}}</p>{{end}}
-  {{if .Error}}<p class="alert ui-status-banner is-error" role="alert">{{.Error}}</p>{{end}}
-  {{if not .PublicIntakeEnabled}}<p class="ui-status-banner is-info">Пользовательская форма пока скрыта. Сохранённые предложения и административная очередь остаются доступны.</p>{{end}}
-
-  <section class="admin-suggestion-queue" aria-labelledby="admin-suggestion-queue-title">
-    <header class="admin-suggestion-queue-heading"><div><p class="section-kicker">Очередь</p><h2 id="admin-suggestion-queue-title">На рассмотрении</h2></div><span>{{len .Suggestions}}</span></header>
-    <div class="admin-suggestion-list">
-      {{range .Suggestions}}
-      <article class="admin-suggestion-item">
-        <header class="admin-suggestion-item-heading">
-          <div><div class="admin-suggestion-origin"><span class="suggestion-kind">{{.KindLabel}}</span><span>{{.Username}}{{if .AuthorDeleted}} · пользователь удалён{{end}}</span><span>{{formatTime .CreatedAt}}</span></div><h3>{{.Title}}</h3></div>
-          <span class="badge {{.StatusClass}}">{{.StatusLabel}}</span>
-        </header>
-
-        <div class="admin-suggestion-body">
-          <section class="admin-suggestion-summary"><h4>Запрос пользователя</h4><p>{{.Description}}</p>{{if .ReviewComment}}<div class="suggestion-review-note"><strong>Решение {{if .ReviewedByUsername}}· {{.ReviewedByUsername}}{{if .ReviewerDeleted}} (удалён){{end}}{{end}}</strong><p>{{.ReviewComment}}</p></div>{{end}}</section>
-          <section class="admin-suggestion-materials"><div class="admin-suggestion-materials-heading"><h4>Материалы</h4><span>{{if gt .AttachmentCount 0}}{{.AttachmentCount}} шт. · {{.ScanStatusLabel}}{{else}}Только текст{{end}}</span></div>
-            {{if .Links}}<div class="admin-suggestion-sources">{{range .Links}}<div class="admin-suggestion-source"><span aria-hidden="true">↗</span><div><strong>{{.SourceName}}</strong>{{if .Safe}}<a href="{{.URL}}" target="_blank" rel="noreferrer noopener">{{.URL}}</a>{{else}}<span>{{.URL}}</span><small>Ссылка откроется после чистой проверки</small>{{end}}</div></div>{{end}}</div>{{end}}
-            {{if .JSONName}}<div class="admin-suggestion-source"><span aria-hidden="true">{ }</span><div><strong>{{.JSONName}}</strong><span>{{formatBytes .JSONSizeBytes}}</span>{{if .CanDownloadJSON}}<a href="/admin/suggestions/{{.ID}}/json">Скачать проверенный JSON</a>{{else}}<small>Скачивание недоступно до чистой проверки файла</small>{{end}}</div></div>{{end}}
-            {{if eq .AttachmentCount 0}}<p class="admin-suggestion-no-files">Пользователь не приложил файлы или ссылки. Администратор получает только описание.</p>{{end}}
-          </section>
-        </div>
-
-        {{if .Scans}}<details class="admin-suggestion-diagnostics"><summary>Диагностика VirusTotal</summary><div>{{range .Scans}}<section><header><strong>{{.SourceName}}</strong><span class="badge {{.StatusClass}}">{{.StatusLabel}}</span></header><p>Попыток: {{.AttemptCount}}{{if .CheckedAt}} · проверено {{formatTime .CheckedAt}}{{end}}</p>{{if eq .Status "completed"}}<p>Безопасных: {{.Harmless}} · без вердикта: {{.Undetected}} · угроз: {{.Malicious}} · подозрений: {{.Suspicious}}</p>{{end}}{{if .Error}}<p class="text-danger">{{.Error}}</p>{{end}}</section>{{end}}</div></details>{{end}}
-
-        {{if eq .Status "review"}}
-        <footer class="admin-suggestion-review">
-          <form method="post" action="/admin/suggestions/{{.ID}}/decision">
-            <input type="hidden" name="csrf" value="{{$.CSRF}}">
-            <label class="ui-field"><span class="ui-field-label"><span>Комментарий пользователю</span></span><textarea name="comment" rows="2" maxlength="1000" placeholder="Объясните решение; при отклонении комментарий обязателен"></textarea></label>
-            <div class="admin-suggestion-review-actions">{{if .CanAccept}}<button type="submit" name="decision" value="accepted">Принять в работу</button>{{else}}<span>Принятие недоступно: вложения не прошли чистую проверку.</span>{{end}}<button class="danger" type="submit" name="decision" value="rejected">Отклонить</button></div>
-          </form>
-          {{if .CanRetry}}<form method="post" action="/admin/suggestions/{{.ID}}/retry"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="ghost" type="submit" {{if not $.VirusTotalConfigured}}disabled{{end}}>Проверить повторно</button></form>{{end}}
-        </footer>
-        {{else if or (eq .Status "submitted") (eq .Status "scanning")}}
-        <footer class="admin-suggestion-progress"><span class="status-pulse" aria-hidden="true"></span><div><strong>{{.StatusLabel}}</strong><p>{{.StatusHint}}</p></div></footer>
-        {{else}}
-        <footer class="admin-suggestion-closed"><strong>{{.StatusLabel}}</strong>{{if .ReviewedAt}}<span>{{formatTime .ReviewedAt}}</span>{{end}}</footer>
-        {{end}}
+<link rel="stylesheet" href="/static/suggestions.css?v={{.AssetVersion}}">
+<script src="/static/suggestions.js?v={{.AssetVersion}}" defer></script>
+<main class="page sg-page" id="main-content" data-suggestions-page data-current-url="/admin/suggestions">
+  <header class="sg-heading"><h1>Предложения</h1><a class="button ghost icon-button" href="/admin/suggestions" aria-label="Обновить предложения" title="Обновить предложения"><i data-lucide="refresh-cw" aria-hidden="true"></i></a></header>
+  <div class="sg-service-state"><span class="badge {{if .PublicIntakeEnabled}}ok{{else}}neutral{{end}}">Приём {{if .PublicIntakeEnabled}}включён{{else}}скрыт{{end}}</span><span class="badge {{if .VirusTotalConfigured}}ok{{else}}warning{{end}}">VirusTotal {{if .VirusTotalConfigured}}подключён{{else}}недоступен{{end}}</span></div>
+  {{if .Message}}<p class="ui-status-banner is-success" role="status">{{.Message}}</p>{{end}}
+  {{if .Error}}<p class="ui-status-banner is-error" role="alert">{{.Error}}</p>{{end}}
+  {{if .SuggestionLoadError}}<section class="sg-empty" role="alert"><h2>Предложения не загружены</h2><p>Не удалось получить очередь. Повторите загрузку.</p><a class="button secondary" href="/admin/suggestions"><i data-lucide="refresh-cw" aria-hidden="true"></i>Повторить</a></section>{{else}}
+  <section aria-labelledby="sg-queue-title"><div class="sg-section-heading"><h2 id="sg-queue-title">Последние предложения</h2><span class="sg-note">{{len .Suggestions}}</span></div>{{if ge (len .Suggestions) 200}}<p class="sg-note">Показаны последние 200 предложений.</p>{{end}}
+    <div class="sg-list sg-admin-list">{{range .Suggestions}}
+      <article class="sg-item" data-suggestion-id="{{.ID}}"><header><span class="sg-meta">{{.KindLabel}} · #{{.ID}} · {{.Username}}{{if .AuthorDeleted}} (удалён){{end}}</span><span class="badge {{.StatusClass}}">{{.StatusLabel}}</span></header><h3>{{.Title}}</h3><p class="sg-meta">{{formatTime .CreatedAt}} · {{.ScanStatusLabel}}</p>
+        <details class="sg-case" {{if or (eq .Status "review") (eq $.CommentID .ID)}}open{{end}}><summary>Рассмотрение предложения</summary><div class="sg-case-body">
+          <div class="sg-review-grid"><section><h4>Запрос пользователя</h4><p class="sg-text">{{.Description}}</p>{{if .ReviewComment}}<blockquote class="sg-review-note"><strong>Решение{{if .ReviewedByUsername}} · {{.ReviewedByUsername}}{{if .ReviewerDeleted}} (удалён){{end}}{{end}}</strong><p class="sg-text">{{.ReviewComment}}</p></blockquote>{{end}}</section>
+            <section><h4>Материалы</h4>{{range .Links}}<div class="sg-source"><i data-lucide="link" aria-hidden="true"></i><div><strong>{{.SourceName}}</strong>{{if .Safe}}<a href="{{.URL}}" target="_blank" rel="noreferrer noopener">{{.URL}}</a>{{else}}<span class="sg-note">{{.URL}}</span><small class="sg-note">Открытие недоступно до проверки без замечаний.</small>{{end}}</div></div>{{end}}
+              {{if .JSONName}}<div class="sg-source"><i data-lucide="file-json" aria-hidden="true"></i><div><strong>{{.JSONName}}</strong><span class="sg-note">{{formatBytes .JSONSizeBytes}}</span>{{if .CanDownloadJSON}}<a class="button ghost" href="/admin/suggestions/{{.ID}}/json" download><i data-lucide="download" aria-hidden="true"></i>Скачать проверенный JSON</a>{{else}}<small class="sg-note">Скачивание недоступно до проверки без замечаний.</small>{{end}}</div></div>{{end}}
+              {{if eq .AttachmentCount 0}}<p class="sg-note" data-suggestion-no-files>Без вложений, только описание.</p>{{end}}
+            </section></div>
+          {{if .Scans}}<details class="sg-detail" data-suggestion-diagnostics><summary>Диагностика VirusTotal</summary><div class="sg-diagnostics">{{range .Scans}}<section><header><strong>{{.SourceName}}</strong><span class="badge {{.StatusClass}}">{{.StatusLabel}}</span></header><p class="sg-note">Попыток: {{.AttemptCount}}{{if .CheckedAt}} · {{formatTime .CheckedAt}}{{end}}</p>{{if eq .Status "completed"}}<p class="sg-note">Безопасных: {{.Harmless}} · Без вердикта: {{.Undetected}} · Угроз: {{.Malicious}} · Подозрений: {{.Suspicious}}</p>{{end}}{{if .Error}}<p class="sg-danger">{{.Error}}</p>{{end}}</section>{{end}}</div></details>{{end}}
+          {{if eq .Status "review"}}<div class="sg-review-actions">
+            <form method="post" action="/admin/suggestions/{{.ID}}/decision" data-suggestion-write><input type="hidden" name="csrf" value="{{$.CSRF}}"><label class="ui-field"><span class="ui-field-label" id="sg-comment-label-{{.ID}}">Комментарий пользователю</span><textarea name="comment" rows="2" maxlength="1000" aria-labelledby="sg-comment-label-{{.ID}}" aria-describedby="sg-comment-{{.ID}}">{{if eq $.CommentID .ID}}{{$.Comment}}{{end}}</textarea><small id="sg-comment-{{.ID}}" class="sg-note">При отклонении: от 3 до 1000 символов.</small></label><p class="sg-form-error" data-suggestion-form-error role="alert"></p><div class="sg-actions">{{if .CanAccept}}<button type="submit" name="decision" value="accepted" {{if $.SuggestionUncertain}}disabled{{end}}><i data-lucide="check" aria-hidden="true"></i>Принять в работу</button>{{else}}<p class="sg-warning">Принятие недоступно: проверка вложений не завершена без замечаний.</p>{{end}}{{if .CanReject}}<button class="danger" type="submit" name="decision" value="rejected" {{if $.SuggestionUncertain}}disabled{{end}}><i data-lucide="x" aria-hidden="true"></i>Отклонить</button>{{end}}</div></form>
+            {{if .CanRetry}}<form method="post" action="/admin/suggestions/{{.ID}}/retry" data-suggestion-write><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="ghost" type="submit" {{if or (not $.VirusTotalConfigured) $.SuggestionUncertain}}disabled{{end}}><i data-lucide="scan-line" aria-hidden="true"></i>Проверить повторно</button></form>{{end}}
+          </div>{{else}}<p class="sg-note">{{.StatusHint}}{{if .ReviewedAt}} · {{formatTime .ReviewedAt}}{{end}}</p>{{end}}
+        </div></details>
       </article>
-      {{else}}
-      <div class="ui-empty-state admin-suggestion-empty"><span aria-hidden="true">✓</span><div><h3>Очередь пуста</h3><p>Отправленные пользователями предложения появятся здесь после сохранения.</p></div></div>
-      {{end}}
-    </div>
-  </section>
+    {{else}}<div class="sg-empty"><i data-lucide="inbox" aria-hidden="true"></i><h3>Предложений пока нет</h3></div>{{end}}</div>
+  </section>{{end}}
+  <p class="sg-progress" data-suggestion-progress role="status" aria-live="polite"></p>
 </main>
 </body></html>
 {{end}}

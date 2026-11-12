@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,12 +14,9 @@ import (
 	"ai-access-gateway/internal/domain"
 )
 
-const (
-	generationJobEventPollInterval      = 750 * time.Millisecond
-	generationJobEventHeartbeatInterval = 15 * time.Second
-)
-
 type generationJobView struct {
+	Operation       string                `json:"operation,omitempty"`
+	Postprocess     *postprocessView      `json:"postprocess,omitempty"`
 	JobID           string                `json:"job_id"`
 	RequestID       string                `json:"request_id"`
 	CorrelationID   string                `json:"correlation_id"`
@@ -47,6 +43,7 @@ type generationJobView struct {
 	ExpiresAt       *time.Time            `json:"expires_at,omitempty"`
 	DurationSeconds int64                 `json:"duration_seconds"`
 	Media           []generationMediaView `json:"media"`
+	Preview         *taskPreviewView      `json:"preview,omitempty"`
 }
 
 type generationJobTransitionView struct {
@@ -90,7 +87,10 @@ func (a *App) generationJobView(job domain.GenerationJob) generationJobView {
 		expires := boundary.Add(a.retentionPolicy().GenerationHistory)
 		view.ExpiresAt = &expires
 	}
-	if len(job.PayloadCipher) > 0 {
+	if isPostprocessJob(job) {
+		view.Operation = "postprocess"
+		view.Retryable = false
+	} else if len(job.PayloadCipher) > 0 {
 		if payload, err := a.decodeGenerationSavedPayload(job.PayloadCipher); err == nil {
 			view.Prompt = strings.TrimSpace(payload.Values["positive_prompt"])
 		} else {
@@ -102,7 +102,9 @@ func (a *App) generationJobView(job domain.GenerationJob) generationJobView {
 
 func (a *App) generationJobViews(ctx context.Context, jobs []domain.GenerationJob, userID int64) ([]generationJobView, error) {
 	promptIDs := make([]string, 0, len(jobs))
+	publicIDs := make([]string, 0, len(jobs))
 	for _, job := range jobs {
+		publicIDs = append(publicIDs, job.PublicID)
 		if job.PromptID != "" {
 			promptIDs = append(promptIDs, job.PromptID)
 		}
@@ -111,9 +113,22 @@ func (a *App) generationJobViews(ctx context.Context, jobs []domain.GenerationJo
 	if err != nil {
 		return nil, err
 	}
+	previews, err := a.store.GenerationTaskPreviews(ctx, userID, publicIDs)
+	if err != nil {
+		return nil, err
+	}
 	views := make([]generationJobView, 0, len(jobs))
 	for _, job := range jobs {
 		view := a.generationJobView(job)
+		if task, ok := previews[job.PublicID]; ok {
+			view.Preview = makeTaskView(task).Preview
+		}
+		if isPostprocessJob(job) {
+			view.Postprocess, err = a.postprocessJobView(ctx, job)
+			if err != nil {
+				return nil, err
+			}
+		}
 		if job.PromptID != "" {
 			for _, item := range mediaByPrompt[job.PromptID] {
 				view.Media = append(view.Media, generationMediaView{
@@ -130,6 +145,11 @@ func (a *App) generationJobViews(ctx context.Context, jobs []domain.GenerationJo
 
 func (a *App) loadGenerationJobViews(r *http.Request) ([]generationJobView, int64, error) {
 	user := a.currentUser(r)
+	// A change during these reads must still invalidate the returned cursor.
+	revision, err := a.store.TaskRevision(r.Context(), user.ID)
+	if err != nil {
+		return nil, 0, err
+	}
 	jobs, err := a.store.ListGenerationJobs(r.Context(), user.ID, 60, time.Now().Add(-a.retentionPolicy().GenerationHistory))
 	if err != nil {
 		return nil, 0, err
@@ -138,8 +158,7 @@ func (a *App) loadGenerationJobViews(r *http.Request) ([]generationJobView, int6
 	if err != nil {
 		return nil, 0, err
 	}
-	revision, err := a.store.GenerationJobRevision(r.Context())
-	return views, revision, err
+	return views, revision, nil
 }
 
 func (a *App) handleGenerationJobs(w http.ResponseWriter, r *http.Request) {
@@ -193,66 +212,7 @@ func (a *App) handleGenerationJobDetail(w http.ResponseWriter, r *http.Request) 
 }
 
 func (a *App) handleGenerationJobEvents(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
-		return
-	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "потоковые обновления не поддерживаются", http.StatusInternalServerError)
-		return
-	}
-	lastRevision, _ := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("since")), 10, 64)
-	revision, err := a.store.GenerationJobRevision(r.Context())
-	if err != nil {
-		writeGenerationError(w, http.StatusInternalServerError, "не удалось открыть поток заданий")
-		return
-	}
-	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache, no-transform")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	_, _ = io.WriteString(w, "retry: 2000\n\n")
-	event := "ready"
-	if revision != lastRevision {
-		event = "jobs"
-	}
-	if err := writeGenerationJobRevisionEvent(w, event, revision); err != nil {
-		return
-	}
-	flusher.Flush()
-	lastRevision = revision
-
-	poll := time.NewTicker(generationJobEventPollInterval)
-	heartbeat := time.NewTicker(generationJobEventHeartbeatInterval)
-	defer poll.Stop()
-	defer heartbeat.Stop()
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-poll.C:
-			revision, err = a.store.GenerationJobRevision(r.Context())
-			if err != nil {
-				log.Printf("generation job event stream: %v", err)
-				return
-			}
-			if revision == lastRevision {
-				continue
-			}
-			if err := writeGenerationJobRevisionEvent(w, "jobs", revision); err != nil {
-				return
-			}
-			flusher.Flush()
-			lastRevision = revision
-		case <-heartbeat.C:
-			if _, err := fmt.Fprintf(w, ": keepalive %d\n\n", time.Now().Unix()); err != nil {
-				return
-			}
-			flusher.Flush()
-		}
-	}
+	a.serveLiveEvents(w, r, "jobs", writeGenerationJobRevisionEvent)
 }
 
 func writeGenerationJobRevisionEvent(w io.Writer, event string, revision int64) error {
@@ -312,6 +272,7 @@ func (a *App) handleGenerationJobCancel(w http.ResponseWriter, r *http.Request) 
 }
 
 func (a *App) handleGenerationJobRetry(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "private, no-store")
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
@@ -345,10 +306,22 @@ func (a *App) handleGenerationJobRetry(w http.ResponseWriter, r *http.Request) {
 		writeGenerationError(w, http.StatusGone, "не удалось восстановить параметры этого задания")
 		return
 	}
+	if !user.CanUseQuickGenerationType(job.TemplateID) || isPostprocessJob(job) {
+		writeGenerationError(w, http.StatusForbidden, "редактирование этой генерации недоступно")
+		return
+	}
 	delete(payload.Values, "client_request_id")
 	delete(payload.Values, "csrf")
+	if job.Seed >= 0 {
+		payload.Values["seed"] = strconv.FormatInt(job.Seed, 10)
+	}
+	assets, missing, err := a.generationJobSourceAssets(r.Context(), user.ID, payload.Values)
+	if err != nil {
+		writeGenerationError(w, http.StatusServiceUnavailable, "не удалось проверить исходные материалы; повторите загрузку параметров")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"parent_job_id": job.PublicID, "values": payload.Values,
-		"requires_inputs": job.InputCount > 0,
+		"assets": assets, "requires_inputs": missing,
 	})
 }

@@ -42,11 +42,20 @@ func TestGenerateTemplateRenders(t *testing.T) {
 		!strings.Contains(output.String(), "/static/generation-summary.js") || !strings.Contains(output.String(), "Krea 2: фото и промт") ||
 		!strings.Contains(output.String(), "studio-workspace") || !strings.Contains(output.String(), "studio-settings") ||
 		!strings.Contains(output.String(), "generation-editor-profile") || !strings.Contains(output.String(), "prompt-assistant-template") ||
-		!strings.Contains(output.String(), "Перенос внешности и редактирование") || !strings.Contains(output.String(), "prompt-assistant-think") ||
+		!strings.Contains(output.String(), "FLUX.2 · редактирование") || !strings.Contains(output.String(), "Krea2 · редактирование") || !strings.Contains(output.String(), "prompt-assistant-think") ||
 		!strings.Contains(output.String(), "Максимум деталей · 4,7 Мп") || !strings.Contains(output.String(), "data-gallery-image-picker-open") ||
 		!strings.Contains(output.String(), "Из результатов") || !strings.Contains(output.String(), "generation-image-picker-refresh") ||
 		!strings.Contains(output.String(), "generation-image-picker-grid") || !strings.Contains(output.String(), `data-requires-advanced-settings="true"`) {
 		t.Fatal("generation template did not render the studio")
+	}
+	for _, module := range []string{"generation-payload.js", "generation-draft.js"} {
+		position := strings.Index(output.String(), "/static/"+module)
+		if position < 0 || position > strings.Index(output.String(), "/static/generate.js") {
+			t.Fatalf("%s must load before the generation page controller", module)
+		}
+	}
+	if !strings.Contains(output.String(), `id="generation-form" autocomplete="off"`) {
+		t.Fatal("the versioned draft must own generation form restoration")
 	}
 }
 
@@ -141,27 +150,112 @@ func TestGenerationImageSourcesAreAvailableToEveryImageInputScenario(t *testing.
 	}
 }
 
-func TestGenerationClientStopsRecoveryAfterConfirmedRunFailure(t *testing.T) {
+func TestGenerationClientUsesSubmissionLifecycleOwner(t *testing.T) {
 	script, err := embeddedFS.ReadFile("static/generate.js")
 	if err != nil {
 		t.Fatal(err)
 	}
-	start := strings.Index(string(script), `const response = await fetch("/generate/run"`)
-	if start < 0 {
-		t.Fatal("generation submit response block was not found")
-	}
-	end := strings.Index(string(script[start:]), "updateGenerationQuota(payload.quota)")
-	if end < 0 {
-		t.Fatal("generation submit response block was not found")
-	}
-	block := string(script[start : start+end])
-	for _, marker := range []string{"if (!response.ok)", "clearActiveGeneration()", "setGenerationActions({ retry: true })", "runProgress.hidden = true", "return;"} {
-		if !strings.Contains(block, marker) {
-			t.Fatalf("confirmed failure block is missing %q", marker)
+	for _, marker := range []string{"generationModules.submission.createController", "submissionController.start(", "submissionController.resume()", "submissionController.suspend()", "submissionController.setVisible(", "submissionController.cancel()", "submissionController.refresh()"} {
+		if !strings.Contains(string(script), marker) {
+			t.Fatalf("generation page is missing lifecycle binding %q", marker)
 		}
 	}
-	if strings.Contains(block, `throw new Error(payload.error`) {
-		t.Fatal("confirmed HTTP failure still enters ambiguous request recovery")
+	for _, legacy := range []string{"const recoverGeneration =", "const monitorGeneration =", "const poll = async (promptID)", "clearActiveGeneration(", "persistActiveGeneration(", "connectProgressSocket(", "ai-gateway.active-generation", `fetch("/generate/run"`} {
+		if strings.Contains(string(script), legacy) {
+			t.Fatalf("generation page still owns legacy submission behavior %q", legacy)
+		}
+	}
+	page, err := embeddedFS.ReadFile("templates/generate.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	moduleAt, pageAt := strings.Index(string(page), "/static/generation-submission.js"), strings.Index(string(page), "/static/generate.js")
+	if moduleAt < 0 || moduleAt > pageAt || !strings.Contains(string(page), `data-generation-owner="{{.CurrentUser.ID}}"`) {
+		t.Fatal("submission module must load before the page and receive its account scope")
+	}
+}
+
+func TestGenerationClientUsesAssistantSessionOwner(t *testing.T) {
+	script, err := embeddedFS.ReadFile("static/generate.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{"generationModules.assistant.createSession", "generationModules.assistant.createTransport", "generationModules.assistant.createPersistence", "assistantSession.beforeLaunch()", "assistantSession.restore(values)", "assistantSession.improve()", "assistantSession.apply()", "assistantSession.keep()", "assistantSession.suspend()", "assistantSession.resume()"} {
+		if !strings.Contains(string(script), marker) {
+			t.Fatalf("generation page is missing assistant session binding %q", marker)
+		}
+	}
+	for _, legacy := range []string{"assistantRequestSerial", "assistantCorrections =", "assistantDecisionPromise", "ai_gateway_assistant_job_v1_", "assistantJobs.createController", `fetch("/generate/prompt-assistant`} {
+		if strings.Contains(string(script), legacy) {
+			t.Fatalf("generation page still owns assistant orchestration %q", legacy)
+		}
+	}
+	page, err := embeddedFS.ReadFile("templates/generate.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, module := range []string{"generation-assistant.js", "generation-assistant-jobs.js"} {
+		position := strings.Index(string(page), "/static/"+module)
+		if position < 0 || position > strings.Index(string(page), "/static/generate.js") {
+			t.Fatalf("%s must load before the generation page", module)
+		}
+	}
+}
+
+func TestGenerationClientUsesResultsHistoryOwners(t *testing.T) {
+	script, err := embeddedFS.ReadFile("static/generate.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{"generationModules.results.createView", "generationModules.history.createController", "generationModules.history.createTransport", "resultsView.bind(historyController)", "historyController.start(", "historyController.suspend()", "historyController.resume()", "historyController.setVisible(", "resultsView.suspend()", "historyController.acceptBatch("} {
+		if !strings.Contains(string(script), marker) {
+			t.Fatalf("generation page is missing results/history binding %q", marker)
+		}
+	}
+	for _, legacy := range []string{"const renderJobCard =", "const renderGenerationBatch =", "const refreshJobs = async", "const loadJobDetails =", "const cancelGenerationBatch =", "const selectGenerationBatchWinner =", "ai-gateway.generation-history-collapsed", "const renderLibrary =", "const wireVideoPreview =", `fetch("/generate/jobs"`, `fetch("/generate/batches"`, `fetch("/generate/variants"`} {
+		if strings.Contains(string(script), legacy) {
+			t.Fatalf("generation page still owns results orchestration %q", legacy)
+		}
+	}
+	page, err := embeddedFS.ReadFile("templates/generate.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, module := range []string{"generation-results.js", "generation-history.js", "generation-lightbox.js"} {
+		position := strings.Index(string(page), "/static/"+module)
+		if position < 0 || position > strings.Index(string(page), "/static/generate.js") {
+			t.Fatalf("%s must load before the generation page", module)
+		}
+	}
+}
+
+func TestGenerationClientUsesSharedFeedback(t *testing.T) {
+	script, err := embeddedFS.ReadFile("static/generate.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{"feedback.createResource", "feedback.requestJSON", "generationModules.recipes.createController", "recipeController.pause()", "recipeController.resume()", "resource.pause()", "preflightResource.resume({ read: false })"} {
+		if !strings.Contains(string(script), marker) {
+			t.Fatalf("generation page is missing feedback binding %q", marker)
+		}
+	}
+	for _, endpoint := range []string{"/generate/queue", "/generate/preflight", "/generate/recipes", "/generate/library/images"} {
+		if strings.Contains(string(script), `fetch("`+endpoint+`"`) {
+			t.Fatalf("page bypasses the shared request boundary for %q", endpoint)
+		}
+	}
+	page, err := embeddedFS.ReadFile("templates/generate.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, module := range []string{"generation-feedback.js", "generation-recipes.js"} {
+		position := strings.Index(string(page), "/static/"+module)
+		if position < 0 || position > strings.Index(string(page), "/static/generate.js") {
+			t.Fatalf("%s must load before the generation page", module)
+		}
+		if _, err := embeddedFS.ReadFile("static/" + module); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -805,6 +899,47 @@ func TestFlux2ImageWorkflowUsesReferenceLatent(t *testing.T) {
 	}
 }
 
+func TestFlux2ImageWorkflowUsesConcreteSamplerChoices(t *testing.T) {
+	definitions, err := loadWorkflowDefinitions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition, ok := findWorkflow(definitions, "image-to-image-flux2")
+	if !ok {
+		t.Fatal("Flux 2 image workflow is missing")
+	}
+	for _, mode := range []string{"none", "ultimate"} {
+		t.Run(mode, func(t *testing.T) {
+			prompt, err := definition.buildPrompt(generationForm{
+				ModelName: "Flux2/model.safetensors", TextEncoder: "encoder.safetensors", VAE: "vae.safetensors",
+				InputImage: "gateway/input.png", Positive: "edit", Width: 1024, Height: 1024,
+				Steps: 25, CFG: 1, Denoise: 0.9, Sampler: "euler_ancestral", Scheduler: "karras", Seed: 42,
+				FluxUpscaleMode: mode,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, tc := range []struct{ node, field, want string }{
+				{"1328", "sampler_name", "euler_ancestral"},
+				{"1328", "scheduler", "karras"},
+				{"1350", "scheduler", "karras"},
+				{"1363", "sampler_name", "euler_ancestral"},
+			} {
+				got := prompt[tc.node].(map[string]any)["inputs"].(map[string]any)[tc.field]
+				if got != tc.want {
+					t.Errorf("node %s %s = %v, want literal %s", tc.node, tc.field, got, tc.want)
+				}
+			}
+			if mode == "ultimate" {
+				inputs := prompt["gateway_flux_ultimate"].(map[string]any)["inputs"].(map[string]any)
+				if inputs["sampler_name"] != "euler_ancestral" || inputs["scheduler"] != "karras" {
+					t.Fatalf("upscale sampler choices are not concrete: %#v", inputs)
+				}
+			}
+		})
+	}
+}
+
 func TestFlux2ImageWorkflowPreservesOriginalResolution(t *testing.T) {
 	definitions, err := loadWorkflowDefinitions()
 	if err != nil {
@@ -1382,7 +1517,7 @@ func TestGenerationModelCatalogDiscoversMiniMaxH3V5AndErosMax(t *testing.T) {
 	var base, eros generationModel
 	for _, group := range catalog.Groups {
 		for _, model := range group.Models {
-			if model.Family != modelFamilyMiniMaxH3 {
+			if model.Family != modelFamilyMiniMaxH3 || model.AIHubOnly {
 				continue
 			}
 			if model.VideoIntegratedTurbo {

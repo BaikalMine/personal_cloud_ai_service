@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"ai-access-gateway/internal/updates"
 )
@@ -37,7 +38,7 @@ func DeleteComfyAssetFiles(ctx context.Context, target ComfyTarget, files []upda
 			result.Items = append(result.Items, comfyAssetOutcome(file, "rejected"))
 			continue
 		}
-		outcome, err := deleteComfyAssetFile(directory, file)
+		outcome, err := deleteComfyAssetFile(ctx, directory, file)
 		if err != nil {
 			return result, err
 		}
@@ -93,7 +94,14 @@ func comfyAssetRoot(target ComfyTarget, storageType string) (string, bool) {
 	return directory, true
 }
 
-func deleteComfyAssetFile(directory string, file updates.ComfyAssetFile) (string, error) {
+func deleteComfyAssetFile(ctx context.Context, directory string, file updates.ComfyAssetFile) (string, error) {
+	return examineComfyAssetFile(ctx, directory, file, true)
+}
+
+func examineComfyAssetFile(ctx context.Context, directory string, file updates.ComfyAssetFile, remove bool) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	relative, valid := safeComfyAssetRelativePath(file)
 	if !valid {
 		return "rejected", nil
@@ -106,6 +114,10 @@ func deleteComfyAssetFile(directory string, file updates.ComfyAssetFile) (string
 		return "", err
 	}
 	defer root.Close()
+	return examineComfyAssetAtRoot(ctx, root, relative, file, remove)
+}
+
+func examineComfyAssetAtRoot(ctx context.Context, root *os.Root, relative string, file updates.ComfyAssetFile, remove bool) (string, error) {
 	entry, err := root.Lstat(relative)
 	if errors.Is(err, fs.ErrNotExist) {
 		return "missing", nil
@@ -116,12 +128,18 @@ func deleteComfyAssetFile(directory string, file updates.ComfyAssetFile) (string
 	if entry.Mode()&fs.ModeSymlink != 0 || !entry.Mode().IsRegular() || entry.Size() != file.SizeBytes {
 		return "mismatched", nil
 	}
-	matched, err := hasExpectedSHA256(root, relative, file.SHA256)
+	matched, err := hasExpectedSHA256(ctx, root, relative, file.SHA256, entry)
 	if err != nil {
 		return "", err
 	}
 	if !matched {
 		return "mismatched", nil
+	}
+	if !remove {
+		return "matched", nil
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	if err := root.Remove(relative); err != nil {
 		return "", err
@@ -134,7 +152,7 @@ func safeComfyAssetRelativePath(file updates.ComfyAssetFile) (string, bool) {
 		return "", false
 	}
 	filename := strings.TrimSpace(file.Filename)
-	if filename == "" || filename == "." || filename == ".." || strings.ContainsAny(filename, "\\/") || filepath.Base(filename) != filename {
+	if filename == "" || filename == "." || filename == ".." || strings.ContainsAny(filename, "\\/:\x00<>\"|?*") || filepath.Base(filename) != filename {
 		return "", false
 	}
 	subfolder := strings.ReplaceAll(strings.TrimSpace(file.Subfolder), "\\", "/")
@@ -155,6 +173,31 @@ func safeComfyAssetRelativePath(file updates.ComfyAssetFile) (string, bool) {
 	return relative, true
 }
 
+func InspectComfyAssetFiles(ctx context.Context, target ComfyTarget, files []updates.ComfyAssetFile) (updates.ComfyAssetInspectResult, error) {
+	result := updates.ComfyAssetInspectResult{Protocol: 1, Complete: true, Items: []updates.ComfyAssetDeleteOutcome{}}
+	var inspectionErrors []error
+	for _, file := range files {
+		if err := ctx.Err(); err != nil {
+			result.Complete = false
+			result.CheckedAt = time.Now().UTC()
+			return result, errors.Join(append(inspectionErrors, err)...)
+		}
+		status := "rejected"
+		if directory, valid := comfyAssetRoot(target, file.StorageType); valid {
+			var err error
+			status, err = examineComfyAssetFile(ctx, directory, file, false)
+			if err != nil {
+				status = "io_error"
+				result.Complete = false
+				inspectionErrors = append(inspectionErrors, err)
+			}
+		}
+		result.Items = append(result.Items, comfyAssetOutcome(file, status))
+	}
+	result.CheckedAt = time.Now().UTC()
+	return result, errors.Join(inspectionErrors...)
+}
+
 func validSHA256(value string) bool {
 	if len(value) != sha256.Size*2 {
 		return false
@@ -163,14 +206,51 @@ func validSHA256(value string) bool {
 	return err == nil
 }
 
-func hasExpectedSHA256(root *os.Root, relative, expected string) (bool, error) {
+type comfyCleanupReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r comfyCleanupReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
+}
+
+func sameComfyCleanupEntry(before, after fs.FileInfo) bool {
+	return before != nil && after != nil && before.Mode().IsRegular() && after.Mode().IsRegular() && os.SameFile(before, after) && before.Size() == after.Size() && before.ModTime().Equal(after.ModTime())
+}
+
+func hasExpectedSHA256(ctx context.Context, root *os.Root, relative, expected string, before fs.FileInfo) (bool, error) {
 	file, err := root.Open(relative)
 	if err != nil {
 		return false, err
 	}
 	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil {
+		return false, err
+	}
+	if !sameComfyCleanupEntry(before, opened) {
+		return false, nil
+	}
 	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
+	if _, err := io.Copy(hash, comfyCleanupReader{ctx: ctx, reader: file}); err != nil {
+		return false, err
+	}
+	after, err := file.Stat()
+	if err != nil {
+		return false, err
+	}
+	current, err := root.Lstat(relative)
+	if err != nil {
+		return false, err
+	}
+	if !sameComfyCleanupEntry(before, after) || !sameComfyCleanupEntry(before, current) {
+		return false, nil
+	}
+	if err := ctx.Err(); err != nil {
 		return false, err
 	}
 	return strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), expected), nil

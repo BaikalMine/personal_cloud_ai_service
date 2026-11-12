@@ -54,6 +54,7 @@ type dispatchFixture struct {
 	posts    atomic.Int32
 	accepted atomic.Bool
 	jobID    atomic.Value
+	graph    atomic.Value
 	status   int
 	body     string
 }
@@ -96,12 +97,14 @@ func newDispatchFixture(t *testing.T) *dispatchFixture {
 		case "/prompt":
 			f.posts.Add(1)
 			var document struct {
-				ExtraData map[string]any `json:"extra_data"`
+				ExtraData map[string]any  `json:"extra_data"`
+				Prompt    json.RawMessage `json:"prompt"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&document); err != nil {
 				t.Error(err)
 			}
 			f.jobID.Store(fmt.Sprint(document.ExtraData["gateway_job_id"]))
+			f.graph.Store(document.Prompt)
 			w.WriteHeader(f.status)
 			_, _ = w.Write([]byte(f.body))
 		case "/queue":

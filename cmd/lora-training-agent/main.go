@@ -13,12 +13,20 @@ import (
 	"syscall"
 	"time"
 
+	"ai-access-gateway/internal/buildinfo"
 	"ai-access-gateway/internal/trainingagent"
 )
 
 func main() {
 	configPath := flag.String("config", "", "path to the LoRA training agent JSON config")
+	version := flag.Bool("version-json", false, "print the running build and API contracts without starting services")
 	flag.Parse()
+	if *version {
+		if err := buildinfo.Write(os.Stdout, buildinfo.TrainingAgent); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	var config trainingagent.Config
 	var err error
 	if *configPath != "" {

@@ -26,7 +26,7 @@ func (s *Store) FindUserWithPassword(ctx context.Context, identity string) (doma
 		SELECT id, username, email, role, disabled, can_use_comfyui, can_use_openwebui, can_use_quick_generation, can_generate_text_to_image, can_generate_image_to_image, can_generate_video, can_use_advanced_generation_settings, can_train_image_lora, can_manage_mining, pause_mining_for_quick_generation,
 		       generation_daily_limit, generation_total_limit, generation_total_used,
 		       video_generation_daily_limit, video_generation_total_limit, video_generation_total_used, max_video_generation_quality,
-		       failed_login_count, locked_until, account_expires_at, created_at, last_login_at, password_hash, queue_priority
+		       failed_login_count, locked_until, account_expires_at, created_at, last_login_at, password_hash, queue_priority, can_use_harness
 		FROM users
 		WHERE (username = $1 OR (email IS NOT NULL AND LOWER(email) = LOWER($1)))
 		  AND (account_expires_at IS NULL OR account_expires_at > now())
@@ -38,7 +38,7 @@ func (s *Store) FindUserWithPassword(ctx context.Context, identity string) (doma
 		&user.GenerationDailyLimit, &user.GenerationTotalLimit, &user.GenerationTotalUsed,
 		&user.VideoGenerationDailyLimit, &user.VideoGenerationTotalLimit, &user.VideoGenerationTotalUsed, &user.MaxVideoGenerationQuality,
 		&user.FailedLoginCount, &user.LockedUntil, &user.AccountExpiresAt,
-		&user.CreatedAt, &user.LastLoginAt, &passwordHash, &user.QueuePriority,
+		&user.CreatedAt, &user.LastLoginAt, &passwordHash, &user.QueuePriority, &user.CanUseHarness,
 	)
 	return user, passwordHash, err
 }
@@ -49,7 +49,7 @@ func (s *Store) UserBySessionHash(ctx context.Context, tokenHash string, idleTim
 		SELECT u.id, u.username, u.email, u.role, u.disabled, u.can_use_comfyui,
 		       u.can_use_openwebui, u.can_use_quick_generation, u.can_generate_text_to_image, u.can_generate_image_to_image, u.can_generate_video, u.can_use_advanced_generation_settings, u.can_train_image_lora, u.can_manage_mining, u.pause_mining_for_quick_generation, u.generation_daily_limit,
 		       u.generation_total_limit, u.generation_total_used, u.video_generation_daily_limit, u.video_generation_total_limit, u.video_generation_total_used, u.max_video_generation_quality,
-		       u.failed_login_count, u.locked_until, u.account_expires_at, u.created_at, u.last_login_at, u.queue_priority
+		       u.failed_login_count, u.locked_until, u.account_expires_at, u.created_at, u.last_login_at, u.queue_priority, u.can_use_harness
 		FROM sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = $1
 		  AND s.expires_at > now()
@@ -62,7 +62,7 @@ func (s *Store) UserBySessionHash(ctx context.Context, tokenHash string, idleTim
 		&user.GenerationDailyLimit, &user.GenerationTotalLimit, &user.GenerationTotalUsed,
 		&user.VideoGenerationDailyLimit, &user.VideoGenerationTotalLimit, &user.VideoGenerationTotalUsed, &user.MaxVideoGenerationQuality,
 		&user.FailedLoginCount, &user.LockedUntil, &user.AccountExpiresAt,
-		&user.CreatedAt, &user.LastLoginAt, &user.QueuePriority,
+		&user.CreatedAt, &user.LastLoginAt, &user.QueuePriority, &user.CanUseHarness,
 	)
 	return user, err
 }
@@ -73,7 +73,7 @@ func (s *Store) UserByID(ctx context.Context, id int64) (domain.User, error) {
 		SELECT id, username, email, role, disabled, can_use_comfyui, can_use_openwebui, can_use_quick_generation, can_generate_text_to_image, can_generate_image_to_image, can_generate_video, can_use_advanced_generation_settings, can_train_image_lora, can_manage_mining, pause_mining_for_quick_generation,
 		       generation_daily_limit, generation_total_limit, generation_total_used,
 		       video_generation_daily_limit, video_generation_total_limit, video_generation_total_used, max_video_generation_quality,
-		       failed_login_count, locked_until, account_expires_at, created_at, last_login_at, queue_priority
+		       failed_login_count, locked_until, account_expires_at, created_at, last_login_at, queue_priority, can_use_harness
 		FROM users WHERE id = $1
 	`, id).Scan(
 		&user.ID, &user.Username, &user.Email, &user.Role, &user.Disabled,
@@ -81,7 +81,7 @@ func (s *Store) UserByID(ctx context.Context, id int64) (domain.User, error) {
 		&user.GenerationDailyLimit, &user.GenerationTotalLimit, &user.GenerationTotalUsed,
 		&user.VideoGenerationDailyLimit, &user.VideoGenerationTotalLimit, &user.VideoGenerationTotalUsed, &user.MaxVideoGenerationQuality,
 		&user.FailedLoginCount, &user.LockedUntil, &user.AccountExpiresAt,
-		&user.CreatedAt, &user.LastLoginAt, &user.QueuePriority,
+		&user.CreatedAt, &user.LastLoginAt, &user.QueuePriority, &user.CanUseHarness,
 	)
 	return user, err
 }
@@ -94,7 +94,7 @@ func (s *Store) ListUsers(ctx context.Context, search string) ([]domain.UserRow,
 		       u.video_generation_daily_limit, u.video_generation_total_limit, u.video_generation_total_used, u.max_video_generation_quality,
 		       u.failed_login_count, u.locked_until, u.account_expires_at,
 		       COALESCE(u.locked_until > now(), false), u.created_at, u.last_login_at,
-		       COUNT(pr.id) AS requests, u.queue_priority
+		       COUNT(pr.id) AS requests, u.queue_priority, u.can_use_harness
 		FROM users u
 		LEFT JOIN proxy_requests pr ON pr.user_id = u.id
 		WHERE ($1 = '' OR u.username ILIKE '%' || $1 || '%' OR COALESCE(u.email,'') ILIKE '%' || $1 || '%')
@@ -115,7 +115,7 @@ func (s *Store) ListUsers(ctx context.Context, search string) ([]domain.UserRow,
 			&user.GenerationDailyLimit, &user.GenerationTotalLimit, &user.GenerationTotalUsed,
 			&user.VideoGenerationDailyLimit, &user.VideoGenerationTotalLimit, &user.VideoGenerationTotalUsed, &user.MaxVideoGenerationQuality,
 			&user.FailedLoginCount, &user.LockedUntil, &user.AccountExpiresAt,
-			&user.Locked, &user.CreatedAt, &user.LastLoginAt, &user.Requests, &user.QueuePriority,
+			&user.Locked, &user.CreatedAt, &user.LastLoginAt, &user.Requests, &user.QueuePriority, &user.CanUseHarness,
 		); err != nil {
 			return nil, err
 		}
@@ -265,6 +265,7 @@ type SetServiceAccessParams struct {
 	Video                         bool
 	AdvancedGenerationSettings    bool
 	TrainImageLora                bool
+	Harness                       bool
 	ManageMining                  bool
 	PauseMiningForQuickGeneration bool
 	QueuePriority                 bool
@@ -285,11 +286,11 @@ func (s *Store) SetServiceAccess(ctx context.Context, userID int64, params SetSe
 		    can_generate_text_to_image = $5, can_generate_image_to_image = $6, can_generate_video = $7,
 		    can_use_advanced_generation_settings = $8, can_train_image_lora = $9, can_manage_mining = $10, pause_mining_for_quick_generation = $11,
 		    generation_daily_limit = $12, generation_total_limit = $13,
-		    video_generation_daily_limit = $14, video_generation_total_limit = $15, max_video_generation_quality = $16, queue_priority = $17
+		    video_generation_daily_limit = $14, video_generation_total_limit = $15, max_video_generation_quality = $16, queue_priority = $17, can_use_harness = $18
 		WHERE id = $1 AND role <> 'admin'
 	`, userID, params.ComfyUI, params.OpenWebUI, params.QuickGeneration, params.TextToImage, params.ImageToImage, params.Video,
 		params.AdvancedGenerationSettings, params.TrainImageLora, params.ManageMining, params.PauseMiningForQuickGeneration,
-		params.ImageDailyLimit, params.ImageTotalLimit, params.VideoDailyLimit, params.VideoTotalLimit, params.MaxVideoQuality, params.QueuePriority)
+		params.ImageDailyLimit, params.ImageTotalLimit, params.VideoDailyLimit, params.VideoTotalLimit, params.MaxVideoQuality, params.QueuePriority, params.Harness)
 	if err != nil {
 		return false, err
 	}
@@ -315,6 +316,15 @@ func (s *Store) SetAdminGenerationMiningPolicy(ctx context.Context, userID int64
 		SET pause_mining_for_quick_generation = $2
 		WHERE id = $1 AND role = 'admin'
 	`, userID, enabled)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	return affected > 0, err
+}
+
+func (s *Store) SetAdminGenerationResources(ctx context.Context, userID int64, priority, pauseMining bool) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `UPDATE users SET queue_priority=$2,pause_mining_for_quick_generation=$3 WHERE id=$1 AND role='admin'`, userID, priority, pauseMining)
 	if err != nil {
 		return false, err
 	}

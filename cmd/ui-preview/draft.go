@@ -10,31 +10,57 @@ import (
 	"time"
 )
 
+type previewGenerationState struct {
+	draft          map[string]any
+	assets         map[string]map[string]any
+	collections    map[int64]*previewWorkingCollection
+	nextCollection int64
+}
+
+type previewGenerationStore struct {
+	mu       sync.Mutex
+	revision int64
+	sessions map[string]*previewGenerationState
+	now      time.Time
+}
+
+func (s *previewGenerationStore) session(w http.ResponseWriter, r *http.Request) *previewGenerationState {
+	cookie, _ := r.Cookie("preview_generation_draft")
+	if cookie == nil {
+		cookie = &http.Cookie{Name: "preview_generation_draft", Value: rand.Text(), Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode}
+		http.SetCookie(w, cookie)
+	}
+	state := s.sessions[cookie.Value]
+	if state == nil {
+		state = newPreviewGenerationState(s.now)
+		s.sessions[cookie.Value] = state
+	}
+	return state
+}
+
 // This in-memory fixture exercises the shipped form without a database, GPU,
 // user session, or ComfyUI process. It is only registered by cmd/ui-preview.
-func registerDraftPreview(mux *http.ServeMux, now time.Time) {
-	var mu sync.Mutex
-	var revision int64
-	type sessionState struct {
-		draft  map[string]any
-		assets map[string]map[string]any
-	}
-	sessions := map[string]*sessionState{}
-	fields := []string{"input_image", "input_image_2", "input_image_3", "input_image_4", "input_audio", "input_video"}
+func registerDraftPreview(mux *http.ServeMux, now time.Time) *previewGenerationStore {
+	storage := &previewGenerationStore{revision: 2, sessions: map[string]*previewGenerationState{}, now: now}
+	fields := []string{"input_image", "input_image_2", "input_image_3", "input_image_4", "input_image_5", "input_image_6", "input_image_7", "input_image_8", "input_image_9", "input_audio", "input_video"}
 	serve := func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
+		storage.mu.Lock()
+		defer storage.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		cookie, _ := r.Cookie("preview_generation_draft")
-		if cookie == nil {
-			cookie = &http.Cookie{Name: "preview_generation_draft", Value: rand.Text(), Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode}
-			http.SetCookie(w, cookie)
+		state := storage.session(w, r)
+		if strings.HasPrefix(r.URL.Path, "/generate/library/collections") {
+			servePreviewCollection(w, r, state, &storage.revision, now)
+			return
 		}
-		state := sessions[cookie.Value]
-		if state == nil {
-			state = &sessionState{assets: map[string]map[string]any{}}
-			sessions[cookie.Value] = state
+		if r.URL.Path == "/generate/draft/asset" {
+			if state.assets[r.URL.Query().Get("id")] == nil {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Del("Content-Type")
+			http.ServeFile(w, r, "docs/frontend/prototype/assets/portrait.jpg")
+			return
 		}
 		draft, assets := state.draft, state.assets
 		if r.Method == http.MethodPost {
@@ -84,8 +110,8 @@ func registerDraftPreview(mux *http.ServeMux, now time.Time) {
 						references = append(references, map[string]any{"field": field, "id": id, "name": pending, "available": false})
 					}
 				}
-				revision++
-				draft = map[string]any{"revision": revision, "values": values, "assets": references, "updated_at": now, "expires_at": now.Add(30 * 24 * time.Hour)}
+				storage.revision++
+				draft = map[string]any{"revision": storage.revision, "values": values, "assets": references, "updated_at": now, "expires_at": now.Add(30 * 24 * time.Hour)}
 			}
 		}
 		state.draft = draft
@@ -93,4 +119,9 @@ func registerDraftPreview(mux *http.ServeMux, now time.Time) {
 	}
 	mux.HandleFunc("/generate/draft", serve)
 	mux.HandleFunc("/generate/draft/delete", serve)
+	mux.HandleFunc("/generate/draft/asset", serve)
+	mux.HandleFunc("/generate/library/collections", serve)
+	mux.HandleFunc("/generate/library/collections/context", serve)
+	mux.HandleFunc("/generate/library/collections/delete", serve)
+	return storage
 }

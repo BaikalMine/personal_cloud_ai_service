@@ -64,6 +64,7 @@ input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; flex: 0
 .ui-choice--bare { padding: 0; border: 0; background: transparent; }
 .ui-choice--row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: start; min-height: 64px; padding: 16px; border: 0; border-radius: 0; background: transparent; }
 .ui-choice--row:has(input:checked) { background: transparent; }
+.ui-choice--row.ui-choice--compact { align-items: center; min-height: var(--control-height); padding: 8px 0; }
 
 .ui-segmented { min-width: 0; display: grid; gap: var(--space-2); }
 .ui-segmented--compact { grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--canvas-soft); }
@@ -75,6 +76,9 @@ input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; flex: 0
 .ui-segment[aria-pressed="true"], .ui-segment.is-active, .ui-segment:has(input:checked) { border-color: var(--color-success-border); background: var(--color-success-bg); color: var(--color-success); }
 .ui-segment:focus-visible, .ui-segment:has(> input:focus-visible) { border-color: var(--cyan); box-shadow: var(--focus-ring); }
 .ui-segment:disabled, .ui-segment[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+.ui-segmented--tabs { gap: 0; border-bottom: 1px solid var(--line); }
+.ui-segmented--tabs .ui-segment { border: 0; border-radius: 0; background: transparent; }
+.ui-segmented--tabs .ui-segment[aria-selected="true"] { background: transparent; color: var(--text); box-shadow: inset 0 -2px var(--mint); }
 
 button, .button {
   position: relative; min-height: var(--control-height); display: inline-flex; align-items: center; justify-content: center;

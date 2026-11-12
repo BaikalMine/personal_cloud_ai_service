@@ -44,11 +44,12 @@ type chatRequest struct {
 	Stream    bool      `json:"stream"`
 	Think     bool      `json:"think"`
 	KeepAlive string    `json:"keep_alive"`
-	Format    string    `json:"format,omitempty"`
+	Format    any       `json:"format,omitempty"`
 	Options   struct {
 		Temperature float64 `json:"temperature"`
 		TopP        float64 `json:"top_p"`
 		NumPredict  int     `json:"num_predict"`
+		NumCtx      int     `json:"num_ctx,omitempty"`
 	} `json:"options"`
 }
 
@@ -113,6 +114,22 @@ func (c *Client) Configured() bool {
 	return c != nil && c.baseURL != nil && c.model != ""
 }
 
+// ForModels returns a request-local client; it never changes the shared defaults.
+// An empty vision model intentionally disables image input for this choice.
+func (c *Client) ForModels(model, visionModel string, timeout time.Duration) *Client {
+	if c == nil {
+		return nil
+	}
+	selected := *c
+	selected.model, selected.visionModel = model, visionModel
+	if timeout > 0 {
+		selected.policy.ImageTimeout, selected.policy.VideoTimeout = timeout, timeout
+		selected.policy.ReasoningTimeout = timeout
+		selected.visionTimeout = timeout
+	}
+	return &selected
+}
+
 func (c *Client) VisionConfigured() bool {
 	return c != nil && c.baseURL != nil && c.visionModel != ""
 }
@@ -141,11 +158,21 @@ func (c *Client) EnhanceVideo(ctx context.Context, mode Mode, profile Profile, p
 }
 
 func (c *Client) EnhanceResult(ctx context.Context, mode Mode, profile Profile, prompt string, references []ImageReference, think bool) (Result, error) {
-	return c.enhance(ctx, mode, profile, prompt, references, VideoContext{}, think)
+	return c.enhance(ctx, mode, profile, prompt, references, VideoContext{}, EditContext{}, think)
+}
+
+type EditContext struct {
+	NegativePrompt string
+	CFG            float64
+	ImageFamily    string
+}
+
+func (c *Client) EnhanceEditResult(ctx context.Context, mode Mode, profile Profile, prompt string, references []ImageReference, edit EditContext, think bool) (Result, error) {
+	return c.enhance(ctx, mode, profile, prompt, references, VideoContext{}, edit, think)
 }
 
 func (c *Client) EnhanceVideoResult(ctx context.Context, mode Mode, profile Profile, prompt string, references []ImageReference, video VideoContext, think bool) (Result, error) {
-	return c.enhance(ctx, mode, profile, prompt, references, video, think)
+	return c.enhance(ctx, mode, profile, prompt, references, video, EditContext{}, think)
 }
 
 func (c *Client) PolicyFor(mode Mode, profile Profile, think bool) RequestPolicy {
@@ -160,41 +187,87 @@ func (c *Client) PolicyForRequest(mode Mode, profile Profile, think, hasImages b
 	if hasImages && c != nil {
 		policy = c.visionPolicy(policy)
 	}
+	if think {
+		limit := DefaultModelPolicy().ReasoningTimeout
+		if c != nil {
+			limit = c.policy.normalized().ReasoningTimeout
+		}
+		policy.Timeout = max(policy.Timeout, limit)
+		policy.TimeoutMS = policy.Timeout.Milliseconds()
+	}
 	return policy
 }
 
-func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt string, references []ImageReference, video VideoContext, think bool) (output Result, err error) {
-	execution := ExecutionNotDispatched
-	defer func() { output.Execution = execution }()
-	prompt = strings.TrimSpace(prompt)
-	if prompt == "" {
-		if mode != ModeTextToVideo || len(references) == 0 {
-			return Result{}, errors.New("введите исходный промт")
-		}
-		prompt = "Use only the supplied visual references to derive a complete, natural video. Do not ask for clarification."
+func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt string, references []ImageReference, video VideoContext, edit EditContext, think bool) (output Result, err error) {
+	prepared, err := c.PrepareEnhancementWithEditContext(mode, profile, prompt, references, video, edit, think)
+	output = Result{Model: prepared.Model, Policy: prepared.Policy, Execution: ExecutionNotDispatched}
+	if err != nil {
+		return output, err
 	}
-	if len(prompt) > maxPromptBytes {
-		return Result{}, errors.New("промт слишком длинный")
-	}
-	if !c.Configured() {
-		return Result{}, errors.New("локальный промт-ассистент не настроен")
-	}
-	if !ValidProfile(mode, profile) {
-		return Result{}, errors.New("неизвестный шаблон промт-ассистента")
-	}
-	if mode == ModeTextToVideo && IsMiniMaxH3Profile(profile) && !MiniMaxH3ProfileMatchesMode(profile, video.Mode) {
-		return Result{}, errors.New("шаблон промт-ассистента не соответствует ветке MiniMax H3")
-	}
+	defer clear(prepared.Body)
 	target := *c.baseURL
 	target.Path = joinPath(target.Path, "/api/chat")
 	target.RawQuery = ""
 	target.Fragment = ""
-	systemPrompt := SystemPromptWithReferences(mode, profile, references)
-	if mode == ModeTextToVideo && IsMiniMaxH3Profile(profile) {
-		systemPrompt = SystemPromptWithVideoContextAndReferences(mode, profile, references, video)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), bytes.NewReader(prepared.Body))
+	if err != nil {
+		return output, err
 	}
-	systemPrompt += structuredResponseInstruction(mode, references, video)
-	requestPolicy := c.PolicyForRequest(mode, profile, think, false)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json")
+	output.Execution = ExecutionUnconfirmed
+	response, err := c.httpClientFor(prepared.Policy).Do(request)
+	if err != nil {
+		return output, fmt.Errorf("локальная модель недоступна: %w", err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, int64(prepared.ResponseByteLimit()+1)))
+	if err != nil {
+		return output, err
+	}
+	defer clear(body)
+	return ParseEnhancementResponse(prepared, response.StatusCode, body)
+}
+
+// PrepareEnhancement freezes the selected instruction, model, reference roles
+// and output contract before a durable executor accepts the request.
+func (c *Client) PrepareEnhancement(mode Mode, profile Profile, prompt string, references []ImageReference, video VideoContext, think bool) (PreparedEnhancement, error) {
+	return c.PrepareEnhancementWithEditContext(mode, profile, prompt, references, video, EditContext{}, think)
+}
+
+func (c *Client) PrepareEnhancementWithEditContext(mode Mode, profile Profile, prompt string, references []ImageReference, video VideoContext, edit EditContext, think bool) (PreparedEnhancement, error) {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		if mode != ModeTextToVideo || len(references) == 0 {
+			return PreparedEnhancement{}, errors.New("введите исходный промт")
+		}
+		prompt = "Use only the supplied visual references to derive a complete, natural video. Do not ask for clarification."
+	}
+	promptByteLimit := maxPromptBytes
+	if video.LongParts != 0 {
+		if video.LongTransition != "" && video.LongTransition != "continuous" && video.LongTransition != "cinematic" {
+			return PreparedEnhancement{}, errors.New("неизвестный режим стыков длинного видео")
+		}
+		if mode != ModeTextToVideo || !IsMiniMaxH3Profile(profile) || video.Mode != VideoModeREF2VA || video.AIHubMode != "" || !ValidLongVideoParts(video.LongParts) {
+			return PreparedEnhancement{}, errors.New("некорректный режим длинного видео MiniMax H3")
+		}
+		promptByteLimit = 4 * PromptCharacterLimitForVideo(mode, video.LongParts)
+	}
+	if len(prompt) > promptByteLimit {
+		return PreparedEnhancement{}, errors.New("промт слишком длинный")
+	}
+	if !c.Configured() {
+		return PreparedEnhancement{}, errors.New("локальный промт-ассистент не настроен")
+	}
+	if !ValidProfile(mode, profile) {
+		return PreparedEnhancement{}, errors.New("неизвестный шаблон промт-ассистента")
+	}
+	if mode == ModeTextToVideo && IsMiniMaxH3Profile(profile) && !MiniMaxH3ProfileMatchesMode(profile, video.Mode) {
+		return PreparedEnhancement{}, errors.New("шаблон промт-ассистента не соответствует ветке MiniMax H3")
+	}
+	systemPrompt := EnhancementInstruction(mode, profile, references, video, edit)
+	negativeContext := profile == ProfileQwen21Edit || edit.CFG > 0
+	requestPolicy := c.PolicyForVideoRequest(mode, profile, video, think, false)
 	payload := chatRequest{
 		Model: c.model,
 		Messages: []Message{
@@ -206,17 +279,31 @@ func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt
 		KeepAlive: requestPolicy.KeepAlive,
 		Format:    "json",
 	}
+	if negativeContext {
+		if edit.CFG == 0 {
+			edit.CFG = 1
+		}
+		if !(edit.CFG >= 1 && edit.CFG <= 30) || edit.CFG == 1 && strings.TrimSpace(edit.NegativePrompt) != "" {
+			return PreparedEnhancement{}, errors.New("негативный промт работает только при CFG больше 1")
+		}
+		context, _ := json.Marshal(map[string]any{"cfg": edit.CFG, "existing_negative_prompt": strings.TrimSpace(edit.NegativePrompt)})
+		payload.Messages[1].Content += "\n\nEdit settings (keep this separate from the requested positive edit): " + string(context)
+	}
+	if video.AIHubMode != "" && video.AudioSource == "ltx" {
+		sound, _ := json.Marshal(map[string]string{"ltx_sound_specification": video.AudioPrompt})
+		payload.Messages[1].Content += "\n\nSeparate user sound specification:\n" + string(sound)
+	}
 	for _, reference := range references {
 		if len(reference.Image) == 0 {
 			continue
 		}
 		if len(reference.Image) > maxImageBytes {
-			return Result{}, fmt.Errorf("%w: изображение %d слишком большое", ErrUnsupportedImage, reference.Number)
+			return PreparedEnhancement{}, fmt.Errorf("%w: изображение %d слишком большое", ErrUnsupportedImage, reference.Number)
 		}
 		switch strings.ToLower(strings.TrimSpace(reference.MIMEType)) {
 		case "image/jpeg", "image/png", "image/webp":
 		default:
-			return Result{}, fmt.Errorf("%w: формат изображения %d", ErrUnsupportedImage, reference.Number)
+			return PreparedEnhancement{}, fmt.Errorf("%w: формат изображения %d", ErrUnsupportedImage, reference.Number)
 		}
 		payload.Messages[1].Images = append(payload.Messages[1].Images, base64.StdEncoding.EncodeToString(reference.Image))
 		if note := strings.TrimSpace(reference.Correction); note != "" {
@@ -227,66 +314,56 @@ func (c *Client) enhance(ctx context.Context, mode Mode, profile Profile, prompt
 			payload.Messages[1].Content += "\n\nReference-specific user observation (only for this picture; do not transfer it to another source):\n" + string(metadata)
 		}
 	}
-	if len(payload.Messages[1].Images) > 0 {
+	if len(video.VideoStoryboards) > 0 {
+		if len(video.VideoStoryboards) > 10 || len(video.VideoStoryboards) != len(video.VideoStoryboardTimes) {
+			return PreparedEnhancement{}, ErrUnsupportedImage
+		}
+		total := 0
+		for i, page := range video.VideoStoryboards {
+			total += len(page)
+			if len(page) == 0 || len(page) > 2<<20 || total > 16<<20 || len(video.VideoStoryboardTimes[i]) == 0 || len(video.VideoStoryboardTimes[i]) > 12 {
+				return PreparedEnhancement{}, ErrUnsupportedImage
+			}
+			payload.Messages[1].Images = append(payload.Messages[1].Images, base64.StdEncoding.EncodeToString(page))
+			times, err := json.Marshal(video.VideoStoryboardTimes[i])
+			if err != nil {
+				return PreparedEnhancement{}, ErrUnsupportedImage
+			}
+			payload.Messages[1].Content += fmt.Sprintf("\nAttachment %d is Video 1 storyboard page %d/%d, NOT a Picture reference. Grid: 4 columns, 3 rows, left-to-right then top-to-bottom. Valid tile timestamps in source seconds: %s. Ignore remaining blank tiles.", len(payload.Messages[1].Images), i+1, len(video.VideoStoryboards), times)
+		}
+		payload.Messages[1].Content += "\nInspect every video page in chronological order. Describe timecoded phases, camera changes, completed key actions and the final visible state. Distinguish observed events from gaps between samples. These frames contain no heard or transcribed audio; never infer exact spoken words from mouth shapes."
+	} else if len(video.VideoStoryboard) > 0 {
+		if len(video.VideoStoryboard) > 4<<20 {
+			return PreparedEnhancement{}, ErrUnsupportedImage
+		}
+		payload.Messages[1].Images = append(payload.Messages[1].Images, base64.StdEncoding.EncodeToString(video.VideoStoryboard))
+		payload.Messages[1].Content += fmt.Sprintf("\nThe last attached image is a 2x2 sampled storyboard of Video 1, NOT Picture %d. Read left-to-right, top-to-bottom. Approximate sample offsets in the source: %.2f, %.2f, %.2f, %.2f seconds. Empty tiles are not evidence. Samples do not show every motion or any audio.", len(references)+1, video.VideoStart, video.VideoStart+video.VideoSampleDuration/4, video.VideoStart+video.VideoSampleDuration/2, video.VideoStart+video.VideoSampleDuration*3/4)
+	}
+	if len(payload.Messages[1].Images) > 0 || mode == ModeTextToVideo && c.VisionConfigured() {
 		if !c.VisionConfigured() {
-			return Result{}, errors.New("локальная vision-модель не настроена")
+			return PreparedEnhancement{}, errors.New("локальная vision-модель не настроена")
 		}
 		payload.Model = c.visionModel
-		requestPolicy = c.PolicyForRequest(mode, profile, think, true)
+		requestPolicy = c.PolicyForVideoRequest(mode, profile, video, think, true)
 		payload.KeepAlive = requestPolicy.KeepAlive
 	}
 	payload.Options.Temperature = 0.35
 	payload.Options.TopP = 0.9
 	payload.Options.NumPredict = requestPolicy.NumPredict
+	payload.Options.NumCtx = requestPolicy.NumCtx
 	if mode == ModeTextToVideo && IsMiniMaxH3Profile(profile) {
 		payload.Options.Temperature = 0.3
 	}
+	if ValidLongVideoParts(video.LongParts) {
+		payload.Format = longVideoResponseSchema(video.LongParts)
+	} else if wantsLTXAudio(video) {
+		payload.Format = ltxResponseSchema(mode)
+	} else if negativeContext {
+		payload.Format = qwen21ResponseSchema(mode)
+	}
 	body, err := json.Marshal(payload)
-	if err != nil {
-		return Result{Model: payload.Model, Policy: requestPolicy}, err
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), bytes.NewReader(body))
-	if err != nil {
-		return Result{Model: payload.Model, Policy: requestPolicy}, err
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Accept", "application/json")
-	execution = ExecutionUnconfirmed
-	response, err := c.httpClientFor(requestPolicy).Do(request)
-	if err != nil {
-		return Result{Model: payload.Model, Policy: requestPolicy}, fmt.Errorf("локальная модель недоступна: %w", err)
-	}
-	defer response.Body.Close()
-	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
-	if err != nil {
-		return Result{Model: payload.Model, Policy: requestPolicy}, err
-	}
-	if len(responseBody) > maxResponseBytes {
-		return Result{Model: payload.Model, Policy: requestPolicy}, errors.New("локальная модель вернула слишком большой ответ")
-	}
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return Result{Model: payload.Model, Policy: requestPolicy}, fmt.Errorf("локальная модель ответила HTTP %d", response.StatusCode)
-	}
-	var result chatResponse
-	if err := json.Unmarshal(responseBody, &result); err != nil {
-		return Result{Model: payload.Model, Policy: requestPolicy}, fmt.Errorf("некорректный ответ локальной модели: %w", err)
-	}
-	if result.Done {
-		execution = ExecutionCompleted
-	}
-	parsed, err := parseModelResult(result.Message.Content, mode, references, video)
-	if err != nil {
-		return Result{Model: payload.Model, Policy: requestPolicy}, err
-	}
-	parsed.Model = payload.Model
-	parsed.Policy = requestPolicy
-	parsed.Usage = Usage{
-		PromptTokens: result.PromptEvalCount, CompletionTokens: result.EvalCount,
-		TotalDurationMS: durationMilliseconds(result.TotalDuration), LoadDurationMS: durationMilliseconds(result.LoadDuration),
-		PromptDurationMS: durationMilliseconds(result.PromptEvalDuration), CompletionTimeMS: durationMilliseconds(result.EvalDuration),
-		DoneReason: strings.TrimSpace(result.DoneReason),
-	}
-	return parsed, nil
+	return PreparedEnhancement{Body: body, Model: payload.Model, Mode: mode, Policy: requestPolicy, LongParts: video.LongParts, LongAudio: ValidLongVideoParts(video.LongParts), LTXAudio: wantsLTXAudio(video),
+		References: expectedReferenceMap(mode, references, video)}, err
 }
 
 func (c *Client) httpClientFor(policy RequestPolicy) *http.Client {
@@ -390,9 +467,6 @@ func cleanOutput(value string) string {
 		value = strings.TrimSpace(value[end+len("</think>"):])
 	}
 	value = strings.Trim(value, "\"` ")
-	if len(value) > maxPromptBytes {
-		value = value[:maxPromptBytes]
-	}
 	return strings.TrimSpace(value)
 }
 

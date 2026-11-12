@@ -19,29 +19,34 @@
   const collectionHeadingCount = root.querySelector(".media-library-collections-heading span");
   const metadataCollections = root.querySelector("[data-gallery-metadata-collections]");
 
-  const lightbox = document.getElementById("gallery-lightbox");
-  const lightboxImage = lightbox?.querySelector("[data-gallery-lightbox-image]");
-  const lightboxVideo = lightbox?.querySelector("[data-gallery-lightbox-video]");
-  const lightboxName = lightbox?.querySelector("[data-gallery-lightbox-name]");
-  const lightboxDownload = lightbox?.querySelector("[data-gallery-lightbox-download]");
   const metadataDialog = document.getElementById("gallery-metadata-dialog");
   const metadataForm = metadataDialog?.querySelector("[data-gallery-metadata-form]");
   const metadataStatus = metadataDialog?.querySelector("[data-gallery-metadata-status]");
   const useDialog = document.getElementById("gallery-use-dialog");
   const useForm = useDialog?.querySelector("[data-gallery-use-form]");
   const useHint = useDialog?.querySelector("[data-gallery-use-hint]");
-  const compareDialog = document.getElementById("gallery-compare-dialog");
-  const compareGrid = compareDialog?.querySelector("[data-gallery-compare-grid]");
   const confirmDialog = document.getElementById("gallery-confirm-dialog");
   const confirmMessage = confirmDialog?.querySelector("[data-gallery-confirm-message]");
   const confirmAccept = confirmDialog?.querySelector("[data-gallery-confirm-accept]");
 
   let activeType = "all";
   let activeCollection = "";
+  let collectionContext = null;
   let statusTimer = 0;
   let metadataCard = null;
+  let metadataEpoch = 0;
   let confirmResolve = null;
-  let roleTouched = false;
+  const owner = root.dataset.owner || "";
+  const storageKey = /^[1-9][0-9]*$/.test(owner) ? `ai-gateway:gallery:v2:${owner}` : "";
+  let restoredMediaID = "";
+  let restoring = true;
+  const closeMenu = button => { const menu = button.closest(".gallery-card-menu"); if (!menu) return button; menu.open = false; return menu.querySelector("summary"); };
+  const collectionsDisclosure = root.querySelector(".media-library-collections");
+  if (collectionsDisclosure && window.matchMedia("(max-width: 1100px)").matches) collectionsDisclosure.open = false;
+  const saveState = () => {
+    if (restoring || !storageKey) return;
+    try { sessionStorage.setItem(storageKey, JSON.stringify({ filters: { search: search?.value, from: dateFrom?.value, to: dateTo?.value, type: activeType, collection: activeCollection, flags: [...activeFlags()] }, selected: cards().filter(card => card.querySelector("[data-gallery-select]")?.checked).map(cardMediaID), media: restoredMediaID, scroll: window.scrollY })); } catch (_) {}
+  };
 
   const cards = () => [...root.querySelectorAll("[data-gallery-item]")];
   const normalize = (value) => String(value || "").trim().toLocaleLowerCase("ru-RU");
@@ -74,19 +79,22 @@
   };
 
   const dialogTraps = new Map();
-  [metadataDialog, useDialog, compareDialog, confirmDialog].filter(Boolean).forEach((dialog) => {
+  [metadataDialog, useDialog, confirmDialog].filter(Boolean).forEach((dialog) => {
     const trap = window.AIGatewayDialogFocus?.createFocusTrap?.({ root: dialog, documentRef: document });
     if (trap) dialogTraps.set(dialog, trap);
+    dialog.addEventListener("cancel", event => { event.preventDefault(); if (dialog === confirmDialog) finishConfirmation(false); else if (dialog === metadataDialog) closeMetadata(); else closeDialog(dialog); });
   });
   const closeDialog = (dialog) => {
     if (!dialog || dialog.hidden) return;
+    if (dialog.open) dialog.close();
     dialog.hidden = true;
     dialogTraps.get(dialog)?.deactivate();
-    if (![metadataDialog, useDialog, compareDialog, confirmDialog].some((item) => item && !item.hidden)) document.body.classList.remove("media-library-dialog-open");
+    if (![metadataDialog, useDialog, confirmDialog].some((item) => item && !item.hidden)) document.body.classList.remove("media-library-dialog-open");
   };
   const openDialog = (dialog, trigger, initialFocus, onEscape) => {
     if (!dialog) return;
     dialog.hidden = false;
+    if (!dialog.open) dialog.showModal();
     document.body.classList.add("media-library-dialog-open");
     const trap = dialogTraps.get(dialog);
     const escape = onEscape || (() => closeDialog(dialog));
@@ -113,68 +121,54 @@
   confirmDialog?.querySelectorAll("[data-gallery-confirm-cancel]").forEach((button) => button.addEventListener("click", () => finishConfirmation(false)));
   confirmAccept?.addEventListener("click", () => finishConfirmation(true));
 
-  const downloadURL = (source) => {
-    const url = new URL(source, window.location.origin);
-    url.searchParams.set("download", "1");
-    return `${url.pathname}${url.search}`;
-  };
-  const lightboxTrap = window.AIGatewayDialogFocus?.createFocusTrap?.({ root: lightbox, documentRef: document }) || null;
-  const closeLightbox = () => {
-    if (!lightbox || lightbox.hidden) return;
-    lightbox.hidden = true;
-    lightboxImage?.removeAttribute("src");
-    if (lightboxVideo) {
-      lightboxVideo.pause();
-      lightboxVideo.removeAttribute("src");
-      lightboxVideo.load();
-    }
-    document.body.classList.remove("generation-lightbox-open");
-    lightboxTrap?.deactivate();
-  };
-  const openLightbox = (trigger) => {
-    if (!lightbox || !lightboxImage || !lightboxVideo || !lightboxName || !lightboxDownload) return;
-    const source = trigger.dataset.url || "";
-    const filename = trigger.dataset.filename || "Результат генерации";
-    const isVideo = trigger.dataset.mediaType === "video";
-    lightboxImage.hidden = isVideo;
-    lightboxVideo.hidden = !isVideo;
-    if (isVideo) {
-      lightboxVideo.src = source;
-      lightboxVideo.play().catch(() => {});
-    } else {
-      lightboxImage.src = source;
-    }
-    lightboxName.textContent = filename;
-    lightboxDownload.href = downloadURL(source);
-    lightboxDownload.download = filename;
-    lightbox.hidden = false;
-    document.body.classList.add("generation-lightbox-open");
-    const closeButton = lightbox.querySelector(".generation-lightbox-close");
-    if (lightboxTrap) lightboxTrap.activate({ trigger, initialFocus: closeButton, onEscape: closeLightbox });
-    else closeButton?.focus({ preventScroll: true });
-  };
-  root.querySelectorAll("[data-gallery-open]").forEach((trigger) => trigger.addEventListener("click", () => {
-    if (window.aiGatewaySensitiveContent?.reveal(trigger)) return;
-    openLightbox(trigger);
-  }));
-  lightbox?.querySelectorAll("[data-gallery-close]").forEach((button) => button.addEventListener("click", closeLightbox));
-  lightboxImage?.addEventListener("click", closeLightbox);
-  lightboxVideo?.addEventListener("dblclick", closeLightbox);
-  if (!lightboxTrap) document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeLightbox(); });
-
-  root.querySelectorAll("[data-gallery-open] img, [data-gallery-open] video").forEach((media) => {
-    let retries = 0;
-    media.addEventListener("error", () => {
-      if (retries >= 2 || !media.src) return;
-      retries += 1;
-      const url = new URL(media.src, window.location.origin);
-      url.searchParams.set("retry", `${Date.now()}-${retries}`);
-      window.setTimeout(() => {
-        media.src = url.toString();
-        if (media instanceof HTMLVideoElement) media.load();
-      }, 300 * retries);
-    });
+  const viewer = window.AIGatewayGallery.createViewer({ root, cards, status: setStatus,
+    use: (card, trigger) => openUse(card, trigger), organize: (card, trigger) => openMetadata(card, trigger),
+    onSelect: source => { restoredMediaID = source.mediaID; saveState(); },
   });
+  root.addEventListener("click", event => {
+    const open = event.target.closest("[data-gallery-open], [data-gallery-inspect]");
+    if (open) {
+      const card = open.closest("[data-gallery-item]");
+      const from = closeMenu(open);
+      viewer.open(card, from, open.hasAttribute("data-gallery-inspect"));
+    }
+    const repeat = event.target.closest("[data-gallery-repeat]");
+    if (repeat && repeat.closest("[data-gallery-item]").dataset.operation !== "postprocess") window.AIGatewayGeneration?.openRepeat?.(repeat.closest("[data-gallery-item]").dataset.jobId, closeMenu(repeat));
+    const repeatNow = event.target.closest("[data-gallery-repeat-now]");
+    if (repeatNow && repeatNow.closest("[data-gallery-item]").dataset.operation !== "postprocess") window.AIGatewayGeneration?.openRepeatNow?.(repeatNow.closest("[data-gallery-item]").dataset.jobId, closeMenu(repeatNow));
+    const postprocess = event.target.closest("[data-gallery-postprocess]");
+    if (postprocess) window.AIGatewayGeneration?.openPostprocess?.(window.AIGatewayGallery.cardSource(postprocess.closest("[data-gallery-item]")), closeMenu(postprocess));
+    const compareButton = event.target.closest("[data-gallery-compare]");
+    if (compareButton) viewer.compareFrom(compareButton.closest("[data-gallery-item]"), closeMenu(compareButton));
+  });
+  root.querySelector("[data-gallery-bulk-compare]")?.addEventListener("click", event => {
+    viewer.openCompare(cards().filter(card => card.querySelector("[data-gallery-select]")?.checked), event.currentTarget);
+  });
+  const visiblePreviews = new Set();
+  const loadPreview = card => {
+    const source = window.AIGatewayGallery.cardSource(card);
+    const media = card.querySelector("[data-gallery-preview-src]");
+    if (!source || !media) return;
+    const unavailable = window.AIGatewayGallery.expired(source, Date.now());
+    const concealed = source.sensitive && !card.classList.contains("is-revealed") && !document.body.classList.contains("show-sensitive-content");
+    const message = card.querySelector("[data-gallery-preview-message]");
+    if (unavailable || concealed || card.hidden) {
+      if (media.hasAttribute("src")) { media.pause?.(); media.removeAttribute("src"); media.load?.(); }
+      if (message) { message.textContent = unavailable ? "Срок хранения истёк" : ""; message.hidden = !unavailable; }
+      return;
+    }
+    if (!media.hasAttribute("src") && visiblePreviews.has(card)) {
+      const url = window.AIGatewayGallery.safeURL(media.dataset.galleryPreviewSrc, location.origin);
+      if (url) media.src = url;
+    }
+  };
+  const observer = new IntersectionObserver(entries => entries.forEach(entry => { if (entry.isIntersecting) { visiblePreviews.add(entry.target); loadPreview(entry.target); } else visiblePreviews.delete(entry.target); }), { rootMargin: "200px" });
+  cards().forEach(card => {
+    observer.observe(card);
+    card.querySelector("[data-gallery-preview-src]")?.addEventListener("error", () => { const message = card.querySelector("[data-gallery-preview-message]"); if (message) { message.hidden = false; message.textContent = "Предпросмотр недоступен"; } });
+  });
+  new MutationObserver(() => cards().forEach(loadPreview)).observe(root, { subtree: true, attributes: true, attributeFilter: ["class"] });
+  new MutationObserver(() => cards().forEach(loadPreview)).observe(document.body, { attributes: true, attributeFilter: ["class"] });
 
   const parseDateStart = (value) => value ? new Date(`${value}T00:00:00`).getTime() : Number.NEGATIVE_INFINITY;
   const parseDateEnd = (value) => value ? new Date(`${value}T00:00:00`).getTime() + 86400000 : Number.POSITIVE_INFINITY;
@@ -193,7 +187,7 @@
     typeFilters.forEach((button) => {
       const type = button.dataset.galleryFilter || "all";
       const count = type === "all" ? items.length : items.filter((card) => card.dataset.mediaType === type).length;
-      const badge = button.querySelector("span");
+      const badge = button.querySelector("span:last-child");
       if (badge) badge.textContent = String(count);
     });
     flagFilters.forEach((button) => {
@@ -222,9 +216,12 @@
     const visible = [...root.querySelectorAll("[data-gallery-item]:not([hidden]) [data-gallery-select]")];
     const allVisibleSelected = visible.length > 0 && visible.every((input) => input.checked);
     if (selectAll) selectAll.textContent = allVisibleSelected ? "Снять выбор" : "Выбрать все видимые";
+    const compareButton = root.querySelector("[data-gallery-bulk-compare]"); if (compareButton) compareButton.disabled = selected.length !== 2;
+    saveState();
   };
 
   const applyFilters = () => {
+    void collectionContext?.select(activeCollection);
     const query = normalize(search?.value);
     const from = parseDateStart(dateFrom?.value || "");
     const to = parseDateEnd(dateTo?.value || "");
@@ -239,10 +236,18 @@
         && cardMatchesFlags(card, flags);
       card.hidden = !visible;
       if (visible) shown += 1;
+      loadPreview(card);
     });
     if (visibleCount) visibleCount.textContent = String(shown);
     if (visibleLabel) visibleLabel.textContent = shown === 1 ? "результат" : "результатов";
-    if (filterEmpty) filterEmpty.hidden = shown > 0;
+    if (filterEmpty) filterEmpty.hidden = shown > 0 || !cards().length;
+    const activeHost = root.querySelector("[data-gallery-active-filters]");
+    const labels = [query ? `Поиск: ${search.value}` : "", activeType !== "all" ? activeType === "video" ? "Видео" : "Фото" : "", activeCollection ? root.querySelector(`[data-gallery-collection-filter="${activeCollection}"] span`)?.textContent : "", dateFrom?.value ? `С ${dateFrom.value}` : "", dateTo?.value ? `По ${dateTo.value}` : "", ...[...flags].map(flag => ({ favorite: "Избранное", pinned: "Закреплённые", sensitive: "18+", error: "Ошибки" })[flag])].filter(Boolean);
+    if (activeHost) {
+      activeHost.replaceChildren(); activeHost.hidden = labels.length === 0;
+      if (labels.length) { const summary = document.createElement("span"); summary.textContent = labels.join(" · "); const reset = document.createElement("button"); reset.type = "button"; reset.className = "ghost"; reset.textContent = "Сбросить"; reset.addEventListener("click", () => root.querySelector("[data-gallery-reset]")?.click()); activeHost.append(summary, reset); }
+    }
+    const filterCount = root.querySelector("[data-gallery-filter-count]"); if (filterCount) { filterCount.textContent = String(flags.size + Number(!!dateFrom?.value) + Number(!!dateTo?.value)); filterCount.hidden = filterCount.textContent === "0"; }
     syncSelection();
   };
 
@@ -325,9 +330,9 @@
     form.remove();
   });
   root.querySelector("[data-gallery-bulk-hide]")?.addEventListener("click", async (event) => {
-    const ids = selectedMediaIDs();
-    if (!ids.length || !await requestConfirmation(`Убрать выбранные результаты (${ids.length}) из медиатеки?`, event.currentTarget)) return;
     const button = event.currentTarget;
+    const ids = selectedMediaIDs();
+    if (!ids.length || !await requestConfirmation(`Скрыть выбранные результаты (${ids.length})? Они исчезнут из результатов и не будут доступны для повторного использования.`, button)) return;
     button.disabled = true;
     try {
       const body = new URLSearchParams({ csrf });
@@ -358,9 +363,11 @@
   const refreshExpiry = () => root.querySelectorAll("[data-generation-expiry]").forEach((element) => {
     const expiresAt = Number(element.dataset.generationExpiry);
     element.textContent = Number.isFinite(expiresAt) ? formatExpiry(expiresAt - Date.now()) : "Срок неизвестен";
+    const label = element.closest("[data-gallery-item]")?.querySelector("[data-gallery-menu-retention]");
+    if (label) label.textContent = expiresAt > Date.now() ? `Хранится до ${new Date(expiresAt).toLocaleString("ru-RU")}` : "Срок хранения истёк";
   });
   refreshExpiry();
-  window.setInterval(refreshExpiry, 30000);
+  window.setInterval(() => { refreshExpiry(); cards().forEach(loadPreview); }, 30000);
 
   const toggleMediaFlag = async (button, card, type) => {
     const mediaID = cardMediaID(card);
@@ -373,13 +380,13 @@
       button.setAttribute("aria-pressed", String(enabled));
       if (type === "pinned") {
         card.classList.toggle("is-pinned", enabled);
-        button.textContent = enabled ? "Закреплено" : "Закрепить";
+        const label = button.querySelector("[data-action-label]"); if (label) label.textContent = enabled ? "Обычное хранение" : "Продлить хранение";
         const expiry = card.querySelector("[data-generation-expiry]");
-        if (expiry && payload.expires_unix) expiry.dataset.generationExpiry = String(payload.expires_unix);
+        if (expiry && payload.expires_unix) { expiry.dataset.generationExpiry = String(payload.expires_unix); card.querySelector("[data-gallery-open]").dataset.expires = String(payload.expires_unix); }
         refreshExpiry();
         setStatus(enabled ? `Результат закреплён на ${root.dataset.pinnedRetention}.` : `Возвращён обычный срок хранения: ${root.dataset.mediaRetention}.`);
       } else {
-        button.textContent = enabled ? "В избранном" : "В избранное";
+        button.title = enabled ? "Удалить из избранного" : "В избранное"; button.setAttribute("aria-label", button.title);
         setStatus(enabled ? "Добавлено в избранное." : "Удалено из избранного.");
       }
       updateCounts();
@@ -426,42 +433,46 @@
     target.replaceChildren(...selectedOptions.map((option) => {
       const marker = document.createElement("span");
       marker.dataset.galleryCollectionId = option.value;
-      marker.textContent = option.closest("label")?.querySelector("strong")?.textContent || option.value;
+      marker.textContent = metadataCollections.querySelector(`[data-gallery-metadata-collection="${option.value}"] strong`)?.textContent || option.value;
       return marker;
     }));
   };
 
-  const closeMetadata = () => { metadataCard = null; closeDialog(metadataDialog); };
+  const closeMetadata = () => { metadataEpoch++; metadataCard = null; closeDialog(metadataDialog); };
   metadataDialog?.querySelectorAll("[data-gallery-metadata-close]").forEach((button) => button.addEventListener("click", closeMetadata));
-  root.querySelectorAll("[data-gallery-metadata-open]").forEach((button) => button.addEventListener("click", () => {
-    const card = button.closest("[data-gallery-item]");
+  const openMetadata = (card, button) => {
     if (!card || !metadataForm) return;
+    metadataEpoch++;
     metadataCard = card;
     metadataForm.elements.media_id.value = cardMediaID(card);
     metadataForm.elements.tags.value = cardTags(card).join(", ");
     const selected = cardCollectionIDs(card);
-    metadataForm.querySelectorAll('input[name="collection_id"]').forEach((input) => { input.checked = selected.has(input.value); });
+    metadataForm.querySelectorAll('input[name="collection_id"]').forEach(input => { input.checked = selected.has(input.value); });
     if (metadataStatus) metadataStatus.textContent = "";
-    openDialog(metadataDialog, button, metadataForm.elements.tags);
-  }));
+    openDialog(metadataDialog, closeMenu(button), metadataForm.elements.tags, closeMetadata);
+  };
+  root.querySelectorAll("[data-gallery-metadata-open]").forEach(button => button.addEventListener("click", () => openMetadata(button.closest("[data-gallery-item]"), button)));
   metadataForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!metadataCard) return;
+    const targetCard = metadataCard;
+    const token = metadataEpoch;
+    const body = new URLSearchParams(new FormData(metadataForm));
+    const tags = metadataForm.elements.tags.value.split(/[,;\n]/).map(tag => tag.trim()).filter(Boolean).slice(0, 20);
+    const selected = [...metadataForm.querySelectorAll('input[name="collection_id"]:checked')].map(input => input.cloneNode(true));
     const submit = metadataForm.querySelector('button[type="submit"]');
     submit.disabled = true;
     if (metadataStatus) metadataStatus.textContent = "Сохраняем...";
     try {
-      await postForm(metadataForm.action, new URLSearchParams(new FormData(metadataForm)));
-      const tags = metadataForm.elements.tags.value.split(/[,;\n]/).map((tag) => tag.trim()).filter(Boolean).slice(0, 20);
-      const selected = [...metadataForm.querySelectorAll('input[name="collection_id"]:checked')];
-      renderCardTags(metadataCard, tags);
-      renderCardCollections(metadataCard, selected);
+      await postForm(metadataForm.action, body);
+      renderCardTags(targetCard, tags);
+      renderCardCollections(targetCard, selected);
       updateCounts();
       applyFilters();
-      closeMetadata();
+      if (metadataEpoch === token) closeMetadata();
       setStatus("Теги и коллекции сохранены.");
     } catch (error) {
-      if (metadataStatus) metadataStatus.textContent = error.message || "Не удалось сохранить изменения";
+      if (metadataStatus && metadataEpoch === token) metadataStatus.textContent = error.message || "Не удалось сохранить изменения";
     } finally {
       submit.disabled = false;
     }
@@ -502,14 +513,15 @@
     filter.append(title, count);
     const remove = document.createElement("button");
     remove.type = "button";
-    remove.className = "media-library-collection-delete";
+    remove.className = "media-library-collection-delete icon-button ghost";
     remove.dataset.galleryCollectionDelete = id;
     remove.dataset.collectionName = name;
     remove.setAttribute("aria-label", `Удалить коллекцию ${name}`);
     remove.title = "Удалить коллекцию";
-    remove.textContent = "×";
+    const removeIcon = document.createElement("i"); removeIcon.dataset.lucide = "x"; removeIcon.setAttribute("aria-hidden", "true"); remove.append(removeIcon);
     row.append(filter, remove);
     collectionList.append(row);
+    window.lucide?.createIcons();
   };
   root.querySelector("[data-gallery-collection-create]")?.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -526,6 +538,9 @@
       if (!id) throw new Error("Gateway не вернул коллекцию");
       addCollectionRow(id, savedName);
       addCollectionOption(id, savedName);
+      activeCollection = id;
+      root.querySelectorAll("[data-gallery-collection-filter]").forEach(button => { const active = button.dataset.galleryCollectionFilter === id; button.classList.toggle("is-active", active); button.setAttribute("aria-pressed", String(active)); });
+      applyFilters();
       form.reset();
       if (collectionHeadingCount) collectionHeadingCount.textContent = String(root.querySelectorAll("[data-gallery-collection-row]").length);
       setStatus(`Коллекция «${savedName}» создана.`);
@@ -563,94 +578,9 @@
     }
   });
 
-  const closeUse = () => closeDialog(useDialog);
-  useDialog?.querySelectorAll("[data-gallery-use-close]").forEach((button) => button.addEventListener("click", closeUse));
-  const syncUseForm = ({ resetRole = false } = {}) => {
-    if (!useForm) return;
-    const workflow = useForm.querySelector('input[name="workflow"]:checked');
-    const slot = useForm.elements.slot;
-    const role = useForm.elements.role;
-    const maximum = Number(workflow?.dataset.maxSlots || 1);
-    [...slot.options].forEach((option) => {
-      const unavailable = Number(option.value) > maximum;
-      option.hidden = unavailable;
-      option.disabled = unavailable;
-    });
-    if (Number(slot.value) > maximum) slot.value = "1";
-    if (resetRole || !roleTouched) {
-      role.value = workflow?.value === "minimax-h3-video"
-        ? (slot.value === "1" ? "first_frame" : slot.value === "2" ? "last_frame" : "style")
-        : (slot.value === "1" ? "base_scene" : "style");
-    }
-    const workflowName = workflow?.closest("label")?.querySelector("strong")?.textContent || "выбранный workflow";
-    if (useHint) useHint.textContent = `Изображение откроется в слоте ${slot.value}: ${workflowName}.`;
-  };
-  useForm?.querySelectorAll('input[name="workflow"]').forEach((input) => input.addEventListener("change", () => { roleTouched = false; syncUseForm({ resetRole: true }); }));
-  useForm?.elements.slot?.addEventListener("change", () => { if (!roleTouched) syncUseForm({ resetRole: true }); else syncUseForm(); });
-  useForm?.elements.role?.addEventListener("change", () => { roleTouched = true; syncUseForm(); });
-  root.querySelectorAll("[data-gallery-use-open]").forEach((button) => button.addEventListener("click", () => {
-    const card = button.closest("[data-gallery-item]");
-    if (!card || !useForm) return;
-    useForm.elements.media_id.value = cardMediaID(card);
-    const defaultWorkflow = useForm.querySelector('input[name="workflow"]');
-    if (!defaultWorkflow) return;
-    defaultWorkflow.checked = true;
-    useForm.elements.slot.value = "1";
-    roleTouched = false;
-    syncUseForm({ resetRole: true });
-    openDialog(useDialog, button, defaultWorkflow);
-  }));
-  useForm?.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const workflow = useForm.querySelector('input[name="workflow"]:checked');
-    const mediaID = useForm.elements.media_id.value;
-    if (!workflow || !mediaID) return;
-    const params = new URLSearchParams({ template: workflow.dataset.templateId, workflow: workflow.value, media: mediaID, slot: useForm.elements.slot.value, role: useForm.elements.role.value });
-    window.location.assign(`/generate?${params.toString()}`);
-  });
-
-  const closeCompare = () => {
-    compareGrid?.querySelectorAll("video").forEach((video) => { video.pause(); video.removeAttribute("src"); video.load(); });
-    closeDialog(compareDialog);
-  };
-  compareDialog?.querySelectorAll("[data-gallery-compare-close]").forEach((button) => button.addEventListener("click", closeCompare));
-  root.querySelectorAll("[data-gallery-compare]").forEach((button) => button.addEventListener("click", () => {
-    const current = button.closest("[data-gallery-item]");
-    if (!current || !compareGrid) return;
-    const siblings = cards().filter((card) => card.dataset.variantId === current.dataset.variantId && cardMediaID(card));
-    compareGrid.replaceChildren(...siblings.map((card) => {
-      const trigger = card.querySelector("[data-gallery-open]");
-      const figure = document.createElement("figure");
-      const media = document.createElement(trigger?.dataset.mediaType === "video" ? "video" : "img");
-      media.src = trigger?.dataset.url || "";
-      if (media instanceof HTMLVideoElement) { media.controls = true; media.playsInline = true; media.preload = "metadata"; }
-      else media.alt = card.querySelector(".media-library-prompt")?.textContent || "Вариант генерации";
-      figure.append(media);
-      if (isTrue(card.dataset.sensitive)) {
-        figure.classList.add("sensitive-media");
-        figure.dataset.sensitiveMedia = "";
-        const cover = document.createElement("button");
-        cover.type = "button";
-        cover.className = "sensitive-media-cover";
-        const title = document.createElement("b");
-        title.textContent = "Контент 18+";
-        const hint = document.createElement("small");
-        hint.textContent = "Нажмите, чтобы показать";
-        cover.append(title, hint);
-        cover.addEventListener("click", () => window.aiGatewaySensitiveContent?.reveal(figure));
-        figure.append(cover);
-      }
-      const caption = document.createElement("figcaption");
-      const model = document.createElement("strong");
-      model.textContent = card.querySelector(".media-library-model")?.textContent || "Вариант";
-      const name = document.createElement("span");
-      name.textContent = trigger?.dataset.filename || "Результат";
-      caption.append(model, name);
-      figure.append(caption);
-      return figure;
-    }));
-    openDialog(compareDialog, button, compareDialog.querySelector("[data-gallery-compare-close]"), closeCompare);
-  }));
+  const useController = window.AIGatewayGallery.createUseController({ root, openDialog, closeDialog, status: setStatus, csrf });
+  const openUse = (card, button) => useController.open(card, closeMenu(button));
+  root.querySelectorAll("[data-gallery-use-open]").forEach(button => button.addEventListener("click", () => openUse(button.closest("[data-gallery-item]"), button)));
 
   root.addEventListener("submit", async (event) => {
     const form = event.target.closest("[data-gallery-hide-form]");
@@ -658,8 +588,9 @@
     event.preventDefault();
     const card = form.closest("[data-gallery-item]");
     const button = form.querySelector("button");
-    if (!card || !button || button.disabled || !await requestConfirmation("Убрать этот результат из медиатеки?", button)) return;
+    if (!card || !button || button.disabled || !await requestConfirmation("Скрыть результат? Он исчезнет из результатов и не будет доступен для повторного использования.", closeMenu(button))) return;
     button.disabled = true;
+    const originalButton = button.cloneNode(true);
     button.textContent = "Убираем...";
     try {
       const payload = await postForm(form.action, new URLSearchParams(new FormData(form)));
@@ -670,11 +601,48 @@
       setStatus("Результат убран из медиатеки.");
     } catch (error) {
       button.disabled = false;
-      button.textContent = "Убрать из медиатеки";
+      button.replaceChildren(...originalButton.childNodes);
       setStatus(error.message || "Не удалось убрать результат", "error");
     }
   });
 
-  updateCounts();
-  applyFilters();
+  collectionContext = window.AIGatewayGeneration?.collectionWorkspace?.bindGallery({ root, onRenamed: record => {
+    const row = root.querySelector(`[data-gallery-collection-row="${record.id}"]`);
+    const label = row?.querySelector("[data-gallery-collection-filter] span");
+    if (label) label.textContent = record.name;
+    const remove = row?.querySelector("[data-gallery-collection-delete]");
+    if (remove) { remove.dataset.collectionName = record.name; remove.setAttribute("aria-label", `Удалить коллекцию ${record.name}`); }
+    const option = metadataCollections?.querySelector(`[data-gallery-metadata-collection="${record.id}"]`);
+    const optionLabel = option?.querySelector("strong");
+    if (optionLabel) optionLabel.textContent = record.name;
+    root.querySelectorAll(`[data-gallery-collection-id="${record.id}"]`).forEach(item => { item.textContent = record.name; });
+    applyFilters();
+  }});
+  let restoreScroll = 0;
+  try {
+    const saved = storageKey ? JSON.parse(sessionStorage.getItem(storageKey) || "null") : null;
+    if (saved) {
+      const filters = window.AIGatewayGallery.normalizedFilters(saved.filters);
+      if (search) search.value = filters.search; if (dateFrom) dateFrom.value = filters.from; if (dateTo) dateTo.value = filters.to;
+      activeType = filters.type; activeCollection = filters.collection;
+      if (activeCollection && !root.querySelector(`[data-gallery-collection-filter="${activeCollection}"]`)) activeCollection = "";
+      typeFilters.forEach(button => { const active = button.dataset.galleryFilter === activeType; button.classList.toggle("is-active", active); button.setAttribute("aria-pressed", String(active)); });
+      flagFilters.forEach(button => { const active = filters.flags.includes(button.dataset.galleryFlag); button.classList.toggle("is-active", active); button.setAttribute("aria-pressed", String(active)); });
+      root.querySelectorAll("[data-gallery-collection-filter]").forEach(button => { const active = button.dataset.galleryCollectionFilter === activeCollection; button.classList.toggle("is-active", active); button.setAttribute("aria-pressed", String(active)); });
+      const selected = new Set(Array.isArray(saved.selected) ? saved.selected.filter(window.AIGatewayGallery.validMediaID) : []);
+      cards().forEach(card => { const checkbox = card.querySelector("[data-gallery-select]"); if (checkbox) checkbox.checked = selected.has(checkbox.value); });
+      restoredMediaID = window.AIGatewayGallery.validMediaID(saved.media) ? saved.media : "";
+      restoreScroll = Number.isFinite(saved.scroll) ? Math.max(0, saved.scroll) : 0;
+    }
+  } catch (_) {}
+  const requestedCollection = new URLSearchParams(location.search).get("collection");
+  if (window.AIGatewayGeneration?.collections?.validID(requestedCollection)) {
+    activeCollection = requestedCollection;
+    root.querySelectorAll("[data-gallery-collection-filter]").forEach(button => { const active = button.dataset.galleryCollectionFilter === activeCollection; button.classList.toggle("is-active", active); button.setAttribute("aria-pressed", String(active)); });
+  }
+  updateCounts(); applyFilters(); restoring = false;
+  requestAnimationFrame(() => window.scrollTo({ top: restoreScroll, behavior: "instant" }));
+  window.addEventListener("pagehide", saveState);
+  const requested = new URLSearchParams(location.search).get("media");
+  if (window.AIGatewayGallery.validMediaID(requested)) { const card = cards().find(item => cardMediaID(item) === requested); if (card) viewer.open(card); else setStatus("Этот результат больше не доступен.", "error"); }
 })();

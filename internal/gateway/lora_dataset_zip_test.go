@@ -70,6 +70,22 @@ func TestLoraDatasetZIPPathsAndLimits(t *testing.T) {
 	}
 }
 
+func TestDiscoverLoraDatasetZIPImagesMatchesCaptionCaseInsensitively(t *testing.T) {
+	data := datasetTestZIP(t, []string{"images/B.PNG", "images/b.TXT", "images/a.jpg", "other/a.txt"}, make([][]byte, 4))
+	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := loraDatasetZIPEntries(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []loraDatasetZIPImage{{File: "images/B.PNG", Caption: "images/b.TXT"}, {File: "images/a.jpg"}}
+	if got := discoverLoraDatasetZIPImages(entries); !reflect.DeepEqual(got, want) {
+		t.Fatalf("images = %#v, want %#v", got, want)
+	}
+}
+
 func assertLoraDatasetZIPRoundTrip(t *testing.T, ctx context.Context, app *App, userID, foreignID int64, original loraDatasetView, session, csrf string) {
 	t.Helper()
 	call := func(owner int64, method, target string, body []byte, contentType string, revision int64, want int) *httptest.ResponseRecorder {
@@ -167,7 +183,7 @@ func assertLoraDatasetZIPRoundTrip(t *testing.T, ctx context.Context, app *App, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	generic := datasetTestZIP(t, []string{"b.png", "b.txt", "a.png"}, [][]byte{image, []byte("  manual generic caption\n"), image})
+	generic := datasetTestZIP(t, []string{"b.png", "B.TXT", "a.png"}, [][]byte{image, []byte("  manual generic caption\n"), image})
 	view = importZIP(generic, view.Dataset.Revision, 200)
 	if view.Manifest.Images[0].Caption != "" || view.Manifest.Images[1].Caption != "  manual generic caption\n" || view.Manifest.Settings.TriggerWord != original.Manifest.Settings.TriggerWord {
 		t.Fatal("plain ZIP order, captions or settings changed")

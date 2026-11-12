@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"log"
@@ -8,12 +9,20 @@ import (
 	"os"
 	"time"
 
+	"ai-access-gateway/internal/buildinfo"
 	"ai-access-gateway/internal/updateagent"
 )
 
 func main() {
 	configPath := flag.String("config", "", "path to the update-agent JSON configuration")
+	version := flag.Bool("version-json", false, "print the running build and API contracts without starting services")
 	flag.Parse()
+	if *version {
+		if err := buildinfo.Write(os.Stdout, buildinfo.UpdateAgent); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if *configPath == "" {
 		log.Fatal("-config is required")
 	}
@@ -43,6 +52,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("create update agent: %v", err)
 	}
+	go server.MaintainStorage(context.Background())
+	go controller.ObserveComfyRuntime(context.Background())
 	httpServer := &http.Server{
 		Addr:              config.ListenAddress,
 		Handler:           server.Handler(),

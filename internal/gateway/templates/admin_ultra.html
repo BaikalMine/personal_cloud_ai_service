@@ -1,0 +1,84 @@
+{{define "admin_ultra"}}
+{{template "head" .}}
+{{template "admin_nav" .}}
+<link rel="stylesheet" href="/static/admin-ultra.css?v={{.AssetVersion}}">
+<script src="/static/gallery-state.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/gallery-viewport.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/admin-ultra.js?v={{.AssetVersion}}" defer></script>
+<main class="page ultra-history" id="main-content" data-ultra-history>
+  <header class="ultra-heading">
+    <div><p class="section-kicker">{{if .Job}}<a href="/admin/harness-ultra">История Harness Ultra</a>{{else}}Генерации Harness{{end}}</p><h1>{{if .Job}}{{.Job.ModeLabel}}{{else}}Harness Ultra{{end}}</h1></div>
+    <div class="ultra-actions"><span class="muted" data-ultra-read-status role="status"></span><a class="button ghost ultra-icon" href="{{.RefreshURL}}" data-ultra-refresh title="Обновить историю" aria-label="Обновить историю"><i data-lucide="refresh-cw" aria-hidden="true"></i></a></div>
+  </header>
+  {{if .LoadError}}<section class="ui-status-banner danger" role="alert"><span>{{.LoadError}}</span><a class="button ghost" href="{{.RefreshURL}}">Повторить</a></section>{{else}}
+  {{if not .Job}}
+  <form class="ultra-filters" action="/admin/harness-ultra" method="get" role="search" aria-label="Поиск генераций Harness Ultra">
+    <label class="ui-field"><span class="ui-field-label">Поиск</span><input type="search" name="q" maxlength="200" value="{{.Query}}" placeholder="Промпт, модель, ошибка или ID"></label>
+    <label class="ui-field"><span class="ui-field-label" id="ultra-state-label">Статус</span><select name="state" aria-labelledby="ultra-state-label"><option value="">Все задания</option><option value="active" {{if eq .State "active"}}selected{{end}}>В работе</option><option value="completed" {{if eq .State "completed"}}selected{{end}}>Готово</option><option value="failed" {{if eq .State "failed"}}selected{{end}}>Ошибка</option><option value="cancelled" {{if eq .State "cancelled"}}selected{{end}}>Отменено</option></select></label>
+    <div class="ultra-actions"><button type="submit"><i data-lucide="search" aria-hidden="true"></i>Найти</button>{{if .Filtered}}<a class="button ghost ultra-icon" href="/admin/harness-ultra" title="Сбросить фильтры" aria-label="Сбросить фильтры"><i data-lucide="x" aria-hidden="true"></i></a>{{end}}</div>
+  </form>
+  {{end}}
+  {{template "admin_ultra_snapshot" .}}
+  {{with .Job}}
+  <section class="ultra-prompts" aria-label="Промпты задания">
+    <div class="ultra-block-heading"><h2>Промпт</h2><button class="button ghost ultra-icon" type="button" data-ultra-copy="#ultra-prompt" title="Копировать промпт" aria-label="Копировать промпт"><i data-lucide="copy" aria-hidden="true"></i></button></div>
+    <pre id="ultra-prompt">{{if .Prompt}}{{.Prompt}}{{else}}Не сохранён{{end}}</pre>
+    {{if .Negative}}<div class="ultra-block-heading"><h2>Негативный промпт</h2><button class="button ghost ultra-icon" type="button" data-ultra-copy="#ultra-negative" title="Копировать негативный промпт" aria-label="Копировать негативный промпт"><i data-lucide="copy" aria-hidden="true"></i></button></div><pre id="ultra-negative">{{.Negative}}</pre>{{end}}
+  </section>
+  <section class="ultra-settings" aria-label="Параметры задания">
+    <h2>Параметры</h2>
+    <details><summary>Фактические параметры workflow</summary><pre>{{.ParametersJSON}}</pre></details>
+    <details><summary>Исходный запрос Harness</summary><pre>{{.RequestJSON}}</pre></details>
+  </section>
+  {{end}}
+  {{end}}
+</main>
+<dialog class="ultra-viewer" data-ultra-viewer aria-label="Просмотр изображения">
+  <div class="ultra-viewer-toolbar" data-ultra-zoom-toolbar>
+    <div class="ultra-actions"><button class="button ghost ultra-icon" type="button" data-zoom="out" aria-label="Уменьшить" title="Уменьшить"><i data-lucide="zoom-out" aria-hidden="true"></i></button><output data-zoom-value>100%</output><button class="button ghost ultra-icon" type="button" data-zoom="in" aria-label="Увеличить" title="Увеличить"><i data-lucide="zoom-in" aria-hidden="true"></i></button><button class="button ghost ultra-icon" type="button" data-zoom="fit" aria-label="Вписать в экран" title="Вписать в экран"><i data-lucide="scan" aria-hidden="true"></i></button><button class="button ghost ultra-icon" type="button" data-zoom="actual" aria-label="Исходный размер" title="Исходный размер"><i data-lucide="maximize" aria-hidden="true"></i></button></div>
+    <button class="button ghost ultra-icon" type="button" data-ultra-viewer-close aria-label="Закрыть изображение" title="Закрыть изображение"><i data-lucide="x" aria-hidden="true"></i></button>
+  </div>
+  <div class="ultra-viewport" data-ultra-viewport tabindex="0" aria-label="Изображение с масштабированием"></div>
+  <p class="ultra-viewer-error" data-ultra-viewer-error role="alert" hidden>Изображение недоступно. Закройте просмотр и обновите задание.</p>
+</dialog>
+</body></html>
+{{end}}
+
+{{define "admin_ultra_snapshot"}}
+<div data-ultra-snapshot data-ultra-version="{{.SnapshotVersion}}" data-ultra-active="{{if .Job}}{{if .Job.Active}}true{{else}}false{{end}}{{else}}{{if index .List.Counts "active"}}true{{else}}false{{end}}{{end}}">
+{{with .Job}}
+  <section class="ultra-job-facts" aria-label="Состояние задания">
+    <div><span>Статус</span><strong class="badge {{.Tone}}">{{.StateLabel}}</strong></div>
+    <div><span>Поставлено</span><strong>{{formatTime .CreatedAt}}</strong></div>
+    <div><span>{{if .Active}}В очереди и работе{{else}}Затрачено{{end}}</span><strong>{{.Duration}}</strong></div>
+    <div><span>Базовый размер</span><strong>{{if .Width}}{{.Width}} × {{.Height}}{{else}}Не сохранён{{end}}</strong></div>
+  </section>
+  <dl class="ultra-job-identifiers"><div><dt>Модель</dt><dd>{{if .Model}}{{.Model}}{{else}}Не сохранена{{end}}</dd></div><div><dt>ID задания</dt><dd><code>{{.ID}}</code></dd></div><div><dt>Обновлено</dt><dd>{{formatTime .UpdatedAt}}</dd></div></dl>
+  {{if .Error}}<section class="ui-status-banner {{if eq .State "failed"}}danger{{end}}" role="status"><span>{{.Error}}</span></section>{{end}}
+  <section class="ultra-results" aria-label="Результаты задания">
+    <div class="ultra-block-heading"><h2>Результат</h2><span class="muted">{{.OutputCount}} {{fileLabel .OutputCount}}</span></div>
+    <div class="ultra-media-grid">
+    {{$job := .}}{{range .Outputs}}
+      <figure>{{if .Missing}}<div class="empty-state">Файл недоступен</div>{{else}}<a class="ultra-image" href="/admin/harness-ultra/{{$job.ID}}/outputs/{{.Index}}" data-ultra-image aria-label="Открыть результат"><img src="/admin/harness-ultra/{{$job.ID}}/outputs/{{.Index}}" alt="Результат Harness Ultra" loading="lazy"></a>{{end}}<figcaption><span>{{if .Width}}{{.Width}} × {{.Height}} · {{end}}{{formatBytes .Bytes}}</span>{{if not .Missing}}<a class="button ghost ultra-icon" href="/admin/harness-ultra/{{$job.ID}}/outputs/{{.Index}}?download=1" title="Скачать оригинал" aria-label="Скачать оригинал"><i data-lucide="download" aria-hidden="true"></i></a>{{end}}</figcaption></figure>
+    {{else}}<div class="empty-state"><strong>{{if .Active}}{{.StateLabel}}{{else if eq .State "cancelled"}}Задание отменено{{else}}Результатов нет{{end}}</strong></div>{{end}}
+    </div>
+  </section>
+  {{if .Inputs}}<section class="ultra-inputs" aria-label="Исходные изображения"><h2>Исходные изображения</h2><div class="ultra-input-grid">{{range .Inputs}}<figure><a class="ultra-image" href="/admin/harness-ultra/{{$job.ID}}/inputs/{{.Index}}" data-ultra-image aria-label="Открыть исходное изображение"><img src="/admin/harness-ultra/{{$job.ID}}/inputs/{{.Index}}" alt="Референс задания" loading="lazy"></a><figcaption>{{.Width}} × {{.Height}}</figcaption></figure>{{end}}</div></section>{{end}}
+{{else}}
+  <dl class="ultra-counts" aria-label="Сводка истории"><div><dt>Всего</dt><dd>{{index .List.Counts "total"}}</dd></div><div><dt>В работе</dt><dd>{{index .List.Counts "active"}}</dd></div><div><dt>Готово</dt><dd>{{index .List.Counts "completed"}}</dd></div><div><dt>Ошибки</dt><dd>{{index .List.Counts "failed"}}</dd></div><div><dt>Отменено</dt><dd>{{index .List.Counts "cancelled"}}</dd></div></dl>
+  <section class="ultra-journal" aria-label="Задания Harness Ultra">
+    <div class="ultra-row ultra-column-head" aria-hidden="true"><span></span><span>Задание</span><span>Статус</span><span>Создано · время</span><span></span></div>
+    {{range .List.Items}}
+    <a class="ultra-row" href="/admin/harness-ultra/{{.ID}}">
+      <span class="ultra-thumb">{{if .Outputs}}{{$preview := index .Outputs 0}}<img loading="lazy" src="/admin/harness-ultra/{{.ID}}/outputs/{{$preview.Index}}" alt="">{{else}}<i data-lucide="{{if eq .State "failed"}}triangle-alert{{else if eq .State "cancelled"}}circle-x{{else}}image{{end}}" aria-hidden="true"></i>{{end}}</span>
+      <span class="ultra-row-description"><strong>{{if .PromptExcerpt}}{{.PromptExcerpt}}{{else}}Задание без сохранённого промпта{{end}}</strong><span class="ultra-model">{{.ModeLabel}} · {{if .Model}}{{.Model}}{{else}}Модель не сохранена{{end}}</span>{{if .Error}}<span class="ultra-row-error">{{.Error}}</span>{{end}}<code>{{.ID}}</code></span>
+      <span class="ultra-row-state"><span class="badge {{.Tone}}">{{.StateLabel}}</span></span>
+      <span class="ultra-row-time"><time>{{formatTime .CreatedAt}}</time><span>{{.Duration}}{{if .Width}} · {{.Width}} × {{.Height}}{{end}}</span></span>
+      <i class="ultra-row-chevron" data-lucide="chevron-right" aria-hidden="true"></i>
+    </a>
+    {{else}}<div class="empty-state"><strong>Заданий не найдено</strong>{{if .Filtered}}<a class="button ghost" href="/admin/harness-ultra">Сбросить фильтры</a>{{end}}</div>{{end}}
+  </section>
+  <nav class="ultra-pagination" aria-label="Страницы истории">{{if .NextURL}}<a class="button ghost" href="{{.NextURL}}">Более ранние<i data-lucide="arrow-right" aria-hidden="true"></i></a>{{end}}{{if .Filtered}}<a href="/admin/harness-ultra">К началу истории</a>{{end}}</nav>
+{{end}}
+</div>
+{{end}}

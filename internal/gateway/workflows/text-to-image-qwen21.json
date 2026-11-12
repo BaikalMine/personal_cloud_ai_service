@@ -1,0 +1,16 @@
+{
+  "id": "text-to-image-qwen21",
+  "name": "Qwen Image 2.1: текст в изображение",
+  "description": "Генерация Qwen Image 2.1 с отдельным Qwen3-VL 8B и VAE.",
+  "requires_image": false,
+  "nodes": {
+    "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "{{diffusion_model}}", "weight_dtype": "default"}},
+    "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "{{text_encoder}}", "type": "qwen_image", "device": "default"}},
+    "3": {"class_type": "VAELoader", "inputs": {"vae_name": "{{vae}}"}},
+    "4": {"class_type": "TextEncodeQwenImage21", "inputs": {"clip": ["2", 0], "prompt": "{{positive_prompt}}", "negative_prompt": "{{negative_prompt}}", "resolution": 1024}},
+    "5": {"class_type": "EmptyLatentImage", "inputs": {"width": "{{width}}", "height": "{{height}}", "batch_size": 1}},
+    "6": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "positive": ["4", 0], "negative": ["4", 1], "latent_image": ["5", 0], "seed": "{{seed}}", "steps": "{{steps}}", "cfg": "{{cfg}}", "sampler_name": "{{sampler}}", "scheduler": "{{scheduler}}", "denoise": 1}},
+    "7": {"class_type": "VAEDecode", "inputs": {"samples": ["6", 0], "vae": ["3", 0]}},
+    "8": {"class_type": "SaveImage", "inputs": {"images": ["7", 0], "filename_prefix": "AI-Gateway-Qwen21"}}
+  }
+}

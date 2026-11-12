@@ -19,13 +19,15 @@
     let inFlight = null;
     let remote = null;
     let status = "loading";
-    const snapshot = () => ({ revision, dirty: epoch !== savedEpoch, ready, status, remote });
+    let replacing = false;
+    const snapshot = () => ({ revision, dirty: epoch !== savedEpoch, ready, status, remote, replacing });
     const publish = (next, error = "") => { status = next; onState({ ...snapshot(), error }); };
     const queue = () => {
       if (timer !== null) unschedule(timer);
-      if (ready && !stopped && status !== "conflict") timer = schedule(() => { timer = null; flush().catch(() => {}); }, delay);
+      if (ready && !stopped && !replacing && status !== "conflict") timer = schedule(() => { timer = null; flush().catch(() => {}); }, delay);
     };
     const load = async ({ preserveLocal = false } = {}) => {
+      if (inFlight) await inFlight.catch(() => {});
       publish("loading");
       try {
         const result = await transport("load");
@@ -121,9 +123,36 @@
       }
       return true;
     };
-    return { load, markDirty, flush, settle, useRemote, keepLocal, remove, snapshot };
+    const replace = async operation => {
+      if (replacing || !await settle() || replacing) return false;
+      const capturedEpoch = epoch, expectedRevision = revision;
+      if (timer !== null) { unschedule(timer); timer = null; }
+      replacing = true;
+      publish("saving");
+      inFlight = (async () => {
+        try {
+          const next = await operation(expectedRevision);
+          if (!next?.revision || !next.values || !Array.isArray(next.assets)) throw new Error("Не удалось подтвердить новую версию черновика. Обновите состояние.");
+          remote = { ...next, fresh: true };
+          revision = remote.revision;
+          replacing = false;
+          if (epoch !== capturedEpoch) { publish("conflict"); return false; }
+          try { await apply(remote); }
+          catch (error) { publish("conflict", error.message); return false; }
+          savedEpoch = epoch;
+          publish("saved");
+          return true;
+        } catch (error) {
+          replacing = false;
+          publish("error", error.message);
+          throw error;
+        } finally { replacing = false; inFlight = null; }
+      })();
+      return inFlight;
+    };
+    return { load, markDirty, flush, settle, replace, useRemote, keepLocal, remove, snapshot };
   };
-  const bindUI = ({ document, window, transport, capture, apply, onSaved = () => {}, hasUnsavedFiles = () => false, onNavigationBlocked = () => {} }) => {
+  const bindUI = ({ document, window, feedback, transport, capture, apply, onSaved = () => {}, hasUnsavedFiles = () => false, onNavigationBlocked = () => {}, schedule, unschedule }) => {
     const bar = document.getElementById("generation-draft-bar");
     if (!bar) return null;
     const status = document.getElementById("generation-draft-status");
@@ -137,22 +166,25 @@
       saving: "Сохраняем настройки и материалы...", saved: "Сохранено", error: "Не удалось сохранить",
       conflict: "Есть другая сохранённая версия. Выберите, какую оставить.",
     };
-    const controller = createController({ transport, capture, apply, onState(state) {
+    const controller = createController({ transport, capture, apply, schedule, unschedule, onState(state) {
       bar.hidden = false;
-      bar.dataset.state = state.status;
-      status.textContent = state.error || labels[state.status] || "";
+      feedback.present(bar, state.status);
+      feedback.text(status, state.error || labels[state.status] || "");
       const missing = state.remote?.assets?.filter((asset) => !asset.available).length || 0;
-      if (state.status === "saved" && missing) status.textContent = `Настройки сохранены. Недоступных материалов: ${missing}`;
+      if (state.status === "saved" && missing) feedback.text(status, `Настройки сохранены. Недоступных материалов: ${missing}`);
       expiry.textContent = state.remote?.expires_at
         ? `Настройки до ${new Date(state.remote.expires_at).toLocaleDateString("ru-RU")}` : "";
       remote.hidden = local.hidden = state.status !== "conflict";
-      remote.textContent = state.remote ? "Взять сохранённый" : "Очистить локальный";
+      feedback.text(remote, state.remote ? "Взять сохранённый" : "Очистить локальный");
       save.hidden = state.status === "conflict";
-      save.disabled = state.status === "loading" || state.status === "saving";
+      feedback.button(save, { busy: ["loading", "saving"].includes(state.status), disabled: ["loading", "saving"].includes(state.status) });
       remove.disabled = !state.revision || ["loading", "saving", "conflict"].includes(state.status);
       if (["saved", "dirty"].includes(state.status) && state.remote) onSaved(state.remote);
     }});
-    const reportError = (error) => { status.textContent = error.message || "Не удалось выполнить действие"; };
+    const reportError = (error) => {
+      feedback.present(bar, controller.snapshot().status === "conflict" ? "conflict" : "error");
+      feedback.text(status, error.message || "Не удалось выполнить действие");
+    };
     save.addEventListener("click", async () => {
       if (!controller.snapshot().ready) await controller.load({ preserveLocal: true });
       controller.markDirty();
@@ -167,13 +199,19 @@
       if (controller.snapshot().ready) controller.flush();
       else controller.load({ preserveLocal: true });
     });
+    let departureAccepted = false;
     window.addEventListener("beforeunload", (event) => {
-      if (!controller.snapshot().dirty && !hasUnsavedFiles()) return;
+      if (departureAccepted) return;
+      if (!controller.snapshot().dirty && !controller.snapshot().replacing && !hasUnsavedFiles()) return;
       event.preventDefault();
       event.returnValue = "";
     });
+    let pageActive = true;
+    window.addEventListener("pagehide", () => { pageActive = false; });
+    window.addEventListener("pageshow", () => { pageActive = true; departureAccepted = false; });
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden") controller.flush();
+      // An accepted unload must not start another write in the departing page.
+      if (pageActive && document.visibilityState === "hidden") controller.flush();
     });
     let navigating = false;
     document.addEventListener("click", async (event) => {
@@ -183,29 +221,123 @@
       const destination = new URL(link.href, window.location.href);
       if (destination.origin !== window.location.origin || !["http:", "https:"].includes(destination.protocol)) return;
       if (destination.pathname === window.location.pathname && destination.search === window.location.search && destination.hash) return;
-      if (!controller.snapshot().dirty && !hasUnsavedFiles()) return;
+      if (!controller.snapshot().dirty && !controller.snapshot().replacing && !hasUnsavedFiles()) return;
       event.preventDefault();
       if (navigating) return;
       navigating = true;
-      const reveal = (message = "") => {
-        onNavigationBlocked();
-        const disclosure = bar.closest("details");
-        if (disclosure) disclosure.open = true;
-        if (message) status.textContent = message;
-        bar.scrollIntoView({ block: "nearest" });
-        (controller.snapshot().status === "conflict" ? remote : save).focus();
+      const leaveUnsaved = (message) => {
+        if (!window.confirm(message + "\n\nПерейти без сохранения этих изменений? Уже сохранённый черновик останется.")) return;
+        departureAccepted = true;
+        pageActive = false;
+        window.location.assign(destination.href);
       };
       try {
-        if (!await controller.settle()) { reveal(); return; }
+        if (!await controller.settle()) {
+          leaveUnsaved(controller.snapshot().status === "conflict"
+            ? "Есть другая версия черновика. Текущие изменения не сохранены."
+            : "Не удалось сохранить последние изменения черновика.");
+          return;
+        }
         if (hasUnsavedFiles()) {
-          reveal("Материалы ещё не сохранены. Дождитесь загрузки или удалите их перед переходом.");
+          leaveUnsaved("Не все выбранные файлы загружены. При переходе их потребуется выбрать повторно.");
           return;
         }
         window.location.assign(destination.href);
-      } catch (error) { reveal(error.message || "Не удалось сохранить черновик перед переходом."); }
+      } catch (error) { leaveUnsaved("Не удалось сохранить черновик перед переходом."); }
       finally { navigating = false; }
     });
     return controller;
   };
-  return { createController, bindUI };
+  /**
+   * Draft HTTP contract. This transport never retries a mutation automatically.
+   * @param {{fetcher?: typeof fetch, csrf: () => string, timeoutSignal?: (ms: number) => AbortSignal}} options
+   * @returns {(operation: string, body?: URLSearchParams) => Promise<{ok: boolean, status: number, payload: Object}>}
+   */
+  const createTransport = ({ fetcher = fetch, csrf, timeoutSignal = ms => AbortSignal.timeout(ms) }) => async (operation, body) => {
+    if (!["load", "save", "delete"].includes(operation)) throw new Error("Unknown draft operation");
+    if (body) body.set("csrf", csrf() || "");
+    const response = await fetcher(operation === "delete" ? "/generate/draft/delete" : "/generate/draft", {
+      method: operation === "load" ? "GET" : "POST", body, credentials: "same-origin", cache: "no-store",
+      headers: body ? { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" } : {},
+      signal: timeoutSignal(20000),
+    });
+    return { ok: response.ok, status: response.status, payload: await response.json() };
+  };
+  /**
+   * Studio draft orchestration: validates before synchronous presentation,
+   * suppresses restore-generated dirty events and shares the upload controller.
+   * Model parameter serialization is delegated to the supplied payload adapter.
+   * @param {Object} options
+   * @param {Object} options.parameters Adapter with draft(state) and resolveSelection(values).
+   * @param {() => Object} options.capture Current payload state, without side effects.
+   * @param {(draft: Object) => void} options.apply Synchronous component presentation only.
+   * @param {Object} options.files pending() returns all active/inactive source entries;
+   * inFlight() returns transport count; current(entry) checks selection identity.
+   * Entries contain field, source, upload() and optional state element.
+   * @returns {Object} Versioned controller API plus apply(draft) and readonly restoring.
+   */
+  const createSession = ({ document, window, root, form, store, advanced, feedback, parameters, capture, apply: render, files, onSaved, onNavigationBlocked, transport, schedule, unschedule }) => {
+    const attempts = new Map();
+    let restoring = 0;
+    let advancedOpen = Boolean(advanced?.open);
+    let controller = null;
+    const markDirty = () => { if (!restoring) controller?.markDirty(); };
+    const apply = draft => {
+      parameters.resolveSelection(draft.values || {});
+      restoring++;
+      try { render({ ...draft, fresh: true }); }
+      finally { restoring--; advancedOpen = Boolean(advanced?.open); }
+    };
+    const captureDraft = () => {
+      const pending = files.pending();
+      // Save text first, then bind one newly uploaded material in the next save.
+      const next = !files.inFlight() && pending.find(item => attempts.get(item.field) !== item.source);
+      if (next) {
+        attempts.set(next.field, next.source);
+        if (next.state) next.state.textContent = "Сохраняем материал...";
+        next.upload().catch(error => {
+          if (next.state && files.current(next)) next.state.textContent = error.message || "Материал не загружен";
+        }).finally(markDirty);
+      }
+      const state = capture();
+      return parameters.draft({ ...state, media: { ...state.media, pending } });
+    };
+    controller = bindUI({
+      document, window, feedback, capture: captureDraft, apply,
+      transport: transport || createTransport({ csrf: () => form.elements.csrf?.value || "" }),
+      hasUnsavedFiles: () => files.pending().length > 0,
+      onSaved, onNavigationBlocked, schedule, unschedule,
+    });
+    form.addEventListener("input", markDirty);
+    form.addEventListener("change", markDirty);
+    advanced?.addEventListener("toggle", () => {
+      if (advancedOpen === advanced.open) return;
+      advancedOpen = advanced.open;
+      markDirty();
+    });
+    root.addEventListener("click", event => {
+      if (event.target.closest?.(".scenario-choice, .generation-workflow-choice, [data-remove-image], #minimax-audio-remove, #minimax-video-remove, #prompt-assistant-apply, #prompt-assistant-keep")) markDirty();
+    });
+    store?.subscribe?.("assistant:change", ({ previous, current }) => {
+      if (["original", "suggestion", "action", "correlationID"].some(key => previous?.[key] !== current?.[key])) markDirty();
+    });
+    store?.subscribe?.("wizard:change", ({ previous, current }) => {
+      if (["step", "scenarioID", "workflowID"].some(key => previous?.[key] !== current?.[key])) markDirty();
+    });
+    const settleFiles = async () => {
+      if (!controller?.snapshot().ready || controller.snapshot().status === "conflict") return false;
+      const pending = files.pending();
+      for (const item of pending) {
+        if (!files.current(item)) throw new Error("Исходники изменились. Проверьте их перед продолжением.");
+        await item.upload();
+        markDirty();
+      }
+      markDirty();
+      if (!await controller.settle()) return false;
+      if (files.pending().length || files.inFlight()) throw new Error("Материалы ещё загружаются или изменились. Дождитесь загрузки и повторите действие.");
+      return true;
+    };
+    return { ...controller, apply, markDirty, settleFiles, load: options => controller?.load(options), get restoring() { return restoring > 0; } };
+  };
+  return { createController, bindUI, createTransport, createSession };
 });

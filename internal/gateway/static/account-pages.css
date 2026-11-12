@@ -1,0 +1,96 @@
+.account-workspace { max-width: 1440px; container-type: inline-size; }
+.account-workspace [hidden] { display: none; }
+.account-heading { margin-bottom: 20px; }
+.account-heading > p { margin: 0 0 6px; color: var(--muted); font-size: 12px; }
+.account-heading h1 { margin: 0; color: var(--text); font-size: 28px; line-height: 1.25; overflow-wrap: anywhere; }
+.account-tabs { display: flex; flex-wrap: wrap; gap: 0 16px; border-bottom: 1px solid var(--line); margin-bottom: 24px; }
+.account-tabs a { display: flex; align-items: center; min-height: 44px; border-bottom: 2px solid transparent; color: var(--text-soft); font-size: 13px; font-weight: 600; text-decoration: none; }
+.account-tabs a[aria-current=page] { border-bottom-color: var(--mint); color: var(--text); }
+.account-workspace :is(section, div, form, label, fieldset, dl, dd) { min-width: 0; }
+.account-section { display: grid; grid-template-columns: minmax(160px, 220px) minmax(0, 640px); column-gap: 32px; padding: 24px 0; border-bottom: 1px solid var(--line); }
+.account-section:first-of-type { padding-top: 0; }
+.account-section h2, .account-list-heading h2 { margin: 0; font-size: 17px; line-height: 1.4; }
+.account-section > header p { color: var(--muted); font-size: 12px; line-height: 1.65; margin: 10px 0 0; }
+.account-section-body > form + form { border-top: 1px solid var(--line); margin-top: 20px; padding-top: 20px; }
+.account-fields { margin: 0; padding: 0; border: 0; display: grid; gap: 16px; }
+.account-fields > .ui-field + .ui-field { margin-top: 0; }
+.account-fields .ui-field-label { margin: 0; }
+.account-form-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.account-workspace [data-account-progress] { margin: 0; font-size: 12px; color: var(--color-info); overflow-wrap: anywhere; }
+.account-workspace [data-account-progress]:empty { display: none; }
+.account-workspace svg { flex-shrink: 0; width: 18px; height: 18px; }
+.account-workspace :is(button, .button) { white-space: normal; overflow-wrap: anywhere; min-height: 44px; }
+.account-workspace .icon-button { min-width: 44px; width: 44px; height: 44px; padding: 0; }
+.account-workspace input { min-width: 0; }
+.account-theme-form { max-width: 300px; }
+.account-theme-form noscript button { margin-top: 12px; }
+.account-preference { min-height: 52px; margin: 0; padding: 12px 0; border: 0; border-radius: 0; background: transparent; }
+.account-preference small { display: block; color: var(--muted); font-size: 12px; line-height: 1.6; font-weight: 400; margin-top: 4px; }
+.account-preference input { flex-shrink: 0; }
+.account-theme-form + .account-preference { margin-top: 16px; }
+.account-password { display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 8px; }
+.account-message { border-left: 3px solid var(--color-danger); padding-left: 12px; margin: 0 0 20px; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.account-message > p { margin: 0 0 6px; }
+.account-success { border-left: 3px solid var(--color-success); padding-left: 12px; font-size: 13px; margin: 0 0 20px; }
+.account-field-error { color: var(--color-danger); margin: -8px 0 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.account-field-error a { color: inherit; }
+.account-note { color: var(--muted); font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }
+.account-facts { margin: 16px 0 0; display: grid; gap: 10px; }
+.account-facts > div { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(0, 1.5fr); gap: 16px; }
+.account-facts dt { color: var(--muted); font-size: 12px; }
+.account-facts dd { margin: 0; color: var(--text-soft); font-size: 12px; overflow-wrap: anywhere; }
+.account-capabilities { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); list-style: none; margin: 24px 0; padding: 0; gap: 14px; }
+.account-capabilities li { display: flex; align-items: start; gap: 10px; font-size: 13px; overflow-wrap: anywhere; }
+.account-capabilities svg { color: var(--color-success); }
+.account-quotas { margin: 0; }
+.account-quotas > div { display: grid; grid-template-columns: 90px minmax(0,1fr); gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+.account-quotas > div:first-child { padding-top: 0; }
+.account-quotas dt { font-size: 14px; font-weight: 700; }
+.account-quotas dd { margin: 0; display: grid; gap: 6px; font-size: 13px; overflow-wrap: anywhere; }
+.account-quotas dd span { color: var(--muted); font-size: 12px; }
+.account-details { margin-top: 8px; }
+.account-details > summary { min-height: 44px; padding: 11px 0; color: var(--text-soft); font-size: 12px; cursor: pointer; }
+.account-details .account-facts { margin: 8px 0 16px; }
+.account-service-usage { list-style: none; padding: 0; margin: 16px 0 0; }
+.account-service-usage li { display: flex; flex-wrap: wrap; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 12px; }
+.account-route-hint { display: none; }
+.account-route-hint:target { display: block; margin-top: 20px; font-size: 13px; }
+.account-session-filters { display: grid; grid-template-columns: minmax(180px, 1.6fr) repeat(2,minmax(130px,1fr)) auto; align-items: end; gap: 12px; margin: 0 0 24px; }
+.account-session-filters > .ui-field + .ui-field { margin-top: 0; }
+.account-list-heading { display: flex; align-items: start; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin: 0 0 16px; }
+.account-list-heading p { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+.account-table-wrap { max-width: 100%; overflow: auto; }
+.account-session-table { width: 100%; table-layout: fixed; }
+.account-session-table th:first-child { width: 30%; }
+.account-session-table th:last-child { width: 120px; }
+.account-session-table :is(th,td) { padding: 14px 12px; vertical-align: top; font-size: 12px; overflow-wrap: anywhere; }
+.account-session-table td > strong { font-size: 13px; }
+.account-session-table code { white-space: normal; overflow-wrap: anywhere; }
+.account-session-table .account-facts > div { grid-template-columns: 1fr; gap: 4px; }
+.account-confirm { display: flex; align-items: start; gap: 8px; margin: 0 0 10px; font-size: 12px; }
+.account-confirm input { width: 18px; height: 18px; flex: 0 0 18px; }
+.account-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; font-size: 12px; color: var(--muted); }
+.account-pagination > div { display: flex; gap: 8px; }
+.account-empty { padding: 24px 0; border-block: 1px solid var(--line); }
+.account-empty h3 { margin: 0 0 16px; font-size: 16px; }
+html:has(.account-workspace) { scroll-padding-top: 90px; }
+.account-workspace :is(input, button, a, summary, section, [id]) { scroll-margin-block: 90px 90px; }
+@container (max-width: 1000px) {
+  .account-section { grid-template-columns: minmax(130px,180px) minmax(0,1fr); column-gap: 24px; }
+  .account-session-filters { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+@container (max-width: 640px) {
+  .account-heading h1 { font-size: 25px; }
+  .account-tabs { gap: 0 14px; margin-bottom: 20px; }
+  .account-section { grid-template-columns: 1fr; row-gap: 18px; padding-block: 20px; }
+  .account-capabilities { grid-template-columns: 1fr; }
+  .account-session-filters { grid-template-columns: 1fr; }
+  .account-session-table thead { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); }
+  .account-session-table tbody { display: block; }
+  .account-session-table tr { display: grid; grid-template-columns: minmax(0,1fr) 100px; gap: 10px 12px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+  .account-session-table td { display: block; grid-column: 1; padding: 0; border: 0; }
+  .account-session-table td:last-child { grid-column: 2; grid-row: 1 / span 4; text-align: right; }
+  .account-session-table td:not(:first-child):not(:last-child)::before { display: block; content: attr(data-label); color: var(--muted); margin-bottom: 4px; font-size: 12px; }
+  .account-session-table .account-confirm { text-align: left; flex-wrap: wrap; }
+  .account-quotas > div { grid-template-columns: 60px minmax(0,1fr); }
+}

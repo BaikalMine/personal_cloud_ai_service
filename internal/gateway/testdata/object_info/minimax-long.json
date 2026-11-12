@@ -1,0 +1,337 @@
+{
+  "schema_version": 1,
+  "family": "minimax-long",
+  "source_fingerprint": "a91be5413f61830b3d459236bdc5c7067ebc02d35763c651d8858c8e791d1f6e",
+  "nodes": {
+    "MiniMaxH3LongReferenceSampler": {
+      "input": {
+        "required": {
+          "model": [
+            "MODEL",
+            {}
+          ],
+          "clip": [
+            "CLIP",
+            {}
+          ],
+          "vae": [
+            "VAE",
+            {}
+          ],
+          "audio_vae": [
+            "VAE",
+            {}
+          ],
+          "prompt": [
+            "STRING",
+            {
+              "tooltip": "Use a timestamped master timeline, or connect prompt_plan to use prebuilt local prompts.",
+              "multiline": true,
+              "dynamicPrompts": true
+            }
+          ],
+          "width": [
+            "INT",
+            {
+              "default": 1344,
+              "min": 32,
+              "max": 4096,
+              "step": 32
+            }
+          ],
+          "height": [
+            "INT",
+            {
+              "default": 768,
+              "min": 32,
+              "max": 4096,
+              "step": 32
+            }
+          ],
+          "length": [
+            "INT",
+            {
+              "tooltip": "Total timeline frames at 24 fps. Accepts either 720 or its H3-grid form 736 as 30 seconds.",
+              "default": 720,
+              "min": 24,
+              "max": 86400,
+              "step": 1
+            }
+          ],
+          "max_raw_frames": [
+            "INT",
+            {
+              "tooltip": "H3-grid segment value reversed to its intended duration when possible. 362 means a 15-second timeline window. AV guide frames and H3 padding are added internally.",
+              "default": 124,
+              "min": 73,
+              "max": 362,
+              "step": 17
+            }
+          ],
+          "context_frames": [
+            "COMBO",
+            {
+              "tooltip": "Previous sampled AV latent generated as a guide at the start of each continuation segment. Guided frames are removed from the delivered video.",
+              "default": "22",
+              "multiselect": false,
+              "options": [
+                "22",
+                "39"
+              ]
+            }
+          ],
+          "noise_seed": [
+            "INT",
+            {
+              "tooltip": "Noise seed shared by every segment. Timeline prompts and continuation context change between segments.",
+              "default": 0,
+              "min": 0,
+              "max": 18446744073709551615,
+              "control_after_generate": true
+            }
+          ],
+          "sampler": [
+            "SAMPLER",
+            {}
+          ],
+          "sigmas": [
+            "SIGMAS",
+            {}
+          ],
+          "cache_name": [
+            "STRING",
+            {
+              "tooltip": "Output-relative bundle folder. Supports Save Video patterns, for example h3_long_video/%seed.seed%/. Existing folders become _2, _3, and so on unless resume is enabled.",
+              "default": "h3_long_video",
+              "multiline": false
+            }
+          ],
+          "resume": [
+            "BOOLEAN",
+            {
+              "tooltip": "Reuse compatible segment checkpoints. Missing or incompatible later segments are regenerated.",
+              "default": false
+            }
+          ],
+          "reroll_from_segment": [
+            "INT",
+            {
+              "tooltip": "With resume enabled: -1 resumes the first missing segment; N keeps segments before N and regenerates N onward.",
+              "default": -1,
+              "min": -1,
+              "max": 999,
+              "step": 1
+            }
+          ],
+          "crf": [
+            "INT",
+            {
+              "advanced": true,
+              "default": 18,
+              "min": 0,
+              "max": 51,
+              "step": 1
+            }
+          ],
+          "ref_image_size": [
+            "COMBO",
+            {
+              "default": "match",
+              "multiselect": false,
+              "options": [
+                "match",
+                "max"
+              ]
+            }
+          ]
+        },
+        "optional": {
+          "initial_latent": [
+            "LATENT",
+            {
+              "tooltip": "Optional sampled H3 AV latent. Its tail guides a removable head before this node's timeline starts at 0."
+            }
+          ],
+          "ref_images": [
+            "COMFY_AUTOGROW_V3",
+            {
+              "template": {
+                "input": {
+                  "required": {
+                    "ref_image": [
+                      "IMAGE",
+                      {}
+                    ]
+                  }
+                },
+                "prefix": "ref_image_",
+                "min": 0,
+                "max": 9
+              }
+            }
+          ],
+          "ref_videos": [
+            "COMFY_AUTOGROW_V3",
+            {
+              "template": {
+                "input": {
+                  "required": {
+                    "ref_video": [
+                      "IMAGE",
+                      {
+                        "tooltip": "Reference video frames at 24 fps"
+                      }
+                    ]
+                  }
+                },
+                "prefix": "ref_video_",
+                "min": 0,
+                "max": 3
+              }
+            }
+          ],
+          "ref_video_audios": [
+            "COMFY_AUTOGROW_V3",
+            {
+              "template": {
+                "input": {
+                  "required": {
+                    "ref_video_audio": [
+                      "AUDIO",
+                      {}
+                    ]
+                  }
+                },
+                "prefix": "ref_video_audio_",
+                "min": 0,
+                "max": 3
+              }
+            }
+          ],
+          "ref_audios": [
+            "COMFY_AUTOGROW_V3",
+            {
+              "template": {
+                "input": {
+                  "required": {
+                    "ref_audio": [
+                      "AUDIO",
+                      {}
+                    ]
+                  }
+                },
+                "prefix": "ref_audio_",
+                "min": 0,
+                "max": 3
+              }
+            }
+          ],
+          "prompt_plan": [
+            "MINIMAX_H3_LONG_PROMPT_PLAN",
+            {
+              "tooltip": "Optional exact local prompts from MiniMax H3 Long Prompt Planner. When connected, these replace internal prompt splitting."
+            }
+          ],
+          "transition_mode": [
+            "COMBO",
+            {
+              "default": "continuous",
+              "multiselect": false,
+              "options": [
+                "continuous",
+                "cinematic"
+              ]
+            }
+          ]
+        },
+        "hidden": {
+          "prompt": [
+            "PROMPT"
+          ],
+          "extra_pnginfo": [
+            "EXTRA_PNGINFO"
+          ],
+          "unique_id": [
+            "UNIQUE_ID"
+          ]
+        }
+      },
+      "input_order": {
+        "required": [
+          "model",
+          "clip",
+          "vae",
+          "audio_vae",
+          "prompt",
+          "width",
+          "height",
+          "length",
+          "max_raw_frames",
+          "context_frames",
+          "noise_seed",
+          "sampler",
+          "sigmas",
+          "cache_name",
+          "resume",
+          "reroll_from_segment",
+          "crf",
+          "ref_image_size"
+        ],
+        "optional": [
+          "initial_latent",
+          "ref_images",
+          "ref_videos",
+          "ref_video_audios",
+          "ref_audios",
+          "prompt_plan",
+          "transition_mode"
+        ],
+        "hidden": [
+          "prompt",
+          "extra_pnginfo",
+          "unique_id"
+        ]
+      },
+      "is_input_list": false,
+      "output": [
+        "VIDEO",
+        "LATENT",
+        "STRING",
+        "INT"
+      ],
+      "output_is_list": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "output_name": [
+        "video",
+        "last_latent",
+        "master_path",
+        "segment_count"
+      ],
+      "output_tooltips": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "output_matchtypes": null,
+      "name": "MiniMaxH3LongReferenceSampler",
+      "display_name": "MiniMax H3 Long Reference Sampler",
+      "description": "Generate a long H3 reference video as sequential AV latent segments. Segment checkpoints are saved under output/h3_long.",
+      "python_module": null,
+      "category": "sampling/minimax",
+      "output_node": true,
+      "deprecated": false,
+      "experimental": false,
+      "dev_only": false,
+      "api_node": false,
+      "price_badge": null,
+      "search_aliases": null,
+      "essentials_category": null,
+      "has_intermediate_output": false
+    }
+  }
+}

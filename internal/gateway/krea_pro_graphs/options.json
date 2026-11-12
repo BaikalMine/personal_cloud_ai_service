@@ -1,0 +1,3882 @@
+[
+  {
+    "id": "3538",
+    "label": "Баланс референсов",
+    "section": "Референсы",
+    "toggle": false,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "image1_tokens",
+        "label": "image1 tokens",
+        "type": "COMBO",
+        "choices": [
+          "low",
+          "normal",
+          "high",
+          "max"
+        ],
+        "default": "normal"
+      },
+      {
+        "name": "image2_tokens",
+        "label": "image2 tokens",
+        "type": "COMBO",
+        "choices": [
+          "low",
+          "normal",
+          "high",
+          "max"
+        ],
+        "default": "normal"
+      },
+      {
+        "name": "image3_tokens",
+        "label": "image3 tokens",
+        "type": "COMBO",
+        "choices": [
+          "low",
+          "normal",
+          "high",
+          "max"
+        ],
+        "default": "normal"
+      },
+      {
+        "name": "image4_tokens",
+        "label": "image4 tokens",
+        "type": "COMBO",
+        "choices": [
+          "low",
+          "normal",
+          "high",
+          "max"
+        ],
+        "default": "normal"
+      }
+    ]
+  },
+  {
+    "id": "3513",
+    "label": "Identity Edit",
+    "section": "Референсы",
+    "toggle": false,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "ref_boost",
+        "label": "ref boost",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1000,
+        "step": 0.01,
+        "default": 1
+      },
+      {
+        "name": "ref_boost_a",
+        "label": "ref boost a",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1000,
+        "step": 0.01,
+        "default": 1
+      },
+      {
+        "name": "fit_mode",
+        "label": "fit mode",
+        "type": "COMBO",
+        "choices": [
+          "fit",
+          "crop (legacy)"
+        ],
+        "default": "fit"
+      },
+      {
+        "name": "ref_position",
+        "label": "ref position",
+        "type": "COMBO",
+        "choices": [
+          "aligned (trained)",
+          "beside (right of target)",
+          "bag of features"
+        ],
+        "default": "aligned (trained)"
+      },
+      {
+        "name": "ref_position_a",
+        "label": "ref position a",
+        "type": "COMBO",
+        "choices": [
+          "aligned (trained)",
+          "beside (right of target)",
+          "bag of features"
+        ],
+        "default": "aligned (trained)"
+      }
+    ]
+  },
+  {
+    "id": "3539",
+    "label": "Grounded Encode",
+    "section": "Референсы",
+    "toggle": false,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "grounding_px",
+        "label": "grounding px",
+        "type": "INT",
+        "min": 0,
+        "max": 4096,
+        "step": 64,
+        "default": 768
+      },
+      {
+        "name": "system_prompt",
+        "label": "system prompt",
+        "type": "STRING",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "id": "3680",
+    "label": "Убрать фон · Фото 1",
+    "section": "Референсы",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "refine",
+        "label": "refine",
+        "type": "COMBO",
+        "choices": [
+          "guided_filter",
+          "vitmatte",
+          "none"
+        ],
+        "default": "none"
+      },
+      {
+        "name": "grow",
+        "label": "Расширение маски",
+        "type": "FLOAT",
+        "min": -512,
+        "max": 512,
+        "step": 0.1,
+        "default": 0
+      },
+      {
+        "name": "edge_erode",
+        "label": "edge erode",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1024,
+        "step": 0.1,
+        "default": 10
+      },
+      {
+        "name": "edge_dilate",
+        "label": "edge dilate",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1024,
+        "step": 0.1,
+        "default": 10
+      },
+      {
+        "name": "black_point",
+        "label": "black point",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 0.999,
+        "step": 0.001,
+        "default": 0
+      },
+      {
+        "name": "white_point",
+        "label": "white point",
+        "type": "FLOAT",
+        "min": 0.001,
+        "max": 1,
+        "step": 0.001,
+        "default": 1
+      },
+      {
+        "name": "feather",
+        "label": "Растушёвка",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 100,
+        "step": 0.1,
+        "default": 0
+      },
+      {
+        "name": "max_megapixels",
+        "label": "max megapixels",
+        "type": "FLOAT",
+        "min": 0.25,
+        "max": 16,
+        "step": 0.25,
+        "default": 2
+      },
+      {
+        "name": "background",
+        "label": "background",
+        "type": "COMBO",
+        "choices": [
+          "black",
+          "white",
+          "gray",
+          "green",
+          "blue",
+          "magenta"
+        ],
+        "default": "black"
+      }
+    ]
+  },
+  {
+    "id": "3681",
+    "label": "Убрать фон · Фото 2",
+    "section": "Референсы",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "refine",
+        "label": "refine",
+        "type": "COMBO",
+        "choices": [
+          "guided_filter",
+          "vitmatte",
+          "none"
+        ],
+        "default": "none"
+      },
+      {
+        "name": "grow",
+        "label": "Расширение маски",
+        "type": "FLOAT",
+        "min": -512,
+        "max": 512,
+        "step": 0.1,
+        "default": 0
+      },
+      {
+        "name": "edge_erode",
+        "label": "edge erode",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1024,
+        "step": 0.1,
+        "default": 10
+      },
+      {
+        "name": "edge_dilate",
+        "label": "edge dilate",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1024,
+        "step": 0.1,
+        "default": 10
+      },
+      {
+        "name": "black_point",
+        "label": "black point",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 0.999,
+        "step": 0.001,
+        "default": 0
+      },
+      {
+        "name": "white_point",
+        "label": "white point",
+        "type": "FLOAT",
+        "min": 0.001,
+        "max": 1,
+        "step": 0.001,
+        "default": 1
+      },
+      {
+        "name": "feather",
+        "label": "Растушёвка",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 100,
+        "step": 0.1,
+        "default": 0
+      },
+      {
+        "name": "max_megapixels",
+        "label": "max megapixels",
+        "type": "FLOAT",
+        "min": 0.25,
+        "max": 16,
+        "step": 0.25,
+        "default": 2
+      },
+      {
+        "name": "background",
+        "label": "background",
+        "type": "COMBO",
+        "choices": [
+          "black",
+          "white",
+          "gray",
+          "green",
+          "blue",
+          "magenta"
+        ],
+        "default": "black"
+      }
+    ]
+  },
+  {
+    "id": "3682",
+    "label": "Убрать фон · Фото 3",
+    "section": "Референсы",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "refine",
+        "label": "refine",
+        "type": "COMBO",
+        "choices": [
+          "guided_filter",
+          "vitmatte",
+          "none"
+        ],
+        "default": "none"
+      },
+      {
+        "name": "grow",
+        "label": "Расширение маски",
+        "type": "FLOAT",
+        "min": -512,
+        "max": 512,
+        "step": 0.1,
+        "default": 0
+      },
+      {
+        "name": "edge_erode",
+        "label": "edge erode",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1024,
+        "step": 0.1,
+        "default": 10
+      },
+      {
+        "name": "edge_dilate",
+        "label": "edge dilate",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1024,
+        "step": 0.1,
+        "default": 10
+      },
+      {
+        "name": "black_point",
+        "label": "black point",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 0.999,
+        "step": 0.001,
+        "default": 0
+      },
+      {
+        "name": "white_point",
+        "label": "white point",
+        "type": "FLOAT",
+        "min": 0.001,
+        "max": 1,
+        "step": 0.001,
+        "default": 1
+      },
+      {
+        "name": "feather",
+        "label": "Растушёвка",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 100,
+        "step": 0.1,
+        "default": 0
+      },
+      {
+        "name": "max_megapixels",
+        "label": "max megapixels",
+        "type": "FLOAT",
+        "min": 0.25,
+        "max": 16,
+        "step": 0.25,
+        "default": 2
+      },
+      {
+        "name": "background",
+        "label": "background",
+        "type": "COMBO",
+        "choices": [
+          "black",
+          "white",
+          "gray",
+          "green",
+          "blue",
+          "magenta"
+        ],
+        "default": "black"
+      }
+    ]
+  },
+  {
+    "id": "3683",
+    "label": "Убрать фон · Фото 4",
+    "section": "Референсы",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "refine",
+        "label": "refine",
+        "type": "COMBO",
+        "choices": [
+          "guided_filter",
+          "vitmatte",
+          "none"
+        ],
+        "default": "none"
+      },
+      {
+        "name": "grow",
+        "label": "Расширение маски",
+        "type": "FLOAT",
+        "min": -512,
+        "max": 512,
+        "step": 0.1,
+        "default": 0
+      },
+      {
+        "name": "edge_erode",
+        "label": "edge erode",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1024,
+        "step": 0.1,
+        "default": 10
+      },
+      {
+        "name": "edge_dilate",
+        "label": "edge dilate",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1024,
+        "step": 0.1,
+        "default": 10
+      },
+      {
+        "name": "black_point",
+        "label": "black point",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 0.999,
+        "step": 0.001,
+        "default": 0
+      },
+      {
+        "name": "white_point",
+        "label": "white point",
+        "type": "FLOAT",
+        "min": 0.001,
+        "max": 1,
+        "step": 0.001,
+        "default": 1
+      },
+      {
+        "name": "feather",
+        "label": "Растушёвка",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 100,
+        "step": 0.1,
+        "default": 0
+      },
+      {
+        "name": "max_megapixels",
+        "label": "max megapixels",
+        "type": "FLOAT",
+        "min": 0.25,
+        "max": 16,
+        "step": 0.25,
+        "default": 2
+      },
+      {
+        "name": "background",
+        "label": "background",
+        "type": "COMBO",
+        "choices": [
+          "black",
+          "white",
+          "gray",
+          "green",
+          "blue",
+          "magenta"
+        ],
+        "default": "black"
+      }
+    ]
+  },
+  {
+    "id": "3518",
+    "label": "Кодирование глубины",
+    "section": "Референсы",
+    "toggle": false,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "resize",
+        "label": "resize",
+        "type": "COMBO",
+        "choices": [
+          "keep_control_image_size",
+          "match_latent_size"
+        ],
+        "default": "match_latent_size"
+      },
+      {
+        "name": "upscale_method",
+        "label": "upscale method",
+        "type": "COMBO",
+        "choices": [
+          "lanczos",
+          "bicubic",
+          "bilinear",
+          "area",
+          "nearest-exact"
+        ],
+        "default": "lanczos"
+      },
+      {
+        "name": "crop",
+        "label": "crop",
+        "type": "COMBO",
+        "choices": [
+          "center",
+          "disabled"
+        ],
+        "default": "center"
+      },
+      {
+        "name": "channel_mode",
+        "label": "channel mode",
+        "type": "COMBO",
+        "choices": [
+          "rgb",
+          "grayscale"
+        ],
+        "default": "grayscale"
+      },
+      {
+        "name": "normalize",
+        "label": "normalize",
+        "type": "COMBO",
+        "choices": [
+          "none",
+          "per_image_minmax"
+        ],
+        "default": "none"
+      },
+      {
+        "name": "invert",
+        "label": "invert",
+        "type": "BOOLEAN",
+        "default": false
+      },
+      {
+        "name": "batch_mode",
+        "label": "batch mode",
+        "type": "COMBO",
+        "choices": [
+          "independent_images",
+          "video_frames"
+        ],
+        "default": "independent_images"
+      }
+    ]
+  },
+  {
+    "id": "2719",
+    "label": "Moodboard",
+    "section": "Семплирование",
+    "toggle": false,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "moodboard_positive",
+        "label": "moodboard positive",
+        "type": "STRING",
+        "default": ""
+      },
+      {
+        "name": "moodboard_negative",
+        "label": "moodboard negative",
+        "type": "STRING",
+        "default": ""
+      },
+      {
+        "name": "strength",
+        "label": "Сила",
+        "type": "COMBO",
+        "choices": [
+          "concise",
+          "normal",
+          "strong"
+        ],
+        "default": "normal"
+      },
+      {
+        "name": "style_only",
+        "label": "style only",
+        "type": "BOOLEAN",
+        "default": false
+      },
+      {
+        "name": "separator",
+        "label": "separator",
+        "type": "COMBO",
+        "choices": [
+          "newline",
+          "comma"
+        ],
+        "default": "newline"
+      }
+    ]
+  },
+  {
+    "id": "4102",
+    "label": "Сдвиг модели",
+    "section": "Семплирование",
+    "toggle": false,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "shift",
+        "label": "shift",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 100,
+        "step": 0.01,
+        "default": 4
+      },
+      {
+        "name": "sampling",
+        "label": "sampling",
+        "type": "COMBO",
+        "choices": [
+          "flow",
+          "img_to_img_velocity"
+        ],
+        "default": "flow"
+      }
+    ]
+  },
+  {
+    "id": "3927",
+    "label": "Кривая сигм",
+    "section": "Семплирование",
+    "toggle": false,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "sigma_curve_presets",
+        "label": "sigma curve presets",
+        "type": "COMBO",
+        "choices": [
+          "base",
+          "beta",
+          "flowmatch",
+          "hyperbolic",
+          "gaussian",
+          "saved: Krea_Drop",
+          "saved: krea2_simple_20"
+        ],
+        "default": "gaussian"
+      },
+      {
+        "name": "denoise",
+        "label": "denoise",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 1
+      },
+      {
+        "name": "denoise_steps",
+        "label": "denoise steps",
+        "type": "COMBO",
+        "choices": [
+          "full schedule",
+          "at step swap"
+        ],
+        "default": "at step swap"
+      },
+      {
+        "name": "low_pass",
+        "label": "low pass",
+        "type": "COMBO",
+        "choices": [
+          "continue noise schedule",
+          "renoise"
+        ],
+        "default": "continue noise schedule"
+      },
+      {
+        "name": "scheduler_shape_2",
+        "label": "scheduler shape 2",
+        "type": "COMBO",
+        "choices": [
+          "same as first",
+          "simple",
+          "sgm_uniform",
+          "karras",
+          "exponential",
+          "ddim_uniform",
+          "beta",
+          "normal",
+          "linear_quadratic",
+          "kl_optimal",
+          "beta57",
+          "bong_tangent"
+        ],
+        "default": "same as first"
+      },
+      {
+        "name": "first_pass_resample",
+        "label": "first pass resample",
+        "type": "FLOAT",
+        "min": 0.25,
+        "max": 4,
+        "step": 0.05,
+        "default": 1.15
+      },
+      {
+        "name": "sigma_shift",
+        "label": "sigma shift",
+        "type": "COMBO",
+        "choices": [
+          "use model default",
+          "by image size",
+          "custom"
+        ],
+        "default": "use model default"
+      },
+      {
+        "name": "custom_shift",
+        "label": "custom shift",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 20,
+        "step": 0.05,
+        "default": 1.15
+      },
+      {
+        "name": "beta_alpha",
+        "label": "beta alpha",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 50,
+        "step": 0.01,
+        "default": 0.6
+      },
+      {
+        "name": "beta_beta",
+        "label": "beta beta",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 50,
+        "step": 0.01,
+        "default": 0.6
+      },
+      {
+        "name": "flowmatch_shift",
+        "label": "flowmatch shift",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 20,
+        "step": 0.01,
+        "default": 3
+      },
+      {
+        "name": "flowmatch_dynamic",
+        "label": "flowmatch dynamic",
+        "type": "BOOLEAN",
+        "default": true
+      },
+      {
+        "name": "flowmatch_terminal",
+        "label": "flowmatch terminal",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 0.99,
+        "step": 0.01,
+        "default": 0
+      },
+      {
+        "name": "hyperbolic_function",
+        "label": "hyperbolic function",
+        "type": "COMBO",
+        "choices": [
+          "sinh",
+          "cosh",
+          "tanh",
+          "asinh",
+          "acosh",
+          "atanh"
+        ],
+        "default": "tanh"
+      },
+      {
+        "name": "hyperbolic_scale",
+        "label": "hyperbolic scale",
+        "type": "FLOAT",
+        "min": 0.01,
+        "max": 10,
+        "step": 0.01,
+        "default": 1
+      },
+      {
+        "name": "gaussian_mean",
+        "label": "gaussian mean",
+        "type": "FLOAT",
+        "min": -10,
+        "max": 10,
+        "step": 0.01,
+        "default": 0.04
+      },
+      {
+        "name": "gaussian_std",
+        "label": "gaussian std",
+        "type": "FLOAT",
+        "min": 0.01,
+        "max": 10,
+        "step": 0.01,
+        "default": 1
+      },
+      {
+        "name": "gaussian_operation",
+        "label": "gaussian operation",
+        "type": "COMBO",
+        "choices": [
+          "pdf",
+          "cdf",
+          "inverse_cdf",
+          "transform",
+          "modulate"
+        ],
+        "default": "transform"
+      },
+      {
+        "name": "edit_mode",
+        "label": "edit mode",
+        "type": "COMBO",
+        "choices": [
+          "smooth",
+          "spike"
+        ],
+        "default": "smooth"
+      },
+      {
+        "name": "smooth_radius",
+        "label": "smooth radius",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 20,
+        "step": 0.5,
+        "default": 1.5
+      },
+      {
+        "name": "curve_edit",
+        "label": "curve edit",
+        "type": "STRING",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "id": "3907",
+    "label": "Detail Daemon",
+    "section": "Семплирование",
+    "toggle": false,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "amount",
+        "label": "Интенсивность",
+        "type": "FLOAT",
+        "min": -5,
+        "max": 5,
+        "step": 0.01,
+        "default": 0.34
+      },
+      {
+        "name": "start",
+        "label": "start",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.15
+      },
+      {
+        "name": "end",
+        "label": "end",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.85
+      },
+      {
+        "name": "peak",
+        "label": "peak",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 0
+      },
+      {
+        "name": "exponent",
+        "label": "exponent",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 10,
+        "step": 0.05,
+        "default": 0
+      },
+      {
+        "name": "mode",
+        "label": "mode",
+        "type": "COMBO",
+        "choices": [
+          "classic",
+          "look only",
+          "keep structure"
+        ],
+        "default": "look only"
+      }
+    ]
+  },
+  {
+    "id": "3014",
+    "label": "Детализация после генерации",
+    "section": "Семплирование",
+    "toggle": false,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "detailer_steps",
+        "label": "Шаги детализации",
+        "type": "INT",
+        "min": 0,
+        "max": 10000,
+        "default": 4
+      }
+    ]
+  },
+  {
+    "id": "4014",
+    "label": "Глаза",
+    "section": "Детализация",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "prompt",
+        "label": "Область",
+        "type": "STRING",
+        "default": "Eyes"
+      },
+      {
+        "name": "threshold",
+        "label": "Порог",
+        "type": "FLOAT",
+        "min": 0.05,
+        "max": 0.95,
+        "step": 0.01,
+        "default": 0.5
+      },
+      {
+        "name": "grow",
+        "label": "Расширение маски",
+        "type": "FLOAT",
+        "min": -64,
+        "max": 256,
+        "step": 0.5,
+        "default": 4
+      },
+      {
+        "name": "feather",
+        "label": "Растушёвка",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 128,
+        "step": 0.5,
+        "default": 9
+      },
+      {
+        "name": "blend",
+        "label": "Смешивание",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 1
+      },
+      {
+        "name": "padding",
+        "label": "Отступ",
+        "type": "INT",
+        "min": 0,
+        "max": 1024,
+        "step": 8,
+        "default": 80
+      },
+      {
+        "name": "inpaint_resolution",
+        "label": "inpaint resolution",
+        "type": "INT",
+        "min": 256,
+        "max": 4096,
+        "step": 64,
+        "default": 1008
+      },
+      {
+        "name": "denoise",
+        "label": "denoise",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.2
+      },
+      {
+        "name": "tone_match",
+        "label": "Согласовать цвет",
+        "type": "BOOLEAN",
+        "default": true
+      },
+      {
+        "name": "cfg",
+        "label": "CFG",
+        "type": "FLOAT",
+        "min": 1,
+        "max": 30,
+        "step": 0.1,
+        "default": 1
+      }
+    ]
+  },
+  {
+    "id": "4013",
+    "label": "Лицо",
+    "section": "Детализация",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "prompt",
+        "label": "Область",
+        "type": "STRING",
+        "default": "Face\n"
+      },
+      {
+        "name": "threshold",
+        "label": "Порог",
+        "type": "FLOAT",
+        "min": 0.05,
+        "max": 0.95,
+        "step": 0.01,
+        "default": 0.5
+      },
+      {
+        "name": "grow",
+        "label": "Расширение маски",
+        "type": "FLOAT",
+        "min": -64,
+        "max": 256,
+        "step": 0.5,
+        "default": 4
+      },
+      {
+        "name": "feather",
+        "label": "Растушёвка",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 128,
+        "step": 0.5,
+        "default": 14
+      },
+      {
+        "name": "blend",
+        "label": "Смешивание",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 1
+      },
+      {
+        "name": "padding",
+        "label": "Отступ",
+        "type": "INT",
+        "min": 0,
+        "max": 1024,
+        "step": 8,
+        "default": 120
+      },
+      {
+        "name": "inpaint_resolution",
+        "label": "inpaint resolution",
+        "type": "INT",
+        "min": 256,
+        "max": 4096,
+        "step": 64,
+        "default": 1008
+      },
+      {
+        "name": "denoise",
+        "label": "denoise",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.15
+      },
+      {
+        "name": "tone_match",
+        "label": "Согласовать цвет",
+        "type": "BOOLEAN",
+        "default": true
+      },
+      {
+        "name": "cfg",
+        "label": "CFG",
+        "type": "FLOAT",
+        "min": 1,
+        "max": 30,
+        "step": 0.1,
+        "default": 1
+      }
+    ]
+  },
+  {
+    "id": "4015",
+    "label": "Руки",
+    "section": "Детализация",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "prompt",
+        "label": "Область",
+        "type": "STRING",
+        "default": "hands"
+      },
+      {
+        "name": "threshold",
+        "label": "Порог",
+        "type": "FLOAT",
+        "min": 0.05,
+        "max": 0.95,
+        "step": 0.01,
+        "default": 0.5
+      },
+      {
+        "name": "grow",
+        "label": "Расширение маски",
+        "type": "FLOAT",
+        "min": -64,
+        "max": 256,
+        "step": 0.5,
+        "default": 4
+      },
+      {
+        "name": "feather",
+        "label": "Растушёвка",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 128,
+        "step": 0.5,
+        "default": 20
+      },
+      {
+        "name": "blend",
+        "label": "Смешивание",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 1
+      },
+      {
+        "name": "padding",
+        "label": "Отступ",
+        "type": "INT",
+        "min": 0,
+        "max": 1024,
+        "step": 8,
+        "default": 120
+      },
+      {
+        "name": "inpaint_resolution",
+        "label": "inpaint resolution",
+        "type": "INT",
+        "min": 256,
+        "max": 4096,
+        "step": 64,
+        "default": 1008
+      },
+      {
+        "name": "denoise",
+        "label": "denoise",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.15
+      },
+      {
+        "name": "tone_match",
+        "label": "Согласовать цвет",
+        "type": "BOOLEAN",
+        "default": true
+      },
+      {
+        "name": "cfg",
+        "label": "CFG",
+        "type": "FLOAT",
+        "min": 1,
+        "max": 30,
+        "step": 0.1,
+        "default": 1
+      }
+    ]
+  },
+  {
+    "id": "4019",
+    "label": "Размер области",
+    "section": "Детализация",
+    "toggle": false,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "value",
+        "label": "Разрешение",
+        "type": "FLOAT",
+        "min": 480,
+        "max": 2048,
+        "step": 16,
+        "default": 1008
+      }
+    ]
+  },
+  {
+    "id": "4017",
+    "label": "Описание глаз",
+    "section": "Детализация",
+    "toggle": false,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "positive",
+        "label": "Описание",
+        "type": "STRING",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "id": "4016",
+    "label": "Описание лица",
+    "section": "Детализация",
+    "toggle": false,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "positive",
+        "label": "Описание",
+        "type": "STRING",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "id": "4018",
+    "label": "Описание рук",
+    "section": "Детализация",
+    "toggle": false,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "positive",
+        "label": "Описание",
+        "type": "STRING",
+        "default": "detailed hands and fingernails"
+      }
+    ]
+  },
+  {
+    "id": "4046",
+    "label": "VOSR2",
+    "section": "Детализация",
+    "toggle": true,
+    "enabled": true,
+    "fields": [
+      {
+        "name": "color_alignment",
+        "label": "Согласование цвета",
+        "type": "COMBO",
+        "choices": [
+          "wavelet",
+          "adain",
+          "none"
+        ],
+        "default": "wavelet"
+      },
+      {
+        "name": "tile_size",
+        "label": "Размер плитки",
+        "type": "INT",
+        "min": 256,
+        "max": 2048,
+        "step": 64,
+        "default": 512
+      },
+      {
+        "name": "vae_tile_size",
+        "label": "Плитка VAE",
+        "type": "INT",
+        "min": 256,
+        "max": 4096,
+        "step": 64,
+        "default": 512
+      }
+    ]
+  },
+  {
+    "id": "4150",
+    "label": "RelayVSR",
+    "section": "Детализация",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "source",
+        "label": "source",
+        "type": "COMBO",
+        "choices": [
+          "video",
+          "image"
+        ],
+        "default": "image"
+      },
+      {
+        "name": "upscale",
+        "label": "upscale",
+        "type": "COMBO",
+        "choices": [
+          "2x",
+          "4x"
+        ],
+        "default": "2x"
+      },
+      {
+        "name": "detail",
+        "label": "detail",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.95
+      }
+    ]
+  },
+  {
+    "id": "3659",
+    "label": "Удаление шума",
+    "section": "Кожа",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "blur_strength",
+        "label": "blur strength",
+        "type": "FLOAT",
+        "min": 0.001,
+        "max": 8,
+        "step": 0.001,
+        "default": 1
+      },
+      {
+        "name": "edge_preservation",
+        "label": "edge preservation",
+        "type": "FLOAT",
+        "min": 0.001,
+        "max": 0.25,
+        "step": 0.001,
+        "default": 0.049
+      },
+      {
+        "name": "radius_multiplier",
+        "label": "radius multiplier",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 3,
+        "step": 0.01,
+        "default": 1
+      },
+      {
+        "name": "strength",
+        "label": "Сила",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 0.65
+      },
+      {
+        "name": "mode",
+        "label": "mode",
+        "type": "COMBO",
+        "choices": [
+          "smart",
+          "legacy"
+        ],
+        "default": "smart"
+      },
+      {
+        "name": "luma",
+        "label": "luma",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 3,
+        "step": 0.05,
+        "default": 1
+      },
+      {
+        "name": "chroma",
+        "label": "chroma",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 3,
+        "step": 0.05,
+        "default": 1
+      },
+      {
+        "name": "keep_detail",
+        "label": "keep detail",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 0.5
+      }
+    ]
+  },
+  {
+    "id": "3662",
+    "label": "Маска человека",
+    "section": "Кожа",
+    "toggle": false,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "engine",
+        "label": "engine",
+        "type": "COMBO",
+        "choices": [
+          "segformer",
+          "mediapipe"
+        ],
+        "default": "segformer"
+      },
+      {
+        "name": "face",
+        "label": "face",
+        "type": "BOOLEAN",
+        "default": true
+      },
+      {
+        "name": "hair",
+        "label": "hair",
+        "type": "BOOLEAN",
+        "default": false
+      },
+      {
+        "name": "body",
+        "label": "body",
+        "type": "BOOLEAN",
+        "default": true
+      },
+      {
+        "name": "clothes",
+        "label": "clothes",
+        "type": "BOOLEAN",
+        "default": false
+      },
+      {
+        "name": "accessories",
+        "label": "accessories",
+        "type": "BOOLEAN",
+        "default": false
+      },
+      {
+        "name": "background",
+        "label": "background",
+        "type": "BOOLEAN",
+        "default": false
+      },
+      {
+        "name": "confidence",
+        "label": "confidence",
+        "type": "FLOAT",
+        "min": 0.05,
+        "max": 0.95,
+        "step": 0.01,
+        "default": 0.4
+      },
+      {
+        "name": "refine",
+        "label": "refine",
+        "type": "COMBO",
+        "choices": [
+          "guided_filter",
+          "vitmatte",
+          "none"
+        ],
+        "default": "vitmatte"
+      },
+      {
+        "name": "edge_erode",
+        "label": "edge erode",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1024,
+        "step": 0.1,
+        "default": 10
+      },
+      {
+        "name": "edge_dilate",
+        "label": "edge dilate",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1024,
+        "step": 0.1,
+        "default": 10
+      },
+      {
+        "name": "black_point",
+        "label": "black point",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 0.999,
+        "step": 0.001,
+        "default": 0.01
+      },
+      {
+        "name": "white_point",
+        "label": "white point",
+        "type": "FLOAT",
+        "min": 0.001,
+        "max": 1,
+        "step": 0.001,
+        "default": 0.99
+      },
+      {
+        "name": "max_megapixels",
+        "label": "max megapixels",
+        "type": "FLOAT",
+        "min": 0.25,
+        "max": 16,
+        "step": 0.25,
+        "default": 2
+      },
+      {
+        "name": "remove_features",
+        "label": "remove features",
+        "type": "BOOLEAN",
+        "default": false
+      }
+    ]
+  },
+  {
+    "id": "4096",
+    "label": "Skin Master",
+    "section": "Кожа",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "preset",
+        "label": "Профиль",
+        "type": "COMBO",
+        "choices": [
+          "Custom",
+          "Natural",
+          "Clean Even Tone",
+          "Soft Beauty",
+          "Editorial Detail",
+          "Real Skin Restore",
+          "Mature Skin",
+          "Weathered",
+          "Body Skin",
+          "Sun-Kissed"
+        ],
+        "default": "Real Skin Restore"
+      },
+      {
+        "name": "strength",
+        "label": "Сила",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 1
+      },
+      {
+        "name": "clean",
+        "label": "clean",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 0.2
+      },
+      {
+        "name": "pores",
+        "label": "pores",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 2,
+        "step": 0.05,
+        "default": 1.2
+      },
+      {
+        "name": "add_pores",
+        "label": "add pores",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 0.6
+      },
+      {
+        "name": "pore_size",
+        "label": "pore size",
+        "type": "FLOAT",
+        "min": 0.5,
+        "max": 2,
+        "step": 0.05,
+        "default": 1
+      },
+      {
+        "name": "even_skin",
+        "label": "even skin",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 0.05
+      },
+      {
+        "name": "wrinkles",
+        "label": "wrinkles",
+        "type": "FLOAT",
+        "min": -1,
+        "max": 1,
+        "step": 0.05,
+        "default": 0
+      },
+      {
+        "name": "even_colour",
+        "label": "even colour",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 0.1
+      },
+      {
+        "name": "pigmentation",
+        "label": "pigmentation",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 0.3
+      },
+      {
+        "name": "eye_detail",
+        "label": "eye detail",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 2,
+        "step": 0.05,
+        "default": 0.5
+      },
+      {
+        "name": "warmth",
+        "label": "warmth",
+        "type": "FLOAT",
+        "min": -1,
+        "max": 1,
+        "step": 0.05,
+        "default": -0.2
+      },
+      {
+        "name": "brightness",
+        "label": "brightness",
+        "type": "FLOAT",
+        "min": -0.5,
+        "max": 1,
+        "step": 0.05,
+        "default": 0.05
+      },
+      {
+        "name": "rosy",
+        "label": "rosy",
+        "type": "FLOAT",
+        "min": -0.5,
+        "max": 0.5,
+        "step": 0.05,
+        "default": 0.03
+      },
+      {
+        "name": "saturation",
+        "label": "saturation",
+        "type": "FLOAT",
+        "min": -0.5,
+        "max": 0.5,
+        "step": 0.05,
+        "default": -0.05
+      },
+      {
+        "name": "shadow_lift",
+        "label": "shadow lift",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 0.1
+      },
+      {
+        "name": "delicate_skin",
+        "label": "delicate skin",
+        "type": "BOOLEAN",
+        "default": true
+      },
+      {
+        "name": "skin_match",
+        "label": "skin match",
+        "type": "FLOAT",
+        "min": 0.5,
+        "max": 2,
+        "step": 0.05,
+        "default": 1
+      }
+    ]
+  },
+  {
+    "id": "3995",
+    "label": "Естественный вид",
+    "section": "Кожа",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "strength",
+        "label": "Сила",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 2,
+        "step": 0.01,
+        "default": 0.5
+      },
+      {
+        "name": "skin",
+        "label": "skin",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 2,
+        "step": 0.01,
+        "default": 0.75
+      }
+    ]
+  },
+  {
+    "id": "3698",
+    "label": "Освещение",
+    "section": "Свет и глубина",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "preset",
+        "label": "Профиль",
+        "type": "COMBO",
+        "choices": [
+          "custom",
+          "Soft window (left)",
+          "Soft window (right)",
+          "Rembrandt",
+          "Split (hard side)",
+          "Top light",
+          "Under light",
+          "Rim / back light",
+          "Golden hour",
+          "Campfire",
+          "Cyberpunk",
+          "Key + fill",
+          "Flat front"
+        ],
+        "default": "Rembrandt"
+      },
+      {
+        "name": "blend",
+        "label": "Смешивание",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.8
+      },
+      {
+        "name": "light1_type",
+        "label": "light1 type",
+        "type": "COMBO",
+        "choices": [
+          "spot",
+          "sun"
+        ],
+        "default": "spot"
+      },
+      {
+        "name": "light1_x",
+        "label": "light1 x",
+        "type": "FLOAT",
+        "min": -1,
+        "max": 1,
+        "step": 0.05,
+        "default": 0.65
+      },
+      {
+        "name": "light1_y",
+        "label": "light1 y",
+        "type": "FLOAT",
+        "min": -1,
+        "max": 1,
+        "step": 0.05,
+        "default": 0.6
+      },
+      {
+        "name": "light1_z",
+        "label": "light1 z",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 0.5
+      },
+      {
+        "name": "light1_brightness",
+        "label": "light1 brightness",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 4,
+        "step": 0.01,
+        "default": 1.4
+      },
+      {
+        "name": "light1_spread",
+        "label": "light1 spread",
+        "type": "FLOAT",
+        "min": 0.05,
+        "max": 1.5,
+        "step": 0.01,
+        "default": 0.9
+      },
+      {
+        "name": "light1_warmth",
+        "label": "light1 warmth",
+        "type": "FLOAT",
+        "min": -1,
+        "max": 1,
+        "step": 0.05,
+        "default": 0.1
+      },
+      {
+        "name": "light1_color",
+        "label": "light1 color",
+        "type": "COMBO",
+        "choices": [
+          "none",
+          "red",
+          "orange",
+          "yellow",
+          "green",
+          "cyan",
+          "blue",
+          "purple",
+          "magenta"
+        ],
+        "default": "none"
+      },
+      {
+        "name": "light1_color_amount",
+        "label": "light1 color amount",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.5
+      },
+      {
+        "name": "enable_light_2",
+        "label": "enable light 2",
+        "type": "BOOLEAN",
+        "default": false
+      },
+      {
+        "name": "light2_type",
+        "label": "light2 type",
+        "type": "COMBO",
+        "choices": [
+          "spot",
+          "sun"
+        ],
+        "default": "spot"
+      },
+      {
+        "name": "light2_x",
+        "label": "light2 x",
+        "type": "FLOAT",
+        "min": -1,
+        "max": 1,
+        "step": 0.05,
+        "default": -0.8
+      },
+      {
+        "name": "light2_y",
+        "label": "light2 y",
+        "type": "FLOAT",
+        "min": -1,
+        "max": 1,
+        "step": 0.05,
+        "default": -0.1
+      },
+      {
+        "name": "light2_z",
+        "label": "light2 z",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 0.5
+      },
+      {
+        "name": "light2_brightness",
+        "label": "light2 brightness",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 4,
+        "step": 0.01,
+        "default": 0.6
+      },
+      {
+        "name": "light2_spread",
+        "label": "light2 spread",
+        "type": "FLOAT",
+        "min": 0.05,
+        "max": 1.5,
+        "step": 0.01,
+        "default": 1.2
+      },
+      {
+        "name": "light2_warmth",
+        "label": "light2 warmth",
+        "type": "FLOAT",
+        "min": -1,
+        "max": 1,
+        "step": 0.05,
+        "default": -0.15
+      },
+      {
+        "name": "light2_color",
+        "label": "light2 color",
+        "type": "COMBO",
+        "choices": [
+          "none",
+          "red",
+          "orange",
+          "yellow",
+          "green",
+          "cyan",
+          "blue",
+          "purple",
+          "magenta"
+        ],
+        "default": "none"
+      },
+      {
+        "name": "light2_color_amount",
+        "label": "light2 color amount",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.5
+      },
+      {
+        "name": "light_wrap",
+        "label": "light wrap",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.3
+      },
+      {
+        "name": "fill",
+        "label": "Заполнение",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1.5,
+        "step": 0.01,
+        "default": 0.18
+      },
+      {
+        "name": "shadows",
+        "label": "shadows",
+        "type": "COMBO",
+        "choices": [
+          "soft",
+          "hard",
+          "off"
+        ],
+        "default": "soft"
+      },
+      {
+        "name": "shadow_amount",
+        "label": "shadow amount",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.55
+      },
+      {
+        "name": "shadow_blur",
+        "label": "shadow blur",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.3
+      },
+      {
+        "name": "background_shadow",
+        "label": "background shadow",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.5
+      },
+      {
+        "name": "self_shadow",
+        "label": "self shadow",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.8
+      },
+      {
+        "name": "relief",
+        "label": "relief",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.45
+      },
+      {
+        "name": "advanced",
+        "label": "advanced",
+        "type": "BOOLEAN",
+        "default": false
+      },
+      {
+        "name": "depth_falloff",
+        "label": "depth falloff",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 2,
+        "step": 0.01,
+        "default": 0.4
+      },
+      {
+        "name": "shadow_height",
+        "label": "shadow height",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.3
+      },
+      {
+        "name": "shadow_length",
+        "label": "shadow length",
+        "type": "FLOAT",
+        "min": 0.02,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.35
+      },
+      {
+        "name": "shadow_softness",
+        "label": "shadow softness",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.5
+      },
+      {
+        "name": "subject_distance",
+        "label": "subject distance",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.15
+      },
+      {
+        "name": "mask_dome",
+        "label": "mask dome",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.4
+      }
+    ]
+  },
+  {
+    "id": "3800",
+    "label": "Глубина резкости",
+    "section": "Свет и глубина",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "look",
+        "label": "look",
+        "type": "COMBO",
+        "choices": [
+          "Natural",
+          "Portrait",
+          "Cinematic",
+          "Golden hour",
+          "Vintage",
+          "Dreamy",
+          "Landscape",
+          "Night",
+          "B&W",
+          "Custom"
+        ],
+        "default": "Natural"
+      },
+      {
+        "name": "haze",
+        "label": "haze",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 2,
+        "step": 0.01,
+        "default": 0.08
+      },
+      {
+        "name": "haze_distance",
+        "label": "haze distance",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 0.95,
+        "step": 0.01,
+        "default": 0.5
+      },
+      {
+        "name": "haze_warmth",
+        "label": "haze warmth",
+        "type": "FLOAT",
+        "min": -1,
+        "max": 1,
+        "step": 0.05,
+        "default": 0
+      },
+      {
+        "name": "light_wrap",
+        "label": "light wrap",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 2,
+        "step": 0.01,
+        "default": 0.2
+      },
+      {
+        "name": "dof_blur",
+        "label": "dof blur",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 2,
+        "step": 0.01,
+        "default": 0.2
+      },
+      {
+        "name": "focus_range",
+        "label": "focus range",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 0.8,
+        "step": 0.01,
+        "default": 0.15
+      },
+      {
+        "name": "bokeh",
+        "label": "bokeh",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 2,
+        "step": 0.01,
+        "default": 0.4
+      },
+      {
+        "name": "auto_focus",
+        "label": "auto focus",
+        "type": "BOOLEAN",
+        "default": true
+      },
+      {
+        "name": "focus_depth",
+        "label": "focus depth",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.32
+      },
+      {
+        "name": "depth_direction",
+        "label": "depth direction",
+        "type": "COMBO",
+        "choices": [
+          "Auto",
+          "Bright = near",
+          "Bright = far"
+        ],
+        "default": "Auto"
+      }
+    ]
+  },
+  {
+    "id": "3801",
+    "label": "Световой ореол",
+    "section": "Свет и глубина",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "intensity",
+        "label": "intensity",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 8,
+        "step": 0.01,
+        "default": 0.2
+      },
+      {
+        "name": "threshold",
+        "label": "Порог",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.8
+      },
+      {
+        "name": "smoothing",
+        "label": "smoothing",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.3
+      },
+      {
+        "name": "radius",
+        "label": "radius",
+        "type": "FLOAT",
+        "min": 0.1,
+        "max": 5,
+        "step": 0.1,
+        "default": 1
+      },
+      {
+        "name": "saturation",
+        "label": "saturation",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 2,
+        "step": 0.05,
+        "default": 0.7
+      },
+      {
+        "name": "exposure",
+        "label": "exposure",
+        "type": "FLOAT",
+        "min": 0.1,
+        "max": 4,
+        "step": 0.05,
+        "default": 0.95
+      },
+      {
+        "name": "mode",
+        "label": "mode",
+        "type": "COMBO",
+        "choices": [
+          "Bloom",
+          "Pro-Mist",
+          "Halation"
+        ],
+        "default": "Halation"
+      },
+      {
+        "name": "look",
+        "label": "look",
+        "type": "COMBO",
+        "choices": [
+          "Natural",
+          "Portrait",
+          "Cinematic",
+          "Golden hour",
+          "Vintage",
+          "Dreamy",
+          "Landscape",
+          "Night",
+          "B&W",
+          "Custom"
+        ],
+        "default": "Custom"
+      }
+    ]
+  },
+  {
+    "id": "3634",
+    "label": "Свечение",
+    "section": "Свет и глубина",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "intensity",
+        "label": "intensity",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 8,
+        "step": 0.01,
+        "default": 0.2
+      },
+      {
+        "name": "threshold",
+        "label": "Порог",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.6
+      },
+      {
+        "name": "smoothing",
+        "label": "smoothing",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.5
+      },
+      {
+        "name": "radius",
+        "label": "radius",
+        "type": "FLOAT",
+        "min": 0.1,
+        "max": 5,
+        "step": 0.1,
+        "default": 2
+      },
+      {
+        "name": "saturation",
+        "label": "saturation",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 2,
+        "step": 0.05,
+        "default": 0.75
+      },
+      {
+        "name": "exposure",
+        "label": "exposure",
+        "type": "FLOAT",
+        "min": 0.1,
+        "max": 4,
+        "step": 0.05,
+        "default": 1
+      },
+      {
+        "name": "mode",
+        "label": "mode",
+        "type": "COMBO",
+        "choices": [
+          "Bloom",
+          "Pro-Mist",
+          "Halation"
+        ],
+        "default": "Pro-Mist"
+      },
+      {
+        "name": "look",
+        "label": "look",
+        "type": "COMBO",
+        "choices": [
+          "Natural",
+          "Portrait",
+          "Cinematic",
+          "Golden hour",
+          "Vintage",
+          "Dreamy",
+          "Landscape",
+          "Night",
+          "B&W",
+          "Custom"
+        ],
+        "default": "Custom"
+      }
+    ]
+  },
+  {
+    "id": "3645",
+    "label": "Чёткость",
+    "section": "Цвет и оптика",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "preset",
+        "label": "Профиль",
+        "type": "COMBO",
+        "choices": [
+          "Natural",
+          "Subtle",
+          "Portrait",
+          "Product",
+          "Landscape",
+          "Crisp",
+          "Lineart",
+          "Anime sharp",
+          "Illustration",
+          "Custom"
+        ],
+        "default": "Portrait"
+      },
+      {
+        "name": "clarity",
+        "label": "clarity",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.1
+      },
+      {
+        "name": "sharpen",
+        "label": "sharpen",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.2
+      },
+      {
+        "name": "strength",
+        "label": "Сила",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.6
+      },
+      {
+        "name": "halo",
+        "label": "halo",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.8
+      },
+      {
+        "name": "skin_protect",
+        "label": "skin protect",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 1
+      },
+      {
+        "name": "radius",
+        "label": "radius",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.35
+      },
+      {
+        "name": "blend_mode",
+        "label": "blend mode",
+        "type": "COMBO",
+        "choices": [
+          "Soft Light",
+          "Hard Light",
+          "Overlay",
+          "Multiply",
+          "Vivid Light",
+          "Linear Light",
+          "Addition"
+        ],
+        "default": "Soft Light"
+      },
+      {
+        "name": "shadow_protect",
+        "label": "shadow protect",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.35
+      },
+      {
+        "name": "highlight_protect",
+        "label": "highlight protect",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.35
+      },
+      {
+        "name": "texture",
+        "label": "texture",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "default": 0
+      }
+    ]
+  },
+  {
+    "id": "3643",
+    "label": "Насыщенность",
+    "section": "Цвет и оптика",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "vibrance",
+        "label": "vibrance",
+        "type": "FLOAT",
+        "min": -100,
+        "max": 100,
+        "step": 1,
+        "default": 100
+      },
+      {
+        "name": "saturation",
+        "label": "saturation",
+        "type": "FLOAT",
+        "min": -100,
+        "max": 100,
+        "step": 1,
+        "default": 0
+      },
+      {
+        "name": "protect_skin",
+        "label": "protect skin",
+        "type": "BOOLEAN",
+        "default": true
+      },
+      {
+        "name": "strength",
+        "label": "Сила",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 1
+      }
+    ]
+  },
+  {
+    "id": "3642",
+    "label": "Тени и свет",
+    "section": "Цвет и оптика",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "lift",
+        "label": "lift",
+        "type": "FLOAT",
+        "min": -1,
+        "max": 1,
+        "step": 0.01,
+        "default": 0.01
+      },
+      {
+        "name": "gamma",
+        "label": "gamma",
+        "type": "FLOAT",
+        "min": 0.1,
+        "max": 4,
+        "step": 0.01,
+        "default": 1
+      },
+      {
+        "name": "gain",
+        "label": "gain",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 4,
+        "step": 0.01,
+        "default": 0.9
+      },
+      {
+        "name": "offset",
+        "label": "offset",
+        "type": "FLOAT",
+        "min": -0.5,
+        "max": 0.5,
+        "step": 0.005,
+        "default": 0
+      },
+      {
+        "name": "strength",
+        "label": "Сила",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 0.5
+      }
+    ]
+  },
+  {
+    "id": "3641",
+    "label": "Баланс белого",
+    "section": "Цвет и оптика",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "method",
+        "label": "method",
+        "type": "COMBO",
+        "choices": [
+          "Gray World",
+          "White Patch",
+          "Shades of Gray",
+          "Gray Edge"
+        ],
+        "default": "Shades of Gray"
+      },
+      {
+        "name": "minkowski_p",
+        "label": "minkowski p",
+        "type": "FLOAT",
+        "min": 1,
+        "max": 16,
+        "step": 0.5,
+        "default": 6
+      },
+      {
+        "name": "strength",
+        "label": "Сила",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 1
+      }
+    ]
+  },
+  {
+    "id": "3646",
+    "label": "Перенос цвета",
+    "section": "Цвет и оптика",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "method",
+        "label": "method",
+        "type": "COMBO",
+        "choices": [
+          "oklab",
+          "oklab + distribution",
+          "adain",
+          "mean_std"
+        ],
+        "default": "adain"
+      },
+      {
+        "name": "strength",
+        "label": "Сила",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 1
+      },
+      {
+        "name": "skin_protect",
+        "label": "skin protect",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 0.5
+      }
+    ]
+  },
+  {
+    "id": "3631",
+    "label": "Цветная плёнка",
+    "section": "Цвет и оптика",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "film_stock",
+        "label": "film stock",
+        "type": "COMBO",
+        "choices": [
+          "Neg / Kodak Portra 400",
+          "Neg / Kodak Portra 160",
+          "Neg / Kodak Gold 200",
+          "Neg / Fuji Superia 400",
+          "Neg / Cinestill 800T",
+          "Slide / Fuji Velvia 50",
+          "Slide / Kodak Ektachrome E100",
+          "Slide / Fuji Provia 100F"
+        ],
+        "default": "Slide / Kodak Ektachrome E100"
+      },
+      {
+        "name": "strength",
+        "label": "Сила",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 0.8
+      },
+      {
+        "name": "override_toe",
+        "label": "override toe",
+        "type": "FLOAT",
+        "min": -1,
+        "max": 5,
+        "step": 0.1,
+        "default": -1
+      },
+      {
+        "name": "override_shoulder",
+        "label": "override shoulder",
+        "type": "FLOAT",
+        "min": -1,
+        "max": 5,
+        "step": 0.1,
+        "default": -1
+      },
+      {
+        "name": "override_gamma",
+        "label": "override gamma",
+        "type": "FLOAT",
+        "min": -1,
+        "max": 3,
+        "step": 0.05,
+        "default": -1
+      },
+      {
+        "name": "look",
+        "label": "look",
+        "type": "COMBO",
+        "choices": [
+          "Natural",
+          "Portrait",
+          "Cinematic",
+          "Golden hour",
+          "Vintage",
+          "Dreamy",
+          "Landscape",
+          "Night",
+          "B&W",
+          "Custom"
+        ],
+        "default": "Custom"
+      }
+    ]
+  },
+  {
+    "id": "3632",
+    "label": "Чёрно-белая плёнка",
+    "section": "Цвет и оптика",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "film_stock",
+        "label": "film stock",
+        "type": "COMBO",
+        "choices": [
+          "Ilford HP5 Plus 400",
+          "Ilford Delta 100",
+          "Kodak Tri-X 400",
+          "Kodak T-Max 100",
+          "Fuji Acros 100",
+          "Ilford Pan F Plus 50"
+        ],
+        "default": "Fuji Acros 100"
+      },
+      {
+        "name": "color_filter",
+        "label": "color filter",
+        "type": "COMBO",
+        "choices": [
+          "None",
+          "Yellow",
+          "Orange",
+          "Red",
+          "Green",
+          "Blue"
+        ],
+        "default": "None"
+      },
+      {
+        "name": "strength",
+        "label": "Сила",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 1
+      },
+      {
+        "name": "contrast",
+        "label": "contrast",
+        "type": "FLOAT",
+        "min": -1,
+        "max": 1,
+        "step": 0.05,
+        "default": 0
+      },
+      {
+        "name": "exposure_shift",
+        "label": "exposure shift",
+        "type": "FLOAT",
+        "min": -3,
+        "max": 3,
+        "step": 0.25,
+        "default": 0
+      },
+      {
+        "name": "look",
+        "label": "look",
+        "type": "COMBO",
+        "choices": [
+          "Natural",
+          "Portrait",
+          "Cinematic",
+          "Golden hour",
+          "Vintage",
+          "Dreamy",
+          "Landscape",
+          "Night",
+          "B&W",
+          "Custom"
+        ],
+        "default": "Custom"
+      }
+    ]
+  },
+  {
+    "id": "3636",
+    "label": "Объектив",
+    "section": "Цвет и оптика",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "lens",
+        "label": "lens",
+        "type": "COMBO",
+        "choices": [
+          "Canon EF 50mm f/1.8",
+          "Canon EF 24-70mm f/2.8",
+          "Nikon AF-S 35mm f/1.8",
+          "Nikon AF-S 85mm f/1.4",
+          "Sony FE 55mm f/1.8",
+          "Sony FE 24-70mm f/2.8",
+          "Sigma 35mm f/1.4 Art",
+          "Vintage Helios 44-2"
+        ],
+        "default": "Sony FE 55mm f/1.8"
+      },
+      {
+        "name": "mode",
+        "label": "mode",
+        "type": "COMBO",
+        "choices": [
+          "Add Aberrations",
+          "Correct Aberrations"
+        ],
+        "default": "Add Aberrations"
+      },
+      {
+        "name": "strength",
+        "label": "Сила",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 4,
+        "step": 0.01,
+        "default": 0.35
+      },
+      {
+        "name": "look",
+        "label": "look",
+        "type": "COMBO",
+        "choices": [
+          "Natural",
+          "Portrait",
+          "Cinematic",
+          "Golden hour",
+          "Vintage",
+          "Dreamy",
+          "Landscape",
+          "Night",
+          "B&W",
+          "Custom"
+        ],
+        "default": "Custom"
+      }
+    ]
+  },
+  {
+    "id": "3624",
+    "label": "LUT",
+    "section": "Цвет и оптика",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "lut_name",
+        "label": "lut name",
+        "type": "COMBO",
+        "choices": [
+          "AppleLog2_to_Rec709_33_Grid.cube",
+          "BLUE_HORROR_REC709_V1.cube",
+          "Blue&Pink.cube",
+          "Blue_LOOK.cube",
+          "Cool_Natural_Breeze.cube",
+          "Creative_-_Kodak_Wratten_85A_.cube",
+          "Dark_Man_X.cube",
+          "Gamma Correction.cube",
+          "Kodak_Wratten_85A_.cube",
+          "LC Cool Breeze.cube",
+          "LC Highlights_Protection.cube",
+          "LC_Crushed_Blacks.cube",
+          "Light Rays.cube",
+          "Low_light_King_346.cube",
+          "MERRY_MEN_II.cube",
+          "Sony-S-log3-cine-AZ.cube",
+          "TDH.cube",
+          "Warm_tem._over.cube",
+          "cannon_cool_corr_look.cube",
+          "cannon_cool_corr_look_224.9R8A3608.cube",
+          "street.cube"
+        ],
+        "default": "LC Cool Breeze.cube"
+      },
+      {
+        "name": "strength",
+        "label": "Сила",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 2,
+        "step": 0.01,
+        "default": 0.26
+      },
+      {
+        "name": "log",
+        "label": "log",
+        "type": "BOOLEAN",
+        "default": false
+      },
+      {
+        "name": "interpolation",
+        "label": "interpolation",
+        "type": "COMBO",
+        "choices": [
+          "tetrahedral",
+          "trilinear"
+        ],
+        "default": "tetrahedral"
+      }
+    ]
+  },
+  {
+    "id": "3629",
+    "label": "Зерно",
+    "section": "Цвет и оптика",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "grain_size",
+        "label": "grain size",
+        "type": "FLOAT",
+        "min": 0.7,
+        "max": 4,
+        "step": 0.05,
+        "default": 1
+      },
+      {
+        "name": "strength",
+        "label": "Сила",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 0.25
+      },
+      {
+        "name": "radius_variation",
+        "label": "radius variation",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 0.5,
+        "step": 0.05,
+        "default": 0
+      },
+      {
+        "name": "color_grain",
+        "label": "color grain",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 0
+      },
+      {
+        "name": "softness",
+        "label": "softness",
+        "type": "FLOAT",
+        "min": 0.4,
+        "max": 2,
+        "step": 0.1,
+        "default": 0.8
+      },
+      {
+        "name": "look",
+        "label": "look",
+        "type": "COMBO",
+        "choices": [
+          "Natural",
+          "Portrait",
+          "Cinematic",
+          "Golden hour",
+          "Vintage",
+          "Dreamy",
+          "Landscape",
+          "Night",
+          "B&W",
+          "Custom"
+        ],
+        "default": "Natural"
+      },
+      {
+        "name": "response",
+        "label": "response",
+        "type": "COMBO",
+        "choices": [
+          "classic",
+          "film",
+          "sensor"
+        ],
+        "default": "sensor"
+      }
+    ]
+  },
+  {
+    "id": "3773",
+    "label": "Камера телефона",
+    "section": "Цвет и оптика",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "preset",
+        "label": "Профиль",
+        "type": "COMBO",
+        "choices": [
+          "1977",
+          "aden",
+          "bleach bypass",
+          "brannan",
+          "brooklyn",
+          "clarendon",
+          "clean punch",
+          "cross process",
+          "earlybird",
+          "faded film",
+          "fairy tale",
+          "film noir",
+          "gingham",
+          "golden hour",
+          "hudson",
+          "inkwell",
+          "kelvin",
+          "lark",
+          "lofi",
+          "maven",
+          "mayfair",
+          "moody blue",
+          "moon",
+          "nashville",
+          "neon night",
+          "perpetua",
+          "reyes",
+          "rise",
+          "slumber",
+          "soft portrait",
+          "stinson",
+          "teal and orange",
+          "toaster",
+          "valencia",
+          "walden",
+          "willow",
+          "xpro2"
+        ],
+        "default": "1977"
+      },
+      {
+        "name": "strength",
+        "label": "Сила",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 1
+      }
+    ]
+  },
+  {
+    "id": "3774",
+    "label": "Размытие движения",
+    "section": "Цвет и оптика",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "angle",
+        "label": "angle",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 360,
+        "step": 0.1,
+        "default": 314.717570393228
+      },
+      {
+        "name": "distance",
+        "label": "distance",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 500,
+        "step": 0.5,
+        "default": 67.62454593641333
+      },
+      {
+        "name": "strength",
+        "label": "Сила",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 1
+      },
+      {
+        "name": "taps",
+        "label": "taps",
+        "type": "INT",
+        "min": 2,
+        "max": 128,
+        "step": 1,
+        "default": 64
+      },
+      {
+        "name": "edge",
+        "label": "edge",
+        "type": "COMBO",
+        "choices": [
+          "hold the edge",
+          "mirror",
+          "empty"
+        ],
+        "default": "mirror"
+      }
+    ]
+  },
+  {
+    "id": "3832",
+    "label": "Виньетка",
+    "section": "Цвет и оптика",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "intensity",
+        "label": "intensity",
+        "type": "FLOAT",
+        "min": -1,
+        "max": 2,
+        "step": 0.05,
+        "default": 0.25
+      },
+      {
+        "name": "midpoint",
+        "label": "midpoint",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 0.55
+      },
+      {
+        "name": "roundness",
+        "label": "roundness",
+        "type": "FLOAT",
+        "min": 0.3,
+        "max": 2,
+        "step": 0.1,
+        "default": 0.8
+      },
+      {
+        "name": "feather",
+        "label": "Растушёвка",
+        "type": "FLOAT",
+        "min": 0.02,
+        "max": 2,
+        "step": 0.02,
+        "default": 0.35
+      },
+      {
+        "name": "cos4_falloff",
+        "label": "cos4 falloff",
+        "type": "BOOLEAN",
+        "default": true
+      },
+      {
+        "name": "tint_r",
+        "label": "tint r",
+        "type": "FLOAT",
+        "min": 0.5,
+        "max": 1.5,
+        "step": 0.05,
+        "default": 1
+      },
+      {
+        "name": "tint_g",
+        "label": "tint g",
+        "type": "FLOAT",
+        "min": 0.5,
+        "max": 1.5,
+        "step": 0.05,
+        "default": 1
+      },
+      {
+        "name": "tint_b",
+        "label": "tint b",
+        "type": "FLOAT",
+        "min": 0.5,
+        "max": 1.5,
+        "step": 0.05,
+        "default": 1.05
+      },
+      {
+        "name": "look",
+        "label": "look",
+        "type": "COMBO",
+        "choices": [
+          "Natural",
+          "Portrait",
+          "Cinematic",
+          "Golden hour",
+          "Vintage",
+          "Dreamy",
+          "Landscape",
+          "Night",
+          "B&W",
+          "Custom"
+        ],
+        "default": "Custom"
+      }
+    ]
+  },
+  {
+    "id": "3623",
+    "label": "Кадрирование",
+    "section": "Кадр и подпись",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "x",
+        "label": "x",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 100,
+        "step": 0.1,
+        "default": 0
+      },
+      {
+        "name": "y",
+        "label": "y",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 100,
+        "step": 0.1,
+        "default": 0
+      },
+      {
+        "name": "width",
+        "label": "Ширина",
+        "type": "FLOAT",
+        "min": 0.5,
+        "max": 100,
+        "step": 0.1,
+        "default": 100
+      },
+      {
+        "name": "height",
+        "label": "Высота",
+        "type": "FLOAT",
+        "min": 0.5,
+        "max": 100,
+        "step": 0.1,
+        "default": 100
+      },
+      {
+        "name": "aspect",
+        "label": "aspect",
+        "type": "COMBO",
+        "choices": [
+          "free",
+          "original",
+          "1:1",
+          "4:3",
+          "3:2",
+          "16:9",
+          "3:4",
+          "2:3",
+          "9:16"
+        ],
+        "default": "free"
+      }
+    ]
+  },
+  {
+    "id": "3622",
+    "label": "Подпись",
+    "section": "Кадр и подпись",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "text",
+        "label": "Текст",
+        "type": "STRING",
+        "default": "Hello"
+      },
+      {
+        "name": "font",
+        "label": "font",
+        "type": "COMBO",
+        "choices": [
+          "Arial",
+          "Arial Bold",
+          "Arial Italic",
+          "Times New Roman",
+          "Times New Roman Bold",
+          "Georgia",
+          "Georgia Bold",
+          "Verdana",
+          "Verdana Bold",
+          "Tahoma",
+          "Trebuchet MS",
+          "Comic Sans MS",
+          "Impact",
+          "Courier New",
+          "Consolas",
+          "Segoe UI",
+          "Segoe UI Bold",
+          "Calibri",
+          "Calibri Bold",
+          "DejaVu Sans",
+          "DejaVu Serif",
+          "DejaVu Sans Mono",
+          "Liberation Sans",
+          "Liberation Serif",
+          "Bebas Neue",
+          "Oswald",
+          "Permanent Marker",
+          "Pacifico",
+          "Lobster",
+          "Great Vibes",
+          "Abril Fatface",
+          "Cinzel Decorative",
+          "UnifrakturMaguntia",
+          "Monoton",
+          "Bangers",
+          "Creepster",
+          "Rubik Glitch",
+          "Press Start 2P"
+        ],
+        "default": "Arial"
+      },
+      {
+        "name": "font_size",
+        "label": "Размер шрифта",
+        "type": "INT",
+        "min": 1,
+        "max": 512,
+        "step": 1,
+        "default": 64
+      },
+      {
+        "name": "color_r",
+        "label": "color r",
+        "type": "INT",
+        "min": 0,
+        "max": 255,
+        "step": 1,
+        "default": 255
+      },
+      {
+        "name": "color_g",
+        "label": "color g",
+        "type": "INT",
+        "min": 0,
+        "max": 255,
+        "step": 1,
+        "default": 255
+      },
+      {
+        "name": "color_b",
+        "label": "color b",
+        "type": "INT",
+        "min": 0,
+        "max": 255,
+        "step": 1,
+        "default": 255
+      },
+      {
+        "name": "x_percent",
+        "label": "x percent",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 100,
+        "step": 0.1,
+        "default": 85.8
+      },
+      {
+        "name": "y_percent",
+        "label": "y percent",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 100,
+        "step": 0.1,
+        "default": 15.5
+      },
+      {
+        "name": "alignment",
+        "label": "alignment",
+        "type": "COMBO",
+        "choices": [
+          "left",
+          "center",
+          "right",
+          "left-top",
+          "center-top",
+          "right-top",
+          "left-center",
+          "center-center",
+          "right-center",
+          "left-bottom",
+          "center-bottom",
+          "right-bottom"
+        ],
+        "default": "center"
+      }
+    ]
+  },
+  {
+    "id": "3621",
+    "label": "Водяной знак · Фото 4",
+    "section": "Кадр и подпись",
+    "toggle": true,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "size_percent",
+        "label": "size percent",
+        "type": "FLOAT",
+        "min": 1,
+        "max": 100,
+        "step": 0.5,
+        "default": 20
+      },
+      {
+        "name": "opacity",
+        "label": "opacity",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "default": 0.8
+      },
+      {
+        "name": "x_percent",
+        "label": "x percent",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 100,
+        "step": 0.5,
+        "default": 5.4
+      },
+      {
+        "name": "y_percent",
+        "label": "y percent",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 100,
+        "step": 0.5,
+        "default": 100
+      },
+      {
+        "name": "margin_percent",
+        "label": "margin percent",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 10,
+        "step": 0.1,
+        "default": 0.5
+      }
+    ]
+  },
+  {
+    "id": "3870",
+    "label": "Расширение кадра",
+    "section": "Кадр и подпись",
+    "toggle": false,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "angle",
+        "label": "angle",
+        "type": "FLOAT",
+        "min": -180,
+        "max": 180,
+        "step": 0.1,
+        "default": 0
+      },
+      {
+        "name": "fit",
+        "label": "fit",
+        "type": "COMBO",
+        "choices": [
+          "expand",
+          "crop"
+        ],
+        "default": "expand"
+      },
+      {
+        "name": "fill",
+        "label": "Заполнение",
+        "type": "COMBO",
+        "choices": [
+          "gray",
+          "edge",
+          "white",
+          "black"
+        ],
+        "default": "gray"
+      },
+      {
+        "name": "left",
+        "label": "Слева",
+        "type": "FLOAT",
+        "min": -100,
+        "max": 400,
+        "step": 0.01,
+        "default": 10
+      },
+      {
+        "name": "top",
+        "label": "Сверху",
+        "type": "FLOAT",
+        "min": -100,
+        "max": 400,
+        "step": 0.01,
+        "default": 0
+      },
+      {
+        "name": "right",
+        "label": "Справа",
+        "type": "FLOAT",
+        "min": -100,
+        "max": 400,
+        "step": 0.01,
+        "default": 10
+      },
+      {
+        "name": "bottom",
+        "label": "Снизу",
+        "type": "FLOAT",
+        "min": -100,
+        "max": 400,
+        "step": 0.01,
+        "default": 0
+      },
+      {
+        "name": "aspect",
+        "label": "aspect",
+        "type": "COMBO",
+        "choices": [
+          "free",
+          "original",
+          "1:1",
+          "4:3",
+          "3:2",
+          "16:9",
+          "3:4",
+          "2:3",
+          "9:16"
+        ],
+        "default": "free"
+      },
+      {
+        "name": "snap_to",
+        "label": "snap to",
+        "type": "COMBO",
+        "choices": [
+          "1",
+          "8",
+          "16",
+          "32",
+          "64"
+        ],
+        "default": "16"
+      },
+      {
+        "name": "max_megapixels",
+        "label": "max megapixels",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 64,
+        "step": 0.1,
+        "default": 2
+      }
+    ]
+  },
+  {
+    "id": "3878",
+    "label": "AnyPaint",
+    "section": "Кадр и подпись",
+    "toggle": false,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "lora_strength",
+        "label": "Сила адаптера",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 2,
+        "step": 0.05,
+        "default": 1
+      },
+      {
+        "name": "padding",
+        "label": "Отступ",
+        "type": "INT",
+        "min": 0,
+        "max": 2048,
+        "step": 8,
+        "default": 128
+      },
+      {
+        "name": "inpaint_resolution",
+        "label": "inpaint resolution",
+        "type": "INT",
+        "min": 256,
+        "max": 2048,
+        "step": 64,
+        "default": 1024
+      },
+      {
+        "name": "boundary_px",
+        "label": "boundary px",
+        "type": "INT",
+        "min": 0,
+        "max": 128,
+        "step": 4,
+        "default": 32
+      },
+      {
+        "name": "vlm_reference",
+        "label": "Сохранить привязку к фото",
+        "type": "BOOLEAN",
+        "default": true
+      },
+      {
+        "name": "composite",
+        "label": "composite",
+        "type": "COMBO",
+        "choices": [
+          "keep original",
+          "raw"
+        ],
+        "default": "keep original"
+      }
+    ]
+  },
+  {
+    "id": "3517",
+    "label": "Depth ControlNet",
+    "section": "Кадр и подпись",
+    "toggle": false,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "strength",
+        "label": "Сила",
+        "type": "FLOAT",
+        "min": -100,
+        "max": 100,
+        "step": 0.01,
+        "default": 0.85
+      }
+    ]
+  },
+  {
+    "id": "4089",
+    "label": "Маска редактирования",
+    "section": "Кадр и подпись",
+    "toggle": false,
+    "enabled": false,
+    "fields": [
+      {
+        "name": "person_parts",
+        "label": "person parts",
+        "type": "COMBO",
+        "choices": [
+          "off",
+          "models/segformer_b2_clothes (local)"
+        ],
+        "default": "models/segformer_b2_clothes (local)"
+      },
+      {
+        "name": "grow",
+        "label": "Расширение маски",
+        "type": "INT",
+        "min": -256,
+        "max": 256,
+        "step": 1,
+        "default": 0
+      },
+      {
+        "name": "feather",
+        "label": "Растушёвка",
+        "type": "FLOAT",
+        "min": 0,
+        "max": 200,
+        "step": 0.5,
+        "default": 0
+      },
+      {
+        "name": "invert",
+        "label": "invert",
+        "type": "BOOLEAN",
+        "default": false
+      },
+      {
+        "name": "selections",
+        "label": "selections",
+        "type": "STRING",
+        "default": "[]"
+      },
+      {
+        "name": "threshold",
+        "label": "Порог",
+        "type": "FLOAT",
+        "min": 0.05,
+        "max": 0.95,
+        "step": 0.01,
+        "default": 0.5
+      },
+      {
+        "name": "smooth",
+        "label": "smooth",
+        "type": "INT",
+        "min": 0,
+        "max": 16,
+        "step": 1,
+        "default": 2
+      },
+      {
+        "name": "refine",
+        "label": "refine",
+        "type": "COMBO",
+        "choices": [
+          "guided_filter",
+          "vitmatte",
+          "none"
+        ],
+        "default": "guided_filter"
+      }
+    ]
+  }
+]

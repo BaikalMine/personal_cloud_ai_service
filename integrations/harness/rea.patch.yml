@@ -1,0 +1,14 @@
+- insert:
+    - id: gateway-rea
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: rea
+        transport: stdio
+        command: node
+        args: ['/opt/harness/rea-mcp.mjs']
+        cwd: /workspace
+        env:
+          GHIDRA_INSTALL_DIR: /opt/ghidra/ghidra_12.1.4_PUBLIC
+          JAVA_HOME: /usr/lib/jvm/java-21-openjdk
+        toolCallTimeoutMs: 300000
+        failOnStartupError: true

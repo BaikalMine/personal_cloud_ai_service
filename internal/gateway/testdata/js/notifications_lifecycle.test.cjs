@@ -3,6 +3,7 @@ const test = require("node:test");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const live = require("../../static/live-events.js");
 const source = fs.readFileSync(path.join(__dirname, "../../static/notifications.js"), "utf8");
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function fixture() {
@@ -17,6 +18,10 @@ function fixture() {
   const document = { querySelector: selector => selector === "[data-notification-center]" ? center : null, querySelectorAll: () => [], addEventListener() {} };
   const window = { EventSource: Events, addEventListener: (name, listener) => { listeners[name] = listener; },
     setInterval: fn => { timers.set(++nextTimer, fn); return nextTimer; }, clearInterval: id => timers.delete(id) };
+  window.setTimeout = window.setInterval;
+  window.clearTimeout = window.clearInterval;
+  window.document = document; window.Math = Math;
+  window.AIGatewayLiveEvents = { create: options => live.create(options, window), poll: (...args) => live.poll(...args, window) };
   const fetch = (url, options) => new Promise(resolve => loads.push({ url, options, finish: () => resolve({ ok: true, json: async () => ({ notifications: [], summary: {} }) }) }));
   vm.runInNewContext(source, { document, window, fetch, EventSource: Events, AbortController, URLSearchParams });
   return { listeners, streams, loads, timers };

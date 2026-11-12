@@ -1,0 +1,151 @@
+const { test, expect } = require("@playwright/test");
+const AxeBuilder = require("@axe-core/playwright").default;
+const { settlePage, assertNoViewportOverflow } = require("./helpers.cjs");
+
+test("restart requires explicit confirmation and submits only the selected profile", async ({page})=>{
+  const writes=[];
+  page.on("request",r=>{if(r.method()==="POST") writes.push(r);});
+  await page.goto("/preview/mining?scenario=files");
+  await settlePage(page);
+  await page.getByRole("button",{name:"Перезапустить SRBMiner Pearl",exact:true}).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("button",{name:"Отмена",exact:true}).click();
+  expect(writes).toHaveLength(0);
+  await page.getByRole("button",{name:"Перезапустить SRBMiner Pearl",exact:true}).click();
+  await page.getByRole("button",{name:"Подтвердить",exact:true}).click();
+  await expect(page.locator(".success-box").filter({hasText:"Майнинг перезапущен"})).toBeVisible();
+  expect(writes).toHaveLength(1);
+  expect(writes[0].postData()).toContain("action=restart");
+  expect(writes[0].postData()).toContain("id=1");
+});
+
+test("external miner is visible and can be registered without any mining command", async ({ page }, info) => {
+  const writes=[];
+  page.on("request",r=>{if(r.method()==="POST") writes.push(r.url());});
+  await page.goto("/preview/mining?scenario=external");
+  await settlePage(page);
+  const running=page.getByRole("region",{name:"Сейчас работает"});
+  await expect(running).toContainText("onezerominer.exe");
+  await expect(running).toContainText("quantus.bat");
+  await expect(page.locator('[data-miner-action="start"]:visible')).toHaveCount(3);
+  for(const button of await page.locator('[data-miner-action="start"]:visible').all()) await expect(button).toBeDisabled();
+  await running.getByRole("link",{name:"Добавить профиль"}).click();
+  await expect(page.getByLabel("Полный путь к скрипту запуска")).toHaveValue("C:\\Mining\\OneZero\\quantus.bat");
+  await expect(page.getByLabel("Имя процесса")).toHaveValue("onezerominer.exe");
+  expect(writes).toEqual([]);
+  await assertNoViewportOverflow(page,"external miner");
+  await page.screenshot({path:info.outputPath("mining-external.png"),fullPage:true});
+});
+
+test("downloaded BAT selection fills path and exact executable without launching", async ({ page }, info) => {
+  const writes = [];
+  page.on("request", request => { if (request.method() === "POST") writes.push(request.url()); });
+  await page.goto("/preview/mining?scenario=files");
+  await settlePage(page);
+  await page.getByLabel("Папка майнера").selectOption("SRBMiner");
+  await expect(page.locator("[data-mining-file]:visible")).toHaveCount(2);
+  await page.locator("[data-mining-file]").filter({ hasText: "other-pool.bat" }).getByRole("button", { name: "В профиль" }).click();
+  await expect(page.getByLabel("Полный путь к скрипту запуска")).toHaveValue("C:\\Mining\\SRBMiner\\other-pool.bat");
+  await expect(page.getByLabel("Имя процесса")).toHaveValue("SRBMiner-MULTI.exe");
+  await page.getByLabel("Папка майнера").selectOption("OtherMiner");
+  await expect(page.locator("[data-mining-file]:visible")).toHaveCount(1);
+  await page.locator("[data-mining-file]:visible").getByRole("button", { name: "В профиль" }).click();
+  await expect(page.getByLabel("Имя процесса")).toHaveValue("miner.exe");
+  expect(writes).toEqual([]);
+  await assertNoViewportOverflow(page, "BAT selection");
+  await page.screenshot({ path: info.outputPath("mining-files.png"), fullPage: true });
+});
+
+test("favorites persist and raw BAT opens without registering a profile", async ({ page }, info) => {
+  const commands = [];
+  page.on("request", request => { if (request.method() === "POST" && !request.url().includes("/favorite")) commands.push(request.url()); });
+  await page.goto("/preview/mining?scenario=files&folder=SRBMiner");
+  await settlePage(page);
+  const row = page.locator("[data-mining-file]").filter({ hasText: "other-pool.bat" });
+  await row.getByRole("button", { name: "Добавить в избранное: other-pool.bat" }).click();
+  await expect(row.getByRole("button", { name: "Убрать из избранного: other-pool.bat" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByLabel(/Избранное/).check();
+  await expect(page.locator("[data-mining-file]:visible")).toHaveCount(1);
+  await page.reload();
+  await settlePage(page);
+  await expect(page.locator("[data-mining-file]:visible")).toHaveCount(1);
+  await assertNoViewportOverflow(page, "BAT favorites");
+  const a11y = await new AxeBuilder({ page }).include("main").analyze();
+  expect(a11y.violations.filter(v => ["serious", "critical"].includes(v.impact))).toEqual([]);
+  await page.screenshot({ path: info.outputPath("mining-favorites.png"), fullPage: true });
+  await row.getByRole("link", { name: "Редактировать other-pool.bat" }).click();
+  await expect(page.getByRole("heading", { name: "other-pool.bat", exact: true })).toBeVisible();
+  await expect(page.locator('input[name="id"]')).toHaveValue("0");
+  await expect(page.getByLabel("Процесс майнера")).toHaveValue("SRBMiner-MULTI.exe");
+  await assertNoViewportOverflow(page, "direct BAT editor");
+  expect(commands).toEqual([]);
+  await page.getByRole("textbox", { name: /BAT.*CMD/ }).fill("@echo off\nrem edited fixture only\npause");
+  await page.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await page.getByRole("button", { name: "Подтвердить", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "BAT сохранён" })).toBeVisible();
+  expect(commands).toHaveLength(1);
+  expect(commands[0]).toContain("/admin/mining/script");
+});
+
+test("favorite failure keeps state and removing last favorite shows empty state", async ({ page }) => {
+  await page.goto("/preview/mining?scenario=files&folder=SRBMiner");
+  await settlePage(page);
+  const row = page.locator("[data-mining-file]").filter({ hasText: "other-pool.bat" });
+  await page.route("**/admin/mining/favorite", route => route.fulfill({ status: 503, body: "unavailable" }));
+  await row.getByRole("button", { name: "Добавить в избранное: other-pool.bat" }).click();
+  await expect(page.locator("[data-mining-file-error]")).toBeVisible();
+  await expect(row.getByRole("button", { name: "Добавить в избранное: other-pool.bat" })).toHaveAttribute("aria-pressed", "false");
+  await page.unroute("**/admin/mining/favorite");
+  await row.getByRole("button", { name: "Добавить в избранное: other-pool.bat" }).click();
+  await expect(row.getByRole("button", { name: "Убрать из избранного: other-pool.bat" })).toBeEnabled();
+  await page.getByLabel(/Избранное/).check();
+  await row.getByRole("button", { name: "Убрать из избранного: other-pool.bat" }).click();
+  await expect(page.locator("[data-mining-files-empty]")).toBeVisible();
+  await expect(page.locator("[data-mining-file]:visible")).toHaveCount(0);
+});
+
+test("BAT editor is responsive and saves only the script after confirmation", async ({ page }, info) => {
+  const writes = [];
+  page.on("request", request => { if (request.method() === "POST") writes.push(request); });
+  await page.goto("/admin/mining/script?id=1");
+  await settlePage(page);
+  const editor = page.getByRole("textbox", { name: /BAT.*CMD/ });
+  await expect(editor).toHaveValue(/SRBMiner-MULTI\.exe/);
+  await editor.fill("@echo off\nminer.exe --pool new.example.invalid\npause");
+  await assertNoViewportOverflow(page, "BAT editor");
+  const a11y = await new AxeBuilder({ page }).include("main").analyze();
+  expect(a11y.violations.filter(v => ["serious", "critical"].includes(v.impact))).toEqual([]);
+  await page.screenshot({ path: info.outputPath("mining-editor.png"), fullPage: true });
+  await page.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("button", { name: "Отмена", exact: true }).click();
+  expect(writes).toHaveLength(0);
+  expect(await page.evaluate(() => !window.dispatchEvent(new Event("beforeunload", { cancelable: true })))).toBe(true);
+  await page.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await page.getByRole("button", { name: "Подтвердить", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "BAT сохранён" })).toBeVisible();
+  expect(writes).toHaveLength(1);
+  expect(writes[0].url()).toContain("/admin/mining/script");
+  expect(writes[0].postData()).toContain("sha256=" + "a".repeat(64));
+  expect(writes[0].postData()).not.toContain("action=start");
+});
+
+test("hung favorite request times out and preserves a usable retry", async ({page}) => {
+  await page.goto("/preview/mining?scenario=files&folder=SRBMiner");
+  await settlePage(page);
+  await page.clock.install();
+  const row=page.locator("[data-mining-file]").filter({hasText:"other-pool.bat"});
+  let pending;
+  await page.route("**/admin/mining/favorite", route => { pending=route; });
+  await row.getByRole("button",{name:"Добавить в избранное: other-pool.bat"}).click();
+  await expect(row.locator("button[aria-pressed]")).toBeDisabled();
+  await page.clock.fastForward(11000);
+  await expect(page.locator("[data-mining-file-error]")).toBeVisible();
+  await expect(row.locator("button[aria-pressed]")).toBeEnabled();
+  await expect(row.locator("button[aria-pressed]")).toHaveAttribute("aria-pressed","false");
+  if(pending) await pending.abort().catch(()=>{});
+  await page.unroute("**/admin/mining/favorite");
+  await page.clock.resume();
+  await row.locator("button[aria-pressed]").click();
+  await expect(row.locator("button[aria-pressed]")).toHaveAttribute("aria-pressed","true");
+});

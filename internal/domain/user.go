@@ -14,6 +14,7 @@ type User struct {
 	CanUseComfyUI                    bool
 	CanUseOpenWebUI                  bool
 	CanUseQuickGeneration            bool
+	CanUseHarness                    bool
 	CanGenerateTextToImage           bool
 	CanGenerateImageToImage          bool
 	CanGenerateVideo                 bool
@@ -48,8 +49,10 @@ func (u User) CanUseQuickGenerationType(templateID string) bool {
 		return u.CanGenerateTextToImage
 	case "image-to-image":
 		return u.CanGenerateImageToImage
-	case "minimax-h3-video":
+	case "minimax-h3-video", PostprocessVideoTemplate:
 		return u.CanGenerateVideo
+	case PostprocessImageTemplate:
+		return u.CanGenerateTextToImage || u.CanGenerateImageToImage
 	default:
 		return false
 	}
@@ -70,10 +73,11 @@ func (u User) CanUseService(service string) bool {
 	switch service {
 	case "quick_generation":
 		return u.CanUseQuickGeneration
-	case "comfyui":
-		return u.CanUseComfyUI
-	case "openwebui":
-		return u.CanUseOpenWebUI
+	case "harness":
+		return u.CanUseHarness
+	case "comfyui", "openwebui":
+		// Raw service interfaces are administrative, regardless of legacy grants.
+		return false
 	default:
 		return false
 	}
@@ -88,6 +92,7 @@ type UserRow struct {
 	CanUseComfyUI                    bool
 	CanUseOpenWebUI                  bool
 	CanUseQuickGeneration            bool
+	CanUseHarness                    bool
 	CanGenerateTextToImage           bool
 	CanGenerateImageToImage          bool
 	CanGenerateVideo                 bool

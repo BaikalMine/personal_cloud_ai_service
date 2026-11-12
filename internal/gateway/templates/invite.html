@@ -1,24 +1,47 @@
 {{define "invite"}}
 {{template "head" .}}
-<main class="auth-shell" id="main-content">
-  <section class="auth-card">
-    <p class="eyebrow">Приглашение</p><h1>Создание аккаунта</h1>
-    {{if .Invalid}}
-      <p class="alert">Приглашение недействительно, просрочено, отозвано или уже использовано максимальное число раз.</p>
-      <a class="button ghost" href="/login">Вернуться ко входу</a>
-    {{else}}
-      <p class="muted">Укажите данные новой учётной записи.</p>
-      <p class="access-preview">Доступ: {{if .Access.GrantQuickGeneration}}<span class="badge ok">Быстрая генерация</span>{{end}} {{if .Access.GrantComfyUI}}<span class="badge">ComfyUI</span>{{end}} {{if .Access.GrantOpenWebUI}}<span class="badge">OpenWebUI</span>{{end}}</p>
-      {{if gt .Access.AccountLifetimeSeconds 0}}<p class="access-note">Это временная учётная запись. Доступ будет удалён через {{accountLifetimeLabel .Access.AccountLifetimeSeconds}} после регистрации; история и медиа сохранятся на обычный срок с пометкой об удалённом пользователе.</p>{{end}}
-      {{if .Access.GrantQuickGeneration}}<p class="muted">Изображения: {{if gt .Access.GenerationDailyLimit 0}}{{.Access.GenerationDailyLimit}} в сутки{{else}}без суточного лимита{{end}}, {{if gt .Access.GenerationTotalLimit 0}}{{.Access.GenerationTotalLimit}} всего{{else}}без общего лимита{{end}}.{{if .Access.GrantVideo}} Видео: {{if gt .Access.VideoGenerationDailyLimit 0}}{{.Access.VideoGenerationDailyLimit}} в сутки{{else}}без суточного лимита{{end}}, {{if gt .Access.VideoGenerationTotalLimit 0}}{{.Access.VideoGenerationTotalLimit}} всего{{else}}без общего лимита{{end}}, базовое качество до {{.Access.MaxVideoGenerationQuality}}p; RTX-апскейл не ограничен.{{end}}</p>{{end}}
-      {{if .Error}}<p class="alert">{{.Error}}</p>{{end}}
-      <form method="post">
-        <label class="ui-field"><span class="ui-field-label">Логин</span><input name="username" autocomplete="username" placeholder="От 3 символов" required minlength="3" autofocus></label>
-        <label class="ui-field"><span class="ui-field-label">E-mail <span class="muted">необязательно</span></span><input name="email" type="email" autocomplete="email"></label>
-        <label class="ui-field"><span class="ui-field-label">Пароль</span><input name="password" type="password" autocomplete="new-password" placeholder="Не менее 10 символов" required minlength="10"></label>
-        <button type="submit">Создать аккаунт</button>
-      </form>
+<link rel="stylesheet" href="/static/auth-pages.css?v={{.AssetVersion}}">
+<script src="/static/auth-pages.js?v={{.AssetVersion}}" defer></script>
+<main class="entry-page" id="main-content" data-auth-page>
+  <section class="entry-form-area" aria-labelledby="auth-title">
+    <a class="entry-brand" href="/"><span aria-hidden="true">AI</span>AI Gateway</a>
+    <header><h1 id="auth-title">{{if eq .Auth.State "invalid"}}Приглашение недоступно{{else}}Создание аккаунта{{end}}</h1></header>
+    {{if and .Auth.Error (not .Auth.ErrorField)}}<p class="entry-message" role="alert">{{.Auth.Error}}</p>{{end}}
+    {{with .Auth.Access}}
+      <dl class="entry-dates"><div><dt>Ссылка действует до</dt><dd>{{if not .ExpiresAt.IsZero}}<time>{{.ExpiresAt.UTC.Format "02.01.2006 15:04"}} UTC</time>{{else}}Срок не указан{{end}}</dd></div><div><dt>Срок аккаунта</dt><dd>{{if gt .AccountLifetimeSeconds 0}}{{accountLifetimeLabel .AccountLifetimeSeconds}} после регистрации{{else}}Не ограничен приглашением{{end}}</dd></div></dl>
+      {{$settings := .AccessSettings.Normalize}}
+      <details class="entry-access"><summary>Права и лимиты</summary><div>
+        <ul class="entry-capabilities">
+          {{if $settings.TextToImage}}<li><i data-lucide="check" aria-hidden="true"></i>Изображения по тексту</li>{{end}}
+          {{if $settings.ImageToImage}}<li><i data-lucide="check" aria-hidden="true"></i>Редактирование изображений</li>{{end}}
+          {{if $settings.Video}}<li><i data-lucide="check" aria-hidden="true"></i>Видео</li>{{end}}
+          {{if $settings.Training}}<li><i data-lucide="check" aria-hidden="true"></i>Обучение LoRA</li>{{end}}
+          {{if $settings.AdvancedSettings}}<li><i data-lucide="check" aria-hidden="true"></i>Расширенные настройки</li>{{end}}
+          {{if $settings.PauseMining}}<li><i data-lucide="check" aria-hidden="true"></i>Пауза майнинга для генерации</li>{{end}}
+        </ul>
+        {{if not (or $settings.QuickGeneration $settings.Training)}}<p class="entry-note">Доступ к AI-инструментам не предоставлен.</p>{{end}}
+        <dl class="entry-limits">
+          {{if or $settings.TextToImage $settings.ImageToImage}}<div><dt>Изображения в сутки</dt><dd>{{if gt $settings.ImageDailyLimit 0}}{{$settings.ImageDailyLimit}}{{else}}Без ограничения{{end}}</dd></div><div><dt>Изображения всего</dt><dd>{{if gt $settings.ImageTotalLimit 0}}{{$settings.ImageTotalLimit}}{{else}}Без ограничения{{end}}</dd></div>{{end}}
+          {{if $settings.Video}}<div><dt>Видео в сутки</dt><dd>{{if gt $settings.VideoDailyLimit 0}}{{$settings.VideoDailyLimit}}{{else}}Без ограничения{{end}}</dd></div><div><dt>Видео всего</dt><dd>{{if gt $settings.VideoTotalLimit 0}}{{$settings.VideoTotalLimit}}{{else}}Без ограничения{{end}}</dd></div><div><dt>Базовое качество видео</dt><dd>{{if gt $settings.MaxVideoQuality 0}}До {{$settings.MaxVideoQuality}}p{{else}}Не указано{{end}}</dd></div>{{end}}
+          {{if or $settings.QuickGeneration $settings.Training}}<div><dt>Приоритет очереди</dt><dd>{{if $settings.QueuePriority}}Повышенный{{else}}Обычный{{end}}</dd></div>{{end}}
+        </dl>
+        {{if gt .AccountLifetimeSeconds 0}}<p class="entry-note">По окончании срока аккаунт будет удалён. История и медиа сохранятся на обычный срок с отметкой об удалённом пользователе.</p>{{end}}
+      </div></details>
     {{end}}
+    {{if or (eq .Auth.State "active") .Auth.Username .Auth.Email}}
+    <form method="post" class="entry-form" data-auth-form>
+      <label class="ui-field"><span class="ui-field-label" id="auth-username-label">Логин</span><input id="auth-username" name="username" value="{{.Auth.Username}}" autocomplete="username" autocapitalize="none" spellcheck="false" required minlength="3" maxlength="48" aria-labelledby="auth-username-label" aria-describedby="auth-username-hint{{if eq .Auth.ErrorField "username"}} auth-username-error{{end}}" {{if eq .Auth.ErrorField "username"}}aria-invalid="true"{{end}} autofocus><small class="entry-note" id="auth-username-hint">3–48 символов: латиница, цифры, точка, дефис или подчёркивание.</small></label>
+      {{if eq .Auth.ErrorField "username"}}<p id="auth-username-error" class="entry-field-error" role="alert"><a href="#auth-username">{{.Auth.Error}}</a></p>{{end}}
+      <label class="ui-field"><span class="ui-field-label" id="auth-email-label">E-mail <small class="entry-note">Необязательно</small></span><input id="auth-email" name="email" value="{{.Auth.Email}}" type="email" autocomplete="email" maxlength="254" aria-label="E-mail" {{if eq .Auth.ErrorField "email"}}aria-invalid="true" aria-describedby="auth-email-error"{{end}}></label>
+      {{if eq .Auth.ErrorField "email"}}<p id="auth-email-error" class="entry-field-error" role="alert"><a href="#auth-email">{{.Auth.Error}}</a></p>{{end}}
+      <div class="ui-field"><label class="ui-field-label" id="auth-password-label" for="auth-password">Пароль</label><div class="entry-password"><input id="auth-password" name="password" type="password" autocomplete="new-password" required minlength="10" aria-labelledby="auth-password-label" aria-describedby="auth-password-hint{{if eq .Auth.ErrorField "password"}} auth-password-error{{end}}" {{if eq .Auth.ErrorField "password"}}aria-invalid="true"{{end}}><button class="ghost icon-button" type="button" data-password-toggle aria-label="Показать пароль" title="Показать пароль" aria-pressed="false" hidden><i data-lucide="eye" aria-hidden="true"></i></button></div><small class="entry-note" id="auth-password-hint">От 10 до 256 символов.</small></div>
+      {{if eq .Auth.ErrorField "password"}}<p id="auth-password-error" class="entry-field-error" role="alert"><a href="#auth-password">{{.Auth.Error}}</a></p>{{end}}
+      <button type="submit" {{if ne .Auth.State "active"}}disabled{{end}}><i data-lucide="user-plus" aria-hidden="true"></i>Создать аккаунт</button>
+      <p class="entry-progress" data-auth-progress role="status" aria-live="polite"></p>
+    </form>
+    {{end}}
+    <footer class="entry-footer">{{if eq .Auth.State "unavailable"}}<a class="button ghost" href="?check=1"><i data-lucide="refresh-cw" aria-hidden="true"></i>Проверить приглашение</a>{{end}}<a class="button ghost" href="/login"><i data-lucide="log-in" aria-hidden="true"></i>Перейти ко входу</a></footer>
+    {{if eq .Auth.State "invalid"}}<p class="entry-note">Запросите новую ссылку у администратора.</p>{{end}}
   </section>
 </main>
 </body></html>

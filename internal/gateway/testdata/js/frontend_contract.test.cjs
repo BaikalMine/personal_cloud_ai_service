@@ -26,6 +26,14 @@ const assistantCSS = fs.readFileSync(path.join(projectRoot, "internal/gateway/st
 const captionCSS = fs.readFileSync(path.join(projectRoot, "internal/gateway/static/lora-caption-panel.css"), "utf8");
 const componentCSS = `${css}\n${controlsCSS}\n${assistantCSS}\n${captionCSS}`;
 const generateScript = fs.readFileSync(generatePath, "utf8");
+test("signed fractional fields keep the minus key available on mobile", () => {
+  const assignment = generateScript.match(/field\.inputMode = ([^;]+);/);
+  assert.ok(assignment);
+  const inputMode = new Function("field", `return ${assignment[1]};`);
+  assert.equal(inputMode({ min: "-100" }), "text");
+  assert.equal(inputMode({ min: "0" }), "decimal");
+  assert.equal(inputMode({ min: "" }), "decimal");
+});
 const batchScript = fs.readFileSync(batchPath, "utf8");
 const generateTemplate = fs.readFileSync(generateTemplatePath, "utf8") + fs.readFileSync(path.join(templateRoot, "_generation_options.html"), "utf8");
 const gatewayRoutes = fs.readFileSync(gatewayRoutesPath, "utf8");
@@ -113,10 +121,11 @@ test("frontend tokens have one source of truth", () => {
 });
 
 test("service copy never falls below 12px outside the short badge token", () => {
-  const literalSmallSizes = [...css.matchAll(/(?:font-size\s*:\s*|font\s*:[^;]*?\s)(9|10|11)px/g)]
-    .filter((match) => !css.slice(Math.max(0, match.index - 40), match.index + 40).includes("--font-size-badge"));
+  const surfaceCSS = css + "\n" + fs.readFileSync(path.join(projectRoot, "internal/gateway/static/gallery.css"), "utf8");
+  const literalSmallSizes = [...surfaceCSS.matchAll(/(?:font-size\s*:\s*|font\s*:[^;]*?\s)(9|10|11)px/g)]
+    .filter((match) => !surfaceCSS.slice(Math.max(0, match.index - 40), match.index + 40).includes("--font-size-badge"));
   assert.deepEqual(literalSmallSizes.map((match) => match[0]), []);
-  for (const match of css.matchAll(/letter-spacing\s*:\s*([^;]+);/g)) {
+  for (const match of surfaceCSS.matchAll(/letter-spacing\s*:\s*([^;]+);/g)) {
     assert.equal(match[1].trim(), "0", `non-zero letter spacing: ${match[0]}`);
   }
   assert.match(css, /\.badge\s*\{[^}]*font-size:\s*var\(--font-size-badge\)/s);
@@ -160,11 +169,16 @@ test("a compatible workflow is selected automatically", () => {
 });
 
 test("the media library reuses an image across every compatible workflow", () => {
+  const useScript = fs.readFileSync(path.join(projectRoot, "internal/gateway/static/gallery-use.js"), "utf8");
+  const actions = fs.readFileSync(path.join(templateRoot, "_gallery_actions.html"), "utf8");
+  assert.match(galleryTemplate, /gallery-use\.js/);
+  assert.match(actions, /data-gallery-destinations/);
+  assert.match(useScript, /\/generate\/library\/destinations\?media=/);
+  assert.match(useScript, /params\.set\("library_model", preset\.model_id\)/);
   for (const workflow of ["photoflow-krea2-edit", "photoflow-flux2-edit", "minimax-h3-video"]) {
-    assert.match(galleryTemplate, new RegExp(`name="workflow" value="${workflow}"`));
     assert.ok(generateScript.includes(`"${workflow}"`));
   }
-  for (const parameter of ["media", "template", "workflow", "slot", "role"]) {
+  for (const parameter of ["media", "template", "workflow", "slot", "role", "library_model"]) {
     assert.ok(generateScript.includes(`requestedQuery.get("${parameter}")`), `missing library query ${parameter}`);
   }
   assert.match(generateScript, /selectGalleryImage\(item, entry\)/);
@@ -178,14 +192,25 @@ test("controlled generation batches are wired through the form, job center, and 
     assert.ok(generateTemplate.includes(`id="${id}"`), `missing batch control ${id}`);
   }
   assert.match(fs.readFileSync(path.join(templateRoot, "generate.html"), "utf8"), /generation-batch\.js/);
-  assert.match(generateScript, /fetch\("\/generate\/batches"/);
-  assert.match(generateScript, /renderGenerationBatch/);
-  assert.match(generateScript, /openBatchComparison/);
+  const historyScript = fs.readFileSync(path.join(projectRoot, "internal/gateway/static/generation-history.js"), "utf8");
+  const resultsScript = fs.readFileSync(path.join(projectRoot, "internal/gateway/static/generation-results.js"), "utf8");
+  assert.match(historyScript, /batches: "\/generate\/batches"/);
+  assert.match(generateScript, /generationModules\.history\.createController/);
+  assert.match(generateScript, /resultsView\.bind\(historyController\)/);
+  assert.match(resultsScript, /generation-batch-group/);
+  assert.match(resultsScript, /controller\.comparison\(/);
+  assert.doesNotMatch(generateScript, /const renderGenerationBatch|const openBatchComparison|fetch\("\/generate\/batches"/);
   assert.match(batchScript, /MIN_COUNT = 2/);
   assert.match(batchScript, /MAX_COUNT = 20/);
   for (const route of ["/generate/batches", "/generate/batches/cancel", "/generate/batches/winner"]) {
     assert.ok(gatewayRoutes.includes(route), `missing batch route ${route}`);
   }
+});
+
+test("results use the shared palette without a second color owner", () => {
+  const galleryCSS = fs.readFileSync(path.join(projectRoot, "internal/gateway/static/gallery.css"), "utf8");
+  assert.doesNotMatch(galleryCSS, /#[\da-f]{3,8}\b/i);
+  for (const match of galleryCSS.matchAll(/var\((--color-[\w-]+)/g)) assert.ok(themeCSS.includes(`${match[1]}:`), `undefined gallery color ${match[1]}`);
 });
 
 test("fields and native control states have one shared owner", () => {
@@ -194,9 +219,22 @@ test("fields and native control states have one shared owner", () => {
   assert.match(controlsCSS, /font-size:\s*16px/);
   assert.match(layoutTemplate, /\/static\/controls\.css/);
   assert.match(appSource, /"\/static\/controls\.css":\s*"static\/controls\.css"/);
-  for (const file of ["_generation_sections.html", "lora_training.html", "admin_invites.html", "admin_user_detail.html"]) {
+  assert.match(fs.readFileSync(path.join(templateRoot, "admin_invites.html"), "utf8"), /\{\{template "invite_composer" \.\}\}/);
+  assert.match(fs.readFileSync(path.join(templateRoot, "_invite_composer.html"), "utf8"), /\{\{define "invite_composer"\}\}/);
+  for (const file of ["_generation_sections.html", "lora_training.html", "_invite_composer.html"]) {
     const source = fs.readFileSync(path.join(templateRoot, file), "utf8");
     assert.ok(source.includes("ui-field-grid"), `${file} does not use aligned fields`);
+    assert.ok(source.includes("ui-field-label"), `${file} does not separate labels and controls`);
+  }
+  const profile = fs.readFileSync(path.join(templateRoot, "admin_user_detail.html"), "utf8");
+  assert.match(profile, /\{\{template "admin_profile_access" \.\}\}/);
+  assert.match(profile, /\{\{template "admin_profile_sessions" \.\}\}/);
+  const sessions = fs.readFileSync(path.join(templateRoot, "_admin_profile_sessions.html"), "utf8");
+  assert.match(sessions, /class="ui-field"/);
+  assert.match(sessions, /class="ui-field-label"/);
+  for (const file of ["_invite_composer.html", "_admin_profile_access.html"]) {
+    const source = fs.readFileSync(path.join(templateRoot, file), "utf8");
+    assert.match(source, /\{\{template "access_quota_fields" \$f\}\}/);
     assert.ok(source.includes("ui-field-label"), `${file} does not separate labels and controls`);
   }
 });
@@ -215,13 +253,19 @@ test("video quality limits the base render without constraining RTX upscale", ()
   assert.doesNotMatch(generateScript, /maxVideoGenerationQuality \/ Math\.max/);
   assert.match(generateTemplate, /База доступна до \{\{\.MaxVideoGenerationQuality\}\}p\. RTX-апскейл не входит в лимит\./);
   assert.match(generateTemplate, /name="video_rtx_scale" type="number" min="1" max="2"/);
-  assert.match(templates, /Финальный RTX-апскейл этим лимитом не ограничивается\./);
+  for (const file of ["_invite_composer.html", "_admin_profile_access.html"]) {
+    const source = fs.readFileSync(path.join(templateRoot, file), "utf8");
+    assert.match(source, /name="max_video_generation_quality"/);
+    assert.match(source, /Финальный апскейл не входит в этот предел\./);
+  }
 });
 
 test("suggestions keep public intake hidden without hiding the admin review queue", () => {
   assert.match(suggestionsTemplate, /name="action" value="save"/);
   assert.match(suggestionsTemplate, /name="action" value="submit"/);
-  assert.match(suggestionsTemplate, /Без вложений администратор получит только ваш текст/);
+  assert.match(suggestionsTemplate, /Ссылки и JSON/);
+  assert.match(suggestionsTemplate, /Необязательно/);
+  assert.match(suggestionsTemplate, /name="confirm_delete" value="1" required/);
   assert.match(suggestionsTemplate, /Мои предложения/);
   assert.match(adminSuggestionsTemplate, /Диагностика VirusTotal/);
   assert.match(adminSuggestionsTemplate, /CanDownloadJSON/);

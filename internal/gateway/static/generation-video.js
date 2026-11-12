@@ -64,6 +64,34 @@
     return { width: round(sourceWidth * scale), height: round(sourceHeight * scale), sourceWidth, sourceHeight };
   };
 
+  const longTimeline = (prompt, count) => {
+    const matches = [...String(prompt || "").matchAll(/\[Shot\s+(\d+)\](?:[ \t]+At[ \t]+(\d{2}):(\d{2})\.(\d{3}))?[ \t]*,?/gi)];
+    return Array.from({ length: Math.min(20, Math.max(2, Math.trunc(Number(count) || 2))) }, (_, index) => {
+      const match = matches[index];
+      const start = index * 15;
+      const timestamp = match?.[2] !== undefined ? Number(match[2]) * 60 + Number(match[3]) + Number(match[4]) / 1000 : index === 0 ? 0 : -1;
+      const text = match ? String(prompt).slice(match.index + match[0].length, matches[index + 1]?.index)
+        .split(/\n\s*(?:overall_soundscape|non_diegetic_music)\s*:/i)[0].trim() : "";
+      return { number: index + 1, start, end: start + 15, text,
+        valid: matches.length === Number(count) && Number(match?.[1]) === index + 1 && timestamp === start && Number(match?.[3] || 0) < 60 && Boolean(text) };
+    });
+  };
+
+  const editLongPart = (prompt, count, number, text) => {
+    const source = String(prompt || "");
+    const first = /\[Shot\s+\d+\]/i.exec(source);
+    const sound = /\n\s*(?:overall_soundscape|non_diegetic_music)\s*:/i.exec(source.slice(first?.index ?? 0));
+    const tailStart = sound ? (first?.index ?? 0) + sound.index : source.length;
+    const prefix = source.slice(0, first?.index ?? tailStart).trimEnd();
+    const tail = source.slice(tailStart);
+    const shots = longTimeline(source, count).map(part => {
+      const seconds = part.start;
+      const marker = part.number === 1 ? "[Shot 1]" : `[Shot ${part.number}] At ${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}.000,`;
+      return `${marker} ${part.number === number ? text.trim() : part.text}`;
+    });
+    return `${prefix}\n${shots.join("\n")}${tail}`.trim();
+  };
+
   return {
     MODE_FRAMES,
     MODE_REFERENCES,
@@ -77,5 +105,7 @@
     findProfile,
     dimensionsForAspect,
     scaledResolution,
+    longTimeline,
+    editLongPart,
   };
 });

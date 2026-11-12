@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,12 +35,14 @@ func TestAdminStorageRendersRetentionAndCleanupState(t *testing.T) {
 		},
 	}
 	var rendered bytes.Buffer
-	if err := templates.ExecuteTemplate(&rendered, "admin_storage", map[string]any{"Title": "Хранилище базы данных", "Storage": view}); err != nil {
+	if err := templates.ExecuteTemplate(&rendered, "admin_storage", map[string]any{"Title": "Хранилище", "Storage": view, "CurrentUser": &User{ID: 9007199254740993, Role: "admin"}, "CSRF": "storage-test-csrf"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
 		"Хранилище", "Очистка завершена частично", "PROXY_REQUEST_RETENTION", "future_table",
-		"Политика не задана", "Без политики: 1", "Выгрузить аудит CSV", "Постоянные и служебные данные",
+		"Политика не задана", "Без политики: 1", "Аудит CSV", "Постоянные и служебные данные",
+		`href="/admin/audit/export" download`, `data-owner="9007199254740993"`, `data-csrf="storage-test-csrf"`,
+		`/static/storage-state.js`, `/static/storage-operations.js`, `/static/storage.js`, `data-storage-database-panel`,
 	} {
 		if !strings.Contains(rendered.String(), expected) {
 			t.Fatalf("storage page does not contain %q", expected)
@@ -58,6 +61,30 @@ func TestDatabaseCleanupViewSortsErrorsFirst(t *testing.T) {
 	}
 	if view.Items[0].Table != "proxy_requests" || view.Items[0].Error == "" {
 		t.Fatalf("cleanup errors should be first: %+v", view.Items)
+	}
+}
+
+func TestStorageAssetsAreServedAndVersioned(t *testing.T) {
+	app := &App{}
+	for _, path := range []string{"static/storage.css", "static/storage-state.js", "static/storage-operations.js", "static/storage.js"} {
+		versioned := false
+		for _, asset := range frontendAssetPaths {
+			versioned = versioned || asset == path
+		}
+		if !versioned {
+			t.Errorf("asset %s not versioned", path)
+		}
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/"+path, nil)
+		if strings.HasSuffix(path, ".css") {
+			app.handleStaticCSS(response, request)
+		} else {
+			app.handleStaticJS(response, request)
+		}
+		want, err := embeddedFS.ReadFile(path)
+		if err != nil || response.Code != http.StatusOK || !bytes.Equal(response.Body.Bytes(), want) {
+			t.Errorf("asset %s not served correctly: status %d, %v", path, response.Code, err)
+		}
 	}
 }
 
@@ -82,7 +109,8 @@ func TestGenerationJobTablesHaveLifecyclePolicies(t *testing.T) {
 func TestAdminAuditExportHeadAndInvalidBoundary(t *testing.T) {
 	app := &App{}
 	head := httptest.NewRecorder()
-	app.handleAdminAuditExport(head, httptest.NewRequest(http.MethodHead, "/admin/audit/export?before=2026-08-31T12:00:00Z", nil))
+	ctx := context.WithValue(context.Background(), userCtxKey, &User{Role: "admin"})
+	app.handleAdminAuditExport(head, httptest.NewRequest(http.MethodHead, "/admin/audit/export?before=2026-08-31T12:00:00Z", nil).WithContext(ctx))
 	if head.Code != http.StatusOK || head.Header().Get("Content-Type") != "text/csv; charset=utf-8" {
 		t.Fatalf("audit export HEAD = status:%d headers:%v", head.Code, head.Header())
 	}
@@ -91,7 +119,7 @@ func TestAdminAuditExportHeadAndInvalidBoundary(t *testing.T) {
 	}
 
 	invalid := httptest.NewRecorder()
-	app.handleAdminAuditExport(invalid, httptest.NewRequest(http.MethodGet, "/admin/audit/export?before=invalid", nil))
+	app.handleAdminAuditExport(invalid, httptest.NewRequest(http.MethodGet, "/admin/audit/export?before=invalid", nil).WithContext(ctx))
 	if invalid.Code != http.StatusBadRequest {
 		t.Fatalf("invalid audit boundary status = %d", invalid.Code)
 	}

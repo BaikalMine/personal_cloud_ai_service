@@ -153,11 +153,11 @@ func TestQueuePriorityPolicyIntegration(t *testing.T) {
 			expected = append(expected, job.ID)
 		}
 		for _, id := range []int64{expected[2], expected[1], expected[0]} {
-			job, err := repository.ClaimNextLoraTrainingJob(ctx)
+			job, err := repository.ClaimNextLoraTrainingJob(ctx, "test-claim")
 			if err != nil || job.ID != id {
 				t.Fatalf("claim id=%d want=%d err=%v", job.ID, id, err)
 			}
-			if _, err := repository.ClaimNextLoraTrainingJob(ctx); !errors.Is(err, sql.ErrNoRows) {
+			if _, err := repository.ClaimNextLoraTrainingJob(ctx, "other-claim"); !errors.Is(err, sql.ErrNoRows) {
 				t.Fatalf("active task preempted: %v", err)
 			}
 			if err := repository.UpdateLoraTrainingJob(ctx, job.ID, store.UpdateLoraTrainingJobParams{State: domain.LoraTrainingCompleted}); err != nil {

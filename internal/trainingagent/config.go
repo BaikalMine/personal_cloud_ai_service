@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 
+	"ai-access-gateway/internal/componentinspection"
+	"ai-access-gateway/internal/domain"
 	"ai-access-gateway/internal/loratraining"
 )
 
@@ -35,9 +37,16 @@ type ProfileConfig struct {
 func (profile ProfileConfig) Public(config Config) loratraining.Profile {
 	detail := profile.Readiness(config)
 	return loratraining.Profile{
+		RepeatProtocol: 1, ProfileSHA256: profile.ExecutionIdentity().Hash(),
 		ID: profile.ID, Family: profile.Family, Name: profile.Name, BaseModel: profile.BaseModel,
 		Description: profile.Description, Ready: detail == "", Detail: detail,
 	}
+}
+
+func (profile ProfileConfig) ExecutionIdentity() domain.LoraExecutionProfile {
+	return domain.LoraExecutionProfile{ID: profile.ID, Family: profile.Family, BaseModel: profile.BaseModel,
+		ModelVersion: profile.ModelVersion, StripPrefix: profile.StripPrefix, BlocksToSwap: profile.BlocksToSwap,
+		FP8Base: profile.FP8Base, FP8TextEncoder: profile.FP8TextEncoder}
 }
 
 func (profile ProfileConfig) Readiness(config Config) string {
@@ -66,26 +75,29 @@ func (profile ProfileConfig) Readiness(config Config) string {
 }
 
 type Config struct {
-	Addr            string          `json:"listen_address"`
-	Token           string          `json:"token"`
-	RootDir         string          `json:"root_directory"`
-	TunerDir        string          `json:"tuner_directory"`
-	PythonExe       string          `json:"python_executable"`
-	ComfyLoraDir    string          `json:"comfyui_lora_directory"`
-	LogFile         string          `json:"log_file,omitempty"`
-	Profiles        []ProfileConfig `json:"profiles"`
-	MaxDatasetBytes int64           `json:"max_dataset_bytes,omitempty"`
+	Addr                    string              `json:"listen_address"`
+	Token                   string              `json:"token"`
+	RootDir                 string              `json:"root_directory"`
+	TunerDir                string              `json:"tuner_directory"`
+	PythonExe               string              `json:"python_executable"`
+	ComfyLoraDir            string              `json:"comfyui_lora_directory"`
+	ComfyDiffusionDir       string              `json:"comfyui_diffusion_directory,omitempty"`
+	GenerationComponentDirs map[string][]string `json:"generation_component_directories,omitempty"`
+	LogFile                 string              `json:"log_file,omitempty"`
+	Profiles                []ProfileConfig     `json:"profiles"`
+	MaxDatasetBytes         int64               `json:"max_dataset_bytes,omitempty"`
 }
 
 func LoadConfig() (Config, error) {
 	config := Config{
-		Addr:            env("LORA_TRAINING_AGENT_ADDR", "127.0.0.1:8095"),
-		Token:           strings.TrimSpace(os.Getenv("LORA_TRAINING_AGENT_TOKEN")),
-		RootDir:         filepath.Clean(env("LORA_TRAINING_AGENT_ROOT", `C:\Work\ComfyUI\tools\lora-training-agent-data`)),
-		TunerDir:        filepath.Clean(env("MUSUBI_TUNER_DIR", `C:\Work\ComfyUI\tools\musubi-tuner`)),
-		PythonExe:       filepath.Clean(strings.TrimSpace(os.Getenv("MUSUBI_PYTHON_EXE"))),
-		ComfyLoraDir:    filepath.Clean(env("COMFYUI_LORA_DIR", `C:\Work\ComfyUI\models\loras`)),
-		MaxDatasetBytes: defaultMaxDatasetBytes,
+		Addr:              env("LORA_TRAINING_AGENT_ADDR", "127.0.0.1:8095"),
+		Token:             strings.TrimSpace(os.Getenv("LORA_TRAINING_AGENT_TOKEN")),
+		RootDir:           filepath.Clean(env("LORA_TRAINING_AGENT_ROOT", `C:\Work\ComfyUI\tools\lora-training-agent-data`)),
+		TunerDir:          filepath.Clean(env("MUSUBI_TUNER_DIR", `C:\Work\ComfyUI\tools\musubi-tuner`)),
+		PythonExe:         filepath.Clean(strings.TrimSpace(os.Getenv("MUSUBI_PYTHON_EXE"))),
+		ComfyLoraDir:      filepath.Clean(env("COMFYUI_LORA_DIR", `C:\Work\ComfyUI\models\loras`)),
+		ComfyDiffusionDir: strings.TrimSpace(os.Getenv("COMFYUI_DIFFUSION_DIR")),
+		MaxDatasetBytes:   defaultMaxDatasetBytes,
 	}
 	profileFile := filepath.Clean(strings.TrimSpace(os.Getenv("LORA_TRAINING_PROFILES_FILE")))
 	if profileFile == "." || profileFile == "" {
@@ -154,6 +166,16 @@ func cleanConfigPath(value, fallback string) string {
 }
 
 func (config Config) Validate() error {
+	for kind, directories := range config.GenerationComponentDirs {
+		if !componentinspection.ValidKind(kind) || len(directories) == 0 || len(directories) > 8 {
+			return errors.New("invalid generation component directories")
+		}
+		for _, directory := range directories {
+			if !filepath.IsAbs(directory) || filepath.Clean(directory) != directory {
+				return errors.New("generation component directories must be clean absolute paths")
+			}
+		}
+	}
 	if len(config.Profiles) == 0 {
 		return errors.New("at least one image training profile is required")
 	}

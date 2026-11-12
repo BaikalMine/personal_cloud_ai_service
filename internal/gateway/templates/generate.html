@@ -1,47 +1,67 @@
 {{define "generate"}}
 {{template "head" .}}
+{{template "generation_repeat_assets" .}}
+{{template "collection_assets" .}}
 <script src="/static/generation-store.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/generation-feedback.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-wizard.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-media.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/generation-payload.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/generation-submission.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-video.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-summary.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-output.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/generation-krea-pro.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-assistant.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/generation-assistant-progress.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-batch.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-job.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-recipes.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-draft.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/generation-job-source.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/lora-verification.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/generation-assistant-jobs.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-history.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/generation-results.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-lightbox.js?v={{.AssetVersion}}" defer></script>
+<link rel="stylesheet" href="/static/image-comparison.css?v={{.AssetVersion}}">
+<script src="/static/image-comparison.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generation-studio.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/postprocess-view.js?v={{.AssetVersion}}" defer></script>
 <script src="/static/generate.js?v={{.AssetVersion}}" defer></script>
 {{template "nav" .}}
-<main class="page generation-page" id="main-content" data-comfy-generation data-workflow-capabilities-url="/generate/capabilities" data-selected-workflow="{{.SelectedWorkflow}}" data-preview-output="{{.PreviewOutputURL}}" data-generation-retention="{{.Retention.GenerationHistoryLabel}}" data-media-retention="{{.Retention.GenerationMediaLabel}}" data-generation-image-daily-limit="{{.GenerationQuota.Image.DailyLimit}}" data-generation-image-daily-remaining="{{.GenerationQuota.Image.DailyRemaining}}" data-generation-image-total-limit="{{.GenerationQuota.Image.TotalLimit}}" data-generation-image-total-remaining="{{.GenerationQuota.Image.TotalRemaining}}" data-generation-video-daily-limit="{{.GenerationQuota.Video.DailyLimit}}" data-generation-video-daily-remaining="{{.GenerationQuota.Video.DailyRemaining}}" data-generation-video-total-limit="{{.GenerationQuota.Video.TotalLimit}}" data-generation-video-total-remaining="{{.GenerationQuota.Video.TotalRemaining}}" data-max-video-generation-quality="{{.MaxVideoGenerationQuality}}">
+<main class="page generation-page" id="main-content" data-comfy-generation data-generation-live-progress="{{eq .CurrentUser.Role "admin"}}" data-generation-owner="{{.CurrentUser.ID}}" data-workflow-capabilities-url="/generate/capabilities" data-selected-workflow="{{.SelectedWorkflow}}" data-preview-output="{{.PreviewOutputURL}}" data-generation-retention="{{.Retention.GenerationHistoryLabel}}" data-media-retention="{{.Retention.GenerationMediaLabel}}" data-generation-image-daily-limit="{{.GenerationQuota.Image.DailyLimit}}" data-generation-image-daily-remaining="{{.GenerationQuota.Image.DailyRemaining}}" data-generation-image-total-limit="{{.GenerationQuota.Image.TotalLimit}}" data-generation-image-total-remaining="{{.GenerationQuota.Image.TotalRemaining}}" data-generation-video-daily-limit="{{.GenerationQuota.Video.DailyLimit}}" data-generation-video-daily-remaining="{{.GenerationQuota.Video.DailyRemaining}}" data-generation-video-total-limit="{{.GenerationQuota.Video.TotalLimit}}" data-generation-video-total-remaining="{{.GenerationQuota.Video.TotalRemaining}}" data-max-video-generation-quality="{{.MaxVideoGenerationQuality}}">
   <link rel="stylesheet" href="/static/studio.css?v={{.AssetVersion}}">
   <link rel="stylesheet" href="/static/generation-assistant.css?v={{.AssetVersion}}">
+  <link rel="stylesheet" href="/static/lora-verification.css?v={{.AssetVersion}}">
   <header class="studio-heading">
     <h1>Создать</h1>
     <a class="button ghost" href="/gallery"><i data-lucide="images" aria-hidden="true"></i>Мои результаты</a>
   </header>
   {{template "studio_notices" .}}
-  <div class="studio-mobile-tabs ui-segmented" role="tablist" aria-label="Студия генерации">
+  <section class="ui-status-banner" id="lora-verification-recovery" hidden><p role="status"></p><button type="button" class="button ghost"><i data-lucide="refresh-cw" aria-hidden="true"></i>Уточнить запуск</button></section>
+  <div class="studio-mobile-tabs ui-segmented ui-segmented--tabs" role="tablist" aria-label="Студия генерации">
     <button type="button" class="ui-segment is-active" id="studio-configure-tab" data-studio-tab="configure" role="tab" aria-selected="true" aria-controls="studio-editor">Настроить</button>
     <button type="button" class="ui-segment" id="studio-result-tab" data-studio-tab="result" role="tab" aria-selected="false" aria-controls="studio-result-pane">Результат</button>
   </div>
   <div class="studio-workspace" data-studio-view="configure">
-    <form class="studio-editor" id="generation-form" novalidate>
+    <form class="studio-editor" id="generation-form" autocomplete="off" novalidate>
       {{template "studio_inputs" .}}
       <div id="studio-editor">
         {{template "studio_scenarios" .}}
-        {{template "studio_prompt" .}}
-        <div class="studio-assistant-launch"><button type="button" class="button ghost" id="prompt-assistant-open" aria-haspopup="dialog" aria-controls="prompt-assistant"><i data-lucide="sparkles" aria-hidden="true"></i>Улучшить описание</button><span id="prompt-assistant-launch-state" role="status"></span></div>
+        <section class="studio-models" aria-label="Модель и способ обработки">
+          {{template "studio_workflows" .}}
+          {{template "studio_aihub_mode" .}}
+          {{template "studio_model" .}}
+          {{template "studio_krea_pro" .}}
+          <div class="ui-status-banner" id="generation-capabilities-feedback" hidden><p id="generation-capabilities-message" role="status"></p><button type="button" class="button ghost" id="generation-capabilities-refresh"><i data-lucide="refresh-cw" aria-hidden="true"></i>Повторить проверку</button><a class="button ghost" id="generation-capabilities-login" href="/login?next=%2Fgenerate" hidden><i data-lucide="log-in" aria-hidden="true"></i>Войти</a></div>
+        </section>
         {{template "studio_video_mode" .}}
         {{template "studio_sources" .}}
         <p class="studio-held-media" id="studio-held-media" role="status" hidden></p>
-        <section class="studio-models" aria-label="Модель и способ обработки">
-          {{template "studio_workflows" .}}
-          {{template "studio_model" .}}
-        </section>
+        {{template "studio_prompt" .}}
+        <div class="studio-assistant-launch"><button type="button" class="button ghost" id="prompt-assistant-open" aria-haspopup="dialog" aria-controls="prompt-assistant"><i data-lucide="sparkles" aria-hidden="true"></i>Улучшить описание</button><button type="button" class="button ghost" id="prompt-assistant-restore-original" hidden><i data-lucide="undo-2" aria-hidden="true"></i>Вернуть мой текст</button><span id="prompt-assistant-launch-state" role="status"></span></div>
+        {{template "studio_aihub_audio" .}}
         {{template "studio_profiles" .}}
         <details class="studio-profile-changes" id="studio-profile-changes" hidden><summary>Изменения профиля</summary><dl></dl></details>
         <div hidden>{{template "studio_quality" .}}</div>
@@ -53,6 +73,8 @@
           <button type="button" class="button ghost" data-studio-settings-target="sampling"><i data-lucide="sliders-horizontal" aria-hidden="true"></i>Дополнительные параметры<i data-lucide="chevron-right" aria-hidden="true"></i></button>
         </div>
         {{template "studio_batch" .}}
+        {{template "studio_lora_verification" .}}
+        {{template "studio_collection" .}}
         {{template "studio_preflight" .}}
         <details class="ui-disclosure studio-help">
           <summary><span class="ui-disclosure-label">О выбранном режиме</span><i data-lucide="chevron-down" aria-hidden="true"></i></summary>
@@ -79,14 +101,18 @@
       <div class="studio-result-surface">
         <div class="studio-result-empty" id="studio-result-empty"><i data-lucide="image" aria-hidden="true"></i><h2>Результат</h2><p>Пока ничего не создано</p></div>
         {{template "studio_result" .}}
+        {{template "studio_history_inspector" .}}
       </div>
       <details class="ui-disclosure studio-server"><summary><span class="ui-disclosure-label">Очередь и лимиты</span><i data-lucide="chevron-down" aria-hidden="true"></i></summary>{{template "studio_queue" .}}{{template "studio_quota" .}}</details>
       {{template "studio_history" .}}
     </aside>
   </div>
   {{template "studio_batch_compare" .}}
+  {{template "studio_lora_verification_dialogs" .}}
   {{template "studio_image_picker" .}}
   {{template "studio_lightbox" .}}
+  {{template "generation_repeat_dialog" .}}
+  {{template "collection_dialog" .}}
 </main>
 </body></html>
 {{end}}

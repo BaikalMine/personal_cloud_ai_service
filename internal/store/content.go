@@ -12,11 +12,19 @@ import (
 )
 
 func (s *Store) InsertContentEvent(ctx context.Context, event domain.ContentEventRecord) (int64, error) {
+	return insertContentEvent(ctx, s.db, event)
+}
+
+type contentEventQuerier interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func insertContentEvent(ctx context.Context, db contentEventQuerier, event domain.ContentEventRecord) (int64, error) {
 	if event.ExpiresAt.IsZero() {
 		return 0, errors.New("content event expiration is required")
 	}
 	var id int64
-	err := s.db.QueryRowContext(ctx, `
+	err := db.QueryRowContext(ctx, `
 		INSERT INTO content_events
 			(user_id, generation_job_id, correlation_id, service, kind, external_id, model, generation_state, prompt_cipher, response_cipher, metadata_cipher, is_sensitive, sensitivity_classified_at, username_snapshot, expires_at)
 		VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9,$10,$11,$12,now(),COALESCE((SELECT username FROM users WHERE id=$1),''),$13)
@@ -25,7 +33,7 @@ func (s *Store) InsertContentEvent(ctx context.Context, event domain.ContentEven
 	`, event.UserID, event.GenerationJobID, event.CorrelationID, event.Service, event.Kind, event.ExternalID, event.Model, event.GenerationState,
 		event.PromptCipher, event.ResponseCipher, event.MetadataCipher, event.Sensitive, event.ExpiresAt).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) && event.GenerationJobID != nil {
-		err = s.db.QueryRowContext(ctx, `SELECT id FROM content_events
+		err = db.QueryRowContext(ctx, `SELECT id FROM content_events
 			WHERE generation_job_id=$1 AND service=$2 AND kind=$3`, *event.GenerationJobID, event.Service, event.Kind).Scan(&id)
 	}
 	return id, err
@@ -114,7 +122,7 @@ func (s *Store) ListContentMediaSummaries(ctx context.Context, eventIDs []int64)
 		return result, nil
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id,event_id,media_type,(media_type='image' AND visual_sensitivity_classified_at IS NULL),
+		SELECT id,event_id,media_type,(media_type IN ('image','video') AND visual_sensitivity_classified_at IS NULL),
 		       GREATEST(created_at,COALESCE(visual_sensitivity_classified_at,created_at),COALESCE(favorite_at,created_at),COALESCE(pinned_at,created_at),COALESCE(profile_hidden_at,created_at))
 		FROM content_media
 		WHERE event_id = ANY($1) AND expires_at > now()
@@ -189,7 +197,7 @@ func (s *Store) ListPendingVisualSensitiveMedia(ctx context.Context, limit int) 
 		       m.size_bytes,m.storage_format
 		FROM content_media m
 		JOIN content_events e ON e.id=m.event_id
-		WHERE m.media_type='image' AND m.visual_sensitivity_classified_at IS NULL
+		WHERE m.media_type IN ('image','video') AND m.visual_sensitivity_classified_at IS NULL
 		  AND m.expires_at > now() AND e.expires_at > now()
 		ORDER BY m.created_at ASC,m.id ASC
 		LIMIT $1
@@ -279,7 +287,7 @@ func (s *Store) listUserGenerationMedia(ctx context.Context, userID int64, media
 	limit = boundedLimit(limit, 1, 100)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT m.id,m.media_type,m.mime_type,m.original_name,e.model,m.size_bytes,m.created_at,m.expires_at,e.is_sensitive,
-		       (m.media_type='image' AND m.visual_sensitivity_classified_at IS NULL),
+		       (m.media_type IN ('image','video') AND m.visual_sensitivity_classified_at IS NULL),
 		       (m.pinned_at IS NOT NULL),(m.favorite_at IS NOT NULL)
 		FROM content_media m
 		JOIN content_events e ON e.id=m.event_id
@@ -315,6 +323,20 @@ func (s *Store) ContentMediaByIDForUser(ctx context.Context, id, userID int64) (
 		  AND e.expires_at > now() AND m.expires_at > now() AND m.profile_hidden_at IS NULL
 	`, id, userID).Scan(&media.ID, &media.MediaType, &media.MIMEType, &media.OriginalName, &media.PayloadCipher, &media.SizeBytes, &media.StorageFormat)
 	return media, err
+}
+
+func (s *Store) UserGenerationMediaByID(ctx context.Context, userID, id int64) (domain.UserGenerationMedia, error) {
+	var item domain.UserGenerationMedia
+	err := s.db.QueryRowContext(ctx, `
+		SELECT m.id,m.media_type,m.mime_type,m.original_name,e.model,m.size_bytes,m.created_at,m.expires_at,e.is_sensitive,
+		       (m.media_type IN ('image','video') AND m.visual_sensitivity_classified_at IS NULL),
+		       (m.pinned_at IS NOT NULL),(m.favorite_at IS NOT NULL)
+		FROM content_media m JOIN content_events e ON e.id=m.event_id
+		WHERE m.id=$2 AND e.user_id=$1 AND e.service='comfyui' AND e.kind='comfyui_prompt'
+		  AND e.expires_at>now() AND m.expires_at>now() AND m.profile_hidden_at IS NULL
+	`, userID, id).Scan(&item.ID, &item.MediaType, &item.MIMEType, &item.OriginalName, &item.ModelName, &item.SizeBytes,
+		&item.CreatedAt, &item.ExpiresAt, &item.Sensitive, &item.VisualPending, &item.Pinned, &item.Favorite)
+	return item, err
 }
 
 func (s *Store) HideGenerationMediaForUser(ctx context.Context, id, userID int64) (bool, error) {

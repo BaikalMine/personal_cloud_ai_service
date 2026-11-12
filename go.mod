@@ -3,7 +3,9 @@ module ai-access-gateway
 go 1.25.0
 
 require (
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/lib/pq v1.10.9
 	golang.org/x/crypto v0.55.0
 	golang.org/x/image v0.45.0
+	golang.org/x/sys v0.47.0
 )

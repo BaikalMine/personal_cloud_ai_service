@@ -22,7 +22,10 @@ func Open(ctx context.Context, dsn string) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+	return waitForDatabase(ctx, db)
+}
 
+func waitForDatabase(ctx context.Context, db *sql.DB) (*sql.DB, error) {
 	var lastErr error
 	for {
 		pingCtx, cancel := context.WithTimeout(ctx, pingTimeout)
@@ -34,6 +37,10 @@ func Open(ctx context.Context, dsn string) (*sql.DB, error) {
 			db.SetConnMaxIdleTime(5 * time.Minute)
 			db.SetConnMaxLifetime(30 * time.Minute)
 			return db, nil
+		}
+		if errors.Is(lastErr, ErrRuntimeFenced) || errors.Is(lastErr, ErrRuntimeFenceInvalid) {
+			_ = db.Close()
+			return nil, lastErr
 		}
 
 		timer := time.NewTimer(retryDelay)

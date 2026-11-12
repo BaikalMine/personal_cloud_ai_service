@@ -15,6 +15,10 @@ func NewController(_, _ string, _ ...string) (Controller, error) {
 	return unsupportedController{}, nil
 }
 
+func NewOwnedController(_, _ string, _ ...string) (Controller, error) {
+	return nil, errors.New("owned mining process groups require Windows")
+}
+
 func (unsupportedController) State(context.Context, string) (mining.State, error) {
 	return mining.State{}, errors.New("mining agent process control requires Windows")
 }

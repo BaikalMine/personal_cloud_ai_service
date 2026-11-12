@@ -1,0 +1,50 @@
+{{define "gallery_actions"}}
+<dialog class="media-library-dialog" id="gallery-metadata-dialog" hidden aria-labelledby="gallery-metadata-title">
+  <form class="media-library-dialog-window ui-dialog" action="/generate/library/metadata" method="post" data-gallery-metadata-form>
+    <header class="ui-dialog__toolbar"><h2 id="gallery-metadata-title">Теги и коллекции</h2><button class="icon-button ghost" type="button" data-gallery-metadata-close aria-label="Закрыть" title="Закрыть"><i data-lucide="x" aria-hidden="true"></i></button></header>
+    <div class="media-library-dialog-body">
+      <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="media_id">
+      <label class="ui-field"><span class="ui-field-label">Теги</span><input name="tags" type="text" maxlength="400" placeholder="портрет, студия, вариант 2"></label>
+      <fieldset class="media-library-collection-options"><legend>Коллекции</legend><div data-gallery-metadata-collections>{{range .Collections}}<label class="ui-choice" data-gallery-metadata-collection="{{.ID}}"><input type="checkbox" name="collection_id" value="{{.ID}}"><span><strong>{{.Name}}</strong><small>{{.ItemCount}} результатов</small></span></label>{{else}}<p data-gallery-no-collections>Коллекций пока нет.</p>{{end}}</div></fieldset>
+      <p class="media-library-dialog-status" data-gallery-metadata-status role="status"></p>
+    </div>
+    <footer class="media-library-dialog-actions"><button class="ghost" type="button" data-gallery-metadata-close>Отмена</button><button type="submit">Сохранить</button></footer>
+  </form>
+</dialog>
+{{if .CanReuseImages}}<dialog class="media-library-dialog" id="gallery-use-dialog" hidden aria-labelledby="gallery-use-title">
+  <form class="media-library-dialog-window ui-dialog" data-gallery-use-form>
+    <header class="ui-dialog__toolbar"><h2 id="gallery-use-title">Использовать результат</h2><button class="icon-button ghost" type="button" data-gallery-use-close aria-label="Закрыть" title="Закрыть"><i data-lucide="x" aria-hidden="true"></i></button></header>
+    <div class="media-library-dialog-body">
+      <input type="hidden" name="media_id">
+      <p class="gallery-use-source" data-gallery-use-source></p>
+      <p class="media-library-dialog-status" data-gallery-use-status role="status"></p>
+      <button class="ghost" type="button" data-gallery-use-retry hidden>Проверить назначения</button>
+      <fieldset class="media-library-workflow-options" data-gallery-destinations><legend>Куда добавить</legend></fieldset>
+      <div class="ui-field-grid media-library-use-fields" data-gallery-use-fields hidden>
+        <label class="ui-field" data-gallery-workflow-field><span class="ui-field-label">Модель</span><select name="workflow"></select></label>
+        <label class="ui-field" data-gallery-slot-field><span class="ui-field-label">Слот</span><select name="slot"></select></label>
+        <label class="ui-field" data-gallery-role-field><span class="ui-field-label">Роль</span><select name="role"><option value="base_scene">Основная сцена</option><option value="identity">Внешность и лицо</option><option value="wardrobe_object">Одежда или предмет</option><option value="pose_composition">Поза и композиция</option><option value="style">Стиль, свет и цвет</option><option value="background">Фон</option><option value="details">Мелкие детали</option></select></label>
+      </div>
+      <div class="ui-field-grid media-library-use-fields" data-gallery-dataset-fields hidden>
+        <label class="ui-field"><span class="ui-field-label">Датасет</span><select name="dataset"><option value="">Новый набор</option></select></label>
+        <label class="ui-field" data-gallery-dataset-name-field><span class="ui-field-label">Название набора</span><input name="dataset_name" maxlength="80" value="Новый датасет"></label>
+      </div>
+      <p class="media-library-use-hint" data-gallery-use-hint></p>
+      <a class="button ghost" data-gallery-use-dataset-link hidden>Открыть датасет</a>
+      <div class="gallery-import-recovery" data-gallery-import-recovery hidden>
+        <button class="ghost" type="button" data-gallery-import-check>Проверить результат переноса</button>
+        <button class="ghost" type="button" data-gallery-import-resend>Повторить тот же запрос</button>
+        <button class="ghost" type="button" data-gallery-import-discard>Отказаться от переноса</button>
+      </div>
+    </div>
+    <footer class="media-library-dialog-actions"><button class="ghost" type="button" data-gallery-use-close>Отмена</button><button type="submit" disabled data-gallery-use-submit>Продолжить</button></footer>
+  </form>
+</dialog>
+{{end}}<dialog class="media-library-dialog media-library-confirm-dialog" id="gallery-confirm-dialog" hidden aria-labelledby="gallery-confirm-title">
+  <section class="media-library-dialog-window ui-dialog">
+    <header class="ui-dialog__toolbar"><h2 id="gallery-confirm-title">Подтвердите действие</h2></header>
+    <div class="media-library-dialog-body"><p data-gallery-confirm-message></p></div>
+    <footer class="media-library-dialog-actions"><button class="ghost" type="button" data-gallery-confirm-cancel>Отмена</button><button class="danger" type="button" data-gallery-confirm-accept>Подтвердить</button></footer>
+  </section>
+</dialog>
+{{end}}

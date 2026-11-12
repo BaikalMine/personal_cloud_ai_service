@@ -19,6 +19,7 @@ import (
 	"ai-access-gateway/internal/promptassistant"
 	"ai-access-gateway/internal/security"
 	"ai-access-gateway/internal/store"
+	"ai-access-gateway/internal/thumbnail"
 	"ai-access-gateway/internal/updates"
 	"ai-access-gateway/internal/virustotal"
 )
@@ -57,6 +58,7 @@ type App struct {
 	contentModerator       *moderation.Client
 	updates                *updates.Client
 	loraTraining           *loratraining.Client
+	gpuCoordinator         *gpuCoordinator
 	virusTotal             *virustotal.Client
 	contentCipher          *contentcrypto.Cipher
 	mediaCaptureSlots      chan struct{}
@@ -70,13 +72,28 @@ type App struct {
 	comfyPromptSlots       chan struct{}
 	generationMu           sync.Mutex
 	miningPauseMu          sync.Mutex
+	harnessAgentMu         sync.Mutex
+	harnessAgentOnce       sync.Once
+	harnessAgentSlots      chan struct{}
 	comfyQueueMu           sync.Mutex
 	comfyPromptAdmissionMu sync.Mutex
 	websocketMu            sync.Mutex
 	maintenanceOnce        sync.Once
+	liveOnce               sync.Once
+	live                   *liveHub
 	dependencyOnce         sync.Once
 	observabilityOnce      sync.Once
 	mediaObservabilityOnce sync.Once
+	taskThumbnailsOnce     sync.Once
+	taskThumbnails         *thumbnail.Cache
+	mediaProbeOnce         sync.Once
+	mediaProbeSlots        chan struct{}
+	postprocessDecodeOnce  sync.Once
+	postprocessDecodeSlots chan struct{}
+	postprocessQuoteMu     sync.Mutex
+	postprocessQuoteBusy   bool
+	postprocessQuoteNext   time.Time
+	postprocessOptionsNext time.Time
 	loraTrainingMu         sync.Mutex
 	maintenanceWorkers     *maintenanceRegistry
 	maintenanceDone        chan struct{}
@@ -165,14 +182,18 @@ type MinerView struct {
 }
 
 type MiningOverview struct {
-	Available bool
-	Running   bool
-	Agent     DependencyStatus
-	Active    *MinerView
-	Default   *MinerView
-	Miners    []MinerView
-	Message   string
-	Script    mining.Script
+	LoadError      bool
+	Available      bool
+	Running        bool
+	Agent          DependencyStatus
+	Active         *MinerView
+	Default        *MinerView
+	Miners         []MinerView
+	Message        string
+	Script         mining.Script
+	InventoryKnown bool
+	Catalog        mining.FileCatalog
+	External       []mining.State
 }
 
 type UpdateOverview struct {

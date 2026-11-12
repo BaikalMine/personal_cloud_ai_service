@@ -43,7 +43,7 @@ func (err *QuickGenerationLimitError) Is(target error) bool {
 }
 
 func quickGenerationQuotaKind(templateID string) QuickGenerationQuotaKind {
-	if templateID == "minimax-h3-video" {
+	if templateID == "minimax-h3-video" || templateID == domain.PostprocessVideoTemplate {
 		return QuickGenerationVideoQuota
 	}
 	return QuickGenerationImageQuota
@@ -67,6 +67,17 @@ func (s *Store) ReserveQuickGenerationForJob(ctx context.Context, jobID, userID 
 		return QuickGenerationReservation{}, false, err
 	}
 	defer tx.Rollback()
+	reservation, created, err := reserveQuickGenerationForJob(ctx, tx, jobID, userID)
+	if err != nil {
+		return QuickGenerationReservation{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return QuickGenerationReservation{}, false, err
+	}
+	return reservation, created, nil
+}
+
+func reserveQuickGenerationForJob(ctx context.Context, tx *sql.Tx, jobID, userID int64) (QuickGenerationReservation, bool, error) {
 	var state, templateID string
 	var reservedOn sql.NullTime
 	if err := tx.QueryRowContext(ctx, `SELECT state,template_id,quota_reserved_on FROM generation_jobs
@@ -75,9 +86,6 @@ func (s *Store) ReserveQuickGenerationForJob(ctx context.Context, jobID, userID 
 	}
 	kind := quickGenerationQuotaKind(templateID)
 	if reservedOn.Valid {
-		if err := tx.Commit(); err != nil {
-			return QuickGenerationReservation{}, false, err
-		}
 		return QuickGenerationReservation{UserID: userID, UsageDate: reservedOn.Time, Kind: kind}, false, nil
 	}
 	if domain.GenerationJobState(state) != domain.GenerationJobWaitingForResources {
@@ -86,10 +94,10 @@ func (s *Store) ReserveQuickGenerationForJob(ctx context.Context, jobID, userID 
 	var allowed bool
 	var imageDailyLimit, videoDailyLimit int
 	var imageTotalLimit, imageTotalUsed, videoTotalLimit, videoTotalUsed int64
-	if err := tx.QueryRowContext(ctx, `SELECT can_use_quick_generation,
+	if err := tx.QueryRowContext(ctx, `SELECT (can_use_quick_generation OR (role='admin' AND $2::boolean)),
 		generation_daily_limit,generation_total_limit,generation_total_used,
 		video_generation_daily_limit,video_generation_total_limit,video_generation_total_used
-		FROM users WHERE id=$1 FOR UPDATE`, userID).Scan(&allowed,
+		FROM users WHERE id=$1 FOR UPDATE`, userID, templateID == domain.PostprocessImageTemplate || templateID == domain.PostprocessVideoTemplate).Scan(&allowed,
 		&imageDailyLimit, &imageTotalLimit, &imageTotalUsed,
 		&videoDailyLimit, &videoTotalLimit, &videoTotalUsed); err != nil {
 		return QuickGenerationReservation{}, false, err
@@ -101,6 +109,17 @@ func (s *Store) ReserveQuickGenerationForJob(ctx context.Context, jobID, userID 
 	if !allowed {
 		return QuickGenerationReservation{}, false, ErrQuickGenerationForbidden
 	}
+	if templateID == domain.PostprocessImageTemplate || templateID == domain.PostprocessVideoTemplate {
+		var permitted bool
+		if err := tx.QueryRowContext(ctx, `SELECT NOT disabled AND (account_expires_at IS NULL OR account_expires_at>clock_timestamp()) AND
+		 (role='admin' OR CASE WHEN $2='video' THEN can_generate_video ELSE can_generate_text_to_image OR can_generate_image_to_image END)
+		 FROM users WHERE id=$1`, userID, string(kind)).Scan(&permitted); err != nil {
+			return QuickGenerationReservation{}, false, err
+		}
+		if !permitted {
+			return QuickGenerationReservation{}, false, ErrQuickGenerationForbidden
+		}
+	}
 	if totalLimit > 0 && totalUsed >= totalLimit {
 		return QuickGenerationReservation{}, false, quickGenerationLimitError(kind, "total")
 	}
@@ -109,7 +128,7 @@ func (s *Store) ReserveQuickGenerationForJob(ctx context.Context, jobID, userID 
 		return QuickGenerationReservation{}, false, err
 	}
 	var imageUsedToday, videoUsedToday int
-	err = tx.QueryRowContext(ctx, `SELECT used_count,video_used_count FROM quick_generation_daily_usage
+	err := tx.QueryRowContext(ctx, `SELECT used_count,video_used_count FROM quick_generation_daily_usage
 		WHERE user_id=$1 AND usage_date=$2`, userID, usageDate).Scan(&imageUsedToday, &videoUsedToday)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return QuickGenerationReservation{}, false, err
@@ -145,9 +164,6 @@ func (s *Store) ReserveQuickGenerationForJob(ctx context.Context, jobID, userID 
 		return QuickGenerationReservation{}, false, err
 	}
 	if err := incrementGenerationJobRevision(ctx, tx); err != nil {
-		return QuickGenerationReservation{}, false, err
-	}
-	if err := tx.Commit(); err != nil {
 		return QuickGenerationReservation{}, false, err
 	}
 	return QuickGenerationReservation{UserID: userID, UsageDate: usageDate, Kind: kind}, true, nil

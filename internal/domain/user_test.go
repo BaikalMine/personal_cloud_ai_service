@@ -7,9 +7,9 @@ import (
 )
 
 func TestUserCanUseService(t *testing.T) {
-	user := User{CanUseComfyUI: true, CanUseOpenWebUI: false, CanUseQuickGeneration: true}
-	if !user.CanUseService("comfyui") {
-		t.Fatal("expected ComfyUI access")
+	user := User{Role: "user", CanUseComfyUI: true, CanUseOpenWebUI: true, CanUseQuickGeneration: true}
+	if user.CanUseService("comfyui") {
+		t.Fatal("legacy grant must not expose ComfyUI")
 	}
 	if !user.CanUseService("quick_generation") {
 		t.Fatal("expected quick generation access")

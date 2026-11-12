@@ -1,153 +1,45 @@
 {{define "admin_user_detail"}}
 {{template "head" .}}
 {{template "admin_nav" .}}
-<main class="page" id="main-content">
-  <section class="hero profile-hero">
-    <div>
-      <p class="eyebrow">Профиль пользователя</p>
-      <h1>{{.Profile.Username}}</h1>
+<link rel="stylesheet" href="/static/admin-access.css?v={{.AssetVersion}}">
+<link rel="stylesheet" href="/static/admin-user-profile.css?v={{.AssetVersion}}">
+<main class="page admin-profile-page" id="main-content">
+  {{$tab := or .ProfileTab "access"}}
+  <header class="admin-profile-header">
+    <div><p class="eyebrow">Пользователь</p><h1>{{.Profile.Username}}</h1>
       <div class="profile-badges">
         <span class="badge">{{roleLabel .Profile.Role}}</span>
-        {{if .Profile.AccountExpiresAt.Valid}}
-          <span class="badge account-kind temporary">Временная</span>
-          <span class="profile-account-expiry" data-account-expiry="{{.Profile.AccountExpiresAt.Time.UnixMilli}}">Вычисляем срок удаления...</span>
-        {{else}}
-          <span class="badge account-kind permanent">Постоянная</span>
-        {{end}}
-        {{if .Profile.Disabled}}<span class="badge danger">Отключён</span>{{else if .AccountLocked}}<span class="badge danger">Вход заблокирован</span>{{else}}<span class="badge ok">Активен</span>{{end}}
+        {{if .Profile.AccountExpiresAt.Valid}}<span class="badge account-kind temporary">Временная</span><span class="profile-account-expiry" data-account-expiry="{{.Profile.AccountExpiresAt.Time.UnixMilli}}">Удаление: {{formatTime .Profile.AccountExpiresAt}}</span>{{else}}<span class="badge account-kind permanent">Постоянная</span>{{end}}
+        {{if .Profile.Disabled}}<span class="badge danger">Отключён</span>{{else if eq .EffectiveAccess.State "expired"}}<span class="badge danger">Срок истёк</span>{{else if .AccountLocked}}<span class="badge danger">Вход заблокирован</span>{{else}}<span class="badge ok">Активен</span>{{end}}
       </div>
     </div>
-    <a class="button ghost" href="/admin/users">К списку пользователей</a>
-  </section>
-
-  {{if .AccountLocked}}<p class="alert">Вход заблокирован до {{formatTime .Profile.LockedUntil}}.</p>{{end}}
-  {{if eq .SecurityStatus "unlocked"}}<p class="success-box">Блокировка и счётчик неудачных попыток сброшены.</p>{{end}}
-  {{if eq .DeleteStatus "confirmation_required"}}<p class="alert">Для удаления введите логин пользователя.</p>{{end}}
-  {{if eq .DeleteStatus "confirmation_invalid"}}<p class="alert">Логин не совпадает или эту учётную запись нельзя удалить.</p>{{end}}
-
-  <section class="metric-grid metrics-four profile-metrics" aria-label="Статистика пользователя">
-    <article class="metric-card tone-blue"><span>Всего запросов</span><strong>{{formatNumber .Stats.TotalRequests}}</strong><small>за всё время</small></article>
-    <article class="metric-card tone-amber"><span>Передано данных</span><strong>{{formatBytes .Stats.TotalBytesOut}}</strong><small>исходящий трафик</small></article>
-    <article class="metric-card tone-indigo"><span>Последний сервис</span><strong>{{if .Stats.LastService}}{{.Stats.LastService}}{{else}}Нет данных{{end}}</strong><small>последняя активность</small></article>
-    <article class="metric-card {{if gt .Profile.FailedLoginCount 0}}tone-red{{else}}tone-green{{end}}"><span>Ошибки входа</span><strong>{{formatNumber .Profile.FailedLoginCount}}</strong><small>текущий счётчик</small></article>
-  </section>
-
-  <section class="detail-grid">
-    <section class="panel profile-overview">
-      <div class="panel-heading"><div><p class="section-kicker">Учётная запись</p><h2>Основные данные</h2></div></div>
-      <dl class="key-values">
-        <div><dt>Логин</dt><dd>{{.Profile.Username}}</dd></div>
-        <div><dt>Email</dt><dd>{{if .Profile.Email.Valid}}{{.Profile.Email.String}}{{else}}Не указан{{end}}</dd></div>
-        <div><dt>Роль</dt><dd>{{roleLabel .Profile.Role}}</dd></div>
-        <div><dt>Тип аккаунта</dt><dd>{{if .Profile.AccountExpiresAt.Valid}}Временный{{else}}Постоянный{{end}}</dd></div>
-        {{if .Profile.AccountExpiresAt.Valid}}<div><dt>Автоудаление</dt><dd class="account-expiry-detail"><time>{{formatTime .Profile.AccountExpiresAt}}</time><small data-account-expiry="{{.Profile.AccountExpiresAt.Time.UnixMilli}}">Вычисляем оставшееся время...</small></dd></div>{{end}}
-        <div><dt>Создан</dt><dd>{{formatTime .Profile.CreatedAt}}</dd></div>
-        <div><dt>Последний вход</dt><dd>{{formatTime .Profile.LastLoginAt}}</dd></div>
-      </dl>
-    </section>
-
-    <section class="panel access-panel span-two">
-      <div class="panel-heading"><div><p class="section-kicker">Разрешения</p><h2>Доступ к сервисам</h2></div></div>
-      {{if eq .AccessStatus "changed"}}<p class="success-box">Права доступа обновлены.</p>{{end}}
-	  {{if eq .AccessStatus "invalid_limits"}}<p class="alert">Проверьте лимиты генераций: допустимы только неотрицательные числа.</p>{{end}}
-      {{if eq .Profile.Role "admin"}}
-      <p class="access-note"><span class="account-indicator"></span>Администратору доступны все сервисы и обучение LoRA.</p>
-      {{else}}
-      <form method="post" class="access-form">
-        <input type="hidden" name="csrf" value="{{.CSRF}}">
-        <input type="hidden" name="action" value="update_access">
-        <label class="service-toggle ui-choice"><input name="can_use_quick_generation" type="checkbox" {{if .Profile.CanUseQuickGeneration}}checked{{end}}><span><b>Быстрая генерация</b><small>{{if .Profile.CanUseQuickGeneration}}Разрешена без доступа к ComfyUI{{else}}Доступ закрыт{{end}}</small></span></label>
-        <fieldset class="service-access"><legend>Типы быстрой генерации</legend>
-          <label class="service-toggle ui-choice"><input name="can_generate_text_to_image" type="checkbox" {{if .Profile.CanGenerateTextToImage}}checked{{end}}><span><b>Текст в изображение</b><small>Создание изображения только по текстовому описанию.</small></span></label>
-          <label class="service-toggle ui-choice"><input name="can_generate_image_to_image" type="checkbox" {{if .Profile.CanGenerateImageToImage}}checked{{end}}><span><b>Фото и промт</b><small>Редактирование и перенос внешности по загруженному фото.</small></span></label>
-          <label class="service-toggle ui-choice"><input name="can_generate_video" type="checkbox" {{if .Profile.CanGenerateVideo}}checked{{end}}><span><b>Видео</b><small>Сценарий MiniMax H3 с первым кадром и опциональными референсами.</small></span></label>
-        </fieldset>
-        <label class="service-toggle ui-choice"><input name="can_use_comfyui" type="checkbox" {{if .Profile.CanUseComfyUI}}checked{{end}}><span><b>ComfyUI</b><small>{{if .Profile.CanUseComfyUI}}Доступ разрешён{{else}}Доступ закрыт{{end}}</small></span></label>
-        <label class="service-toggle ui-choice"><input name="can_use_openwebui" type="checkbox" {{if .Profile.CanUseOpenWebUI}}checked{{end}}><span><b>OpenWebUI</b><small>{{if .Profile.CanUseOpenWebUI}}Доступ разрешён{{else}}Доступ закрыт{{end}}</small></span></label>
-		<label class="service-toggle ui-choice"><input name="can_train_image_lora" type="checkbox" {{if .Profile.CanTrainImageLora}}checked{{end}}><span><b>Обучение LoRA для изображений</b><small>Датасеты и обучение для разрешённых Krea2 и Flux.2 Klein. Видео не поддерживается.</small></span></label>
-		<label class="service-toggle ui-choice"><input name="can_manage_mining" type="checkbox" {{if .Profile.CanManageMining}}checked{{end}}><span><b>Доверенный доступ к майнингу</b><small>{{if .Profile.CanManageMining}}Видит состояние и может запускать или останавливать майнинг{{else}}Майнинг полностью скрыт{{end}}</small></span></label>
-        <section class="account-generation-controls">
-          <div class="invite-section-heading"><h3>Генерация и ресурсы</h3><p>Изображения и видео расходуют независимые квоты.</p></div>
-          <div class="invite-generation-grid">
-            <fieldset class="ui-field-grid invite-quota-group"><legend><span>Изображения</span><small>Использовано всего: {{.Profile.GenerationTotalUsed}}</small></legend><label class="ui-field"><span class="ui-field-label">В сутки</span><input name="image_generation_daily_limit" type="number" min="0" max="100000" value="{{.Profile.GenerationDailyLimit}}"></label><label class="ui-field"><span class="ui-field-label">Всего</span><input name="image_generation_total_limit" type="number" min="0" max="10000000" value="{{.Profile.GenerationTotalLimit}}"></label></fieldset>
-            <fieldset class="ui-field-grid invite-quota-group"><legend><span>Видео</span><small>Использовано всего: {{.Profile.VideoGenerationTotalUsed}}</small></legend><label class="ui-field"><span class="ui-field-label">В сутки</span><input name="video_generation_daily_limit" type="number" min="0" max="100000" value="{{.Profile.VideoGenerationDailyLimit}}"></label><label class="ui-field"><span class="ui-field-label">Всего</span><input name="video_generation_total_limit" type="number" min="0" max="10000000" value="{{.Profile.VideoGenerationTotalLimit}}"></label><label class="ui-field invite-video-quality"><span class="ui-field-label">Максимум базового качества</span><select name="max_video_generation_quality"><option value="480" {{if eq .Profile.MaxVideoGenerationQuality 480}}selected{{end}}>480p</option><option value="720" {{if eq .Profile.MaxVideoGenerationQuality 720}}selected{{end}}>720p</option><option value="1080" {{if eq .Profile.MaxVideoGenerationQuality 1080}}selected{{end}}>1080p</option><option value="1440" {{if or (eq .Profile.MaxVideoGenerationQuality 0) (eq .Profile.MaxVideoGenerationQuality 1440)}}selected{{end}}>1440p · 2K</option></select><small class="field-hint">Финальный RTX-апскейл этим лимитом не ограничивается.</small></label></fieldset>
-            <fieldset class="invite-runtime-group">
-              <legend><span>Возможности</span><small>Права можно менять в любое время</small></legend>
-              <input name="queue_policy_version" type="hidden" value="2">
-              <label class="service-toggle ui-choice"><input name="can_use_advanced_generation_settings" type="checkbox" {{if .Profile.CanUseAdvancedGenerationSettings}}checked{{end}}><span><b>Точные настройки</b><small>Сэмплеры, LoRA и обработка workflow.</small></span></label>
-              <label class="service-toggle ui-choice"><input name="queue_priority" type="checkbox" {{if .Profile.QueuePriority}}checked{{end}}><span><b>Приоритетная очередь</b><small>Для новых заданий генерации и обучения.</small></span></label>
-              <label class="service-toggle ui-choice"><input name="pause_mining_for_quick_generation" type="checkbox" {{if .Profile.PauseMiningForQuickGeneration}}checked{{end}}><span><b>Приостанавливать майнинг</b><small>Во время генерации и работы ассистента.</small></span></label>
-            </fieldset>
-          </div>
-        </section>
-        <button type="submit">Сохранить права</button>
-      </form>
-      {{end}}
-    </section>
-
-    {{if ne .Profile.Role "admin"}}
-    <section class="panel span-two generation-policy-panel">
-      <div class="panel-heading"><div><p class="section-kicker">Точная быстрая генерация</p><h2>Разрешённые workflow, модели и LoRA</h2><p class="panel-intro">Ничего не отмечено в группе - доступны все варианты этой группы. Отмечайте, когда нужно сузить выбор для конкретного пользователя.</p></div></div>
-      {{if eq .PolicyStatus "changed"}}<p class="success-box">Индивидуальные правила быстрой генерации сохранены.</p>{{end}}
-      <form method="post" class="generation-policy-form">
-        <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="action" value="update_generation_policy">
-        <fieldset><legend>Workflow</legend><div class="policy-check-grid">{{range .GenerationPresets}}<label><input type="checkbox" name="preset_id" value="{{.ID}}" {{if hasString $.GenerationPolicy.PresetIDs .ID}}checked{{end}}><span><b>{{.Name}}</b><small>{{.Description}}</small></span></label>{{end}}</div></fieldset>
-        <fieldset><legend>Диффузионные модели</legend><div class="policy-check-grid">{{range .QuickModels}}<label><input type="checkbox" name="model_id" value="{{.ID}}" {{if hasString $.GenerationPolicy.ModelIDs .ID}}checked{{end}}><span><b>{{.DisplayName}}</b><small>{{.Family}}</small></span></label>{{end}}</div></fieldset>
-        <fieldset><legend>Группы LoRA для Krea2</legend><div class="policy-check-grid">{{range .LoraGroups}}<label><input type="checkbox" name="krea_lora_group" value="{{.Name}}" {{if hasString $.GenerationPolicy.KreaLoraGroups .Name}}checked{{end}}><span><b>{{.Name}}</b><small>{{len .Loras}} адаптеров</small></span></label>{{else}}<p class="muted">Группы LoRA пока не найдены в ComfyUI.</p>{{end}}</div></fieldset>
-        <fieldset><legend>Группы LoRA для Flux2</legend><div class="policy-check-grid">{{range .FluxLoraGroups}}<label><input type="checkbox" name="flux_lora_group" value="{{.Name}}" {{if hasString $.GenerationPolicy.FluxLoraGroups .Name}}checked{{end}}><span><b>{{.Name}}</b><small>{{len .Loras}} адаптеров</small></span></label>{{else}}<p class="muted">Группы LoRA пока не найдены в ComfyUI.</p>{{end}}</div></fieldset>
-        <button type="submit">Сохранить правила генерации</button>
-      </form>
-    </section>
-    {{end}}
-
-    <section class="panel password-panel">
-      <div class="panel-heading"><div><p class="section-kicker">Безопасность</p><h2>Установить новый пароль</h2></div></div>
-      {{if eq .PasswordStatus "changed"}}<p class="success-box">Пароль изменён, остальные сессии завершены.</p>{{end}}
-      {{if eq .PasswordStatus "invalid"}}<p class="alert">Пароли должны совпадать и содержать не менее 10 символов.</p>{{end}}
-      <form method="post">
-        <input type="hidden" name="csrf" value="{{.CSRF}}">
-        <input type="hidden" name="action" value="change_password">
-        <label class="ui-field"><span class="ui-field-label">Новый пароль</span><input name="new_password" type="password" autocomplete="new-password" placeholder="Не менее 10 символов" required minlength="10"></label>
-        <label class="ui-field"><span class="ui-field-label">Повторите пароль</span><input name="confirm_password" type="password" autocomplete="new-password" placeholder="Повторите новый пароль" required minlength="10"></label>
-        <button type="submit">Установить пароль</button>
-      </form>
-    </section>
-
-    <section class="panel security-panel">
-      <div class="panel-heading"><div><p class="section-kicker">Управление</p><h2>Сессии и статус</h2></div></div>
-      <form method="post" class="stack-actions">
-        <input type="hidden" name="csrf" value="{{.CSRF}}">
-        <button name="action" value="revoke_sessions" class="ghost" data-confirm="Завершить все активные сессии пользователя?">Завершить все сессии</button>
-        {{if gt .Profile.FailedLoginCount 0}}<button name="action" value="unlock" class="ghost">Снять блокировку входа</button>{{end}}
-        {{if ne .Profile.Role "admin"}}
-          {{if .Profile.Disabled}}<button name="action" value="enable">Включить пользователя</button>{{else}}<button name="action" value="disable" class="danger" data-confirm="Отключить пользователя и завершить его активные сессии?">Отключить пользователя</button>{{end}}
-        {{end}}
-      </form>
-	  {{if ne .Profile.Role "admin"}}
-	  <form method="post" class="delete-account-form">
-		<input type="hidden" name="csrf" value="{{.CSRF}}">
-		<input type="hidden" name="action" value="delete">
-		<label class="ui-field"><span class="ui-field-label">Подтвердите логином </span><input name="confirm_username" autocomplete="off" placeholder="{{.Profile.Username}}" required></label>
-		<p class="muted">Удаление необратимо: будут удалены сессии, сохранённые настройки, файлы профиля и данные сервисов пользователя.</p>
-		<button type="submit" class="danger" data-confirm="Удалить учётную запись {{.Profile.Username}} без возможности восстановления?">Удалить учётную запись</button>
-	  </form>
-	  {{end}}
-    </section>
-
-    <section class="panel span-two">
-      <div class="panel-heading"><div><p class="section-kicker">Распределение</p><h2>Использование сервисов</h2></div></div>
-      <div class="table-scroll"><table><thead><tr><th>Сервис</th><th>Запросы</th><th>Передано</th><th>Ошибки</th></tr></thead><tbody>
-      {{range .Stats.ByService}}<tr><td data-label="Сервис"><a class="service-link" href="/admin/services/{{.Service}}"><i class="service-icon {{.Service}}"></i>{{.Service}}</a></td><td data-label="Запросы" class="numeric">{{formatNumber .Requests}}</td><td data-label="Передано">{{formatBytes .Bytes}}</td><td data-label="Ошибки"><span class="error-count {{if gt .Errors 0}}has-errors{{end}}">{{formatNumber .Errors}}</span></td></tr>{{else}}<tr><td colspan="4" class="muted">Сервисами ещё не пользовались.</td></tr>{{end}}
-      </tbody></table></div>
-    </section>
-
-    <section class="panel span-two">
-      <div class="panel-heading"><div><p class="section-kicker">Последние 7 дней</p><h2>Динамика активности</h2></div></div>
-      {{template "chart" .Stats.Chart}}
-    </section>
-  </section>
-
-  <section class="panel"><div class="panel-heading"><div><p class="section-kicker">Понятные действия пользователя</p><h2>Последняя активность</h2><p class="panel-intro">Служебный трафик скрыт, повторяющиеся действия объединены.</p></div></div>{{template "activity_table" .Activities}}</section>
+    <a class="button ghost" href="/admin/users"><i data-lucide="arrow-left" aria-hidden="true"></i>К списку пользователей</a>
+  </header>
+  {{if .AccountLocked}}<p class="ui-status-banner is-warning">Вход заблокирован до {{formatTime .Profile.LockedUntil}}.</p>{{end}}
+  <details class="ui-disclosure admin-profile-account"><summary>Данные аккаунта</summary>
+    <dl class="key-values">
+      <div><dt>Логин</dt><dd>{{.Profile.Username}}</dd></div>
+      <div><dt>Email</dt><dd>{{if .Profile.Email.Valid}}{{.Profile.Email.String}}{{else}}Не указан{{end}}</dd></div>
+      <div><dt>Тип аккаунта</dt><dd>{{if .Profile.AccountExpiresAt.Valid}}Временный{{else}}Постоянный{{end}}</dd></div>
+      {{if .Profile.AccountExpiresAt.Valid}}<div><dt>Автоудаление</dt><dd>{{formatTime .Profile.AccountExpiresAt}}</dd></div>{{end}}
+      <div><dt>Создан</dt><dd>{{formatTime .Profile.CreatedAt}}</dd></div>
+      <div><dt>Последний вход</dt><dd>{{formatTime .Profile.LastLoginAt}}</dd></div>
+    </dl>
+  </details>
+  <nav class="admin-profile-tabs" aria-label="Разделы профиля">
+    {{range adminProfileTabs .Profile.ID $tab}}<a href="{{.URL}}" {{if .Active}}aria-current="page"{{end}}>{{.Label}}</a>{{end}}
+  </nav>
+  {{if eq $tab "access"}}
+    {{template "admin_profile_access" .}}
+    {{template "admin_profile_policy" .}}
+    {{template "admin_assistant_models" .}}
+  {{else if eq $tab "tasks"}}
+    {{template "admin_profile_tasks" .}}
+  {{else if eq $tab "activity"}}
+    {{template "admin_profile_activity" .}}
+  {{else if eq $tab "sessions"}}
+    {{template "admin_profile_sessions" .}}
+  {{end}}
 </main>
 </body></html>
 {{end}}

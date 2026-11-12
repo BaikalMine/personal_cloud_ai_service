@@ -25,13 +25,36 @@
   let captionAction = false;
   let captionPoller;
   let captionPanel;
+  let inlineCaption;
+  let qualityInspector;
   let previousTrigger = defaults.settings.trigger_word;
   let outputEdited = false;
+  let pendingDatasetID = "";
+  let pendingFrame = null;
+  let dialogEpoch = 0;
+  const initialTarget = window.AIGatewayLoraDataset.editorTarget(window.location.search);
+  const initialQuery = new URLSearchParams(window.location.search);
+  const startEmpty = !initialTarget && (initialQuery.get("new") === "1" || initialQuery.has('run'));
+  const setEditorAddress = (target = {}) => {
+    const address = new URL(window.location.href);
+    for (const key of ["dataset", "image", "asset", "version", "new"]) address.searchParams.delete(key);
+    for (const [key, value] of Object.entries(target)) address.searchParams.set(key, value);
+    if (!target.dataset && !target.version) address.searchParams.set("new", "1");
+    history.replaceState(history.state, "", address);
+  };
   const id = window.AIGatewayLoraDataset.createID;
   const formatBytes = (bytes) => `${((Number(bytes) || 0) / 1048576).toFixed(1)} МБ`;
   const plural = (count) => `${count} ${count % 10 === 1 && count % 100 !== 11 ? "изображение" : count % 10 >= 2 && count % 10 <= 4 && !(count % 100 >= 12 && count % 100 <= 14) ? "изображения" : "изображений"}`;
   const node = (tag, text, className = "") => { const result = document.createElement(tag); result.textContent = text; result.className = className; return result; };
-  const icons = () => window.lucide?.createIcons({ attrs: { "aria-hidden": "true", width: 18, height: 18 } });
+  const icons = () => {
+    if (!window.lucide) return;
+    const pending = page.querySelectorAll("i[data-lucide]");
+    if (!pending.length) return;
+    // Replacing an existing SVG during field blur can discard a pending click.
+    for (const mark of pending) mark.dataset.loraIcon = mark.dataset.lucide;
+    window.lucide.createIcons({ nameAttr: "data-lora-icon", attrs: { "aria-hidden": "true", width: 18, height: 18 } });
+    for (const mark of page.querySelectorAll("svg[data-lora-icon]")) mark.removeAttribute("data-lora-icon");
+  };
   const iconButton = (icon, label, action, extra = "") => {
     const button = node("button", "", `ghost dataset-icon ${extra}`);
     button.type = "button"; button.title = label; button.setAttribute("aria-label", label);
@@ -44,6 +67,7 @@
     const modalStatus = dialogContent.querySelector("[data-dialog-status]");
     if (modalStatus) { modalStatus.textContent = message; modalStatus.classList.toggle("is-error", error); }
     captionPanel?.refresh();
+    inlineCaption?.refresh();
   };
   const request = async (suffix, method = "GET", data, options = {}) => {
     const multipart = data instanceof FormData;
@@ -60,7 +84,9 @@
   };
   const controller = window.AIGatewayLoraDataset.createController({ request, defaults, onChange: (state, kind) => {
     if (kind === "load") {
+      qualityInspector?.reset(state.assets);
       captionPanel?.close();
+      inlineCaption?.close();
       for (const name of fields) for (const input of form.querySelectorAll(`[name="${name}"]`)) {
         if (input.type === "radio") input.checked = input.value === String(state.manifest.settings[name]);
         else input.value = state.manifest.settings[name] ?? "";
@@ -75,10 +101,36 @@
       select.replaceChildren(...[...(!state.dataset ? [{ id: "", name: "Новый набор" }] : []), ...state.datasets].map((item) => new Option(item.name || "Без названия", item.id)));
       if (state.dataset && ![...select.options].some((item) => item.value === state.dataset.id)) select.add(new Option(state.dataset.name || "Без названия", state.dataset.id));
       select.value = state.dataset?.id || "";
+      if (state.ready) {
+        const target = window.AIGatewayLoraDataset.editorTarget(window.location.search);
+        if (state.dataset && target?.dataset !== state.dataset.id) setEditorAddress({ dataset: state.dataset.id });
+        else if (!state.dataset && target && !target.version) setEditorAddress();
+      }
     }
     renderState();
   } });
   const state = controller.state;
+  const loadDataset = async (target, frame = null) => {
+    pendingDatasetID = target || ""; pendingFrame = frame;
+    if (!await controller.load(target)) return false;
+    pendingDatasetID = ""; pendingFrame = null;
+    feedback("");
+    setEditorAddress(state.dataset ? { dataset: state.dataset.id } : {});
+    if (frame) {
+      const item = state.manifest.images.find(image => image.id === frame.image && image.asset_id === frame.asset);
+      if (!item) {
+        page.dispatchEvent(new CustomEvent('lora-stage-request', { detail: 'material' }));
+        feedback("Кадр из ссылки удалён или заменён. Открыт рабочий набор без выбора другого кадра.", true);
+        return true;
+      }
+      setEditorAddress({ dataset: state.dataset.id, image: item.id, asset: item.asset_id });
+      const opener = cards.get(item.id)?.querySelector("[data-caption-open]");
+      opener?.scrollIntoView({ block: "center" });
+      page.dispatchEvent(new CustomEvent('lora-stage-request', { detail: 'captions' }));
+      inlineCaption?.open(item.id, opener);
+    }
+    return true;
+  };
   const busy = () => Boolean(operation || uploading || captionAction || state.status === "loading");
   const captionJobs = () => captionPoller && captionPoller.state.datasetID === state.dataset?.id ? captionPoller.state.jobs : [];
   const captionActive = () => captionJobs().some(captions.active);
@@ -103,6 +155,13 @@
     find("[data-dataset-conflict]").hidden = state.status !== "conflict";
     select.disabled = blocked || dirtyFiles;
     for (const button of page.querySelectorAll("[data-dataset-toolbar] button")) button.disabled = blocked;
+    const save = find("[data-dataset-save]");
+    const retryLoad = !state.ready && state.status === "error";
+    if (save.dataset.loadRetry !== String(retryLoad)) {
+      save.dataset.loadRetry = String(retryLoad);
+      save.title = retryLoad ? "Повторить загрузку" : "Сохранить"; save.setAttribute("aria-label", save.title);
+      const mark = document.createElement("i"); mark.dataset.lucide = retryLoad ? "refresh-cw" : "save"; save.replaceChildren(mark);
+    }
     find("[data-dataset-new]").disabled ||= dirtyFiles;
     find("[data-dataset-delete]").disabled ||= !state.dataset || dirtyFiles;
     find("[data-dataset-export]").disabled ||= !state.manifest.images.length || dirtyFiles;
@@ -110,12 +169,32 @@
     fileInput.disabled = blocked || !state.ready;
     find("[data-dataset-gallery]").disabled = blocked || !state.ready;
     find("[data-lora-clear-images]").disabled = blocked;
+    find("[data-dataset-quality-start]").disabled = blocked || !state.ready || dirtyFiles || qualityInspector?.state.running || !state.manifest.images.some(item => !item.excluded && item.asset_id);
     find("[data-lora-caption-all]").disabled = blocked || (!captionActive() && (!state.manifest.images.some((item) => !item.excluded) || dirtyFiles || state.status === "conflict"));
     find("[data-lora-caption-all]").textContent = captionActive() ? "Остановить серию" : "Описать пустые";
     find("[data-lora-caption-assistant]").setAttribute("aria-busy", String(captionActive()));
     const submit = find("[data-lora-submit]");
+    const readyProfile = form.querySelector('[name="profile_id"]:checked:not(:disabled)');
     submit.disabled = blocked || !state.ready || dirtyFiles || captionActive() || (Boolean(state.dataset) && !captionPoller?.state.ready) || state.status === "conflict" || submit.dataset.agentReady !== "true";
     submit.textContent = operation === "train" ? "Подготавливаем обучение…" : "Запустить обучение";
+    const included = state.manifest.images.filter(item => !item.excluded);
+    find('[data-training-summary]').textContent = `${state.manifest.settings.name || 'Новый набор'} · ${plural(included.length)} · ${state.manifest.settings.resolution} px`;
+    for (const preset of page.querySelectorAll('[data-training-preset]')) preset.hidden = preset.dataset.trainingPreset !== state.manifest.settings.preset;
+    const intensity = find('[data-training-intensity]');
+    const selectedPreset = [...page.querySelectorAll('[data-training-preset]')].find(preset => preset.dataset.trainingPreset === state.manifest.settings.preset);
+    const trainSteps = Number(selectedPreset?.dataset.trainingSteps);
+    intensity.hidden = !included.length || !Number.isFinite(trainSteps) || trainSteps <= 0;
+    intensity.textContent = intensity.hidden ? '' : `${trainSteps} шагов · примерно ${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(trainSteps / included.length)} показов на кадр; фактическое число зависит от группировки размеров.`;
+    find('[data-training-blocked]').textContent = submit.dataset.agentReady !== 'true' ? 'Нет готового профиля обучения.'
+      : !readyProfile && !operation ? 'Выберите доступную базовую модель.'
+      : state.status === 'conflict' ? 'Сначала разрешите конфликт изменений набора.'
+      : captionActive() ? 'Дождитесь подписей или остановите серию.'
+      : dirtyFiles ? 'Сначала сохраните изображения.'
+      : !state.ready ? 'Дождитесь загрузки набора.'
+      : blocked ? 'Подождите завершения текущей операции.'
+      : state.dataset && !captionPoller?.state.ready ? 'Проверяем задания описания.'
+      : included.length < 5 || included.length > 100 ? 'Для запуска включите от 5 до 100 изображений на этапе «Подписи».'
+      : 'GPU будет выделен по очереди.';
     const latestJobs = captions.latest(captionJobs());
     for (const [key, card] of cards) {
       for (const button of card.querySelectorAll("button")) button.disabled = blocked;
@@ -130,6 +209,7 @@
       }
     }
     captionPanel?.refresh();
+    inlineCaption?.refresh();
     icons();
   };
   const assetFor = (item) => state.assets[item.asset_id] || {};
@@ -138,6 +218,8 @@
     const target = find("[data-lora-caption-status]"); target.textContent = text; target.classList.toggle("is-error", error);
   };
   const renderItems = () => {
+    const qualityState = qualityInspector?.state;
+    const review = qualityState && window.AIGatewayLoraQuality.recommendations(state.manifest.images, state.assets, qualityState.results);
     for (const [key, card] of cards) if (!state.manifest.images.some((item) => item.id === key)) { card.remove(); cards.delete(key); if (urls.has(key)) URL.revokeObjectURL(urls.get(key)); urls.delete(key); }
     const seen = new Set();
     const latestJobs = captions.latest(captionJobs());
@@ -148,16 +230,15 @@
         const media = node("div", "", "lora-dataset-media");
         const img = document.createElement("img"); img.loading = "lazy"; img.decoding = "async";
         const openFrame = node("button", ""); openFrame.type = "button"; openFrame.dataset.captionOpen = "";
-        openFrame.addEventListener("click", () => captionPanel?.open(item.id, openFrame));
+        openFrame.addEventListener("click", () => inlineCaption?.open(item.id, openFrame));
         openFrame.append(img); media.append(openFrame, node("span", ""));
         const body = node("div", "", "lora-dataset-body");
         const heading = node("div", "", "lora-dataset-heading"); const identity = node("div", ""); identity.append(node("strong", ""), node("small", ""));
         const describe = iconButton("sparkles", "Описать кадр", () => void describeImages([item.id])); describe.dataset.loraCaptionOne = "";
         heading.append(identity, describe);
-        const caption = document.createElement("textarea"); caption.name = "caption"; caption.rows = 4; caption.maxLength = 1000; caption.placeholder = "Ракурс, одежда, фон, свет";
-        caption.addEventListener("input", () => editCaption(item.id, caption.value));
         const status = node("small", "", "lora-caption-item-status"); status.dataset.loraCaptionItemStatus = "";
-        body.append(heading, caption, status);
+        const quality = node("small", "", "dataset-quality-note"); quality.dataset.datasetQualityNote = ""; quality.hidden = true;
+        body.append(heading, status, quality);
         const footer = node("footer", "", "dataset-item-actions");
         const enabled = node("label", "", "dataset-include"); const toggle = document.createElement("input"); toggle.type = "checkbox";
         toggle.addEventListener("change", () => { const current = state.manifest.images.find((image) => image.id === item.id); current.excluded = !toggle.checked; controller.touch("items"); }); enabled.append(toggle, node("span", "В обучении"));
@@ -177,8 +258,6 @@
       card.querySelector(".lora-dataset-media > span").textContent = String(index + 1).padStart(2, "0");
       const title = card.querySelector("strong"); title.textContent = itemName(item); title.title = itemName(item);
       card.querySelector(".lora-dataset-heading small").textContent = `${asset.width ? `${asset.width} × ${asset.height} · ` : ""}${formatBytes(file?.size || asset.size_bytes)}`;
-      const caption = card.querySelector("textarea"); if (caption.value !== item.caption) caption.value = item.caption;
-      caption.setAttribute("aria-label", `Описание кадра ${index + 1}`);
       card.querySelector('input[type="checkbox"]').checked = !item.excluded;
       card.classList.toggle("is-excluded", item.excluded);
       const warnings = [];
@@ -196,13 +275,31 @@
       const itemStatus = card.querySelector("[data-lora-caption-item-status]");
       itemStatus.textContent = jobMessage || captionStates.get(item.id) || warnings.join(" · ") || "Готово к обучению";
       itemStatus.classList.toggle("is-error", job?.state === "failed");
+      const qualityNote = card.querySelector("[data-dataset-quality-note]");
+      qualityNote.textContent = review?.warnings.get(item.id)?.join(" ") || "";
+      qualityNote.hidden = !qualityNote.textContent;
     });
     const images = state.manifest.images;
     find("[data-lora-dataset-summary]").hidden = !images.length;
     find("[data-dataset-empty]").hidden = Boolean(images.length);
+    find('[data-caption-empty]').hidden = Boolean(images.length);
     find("[data-lora-image-count]").textContent = plural(images.length);
     const total = images.reduce((sum, item) => sum + (files.get(item.id)?.size || assetFor(item).size_bytes || 0), 0);
     find("[data-lora-image-size]").textContent = `${formatBytes(total)} · В обучении: ${images.filter((item) => !item.excluded).length}`;
+    find("[data-dataset-quality]").hidden = !images.length || !qualityInspector;
+    if (qualityState) {
+      const status = find("[data-dataset-quality-status]");
+      const pending = review.total - review.checked;
+      const notes = [...review.warnings.values()].filter(messages => messages.length).length;
+      const assessment = !review.checked ? "Результатов пока нет. " : notes ? `Кадров с рекомендациями: ${notes}. ` : "По проверенным фото явных признаков нерезкости или похожих кадров не найдено. Это не гарантия качества. ";
+      status.textContent = qualityState.running ? `Проверяем фото: ${qualityState.processed} из ${qualityState.total}.`
+        : qualityState.error ? `${qualityState.error} Проверено: ${review.checked} из ${review.total}. Повтор продолжит с непроверенных фото.`
+        : !qualityState.hasRun ? "Проверка необязательна. Все кадры остаются в наборе."
+        : `${qualityState.cancelled ? "Проверка остановлена. " : ""}Проверено: ${review.checked} из ${review.total}. ${pending ? `Осталось проверить: ${pending}. ` : ""}${assessment}Все кадры остаются в наборе.`;
+      status.classList.toggle("is-error", Boolean(qualityState.error));
+      find("[data-dataset-quality-cancel]").hidden = !qualityState.running;
+      find("[data-dataset-quality-background]").hidden = !review.background;
+    }
     icons(); renderState();
   };
   const move = (key, offset) => {
@@ -264,38 +361,56 @@
     find("[data-dataset-dialog-title]").textContent = title;
     dialogContent.replaceChildren(); const status = node("p", "Загрузка…", "dataset-dialog-status"); status.dataset.dialogStatus = ""; status.setAttribute("role", "status"); dialogContent.append(status);
     if (!dialog.open) dialog.showModal();
+    return ++dialogEpoch;
   };
-  const showVersions = async (all = false) => {
-    openDialog("Версии набора");
+  const showVersions = async (all = false, selectedID = "") => {
+    const epoch = openDialog(selectedID ? "Исходная версия обучения" : "Версии набора");
     try {
-      const result = await request(`/versions${!all && state.dataset ? `?dataset_id=${state.dataset.id}` : ""}`);
-      const status = dialogContent.firstElementChild; status.textContent = "Версии хранятся 30 дней. Используемые обучением сохраняются до удаления его записи.";
-      const toolbar = node("div", "", "dataset-version-tools");
-      const filter = document.createElement("select"); filter.setAttribute("aria-label", "Наборы в истории версий");
-      filter.append(new Option("Этот набор", "current"), new Option("Все наборы", "all")); filter.value = all || !state.dataset ? "all" : "current";
-      filter.addEventListener("change", () => void showVersions(filter.value === "all"));
-      const save = node("button", "Зафиксировать версию"); save.type = "button"; save.disabled = !state.manifest.images.length;
-      save.addEventListener("click", () => void safely("version", async () => { if (!await flush()) return; await request(`/${state.dataset.id}/versions`, "POST", { revision: state.dataset.revision }); await showVersions(all); }));
-      toolbar.append(filter, save); dialogContent.append(toolbar);
+      const result = selectedID ? { versions: [(await request(`/versions/${encodeURIComponent(selectedID)}`)).version] }
+        : await request(`/versions${!all && state.dataset ? `?dataset_id=${state.dataset.id}` : ""}`);
+      if (epoch !== dialogEpoch) return;
+      feedback("");
+      const status = dialogContent.firstElementChild; status.textContent = selectedID
+        ? "Это сохранённый набор на момент запуска. Копию можно исправить перед новым обучением; текущее обучение и рабочие наборы не изменятся."
+        : "Версии хранятся 30 дней. Используемые обучением сохраняются до удаления его записи.";
+      if (!selectedID) {
+        const toolbar = node("div", "", "dataset-version-tools");
+        const filter = document.createElement("select"); filter.setAttribute("aria-label", "Наборы в истории версий");
+        filter.append(new Option("Этот набор", "current"), new Option("Все наборы", "all")); filter.value = all || !state.dataset ? "all" : "current";
+        filter.addEventListener("change", () => void showVersions(filter.value === "all"));
+        const save = node("button", "Зафиксировать версию"); save.type = "button"; save.disabled = !state.manifest.images.length;
+        save.addEventListener("click", () => void safely("version", async () => { if (!await flush()) return; await request(`/${state.dataset.id}/versions`, "POST", { revision: state.dataset.revision }); await showVersions(all); }));
+        toolbar.append(filter, save); dialogContent.append(toolbar);
+      }
       if (!result.versions.length) dialogContent.append(node("p", "Сохранённых версий пока нет.", "dataset-empty"));
       for (const version of result.versions) {
-        const row = node("div", "", "dataset-version-row"); const info = node("div", "");
+        const row = node("div", "", "dataset-version-row"); row.dataset.versionId = version.id; const info = node("div", "");
         info.append(node("strong", version.name || "Без названия"), node("small", `${new Date(version.created_at).toLocaleString("ru-RU")} · ${plural(version.image_count)}`), node("small", `Хранится до ${new Date(version.expires_at).toLocaleDateString("ru-RU")} или пока связана с обучением`));
         const actions = node("div", ""); const restore = node("button", "Восстановить копию", "ghost"); restore.type = "button";
-        restore.addEventListener("click", () => void safely("restore", async () => { if (!await flush()) return; const restored = await request(`/versions/${version.id}/restore`, "POST", {}); controller.apply(restored); await controller.refreshList(); dialog.close(); feedback("Версия восстановлена в отдельный набор."); }));
-        actions.append(restore, iconButton("download", "Скачать версию ZIP", () => void download(`/versions/${version.id}`)), iconButton("trash-2", "Удалить версию", () => void safely("delete-version", async () => {
+        restore.addEventListener("click", () => void safely("restore", async () => { if (!await flush()) return; const restored = await request(`/versions/${version.id}/restore`, "POST", {}); controller.apply(restored); setEditorAddress({ dataset: restored.dataset.id }); await controller.refreshList(); dialog.close(); page.dispatchEvent(new Event('lora-workspace-reset')); feedback("Версия восстановлена в отдельный набор. Проверьте параметры перед запуском обучения."); }));
+        actions.append(restore, iconButton("download", "Скачать версию ZIP", () => void download(`/versions/${version.id}`)));
+        if (!selectedID) actions.append(iconButton("trash-2", "Удалить версию", () => void safely("delete-version", async () => {
           if (!window.confirm("Удалить эту сохранённую версию? Рабочий набор останется.")) return;
           await request(`/versions/${version.id}/delete`, "POST", {}); await showVersions(all);
         })));
         row.append(info, actions); dialogContent.append(row);
       }
       icons();
-    } catch (error) { feedback(error.message, true); }
+    } catch (error) {
+      if (epoch !== dialogEpoch) return;
+      feedback(error.status === 404 ? "Исходная версия больше недоступна. Рабочие наборы не изменены." : error.message, true);
+      if (selectedID && error.status !== 404) {
+        const retry = node("button", "Проверить снова", "ghost"); retry.type = "button";
+        retry.addEventListener("click", () => void showVersions(false, selectedID)); dialogContent.append(retry);
+      }
+    }
   };
   const showGallery = async () => {
-    openDialog("Из моих генераций");
+    const epoch = openDialog("Из моих генераций");
     try {
-      const result = await request("/gallery"); dialogContent.firstElementChild.textContent = result.images.length ? "" : "Сохранённых фотографий пока нет.";
+      const result = await request("/gallery");
+      if (epoch !== dialogEpoch) return;
+      dialogContent.firstElementChild.textContent = result.images.length ? "" : "Сохранённых фотографий пока нет.";
       const list = node("div", "", "dataset-gallery-grid"); dialogContent.append(list);
       for (const image of result.images) {
         const button = node("button", image.sensitive ? "Показать фото" : "", "ghost dataset-gallery-item"); button.type = "button";
@@ -311,7 +426,7 @@
         }); });
         list.append(button);
       }
-    } catch (error) { feedback(error.message, true); }
+    } catch (error) { if (epoch === dialogEpoch) feedback(error.message, true); }
   };
   const applyCaptionResults = () => {
     if (!state.ready || busy() || state.status === "conflict") return;
@@ -335,6 +450,10 @@
   captionPoller = captions.createPoller({
     request: (datasetID, signal) => request(`/${datasetID}/captions`, "GET", undefined, { signal }),
     onChange: () => { applyCaptionResults(); renderItems(); renderCaptionSummary(); },
+  });
+  if (window.AIGatewayLoraQuality) qualityInspector = window.AIGatewayLoraQuality.createInspector({
+    request: (assetID, signal) => request(`/assets/${encodeURIComponent(assetID)}/quality`, "POST", {}, { signal }),
+    onChange: () => renderItems(),
   });
   const captionJobAction = async (job, action) => {
     const response = await fetch(`/api/lora-training/caption/${encodeURIComponent(job.job_id)}/${action}`, {
@@ -371,8 +490,7 @@
     } finally { captionAction = false; applyCaptionResults(); renderItems(); renderCaptionSummary(); }
   };
   const captionRoot = find("[data-caption-panel]");
-  if (captionRoot && window.AIGatewayLoraCaptionPanel) captionPanel = window.AIGatewayLoraCaptionPanel.create({
-    root: captionRoot,
+  const captionOptions = {
     view: key => {
       const items = state.manifest.images.map(item => ({ ...item, name: itemName(item), src: urls.get(item.id) || `/api/lora-datasets/assets/${encodeURIComponent(item.asset_id)}` }));
       const item = items.find(value => value.id === key);
@@ -382,7 +500,7 @@
       const trigger = state.manifest.settings.trigger_word.trim();
       const triggerMissing = trigger.length < 2 || trigger.length > 80;
       return {
-        items, trigger, editable: state.ready && !operation,
+        items, trigger, editable: state.ready && !operation, canChangeItems: state.ready && !busy(),
         error: find("[data-dataset-feedback]").classList.contains("is-error") ? find("[data-dataset-feedback]").textContent : "",
         canSave: state.ready && !busy() && state.status !== "conflict",
         saveState: find("[data-dataset-status]").textContent, saveError: ["error", "conflict"].includes(state.status),
@@ -390,6 +508,7 @@
           ...item, meta: `${card?.querySelector(".lora-dataset-heading small")?.textContent || ""}${item.excluded ? " · Исключён из обучения" : ""}`,
           status: triggerMissing && !captions.active(job) ? "Укажите триггер в настройках набора." : card?.querySelector("[data-lora-caption-item-status]")?.textContent || "",
           statusError: job?.state === "failed", active: Boolean(captions.active(job)),
+          quality: card?.querySelector('[data-dataset-quality-note]')?.textContent || '',
           actionLabel: !job && item.caption.trim() ? "Описать заново" : action?.getAttribute("aria-label") || "Описать кадр",
           actionDisabled: (action?.disabled ?? true) || (triggerMissing && !captions.active(job)),
         },
@@ -398,7 +517,16 @@
     edit: editCaption,
     describe: key => describeImages([key]),
     save: () => controller.flush(),
-  });
+  };
+  if (captionRoot && window.AIGatewayLoraCaptionPanel) {
+    captionPanel = window.AIGatewayLoraCaptionPanel.create({ ...captionOptions, root: captionRoot, onSelect: key => inlineCaption?.open(key) });
+    inlineCaption = window.AIGatewayLoraCaptionPanel.create({ ...captionOptions, root: find('[data-caption-inline]'), inline: true,
+      enlarge: (key, source) => captionPanel.open(key, source),
+      include: (key, enabled) => { if (busy()) return; const item = state.manifest.images.find(image => image.id === key); if (item) { item.excluded = !enabled; controller.touch('items'); } },
+      move, remove,
+      onSelect: key => { for (const [id, card] of cards) card.querySelector('[data-caption-open]').setAttribute('aria-pressed', String(id === key)); },
+    });
+  }
   fileInput.addEventListener("change", () => { const incoming = [...fileInput.files]; fileInput.value = ""; void addFiles(incoming); });
   const dropzone = find("[data-lora-dropzone]");
   for (const eventName of ["dragenter", "dragover", "dragleave", "drop"]) dropzone.addEventListener(eventName, (event) => { event.preventDefault(); dropzone.classList.toggle("is-dragging", eventName === "dragenter" || eventName === "dragover"); if (eventName === "drop") void addFiles(event.dataTransfer?.files || []); });
@@ -425,16 +553,20 @@
     }
     controller.touch("items");
   });
-  select.addEventListener("change", () => { const target = select.value; select.value = state.dataset?.id || ""; void safely("switch", async () => { if (await flush()) await controller.load(target); }); });
-  find("[data-dataset-new]").addEventListener("click", () => void safely("new", async () => { if (await flush()) controller.startNew(); }));
-  find("[data-dataset-save]").addEventListener("click", async () => { if (!state.ready) { await controller.load(state.dataset?.id); return; } await uploadFiles(); await controller.flush(); });
+  select.addEventListener("change", () => { const target = select.value; select.value = state.dataset?.id || ""; void safely("switch", async () => { if (((!state.ready && !state.dirty) || await flush()) && await loadDataset(target)) page.dispatchEvent(new Event('lora-workspace-reset')); }); });
+  find("[data-dataset-new]").addEventListener("click", () => void safely("new", async () => { if ((!state.ready && !state.dirty) || await flush()) { controller.startNew(); pendingDatasetID = ""; pendingFrame = null; setEditorAddress(); page.dispatchEvent(new Event('lora-workspace-reset')); } }));
+  find("[data-dataset-save]").addEventListener("click", async () => { if (!state.ready) { await loadDataset(pendingDatasetID || state.dataset?.id, pendingFrame); return; } await uploadFiles(); await controller.flush(); });
   find("[data-dataset-delete]").addEventListener("click", () => void safely("delete", async () => {
     if (!await flush() || !window.confirm("Удалить рабочий набор? Сохранённые версии и уже запущенное обучение останутся.")) return;
-    await request(`/${state.dataset.id}/delete`, "POST", { revision: state.dataset.revision }); controller.startNew(); await controller.refreshList(); feedback("Рабочий набор удалён.");
+    await request(`/${state.dataset.id}/delete`, "POST", { revision: state.dataset.revision }); controller.startNew(); await controller.refreshList(); page.dispatchEvent(new Event('lora-workspace-reset')); feedback("Рабочий набор удалён.");
   }));
   find("[data-dataset-versions]").addEventListener("click", () => void showVersions());
   find("[data-dataset-gallery]").addEventListener("click", () => void showGallery());
   find("[data-dataset-dialog-close]").addEventListener("click", () => dialog.close());
+  dialog.addEventListener("close", () => {
+    dialogEpoch += 1;
+    if (new URL(window.location.href).searchParams.has("version")) setEditorAddress(state.dataset ? { dataset: state.dataset.id } : {});
+  });
   find("[data-dataset-export]").addEventListener("click", () => void safely("export", async () => { if (await flush()) await download(`/${state.dataset.id}`); }));
   find("[data-dataset-import]").addEventListener("click", () => find("[data-dataset-zip]").click());
   find("[data-dataset-zip]").addEventListener("change", (event) => { const file = event.target.files[0]; event.target.value = ""; if (!file) return; void safely("import", async () => {
@@ -443,25 +575,53 @@
     const body = new FormData(); body.append("archive", file);
     controller.apply(await request(`/${datasetID}/import`, "POST", body, { headers: { "X-Dataset-Revision": String(state.dataset.revision) } })); await controller.refreshList(); feedback("Набор импортирован.");
   }); });
-  find("[data-dataset-reload]").addEventListener("click", () => { if (window.confirm("Отбросить несохранённые правки и загрузить набор с сервера?")) void controller.load(state.dataset?.id); });
+  find("[data-dataset-reload]").addEventListener("click", () => { if (window.confirm("Отбросить несохранённые правки и загрузить набор с сервера?")) void loadDataset(pendingDatasetID || state.dataset?.id, pendingFrame); });
   find("[data-dataset-fork]").addEventListener("click", () => { controller.startNew({ preserve: true }); void controller.flush(); });
   find("[data-lora-clear-images]").addEventListener("click", () => { if (!window.confirm("Убрать все изображения и подписи из этого набора?")) return; files.clear(); state.manifest.images = []; controller.touch("items"); });
   find("[data-lora-caption-all]").addEventListener("click", () => void describeImages(state.manifest.images.filter((item) => !item.excluded && !item.caption.trim()).map((item) => item.id), true, captionActive()));
-  form.addEventListener("submit", (event) => { event.preventDefault(); void safely("train", async () => {
+  find("[data-dataset-quality-start]").addEventListener("click", () => { if (!busy() && !files.size) void qualityInspector?.run(state.manifest.images, state.assets); });
+  find("[data-dataset-quality-cancel]").addEventListener("click", () => qualityInspector?.cancel());
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (busy()) return;
+    if (!form.querySelector('[name="profile_id"]:checked:not(:disabled)')) {
+      page.dispatchEvent(new CustomEvent('lora-stage-request', { detail: 'training' }));
+      form.querySelector('[name="profile_id"]:not(:disabled)')?.focus();
+      feedback('Выберите доступную базовую модель.', true); return;
+    }
+    void safely("train", async () => {
     if (state.dataset && !captionPoller.state.ready) throw new Error("Дождитесь проверки заданий описания.");
     if (captionActive()) throw new Error("Дождитесь описаний или остановите серию перед обучением.");
     if (!await flush()) return;
     const included = state.manifest.images.filter((item) => !item.excluded);
-    if (included.length < 5 || included.length > 100) throw new Error("Включите от 5 до 100 изображений для обучения.");
+    if (included.length < 5 || included.length > 100) { page.dispatchEvent(new CustomEvent('lora-stage-request', { detail: 'captions' })); throw new Error("Включите от 5 до 100 изображений для обучения."); }
     const missing = included.find((item) => !item.caption.trim() && !state.manifest.settings.global_caption.trim());
-    if (missing) { cards.get(missing.id)?.querySelector("textarea")?.focus(); throw new Error("Добавьте подпись каждому включённому кадру или общее описание."); }
+    if (missing) { page.dispatchEvent(new CustomEvent('lora-stage-request', { detail: 'captions' })); inlineCaption?.open(missing.id); find('[data-caption-inline] [data-caption-text]')?.focus(); throw new Error("Добавьте подпись каждому включённому кадру или общее описание."); }
     const result = await request(`/${state.dataset.id}/train`, "POST", { revision: state.dataset.revision });
     feedback("Обучение поставлено в очередь. Набор сохранён отдельной версией."); page.dispatchEvent(new CustomEvent("lora-training-created", { detail: result.job }));
   }); });
   window.addEventListener("online", () => void captionPoller.refresh());
   document.addEventListener("visibilitychange", () => { if (!document.hidden) void captionPoller.refresh(); });
-  window.addEventListener("pageshow", (event) => { if (event.persisted) { urls.clear(); captionPoller.resume(); renderItems(); if (state.dirty) void controller.flush(); } });
+  window.addEventListener("pageshow", (event) => {
+    if (!event.persisted) return;
+    urls.clear(); captionPoller.resume();
+    if (!state.ready) { void loadDataset(pendingDatasetID || state.dataset?.id, pendingFrame); return; }
+    renderItems(); if (state.dirty) void controller.flush();
+  });
   window.addEventListener("beforeunload", (event) => { if (state.dirty || files.size || uploading) { event.preventDefault(); event.returnValue = ""; } });
-  window.addEventListener("pagehide", () => { controller.dispose(); captionPoller.dispose(); for (const url of urls.values()) URL.revokeObjectURL(url); });
-  icons(); void controller.load();
+  window.addEventListener("pagehide", () => { controller.dispose(); captionPoller.dispose(); qualityInspector?.cancel(); for (const url of urls.values()) URL.revokeObjectURL(url); });
+  const initialize = async () => {
+    const choices = initialTarget || startEmpty ? controller.refreshList().catch(error => feedback(error.message, true)) : null;
+    if (initialTarget?.invalid) {
+      controller.startNew(); feedback("Некорректный адрес набора. Выберите набор из списка или создайте новый.", true);
+    } else if (initialTarget?.version) {
+      controller.startNew(); await showVersions(false, initialTarget.version);
+    } else if (startEmpty) {
+      controller.startNew(); setEditorAddress();
+    } else {
+      await loadDataset(initialTarget?.dataset, initialTarget?.image ? initialTarget : null);
+    }
+    await choices;
+  };
+  icons(); void initialize();
 })();

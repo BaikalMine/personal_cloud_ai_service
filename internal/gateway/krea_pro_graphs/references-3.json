@@ -1,0 +1,2262 @@
+{
+  "2281": {
+    "inputs": {
+      "samples": [
+        "3070",
+        0
+      ],
+      "vae": [
+        "3011",
+        3
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "Декодировать VAE",
+      "cnr_id": "comfy-core",
+      "ver": "0.7.0"
+    }
+  },
+  "2685": {
+    "inputs": {
+      "noise": [
+        "3927",
+        2
+      ],
+      "guider": [
+        "2686",
+        0
+      ],
+      "sampler": [
+        "3981",
+        0
+      ],
+      "sigmas": [
+        "3927",
+        0
+      ],
+      "latent_image": [
+        "3011",
+        11
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "High Pass Sampler",
+      "cnr_id": "comfy-core",
+      "ver": "0.27.0"
+    }
+  },
+  "2686": {
+    "inputs": {
+      "cfg": [
+        "3011",
+        19
+      ],
+      "model": [
+        "3071",
+        0
+      ],
+      "positive": [
+        "3011",
+        14
+      ],
+      "negative": [
+        "3011",
+        16
+      ]
+    },
+    "class_type": "CFGGuider",
+    "_meta": {
+      "title": "CFG Guider High",
+      "cnr_id": "comfy-core",
+      "ver": "0.27.0"
+    }
+  },
+  "2719": {
+    "inputs": {
+      "prompt": [
+        "2917",
+        0
+      ],
+      "negative_prompt": [
+        "2910",
+        0
+      ],
+      "moodboard_positive": "",
+      "moodboard_negative": "",
+      "metadata_json": "{}",
+      "strength": "normal",
+      "style_only": false,
+      "separator": "newline"
+    },
+    "class_type": "KreaMoodboardApply",
+    "_meta": {
+      "title": "Apply Moodboard",
+      "cnr_id": "comfyui-krea-moodboards",
+      "ver": "0.2.1"
+    }
+  },
+  "2910": {
+    "inputs": {
+      "negative": "bad anatomy, bad hands, watermark, ugly, distorted, censored, lowres, pixelated, distorted, jpeg artifacts, signature, (watermark), overexposed, underexposed, missing fingers, extra fingers, missing limbs, extra limbs, bad eyes, cloned face"
+    },
+    "class_type": "LCNegative",
+    "_meta": {
+      "title": "Negative (for detailers)",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "79b81758ac54ba8f9b46ecf7682902e87dc26684"
+    }
+  },
+  "2917": {
+    "inputs": {
+      "any": [
+        "4105",
+        0
+      ]
+    },
+    "class_type": "LCVRAMCacheClear",
+    "_meta": {
+      "title": "LC VRAM Cache Clear",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "79b81758ac54ba8f9b46ecf7682902e87dc26684"
+    }
+  },
+  "3011": {
+    "inputs": {
+      "pipe": [
+        "3491",
+        0
+      ]
+    },
+    "class_type": "LCPipeOut",
+    "_meta": {
+      "title": "LC Pipe Out",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "79b81758ac54ba8f9b46ecf7682902e87dc26684"
+    }
+  },
+  "3014": {
+    "inputs": {
+      "total_steps": 10,
+      "step_swap": 6,
+      "detailer_steps": 4,
+      "denoise": 0.95,
+      "_gap1": "",
+      "cfg_1": 2,
+      "cfg_2": 1,
+      "_gap2": "",
+      "sampler_name": "euler",
+      "scheduler": "simple"
+    },
+    "class_type": "LCSamplerConfigure",
+    "_meta": {
+      "title": "LC Sampler Configure ⚙️",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "79b81758ac54ba8f9b46ecf7682902e87dc26684"
+    }
+  },
+  "3015": {
+    "inputs": {
+      "pipe": [
+        "3524",
+        0
+      ],
+      "model_1": [
+        "4114",
+        0
+      ],
+      "clip_1": [
+        "3760",
+        1
+      ],
+      "vae_1": [
+        "3857",
+        2
+      ],
+      "positive_prompt": [
+        "4114",
+        2
+      ],
+      "negative_prompt": [
+        "2719",
+        1
+      ],
+      "negative": [
+        "3016",
+        0
+      ],
+      "seed": [
+        "3761",
+        0
+      ],
+      "total_steps": [
+        "3014",
+        0
+      ],
+      "cfg_1": [
+        "3014",
+        1
+      ],
+      "denoise": [
+        "3014",
+        2
+      ],
+      "step_swap": [
+        "3014",
+        3
+      ],
+      "cfg_2": [
+        "3014",
+        4
+      ],
+      "sampler_name": [
+        "3014",
+        5
+      ],
+      "scheduler": [
+        "3014",
+        6
+      ],
+      "detailer_steps": [
+        "3014",
+        7
+      ]
+    },
+    "class_type": "LCPipeEdit",
+    "_meta": {
+      "title": "LC Pipe (in/edit)",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "79b81758ac54ba8f9b46ecf7682902e87dc26684"
+    }
+  },
+  "3016": {
+    "inputs": {
+      "clip": [
+        "3760",
+        1
+      ],
+      "string": [
+        "2719",
+        1
+      ]
+    },
+    "class_type": "LCPromptToConditioning",
+    "_meta": {
+      "title": "Prompt to Conditioning",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "79b81758ac54ba8f9b46ecf7682902e87dc26684"
+    }
+  },
+  "3070": {
+    "inputs": {
+      "noise": [
+        "3927",
+        3
+      ],
+      "guider": [
+        "3085",
+        0
+      ],
+      "sampler": [
+        "3907",
+        0
+      ],
+      "sigmas": [
+        "3927",
+        1
+      ],
+      "latent_image": [
+        "2685",
+        0
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "Low Pass Sampler",
+      "cnr_id": "comfy-core",
+      "ver": "0.31.0"
+    }
+  },
+  "3071": {
+    "inputs": {
+      "inputcount": 2,
+      "any_02": [
+        "3011",
+        1
+      ]
+    },
+    "class_type": "LCAnySwitch",
+    "_meta": {
+      "title": "HIgh Model switch",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "79b81758ac54ba8f9b46ecf7682902e87dc26684"
+    }
+  },
+  "3085": {
+    "inputs": {
+      "cfg": [
+        "3011",
+        22
+      ],
+      "model": [
+        "3011",
+        1
+      ],
+      "positive": [
+        "3011",
+        14
+      ],
+      "negative": [
+        "3011",
+        16
+      ]
+    },
+    "class_type": "CFGGuider",
+    "_meta": {
+      "title": "CFG Guider Low",
+      "cnr_id": "comfy-core",
+      "ver": "0.27.0"
+    }
+  },
+  "3109": {
+    "inputs": {
+      "enable": false,
+      "In": [
+        "2281",
+        0
+      ]
+    },
+    "class_type": "LCStop",
+    "_meta": {
+      "title": "LC Stop 🛑",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "79b81758ac54ba8f9b46ecf7682902e87dc26684"
+    }
+  },
+  "3132": {
+    "inputs": {
+      "list_file": "civitai_compliance_remove.txt",
+      "enabled": true,
+      "text": [
+        "4114",
+        2
+      ]
+    },
+    "class_type": "LCCivitaiStrip",
+    "_meta": {
+      "title": "CivitAI 🚩🔪",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "5832ec12d24dc0e316809e990ca4bb50852e4b72"
+    }
+  },
+  "3391": {
+    "inputs": {
+      "positive": [
+        "3132",
+        0
+      ],
+      "negative": "",
+      "seed_value": -1,
+      "steps": 0,
+      "cfg": 0,
+      "sampler": "",
+      "scheduler": "",
+      "models": "",
+      "civitai_air": "urn:air:krea2:unknown:civitai:2726952@3460770",
+      "width": 0,
+      "height": 0,
+      "denoise": 0,
+      "extra_params": "",
+      "pipe": [
+        "3015",
+        0
+      ]
+    },
+    "class_type": "LCSaveImageMetadata",
+    "_meta": {
+      "title": "LC Save Metadata 🏷️",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "3d7e0de54080f5d9bdd720e0e1b854e33c4f0673"
+    }
+  },
+  "3481": {
+    "inputs": {
+      "max_resolution": 0,
+      "resolution_source": [
+        "4110",
+        0
+      ],
+      "aspect_ratio": "custom",
+      "custom_width": 880,
+      "custom_height": 1168,
+      "swap_dimensions": "Off",
+      "upscale_method": "lanczos",
+      "proportion": "crop",
+      "crop_location": "center",
+      "pad_color": "0, 0, 0",
+      "divisible_by": 8,
+      "batch_size": 1,
+      "image": [
+        "3489",
+        0
+      ]
+    },
+    "class_type": "LCAspectRatioPipeOut",
+    "_meta": {
+      "title": "📐 LC Aspect Ratio Simplifier (pipe)",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "79b81758ac54ba8f9b46ecf7682902e87dc26684"
+    }
+  },
+  "3483": {
+    "inputs": {
+      "images": [
+        "3680",
+        2
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Cropped Image & Resolution",
+      "cnr_id": "comfy-core",
+      "ver": "0.9.2"
+    }
+  },
+  "3489": {
+    "inputs": {
+      "image": "gateway-krea-stage-reference.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image  1 🖼️",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.30"
+    }
+  },
+  "3491": {
+    "inputs": {
+      "pipe": [
+        "3492",
+        0
+      ],
+      "model_1": [
+        "3493",
+        0
+      ],
+      "positive": [
+        "3541",
+        0
+      ]
+    },
+    "class_type": "LCPipeEdit",
+    "_meta": {
+      "title": "LC Pipe (in/edit)",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "79b81758ac54ba8f9b46ecf7682902e87dc26684"
+    }
+  },
+  "3492": {
+    "inputs": {
+      "pipe": [
+        "3015",
+        0
+      ]
+    },
+    "class_type": "LCPipeOut",
+    "_meta": {
+      "title": "LC Pipe Out",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "79b81758ac54ba8f9b46ecf7682902e87dc26684"
+    }
+  },
+  "3493": {
+    "inputs": {
+      "inputcount": 2,
+      "any_01": [
+        "3492",
+        1
+      ],
+      "any_02": [
+        "3492",
+        1
+      ]
+    },
+    "class_type": "LCAnySwitch",
+    "_meta": {
+      "title": "Model switch",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "05ce0f935fb4eaf4ca0b415f1710fa84af7cb9a0"
+    }
+  },
+  "3519": {
+    "inputs": {
+      "pixels": [
+        "3483",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "I2I 🖼️",
+      "cnr_id": "comfy-core",
+      "ver": "0.18.1"
+    }
+  },
+  "3520": {
+    "inputs": {
+      "any_01": [
+        "3519",
+        0
+      ],
+      "any_02": [
+        "3481",
+        5
+      ]
+    },
+    "class_type": "Any Switch (rgthree)",
+    "_meta": {
+      "title": "Latent Switch",
+      "cnr_id": "rgthree-comfy",
+      "ver": "1.0.2512112053"
+    }
+  },
+  "3524": {
+    "inputs": {
+      "pipe": [
+        "3481",
+        0
+      ],
+      "image": [
+        "3483",
+        0
+      ],
+      "latent": [
+        "3520",
+        0
+      ]
+    },
+    "class_type": "LCPipeEdit",
+    "_meta": {
+      "title": "LC Pipe (in/edit)",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "79b81758ac54ba8f9b46ecf7682902e87dc26684"
+    }
+  },
+  "3535": {
+    "inputs": {
+      "image": "gateway-krea-stage-reference.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Image 2",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.30"
+    }
+  },
+  "3538": {
+    "inputs": {
+      "text": [
+        "3492",
+        13
+      ],
+      "image1_tokens": "normal",
+      "image2_tokens": "normal",
+      "image3_tokens": "normal",
+      "image4_tokens": "normal",
+      "clip": [
+        "3492",
+        2
+      ],
+      "image1": [
+        "3492",
+        7
+      ],
+      "image2": [
+        "3545",
+        0
+      ],
+      "image3": [
+        "3559",
+        0
+      ]
+    },
+    "class_type": "Krea2EncodeRebalance",
+    "_meta": {
+      "title": "🖼️ Image Reference Edit",
+      "cnr_id": "ComfyUI-Conditioning-Rebalance",
+      "ver": "98e8297a57a2109587f493b327ad028b8af3d2f0"
+    }
+  },
+  "3541": {
+    "inputs": {
+      "inputcount": 2,
+      "any_01": [
+        "3538",
+        0
+      ]
+    },
+    "class_type": "LCAnySwitch",
+    "_meta": {
+      "title": "Conditioning Switch",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "05ce0f935fb4eaf4ca0b415f1710fa84af7cb9a0"
+    }
+  },
+  "3545": {
+    "inputs": {
+      "inputcount": 2,
+      "any_01": [
+        "3681",
+        2
+      ],
+      "any_02": [
+        "3535",
+        0
+      ]
+    },
+    "class_type": "LCAnySwitch",
+    "_meta": {
+      "title": "Image 2 ref switch",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "123dc56c8efd87de715f53dfef4bcaa5aeb54e22"
+    }
+  },
+  "3556": {
+    "inputs": {
+      "image": "gateway-krea-stage-reference.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Image 3",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.30"
+    }
+  },
+  "3559": {
+    "inputs": {
+      "inputcount": 2,
+      "any_01": [
+        "3682",
+        2
+      ],
+      "any_02": [
+        "3556",
+        0
+      ]
+    },
+    "class_type": "LCAnySwitch",
+    "_meta": {
+      "title": "Image 3 ref switch",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "123dc56c8efd87de715f53dfef4bcaa5aeb54e22"
+    }
+  },
+  "3590": {
+    "inputs": {
+      "inputcount": 2,
+      "any_01": [
+        "4046",
+        1
+      ],
+      "any_02": [
+        "4028",
+        0
+      ]
+    },
+    "class_type": "LCAnySwitch",
+    "_meta": {
+      "title": "Switch",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "2f5ea5e36d115e897de29f481f277ac86557b616"
+    }
+  },
+  "3620": {
+    "inputs": {
+      "image": "gateway-krea-stage-reference.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load watermark",
+      "cnr_id": "comfy-core",
+      "ver": "0.31.0"
+    }
+  },
+  "3621": {
+    "inputs": {
+      "size_percent": 20,
+      "opacity": 0.8,
+      "x_percent": 5.4,
+      "y_percent": 100,
+      "margin_percent": 0.5,
+      "image": [
+        "3622",
+        0
+      ],
+      "watermark": [
+        "3620",
+        0
+      ],
+      "watermark_mask": [
+        "3620",
+        1
+      ]
+    },
+    "class_type": "LCWatermark",
+    "_meta": {
+      "title": "LC Watermark 💧",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "4ac98869e5f9ef0a5382ec86d105271257c09267"
+    }
+  },
+  "3622": {
+    "inputs": {
+      "text": "Hello",
+      "font": "Arial",
+      "font_size": 64,
+      "color_r": 255,
+      "color_g": 255,
+      "color_b": 255,
+      "x_percent": 85.8,
+      "y_percent": 15.5,
+      "alignment": "center",
+      "image": [
+        "3995",
+        0
+      ]
+    },
+    "class_type": "LCTextOverlay",
+    "_meta": {
+      "title": "LC Text Overlay",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "4ac98869e5f9ef0a5382ec86d105271257c09267"
+    }
+  },
+  "3623": {
+    "inputs": {
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 100,
+      "aspect": "free",
+      "image": [
+        "3719",
+        0
+      ]
+    },
+    "class_type": "LCImageCrop",
+    "_meta": {
+      "title": "LC Image Crop 🖼️🔪",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "4ac98869e5f9ef0a5382ec86d105271257c09267"
+    }
+  },
+  "3624": {
+    "inputs": {
+      "lut_name": "LC Cool Breeze.cube",
+      "strength": 0.26,
+      "log": false,
+      "interpolation": "tetrahedral",
+      "image": [
+        "3774",
+        0
+      ]
+    },
+    "class_type": "LCApplyLUT",
+    "_meta": {
+      "title": "LC Apply LUT",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "fd45171f9af29d6bb018d9bbf35524262c62b66c"
+    }
+  },
+  "3629": {
+    "inputs": {
+      "grain_size": 1,
+      "strength": 0.25,
+      "radius_variation": 0,
+      "color_grain": 0,
+      "seed": [
+        "3761",
+        0
+      ],
+      "softness": 0.8,
+      "look": "Natural",
+      "response": "sensor",
+      "image": [
+        "3773",
+        0
+      ]
+    },
+    "class_type": "LCFilmGrain",
+    "_meta": {
+      "title": "LC Film Grain",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "4ac98869e5f9ef0a5382ec86d105271257c09267"
+    }
+  },
+  "3631": {
+    "inputs": {
+      "film_stock": "Slide / Kodak Ektachrome E100",
+      "strength": 0.8,
+      "override_toe": -1,
+      "override_shoulder": -1,
+      "override_gamma": -1,
+      "look": "Custom",
+      "image": [
+        "3632",
+        0
+      ]
+    },
+    "class_type": "LCFilmStockColor",
+    "_meta": {
+      "title": "LC Film Stock (Color)",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "4ac98869e5f9ef0a5382ec86d105271257c09267"
+    }
+  },
+  "3632": {
+    "inputs": {
+      "film_stock": "Fuji Acros 100",
+      "color_filter": "None",
+      "strength": 1,
+      "contrast": 0,
+      "exposure_shift": 0,
+      "look": "Custom",
+      "image": [
+        "3832",
+        0
+      ]
+    },
+    "class_type": "LCFilmStockBW",
+    "_meta": {
+      "title": "LC Film Stock (B&W)",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "4ac98869e5f9ef0a5382ec86d105271257c09267"
+    }
+  },
+  "3634": {
+    "inputs": {
+      "intensity": 0.2,
+      "threshold": 0.6,
+      "smoothing": 0.5,
+      "radius": 2,
+      "saturation": 0.75,
+      "exposure": 1,
+      "mode": "Pro-Mist",
+      "look": "Custom",
+      "image": [
+        "3643",
+        0
+      ]
+    },
+    "class_type": "LCBloom",
+    "_meta": {
+      "title": "LC Bloom ⬅️",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "4ac98869e5f9ef0a5382ec86d105271257c09267"
+    }
+  },
+  "3636": {
+    "inputs": {
+      "lens": "Sony FE 55mm f/1.8",
+      "mode": "Add Aberrations",
+      "strength": 0.35,
+      "look": "Custom",
+      "image": [
+        "3634",
+        0
+      ]
+    },
+    "class_type": "LCLensProfile",
+    "_meta": {
+      "title": "LC Lens Profile ⬅️",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "4ac98869e5f9ef0a5382ec86d105271257c09267"
+    }
+  },
+  "3641": {
+    "inputs": {
+      "method": "Shades of Gray",
+      "minkowski_p": 6,
+      "strength": 1,
+      "image": [
+        "3646",
+        0
+      ]
+    },
+    "class_type": "LCAutoWhiteBalance",
+    "_meta": {
+      "title": "LC Auto White Balance",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "4ac98869e5f9ef0a5382ec86d105271257c09267"
+    }
+  },
+  "3642": {
+    "inputs": {
+      "lift": 0.01,
+      "gamma": 1,
+      "gain": 0.9,
+      "offset": 0,
+      "strength": 0.5,
+      "image": [
+        "3800",
+        0
+      ]
+    },
+    "class_type": "LCLiftGammaGain",
+    "_meta": {
+      "title": "LC Lift Gamma Gain",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "4ac98869e5f9ef0a5382ec86d105271257c09267"
+    }
+  },
+  "3643": {
+    "inputs": {
+      "vibrance": 100,
+      "saturation": 0,
+      "protect_skin": true,
+      "strength": 1,
+      "image": [
+        "3642",
+        0
+      ]
+    },
+    "class_type": "LCVibrance",
+    "_meta": {
+      "title": "LC Vibrance",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "4ac98869e5f9ef0a5382ec86d105271257c09267"
+    }
+  },
+  "3645": {
+    "inputs": {
+      "preset": "Portrait",
+      "clarity": 0.1,
+      "sharpen": 0.2,
+      "strength": 0.6,
+      "halo": 0.8,
+      "skin_protect": 1,
+      "radius": 0.35,
+      "blend_mode": "Soft Light",
+      "shadow_protect": 0.35,
+      "highlight_protect": 0.35,
+      "texture": 0,
+      "image": [
+        "3641",
+        0
+      ],
+      "skin_mask": [
+        "4096",
+        1
+      ]
+    },
+    "class_type": "LCClarity",
+    "_meta": {
+      "title": "LC Sharpen Pro",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "4ac98869e5f9ef0a5382ec86d105271257c09267"
+    }
+  },
+  "3646": {
+    "inputs": {
+      "method": "adain",
+      "strength": 1,
+      "skin_protect": 0.5,
+      "image": [
+        "3623",
+        0
+      ],
+      "reference": [
+        "3481",
+        1
+      ]
+    },
+    "class_type": "LCColorMatch",
+    "_meta": {
+      "title": "LC Color Match 🎨",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "4ac98869e5f9ef0a5382ec86d105271257c09267"
+    }
+  },
+  "3659": {
+    "inputs": {
+      "blur_strength": 1,
+      "edge_preservation": 0.049,
+      "radius_multiplier": 1,
+      "strength": 0.65,
+      "mode": "smart",
+      "luma": 1,
+      "chroma": 1,
+      "keep_detail": 0.5,
+      "image": [
+        "3590",
+        0
+      ]
+    },
+    "class_type": "LCImageDenoise",
+    "_meta": {
+      "title": "LC Image Denoise",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "4ac98869e5f9ef0a5382ec86d105271257c09267"
+    }
+  },
+  "3660": {
+    "inputs": {
+      "model": "BiRefNet general (MIT)",
+      "refine": "none",
+      "vitmatte_model": "models/vitmatte (local)",
+      "grow": 0,
+      "edge_erode": 10,
+      "edge_dilate": 10,
+      "black_point": 0,
+      "white_point": 1,
+      "feather": 0,
+      "max_megapixels": 2,
+      "background": "black",
+      "image": [
+        "4096",
+        0
+      ]
+    },
+    "class_type": "LCRemBG",
+    "_meta": {
+      "title": "LC Remove Background ✂️",
+      "cnr_id": "ComfyUI_LC_MaskMaker_nodes",
+      "ver": "3f344dd1f4d2e4dbe30b35e08757f8f4d60cb000"
+    }
+  },
+  "3662": {
+    "inputs": {
+      "engine": "segformer",
+      "segformer_model": "models/segformer_b2_clothes (local)",
+      "face": true,
+      "hair": false,
+      "body": true,
+      "clothes": false,
+      "accessories": false,
+      "background": false,
+      "confidence": 0.4,
+      "refine": "vitmatte",
+      "vitmatte_model": "models/vitmatte (local)",
+      "edge_erode": 10,
+      "edge_dilate": 10,
+      "black_point": 0.01,
+      "white_point": 0.99,
+      "max_megapixels": 2,
+      "remove_features": false,
+      "image": [
+        "3659",
+        0
+      ]
+    },
+    "class_type": "LCPersonMask",
+    "_meta": {
+      "title": "LC Person Mask 🧍",
+      "cnr_id": "ComfyUI_LC_MaskMaker_nodes",
+      "ver": "3f344dd1f4d2e4dbe30b35e08757f8f4d60cb000"
+    }
+  },
+  "3664": {
+    "inputs": {
+      "model": "Depth Anything V2 Small (Apache-2.0)",
+      "resolution": [
+        "3674",
+        1
+      ],
+      "invert": true,
+      "image": [
+        "4096",
+        0
+      ]
+    },
+    "class_type": "LCDepthAnythingV2",
+    "_meta": {
+      "title": "LC Depth Anything V2 🌊",
+      "cnr_id": "ComfyUI_LC_MaskMaker_nodes",
+      "ver": "3f344dd1f4d2e4dbe30b35e08757f8f4d60cb000"
+    }
+  },
+  "3670": {
+    "inputs": {
+      "model": "scannet.pt (BAE normals, ScanNet-trained; license unclear, verify before commercial use)",
+      "resolution": [
+        "3674",
+        1
+      ],
+      "flip_y": false,
+      "blur_radius": 3,
+      "sigma": 1,
+      "image": [
+        "4096",
+        0
+      ]
+    },
+    "class_type": "LCNormalBAE",
+    "_meta": {
+      "title": "LC Normal Map (BAE) 🗺️",
+      "cnr_id": "ComfyUI_LC_MaskMaker_nodes",
+      "ver": "3f344dd1f4d2e4dbe30b35e08757f8f4d60cb000"
+    }
+  },
+  "3674": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "megapixels": 1,
+      "resolution_steps": 1,
+      "image": [
+        "4096",
+        0
+      ]
+    },
+    "class_type": "LCImageToTotalMegapixels",
+    "_meta": {
+      "title": "LC Image to Total Megapixels 📐",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "725b8198884b4b62a392d5b00fba114e1c23303d"
+    }
+  },
+  "3680": {
+    "inputs": {
+      "model": "BiRefNet general (MIT)",
+      "refine": "none",
+      "vitmatte_model": "models/vitmatte (local)",
+      "grow": 0,
+      "edge_erode": 10,
+      "edge_dilate": 10,
+      "black_point": 0,
+      "white_point": 1,
+      "feather": 0,
+      "max_megapixels": 2,
+      "background": "black",
+      "image": [
+        "3481",
+        1
+      ]
+    },
+    "class_type": "LCRemBG",
+    "_meta": {
+      "title": "Background ✂️",
+      "cnr_id": "ComfyUI_LC_MaskMaker_nodes",
+      "ver": "dc77bf3fda1a5d3cff9418bd86f22ab0a2a463a7"
+    }
+  },
+  "3681": {
+    "inputs": {
+      "model": "BiRefNet general (MIT)",
+      "refine": "none",
+      "vitmatte_model": "models/vitmatte (local)",
+      "grow": 0,
+      "edge_erode": 10,
+      "edge_dilate": 10,
+      "black_point": 0,
+      "white_point": 1,
+      "feather": 0,
+      "max_megapixels": 2,
+      "background": "black",
+      "image": [
+        "3535",
+        0
+      ]
+    },
+    "class_type": "LCRemBG",
+    "_meta": {
+      "title": "Background ✂️",
+      "cnr_id": "ComfyUI_LC_MaskMaker_nodes",
+      "ver": "dc77bf3fda1a5d3cff9418bd86f22ab0a2a463a7"
+    }
+  },
+  "3682": {
+    "inputs": {
+      "model": "BiRefNet general (MIT)",
+      "refine": "none",
+      "vitmatte_model": "models/vitmatte (local)",
+      "grow": 0,
+      "edge_erode": 10,
+      "edge_dilate": 10,
+      "black_point": 0,
+      "white_point": 1,
+      "feather": 0,
+      "max_megapixels": 2,
+      "background": "black",
+      "image": [
+        "3556",
+        0
+      ]
+    },
+    "class_type": "LCRemBG",
+    "_meta": {
+      "title": "Background ✂️",
+      "cnr_id": "ComfyUI_LC_MaskMaker_nodes",
+      "ver": "dc77bf3fda1a5d3cff9418bd86f22ab0a2a463a7"
+    }
+  },
+  "3685": {
+    "inputs": {
+      "opacity": 0.71,
+      "image_a": [
+        "4096",
+        0
+      ],
+      "image_b": [
+        "3698",
+        0
+      ]
+    },
+    "class_type": "LCDynamicOverlay",
+    "_meta": {
+      "title": "LC Dynamic Overlay",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "f6f835f2c1478c00537a13d874320e122a6fa82d"
+    }
+  },
+  "3698": {
+    "inputs": {
+      "preset": "Rembrandt",
+      "blend": 0.8,
+      "light1_type": "spot",
+      "light1_x": 0.65,
+      "light1_y": 0.6,
+      "light1_z": 0.5,
+      "light1_brightness": 1.4,
+      "light1_spread": 0.9,
+      "light1_warmth": 0.1,
+      "light1_color": "none",
+      "light1_color_amount": 0.5,
+      "enable_light_2": false,
+      "light2_type": "spot",
+      "light2_x": -0.8,
+      "light2_y": -0.1,
+      "light2_z": 0.5,
+      "light2_brightness": 0.6,
+      "light2_spread": 1.2,
+      "light2_warmth": -0.15,
+      "light2_color": "none",
+      "light2_color_amount": 0.5,
+      "light_wrap": 0.3,
+      "fill": 0.18,
+      "shadows": "soft",
+      "shadow_amount": 0.55,
+      "shadow_blur": 0.3,
+      "background_shadow": 0.5,
+      "self_shadow": 0.8,
+      "relief": 0.45,
+      "advanced": false,
+      "depth_falloff": 0.4,
+      "shadow_height": 0.3,
+      "shadow_length": 0.35,
+      "shadow_softness": 0.5,
+      "subject_distance": 0.15,
+      "mask_dome": 0.4,
+      "image": [
+        "4096",
+        0
+      ],
+      "normal_map": [
+        "3715",
+        0
+      ],
+      "depth_map": [
+        "3706",
+        0
+      ],
+      "mask": [
+        "3714",
+        0
+      ]
+    },
+    "class_type": "LCLightingControlV2",
+    "_meta": {
+      "title": "LC Lighting Control V2 🔦",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "bfb1067b71bc70299c016cae8fad2fe0932fb8ba"
+    }
+  },
+  "3706": {
+    "inputs": {
+      "image": [
+        "3664",
+        0
+      ]
+    },
+    "class_type": "LCPreviewImage",
+    "_meta": {
+      "title": "Depth Map 🗺️",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "24728b75a7291ed7d3ac57d6e23d906823392387"
+    }
+  },
+  "3714": {
+    "inputs": {
+      "mask": [
+        "3660",
+        1
+      ]
+    },
+    "class_type": "LCPreviewMask",
+    "_meta": {
+      "title": "Target Mask 🎭",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "7e2d1aeb3227d1c20192d54210f67ce09469ad6c"
+    }
+  },
+  "3715": {
+    "inputs": {
+      "image": [
+        "3670",
+        0
+      ]
+    },
+    "class_type": "LCPreviewImage",
+    "_meta": {
+      "title": "BAE Normal Map 🗺️",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "24728b75a7291ed7d3ac57d6e23d906823392387"
+    }
+  },
+  "3719": {
+    "inputs": {
+      "inputcount": 2,
+      "any_01": [
+        "3685",
+        0
+      ],
+      "any_02": [
+        "4096",
+        0
+      ]
+    },
+    "class_type": "LCAnySwitch",
+    "_meta": {
+      "title": "image switch",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "7e2d1aeb3227d1c20192d54210f67ce09469ad6c"
+    }
+  },
+  "3760": {
+    "inputs": {
+      "lora_rows": "[]",
+      "model": [
+        "4102",
+        0
+      ],
+      "clip": [
+        "3857",
+        1
+      ]
+    },
+    "class_type": "LCLoraLoader",
+    "_meta": {
+      "title": "LC LoRA Loader 🎚️",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "6250ce75313c80f83e8e9620c77d424f88bf177c"
+    }
+  },
+  "3761": {
+    "inputs": {
+      "base_seed": -1
+    },
+    "class_type": "LCSeed",
+    "_meta": {
+      "title": "🌱LC Seed",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "b63c1e08d90fb1fa8d6d080a57170516e52f2385"
+    }
+  },
+  "3773": {
+    "inputs": {
+      "preset": "1977",
+      "strength": 1,
+      "image": [
+        "3624",
+        0
+      ]
+    },
+    "class_type": "LCPhoneFilters",
+    "_meta": {
+      "title": "LC Phone Filters 📱",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "b63c1e08d90fb1fa8d6d080a57170516e52f2385"
+    }
+  },
+  "3774": {
+    "inputs": {
+      "angle": 314.717570393228,
+      "distance": 67.62454593641333,
+      "strength": 1,
+      "taps": 64,
+      "edge": "mirror",
+      "image": [
+        "3631",
+        0
+      ]
+    },
+    "class_type": "LCDirectionalBlur",
+    "_meta": {
+      "title": "LC Directional Blur",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "b63c1e08d90fb1fa8d6d080a57170516e52f2385"
+    }
+  },
+  "3800": {
+    "inputs": {
+      "look": "Natural",
+      "haze": 0.08,
+      "haze_distance": 0.5,
+      "haze_warmth": 0,
+      "light_wrap": 0.2,
+      "dof_blur": 0.2,
+      "focus_range": 0.15,
+      "bokeh": 0.4,
+      "auto_focus": true,
+      "focus_depth": 0.32,
+      "depth_direction": "Auto",
+      "image": [
+        "3645",
+        0
+      ],
+      "depth_map": [
+        "3623",
+        0
+      ]
+    },
+    "class_type": "LCDepthFX",
+    "_meta": {
+      "title": "LC Depth FX 🌫️ ⬅️",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "5e17279ba425b994aa8e657426e45f1a752f1e6a"
+    }
+  },
+  "3801": {
+    "inputs": {
+      "intensity": 0.2,
+      "threshold": 0.8,
+      "smoothing": 0.3,
+      "radius": 1,
+      "saturation": 0.7,
+      "exposure": 0.95,
+      "mode": "Halation",
+      "look": "Custom",
+      "image": [
+        "3636",
+        0
+      ]
+    },
+    "class_type": "LCBloom",
+    "_meta": {
+      "title": "LC Bloom · Halation ⬅️",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "5e17279ba425b994aa8e657426e45f1a752f1e6a"
+    }
+  },
+  "3832": {
+    "inputs": {
+      "intensity": 0.25,
+      "midpoint": 0.55,
+      "roundness": 0.8,
+      "feather": 0.35,
+      "cos4_falloff": true,
+      "tint_r": 1,
+      "tint_g": 1,
+      "tint_b": 1.05,
+      "look": "Custom",
+      "image": [
+        "3801",
+        0
+      ]
+    },
+    "class_type": "LCVignette",
+    "_meta": {
+      "title": "LC Vignette",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "e9d2dedffd1fe374dbdb674461628dbdaecb8926"
+    }
+  },
+  "3857": {
+    "inputs": {
+      "base_model": "Krea 2 (Turbo)",
+      "goal": "Quality",
+      "model_file": "Krea2\\krea2TurboFP8_krea2TURBO.safetensors",
+      "text_encoder": "qwen3vl_4b_bf16.safetensors",
+      "vae": "krea2RealVae_v10.safetensors",
+      "speed_ups": "Auto",
+      "attention": "auto",
+      "fp16_accumulation": "auto",
+      "step_cache": "auto",
+      "torch_compile": "off",
+      "qwen21_cache": "auto",
+      "clip_type": "auto",
+      "spectrum": "auto",
+      "assets": "ready"
+    },
+    "class_type": "GatewayKreaProOptimizer",
+    "_meta": {
+      "title": "LC Model Optimizer ⚡",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "45c0fd983d47677b1febbad80d1496a0dc0ebbb4"
+    }
+  },
+  "3858": {
+    "inputs": {
+      "inputcount": 2,
+      "any_02": [
+        "3011",
+        23
+      ]
+    },
+    "class_type": "LCAnySwitch",
+    "_meta": {
+      "title": "Sampler switch",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "45c0fd983d47677b1febbad80d1496a0dc0ebbb4"
+    }
+  },
+  "3890": {
+    "inputs": {
+      "inputcount": 2,
+      "any_02": [
+        "3109",
+        0
+      ]
+    },
+    "class_type": "LCAnySwitch",
+    "_meta": {
+      "title": "image bypass switch",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "1d09f85e3bed224313a6fa77f3f79c632d6004ae"
+    }
+  },
+  "3907": {
+    "inputs": {
+      "amount": 0.34,
+      "start": 0.15,
+      "end": 0.85,
+      "peak": 0,
+      "exponent": 0,
+      "mode": "look only",
+      "sampler": [
+        "3927",
+        6
+      ],
+      "sigmas": [
+        "3927",
+        1
+      ]
+    },
+    "class_type": "LCDetailDaemon",
+    "_meta": {
+      "title": "LC Detail Daemon (BETA)",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "1d09f85e3bed224313a6fa77f3f79c632d6004ae"
+    }
+  },
+  "3927": {
+    "inputs": {
+      "sampler": [
+        "3858",
+        0
+      ],
+      "sigma_curve_presets": "gaussian",
+      "base_scheduler": [
+        "3011",
+        24
+      ],
+      "steps": [
+        "3011",
+        18
+      ],
+      "step_swap": [
+        "3011",
+        21
+      ],
+      "denoise": [
+        "3011",
+        20
+      ],
+      "denoise_steps": "at step swap",
+      "low_pass": "continue noise schedule",
+      "scheduler_shape_2": "same as first",
+      "first_pass_resample": 1.15,
+      "sigma_shift": "use model default",
+      "custom_shift": 1.15,
+      "beta_alpha": 0.6,
+      "beta_beta": 0.6,
+      "flowmatch_shift": 3,
+      "flowmatch_dynamic": true,
+      "flowmatch_terminal": 0,
+      "hyperbolic_function": "tanh",
+      "hyperbolic_scale": 1,
+      "gaussian_mean": 0.04,
+      "gaussian_std": 1,
+      "gaussian_operation": "transform",
+      "edit_mode": "smooth",
+      "smooth_radius": 1.5,
+      "curve_edit": "",
+      "seed": [
+        "3011",
+        17
+      ],
+      "reset curve": null,
+      "save curve": null,
+      "model": [
+        "3071",
+        0
+      ],
+      "model_2": [
+        "3011",
+        1
+      ],
+      "image_size_latent": [
+        "3011",
+        11
+      ]
+    },
+    "class_type": "LCSigmas",
+    "_meta": {
+      "title": "LC Sigmas (BETA)",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "573d8e1f7a5a76fb7c93ad7a317b8ff42426c986"
+    }
+  },
+  "3981": {
+    "inputs": {
+      "auto": true,
+      "grow_at_step": 4,
+      "sampler": [
+        "3927",
+        6
+      ]
+    },
+    "class_type": "LCSpeedBoost",
+    "_meta": {
+      "title": "LC Speed Boost (BETA) 🚀",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "5076fdbf40437a6f2d5c71416065de15be1a7ca1"
+    }
+  },
+  "3995": {
+    "inputs": {
+      "strength": 0.5,
+      "skin": 0.75,
+      "seed": [
+        "3761",
+        0
+      ],
+      "image": [
+        "3629",
+        0
+      ]
+    },
+    "class_type": "LCNaturalLook",
+    "_meta": {
+      "title": "LC Natural Look 🍃",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "15206a8304eabe2ed43416bd6afb68c0b4661d82"
+    }
+  },
+  "4010": {
+    "inputs": {
+      "rows": "[{\"name\":\"feather\",\"value\":9,\"min\":0,\"max\":20,\"step\":1,\"decimals\":0,\"cast\":\"FLOAT\"},{\"name\":\"denoise\",\"value\":0.2,\"min\":0.1,\"max\":1,\"step\":0.05,\"decimals\":2,\"cast\":\"FLOAT\"}]"
+    },
+    "class_type": "LCControlPanel",
+    "_meta": {
+      "title": "LC Control Panel 🎛️",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "845a2b692a1a623f42579b69c3a0978c28df90cd"
+    }
+  },
+  "4011": {
+    "inputs": {
+      "rows": "[{\"name\":\"feather\",\"value\":14,\"min\":0,\"max\":20,\"step\":1,\"decimals\":0,\"cast\":\"FLOAT\"},{\"name\":\"denoise\",\"value\":0.15,\"min\":0.1,\"max\":1,\"step\":0.05,\"decimals\":2,\"cast\":\"FLOAT\"}]"
+    },
+    "class_type": "LCControlPanel",
+    "_meta": {
+      "title": "LC Control Panel 🎛️",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "845a2b692a1a623f42579b69c3a0978c28df90cd"
+    }
+  },
+  "4012": {
+    "inputs": {
+      "rows": "[{\"name\":\"feather\",\"value\":20,\"min\":0,\"max\":20,\"step\":1,\"decimals\":0,\"cast\":\"FLOAT\"},{\"name\":\"denoise\",\"value\":0.15,\"min\":0.1,\"max\":1,\"step\":0.05,\"decimals\":2,\"cast\":\"FLOAT\"}]"
+    },
+    "class_type": "LCControlPanel",
+    "_meta": {
+      "title": "LC Control Panel 🎛️",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "845a2b692a1a623f42579b69c3a0978c28df90cd"
+    }
+  },
+  "4013": {
+    "inputs": {
+      "prompt": "Face\n",
+      "sam3_model": "sam3.1_multiplex_fp16.safetensors (SAM 3.1, SAM License)",
+      "threshold": 0.5,
+      "grow": 4,
+      "feather": [
+        "4011",
+        0
+      ],
+      "blend": 1,
+      "padding": 120,
+      "inpaint_resolution": [
+        "4019",
+        0
+      ],
+      "denoise": [
+        "4011",
+        1
+      ],
+      "tone_match": true,
+      "cfg": 1,
+      "pipe": [
+        "3011",
+        0
+      ],
+      "image": [
+        "3890",
+        0
+      ],
+      "model": [
+        "4024",
+        0
+      ],
+      "inpaint_positive": [
+        "4037",
+        0
+      ]
+    },
+    "class_type": "LCSmartInpaintPipe",
+    "_meta": {
+      "title": "Face Detailer",
+      "cnr_id": "ComfyUI_LC_MaskMaker_nodes",
+      "ver": "7641e153d15b5da332888db1d460fbf5466a7626"
+    }
+  },
+  "4014": {
+    "inputs": {
+      "prompt": "Eyes",
+      "sam3_model": "sam3.1_multiplex_fp16.safetensors (SAM 3.1, SAM License)",
+      "threshold": 0.5,
+      "grow": 4,
+      "feather": [
+        "4010",
+        0
+      ],
+      "blend": 1,
+      "padding": 80,
+      "inpaint_resolution": [
+        "4019",
+        0
+      ],
+      "denoise": [
+        "4010",
+        1
+      ],
+      "tone_match": true,
+      "cfg": 1,
+      "pipe": [
+        "4013",
+        0
+      ],
+      "image": [
+        "4013",
+        1
+      ],
+      "model": [
+        "4024",
+        0
+      ],
+      "inpaint_positive": [
+        "4032",
+        0
+      ]
+    },
+    "class_type": "LCSmartInpaintPipe",
+    "_meta": {
+      "title": "Eyes Detailer",
+      "cnr_id": "ComfyUI_LC_MaskMaker_nodes",
+      "ver": "7641e153d15b5da332888db1d460fbf5466a7626"
+    }
+  },
+  "4015": {
+    "inputs": {
+      "prompt": "hands",
+      "sam3_model": "sam3.1_multiplex_fp16.safetensors (SAM 3.1, SAM License)",
+      "threshold": 0.5,
+      "grow": 4,
+      "feather": [
+        "4012",
+        0
+      ],
+      "blend": 1,
+      "padding": 120,
+      "inpaint_resolution": [
+        "4019",
+        0
+      ],
+      "denoise": [
+        "4012",
+        1
+      ],
+      "tone_match": true,
+      "cfg": 1,
+      "pipe": [
+        "4014",
+        0
+      ],
+      "image": [
+        "4014",
+        1
+      ],
+      "model": [
+        "4024",
+        0
+      ],
+      "inpaint_positive": [
+        "4033",
+        0
+      ]
+    },
+    "class_type": "LCSmartInpaintPipe",
+    "_meta": {
+      "title": "Hand Detailer",
+      "cnr_id": "ComfyUI_LC_MaskMaker_nodes",
+      "ver": "7641e153d15b5da332888db1d460fbf5466a7626"
+    }
+  },
+  "4016": {
+    "inputs": {
+      "positive": ""
+    },
+    "class_type": "LCPositive",
+    "_meta": {
+      "title": "Detailer Positive",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "15206a8304eabe2ed43416bd6afb68c0b4661d82"
+    }
+  },
+  "4017": {
+    "inputs": {
+      "positive": ""
+    },
+    "class_type": "LCPositive",
+    "_meta": {
+      "title": "Detailer Positive",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "15206a8304eabe2ed43416bd6afb68c0b4661d82"
+    }
+  },
+  "4018": {
+    "inputs": {
+      "positive": "detailed hands and fingernails"
+    },
+    "class_type": "LCPositive",
+    "_meta": {
+      "title": "Detailer Positive",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "15206a8304eabe2ed43416bd6afb68c0b4661d82"
+    }
+  },
+  "4019": {
+    "inputs": {
+      "value": 1008,
+      "min": 480,
+      "max": 2048,
+      "step": 16,
+      "decimals": 0
+    },
+    "class_type": "LCSlider",
+    "_meta": {
+      "title": "Inpaint Resolution",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "15206a8304eabe2ed43416bd6afb68c0b4661d82"
+    }
+  },
+  "4020": {
+    "inputs": {
+      "lora_rows": "[]",
+      "model": [
+        "4026",
+        1
+      ],
+      "clip": [
+        "4026",
+        2
+      ]
+    },
+    "class_type": "LCLoraLoader",
+    "_meta": {
+      "title": "character or detailer LoRA (optional)",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "b63c1e08d90fb1fa8d6d080a57170516e52f2385"
+    }
+  },
+  "4024": {
+    "inputs": {
+      "shift": 1,
+      "sampling": "flow",
+      "model": [
+        "4020",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "ModelSamplingAuraFloFromProgressive",
+      "cnr_id": "comfy-core",
+      "ver": "0.24.0"
+    }
+  },
+  "4026": {
+    "inputs": {
+      "pipe": [
+        "3011",
+        0
+      ]
+    },
+    "class_type": "LCDetailPipeOut",
+    "_meta": {
+      "title": "LC Detail Pipe Out",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "aux_id": "lonecatone23/ComfyUI_LC123_nodes",
+      "ver": "79b81758ac54ba8f9b46ecf7682902e87dc26684"
+    }
+  },
+  "4028": {
+    "inputs": {
+      "inputcount": 2,
+      "any_01": [
+        "4015",
+        1
+      ],
+      "any_02": [
+        "3890",
+        0
+      ]
+    },
+    "class_type": "LCAnySwitch",
+    "_meta": {
+      "title": "LC AnySwitch",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "9d36e550d8701d07974f1282df5fe26548b3a9f3"
+    }
+  },
+  "4032": {
+    "inputs": {
+      "clip": [
+        "4020",
+        1
+      ],
+      "string": [
+        "4017",
+        0
+      ]
+    },
+    "class_type": "LCPromptToConditioning",
+    "_meta": {
+      "title": "Prompt to Conditioning",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "15206a8304eabe2ed43416bd6afb68c0b4661d82"
+    }
+  },
+  "4033": {
+    "inputs": {
+      "clip": [
+        "4020",
+        1
+      ],
+      "string": [
+        "4018",
+        0
+      ]
+    },
+    "class_type": "LCPromptToConditioning",
+    "_meta": {
+      "title": "Prompt to Conditioning",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "15206a8304eabe2ed43416bd6afb68c0b4661d82"
+    }
+  },
+  "4037": {
+    "inputs": {
+      "clip": [
+        "4020",
+        1
+      ],
+      "string": [
+        "4016",
+        0
+      ]
+    },
+    "class_type": "LCPromptToConditioning",
+    "_meta": {
+      "title": "Prompt to Conditioning",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "15206a8304eabe2ed43416bd6afb68c0b4661d82"
+    }
+  },
+  "4046": {
+    "inputs": {
+      "upscale_by": [
+        "4047",
+        0
+      ],
+      "seed": [
+        "3761",
+        0
+      ],
+      "color_alignment": "wavelet",
+      "tile_size": 512,
+      "vae_tile_size": 512,
+      "pipe": [
+        "4015",
+        0
+      ],
+      "image": [
+        "4028",
+        0
+      ]
+    },
+    "class_type": "LCVOSRUpscalePipe",
+    "_meta": {
+      "title": "LC VOSR2 Upscale (pipe) 🧩",
+      "cnr_id": "ComfyUI_LC_MaskMaker_nodes",
+      "ver": "4b8d959113dd0ceecd23f140e23dcda51f5633c0"
+    }
+  },
+  "4047": {
+    "inputs": {
+      "value": "1.5x"
+    },
+    "class_type": "LCComboSelector",
+    "_meta": {
+      "title": "Upscale Size",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "fe99bddd2e8b2bd9aec22411c1261e786768f38b"
+    }
+  },
+  "4064": {
+    "inputs": {
+      "value": "Lonecats Krea2 Pro"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Prefix",
+      "cnr_id": "comfy-core",
+      "ver": "0.37.0"
+    }
+  },
+  "4068": {
+    "inputs": {
+      "folder": "Metadata",
+      "prefix": [
+        "4064",
+        0
+      ],
+      "suffix": "",
+      "timestamp": "none",
+      "path_separator": "auto",
+      "include_prefix_in_path": true
+    },
+    "class_type": "LCAdvancedFolder",
+    "_meta": {
+      "title": "LC Advanced Folder 📂",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "3d7e0de54080f5d9bdd720e0e1b854e33c4f0673"
+    }
+  },
+  "4071": {
+    "inputs": {
+      "filename": "AI-Gateway-Krea2-Pro-Stage",
+      "path": "krea-pro-stage",
+      "format": "png",
+      "quality": 95,
+      "embed_workflow": true,
+      "embed_civitai": true,
+      "hash_resources": false,
+      "filename_prefix": "",
+      "images": [
+        "4150",
+        0
+      ],
+      "metadata": [
+        "3391",
+        0
+      ]
+    },
+    "class_type": "LCSaveImage",
+    "_meta": {
+      "title": "LC Save Image 💾",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "3d7e0de54080f5d9bdd720e0e1b854e33c4f0673"
+    }
+  },
+  "4096": {
+    "inputs": {
+      "preset": "Real Skin Restore",
+      "strength": 1,
+      "clean": 0.2,
+      "pores": 1.2,
+      "add_pores": 0.6,
+      "pore_size": 1,
+      "even_skin": 0.05,
+      "wrinkles": 0,
+      "even_colour": 0.1,
+      "pigmentation": 0.3,
+      "eye_detail": 0.5,
+      "warmth": -0.2,
+      "brightness": 0.05,
+      "rosy": 0.03,
+      "saturation": -0.05,
+      "shadow_lift": 0.1,
+      "seed": [
+        "3761",
+        0
+      ],
+      "delicate_skin": true,
+      "skin_match": 1,
+      "image": [
+        "3659",
+        0
+      ],
+      "mask": [
+        "3662",
+        1
+      ]
+    },
+    "class_type": "LCSkinMaster",
+    "_meta": {
+      "title": "LC Skin Master ✨ (BETA)",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "9e2b116f51ee00939bd292cf6b5441a10923dd02"
+    }
+  },
+  "4102": {
+    "inputs": {
+      "shift": 4,
+      "sampling": "flow",
+      "model": [
+        "3857",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "Выборка модели AuraFlow",
+      "cnr_id": "comfy-core",
+      "ver": "0.42.0"
+    }
+  },
+  "4105": {
+    "inputs": {
+      "text": "A neutral ceramic vase on an oak table in a bright studio, realistic photography, natural surface texture."
+    },
+    "class_type": "LCShowText",
+    "_meta": {
+      "title": "Final Prompt",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "da62d8cc5f4418a0302effa3c61ad3ed8d162a2a"
+    }
+  },
+  "4109": {
+    "inputs": {
+      "rows": "[{\"name\":\"Use Image 1 (Main)🖼️\",\"value\":true,\"kind\":\"boolean\",\"cast\":\"BOOLEAN\"},{\"name\":\"Use Image 1 Aspect Ratio 📐\",\"value\":false,\"kind\":\"boolean\"},{\"name\":\"Remove Background ✂️\",\"value\":false,\"kind\":\"boolean\",\"cast\":\"BOOLEAN\"},{\"name\":\"🪪 ID reference Boost\",\"value\":1,\"min\":0,\"max\":4,\"step\":0.1,\"decimals\":1},{\"name\":\"Use I2I 🖼️\",\"value\":true,\"kind\":\"boolean\",\"cast\":\"BOOLEAN\"}]"
+    },
+    "class_type": "LCControlPanel",
+    "_meta": {
+      "title": "LC Control Panel 🎛️",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "da62d8cc5f4418a0302effa3c61ad3ed8d162a2a"
+    }
+  },
+  "4110": {
+    "inputs": {
+      "value": [
+        "4109",
+        1
+      ]
+    },
+    "class_type": "LCInvertBoolean",
+    "_meta": {
+      "title": "LC Invert Boolean",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "da62d8cc5f4418a0302effa3c61ad3ed8d162a2a"
+    }
+  },
+  "4114": {
+    "inputs": {
+      "text": "",
+      "strength": 1,
+      "weights": "[]",
+      "block": "never",
+      "last_in": "",
+      "clip": [
+        "3760",
+        1
+      ],
+      "model": [
+        "3760",
+        0
+      ],
+      "prompt": [
+        "2719",
+        0
+      ]
+    },
+    "class_type": "LCWeightedPrompt",
+    "_meta": {
+      "title": "LC Weighted Prompt ⚖️",
+      "cnr_id": "ComfyUI_LC123_nodes",
+      "ver": "f3b821387301ee1839001cc3e70c11c78162d0a0"
+    }
+  },
+  "4150": {
+    "inputs": {
+      "source": "image",
+      "upscale": "2x",
+      "seed": [
+        "3761",
+        0
+      ],
+      "detail": 0.95,
+      "image": [
+        "3621",
+        0
+      ]
+    },
+    "class_type": "LCRelayVSRUpscale",
+    "_meta": {
+      "title": "LC Relay VSR Upscale 🧩",
+      "cnr_id": "ComfyUI_LC_MaskMaker_nodes",
+      "ver": "0.29.8"
+    }
+  }
+}

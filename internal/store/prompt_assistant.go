@@ -9,8 +9,12 @@ import (
 )
 
 func (s *Store) InsertPromptAssistantRun(ctx context.Context, run domain.PromptAssistantRunRecord) (int64, error) {
+	return insertPromptAssistantRun(ctx, s.db, run)
+}
+
+func insertPromptAssistantRun(ctx context.Context, db contentEventQuerier, run domain.PromptAssistantRunRecord) (int64, error) {
 	var id int64
-	err := s.db.QueryRowContext(ctx, `
+	err := db.QueryRowContext(ctx, `
 		INSERT INTO prompt_assistant_runs
 			(content_event_id,user_id,correlation_id,mode,profile,model,status,latency_ms,prompt_tokens,completion_tokens,
 			 total_duration_ms,load_duration_ms,eval_duration_ms,num_predict,timeout_ms,keep_alive,reference_count,error_code)
@@ -21,7 +25,7 @@ func (s *Store) InsertPromptAssistantRun(ctx context.Context, run domain.PromptA
 		run.LatencyMS, run.PromptTokens, run.CompletionTokens, run.TotalDurationMS, run.LoadDurationMS,
 		run.EvalDurationMS, run.NumPredict, run.TimeoutMS, run.KeepAlive, run.ReferenceCount, run.ErrorCode).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
-		err = s.db.QueryRowContext(ctx, `SELECT id FROM prompt_assistant_runs WHERE content_event_id=$1`, run.ContentEventID).Scan(&id)
+		err = db.QueryRowContext(ctx, `SELECT id FROM prompt_assistant_runs WHERE content_event_id=$1`, run.ContentEventID).Scan(&id)
 	}
 	return id, err
 }

@@ -1,0 +1,31 @@
+{{define "studio_lora_verification"}}
+<section id="lora-verification-setup" class="lora-verification-setup" data-owner="{{.CurrentUser.ID}}" hidden aria-labelledby="lora-verification-title">
+  <input type="hidden" name="lora_verification_source" value="">
+  <input type="hidden" name="lora_verification_plan" value="">
+  <header><div><h2 id="lora-verification-title">Проверка LoRA</h2><p data-verification-source-name class="muted">LoRA</p></div><button type="button" class="button ghost icon-button" data-verification-exit title="Вернуться к обычной генерации" aria-label="Вернуться к обычной генерации"><i data-lucide="x" aria-hidden="true"></i></button></header>
+  <div data-verification-cases class="lora-verification-cases"></div>
+  <button type="button" class="button ghost" data-verification-add-case><i data-lucide="plus" aria-hidden="true"></i>Добавить промпт и seed</button>
+  <div data-verification-weights class="lora-verification-weights"></div>
+  <button type="button" class="button ghost" data-verification-add-weight><i data-lucide="plus" aria-hidden="true"></i>Добавить вес</button>
+  <p data-verification-summary class="lora-verification-summary"></p>
+  <p data-verification-message role="status" class="lora-verification-message"></p>
+</section>
+{{end}}
+
+{{define "studio_lora_verification_dialogs"}}
+<dialog id="lora-verification-confirm" class="ui-dialog lora-verification-confirm" aria-labelledby="lora-verification-confirm-title">
+  <h2 id="lora-verification-confirm-title">Запустить проверку LoRA?</h2>
+  <div data-verification-quote></div>
+  <div class="lora-verification-dialog-actions"><button type="button" class="button ghost" data-verification-back>К параметрам</button><button type="button" class="button" data-verification-enqueue disabled>Запустить</button></div>
+</dialog>
+<dialog id="lora-verification-comparison" class="ui-dialog lora-verification-comparison" aria-labelledby="lora-verification-comparison-title">
+  <header><div><h2 id="lora-verification-comparison-title">Проверка LoRA</h2><p data-verification-status role="status"></p></div><button type="button" class="button ghost icon-button" data-verification-close title="Закрыть сравнение" aria-label="Закрыть сравнение"><i data-lucide="x" aria-hidden="true"></i></button></header>
+  <div class="lora-verification-dialog-actions"><a class="button ghost" data-verification-source-link hidden>К LoRA</a><button type="button" class="button ghost icon-button" data-verification-refresh title="Обновить сравнение" aria-label="Обновить сравнение"><i data-lucide="refresh-cw" aria-hidden="true"></i></button><button type="button" class="button ghost" data-verification-cancel hidden><i data-lucide="square" aria-hidden="true"></i>Отменить оставшиеся</button></div>
+  <p class="muted">Объект · фон · детализация · свет · общее качество</p>
+  <div data-verification-results></div>
+</dialog>
+<dialog id="lora-verification-full-image" class="ui-dialog lora-verification-full-image" aria-labelledby="lora-verification-image-title">
+  <header><h2 id="lora-verification-image-title">Изображение</h2><div class="lora-verification-dialog-actions"><a class="button ghost" download>Скачать оригинал</a><button type="button" class="button ghost icon-button" data-verification-image-zoom title="Масштаб 1:1" aria-label="Масштаб 1:1" aria-pressed="false"><i data-lucide="zoom-in" aria-hidden="true"></i></button><button type="button" class="button ghost icon-button" data-verification-image-close title="Закрыть изображение" aria-label="Закрыть изображение"><i data-lucide="x" aria-hidden="true"></i></button></div></header>
+  <div class="lora-verification-image-scroll"><img alt="Полное изображение проверки LoRA"></div>
+</dialog>
+{{end}}

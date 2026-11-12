@@ -14,13 +14,14 @@ import (
 	"time"
 
 	"ai-access-gateway/internal/domain"
+	"ai-access-gateway/internal/promptassistant"
 	"ai-access-gateway/internal/store"
 )
 
-const maxGenerationDraftBody = 192 << 10
-const maxGenerationDraftPayload = 128 << 10
+const maxGenerationDraftBody = 3 << 20
+const maxGenerationDraftPayload = 1 << 20
 
-var generationDraftAssetFields = []string{"input_image", "input_image_2", "input_image_3", "input_image_4", "input_audio", "input_video"}
+var generationDraftAssetFields = []string{"input_image", "input_image_2", "input_image_3", "input_image_4", "input_image_5", "input_image_6", "input_image_7", "input_image_8", "input_image_9", "input_image_10", "input_audio", "input_video"}
 
 type generationDraftAsset struct {
 	Field string `json:"field"`
@@ -61,7 +62,9 @@ func generationDraftValues(form url.Values) (map[string]string, error) {
 	for name, entries := range form {
 		allowed := allowedGenerationRecipeField(name) || allowedGenerationReferenceJobField(name)
 		switch name {
-		case "assistant_requested", "assistant_applied", "assistant_action", "assistant_template_used", "assistant_think_used", "assistant_original_prompt", "assistant_suggestion", "assistant_enabled", "assistant_draft", "assistant_references", "assistant_stale", "assistant_corrections", "correlation_id", "quality_preset", "draft_step", "draft_advanced", "batch_enabled", "batch_mode", "batch_count", "batch_parameter", "batch_from", "batch_to":
+		case "collection_id", "assistant_job_id", "assistant_model", "assistant_draft_edited", "assistant_audio_suggestion", "assistant_original_audio", "parent_job_id", "lora_verification_source", "lora_verification_plan":
+			allowed = true
+		case "assistant_requested", "assistant_applied", "assistant_action", "assistant_template_used", "assistant_think_used", "assistant_original_prompt", "assistant_suggestion", "assistant_original_negative", "assistant_negative_suggestion", "assistant_negative_draft", "assistant_enabled", "assistant_draft", "assistant_references", "assistant_stale", "assistant_corrections", "correlation_id", "quality_preset", "draft_step", "draft_advanced", "batch_enabled", "batch_mode", "batch_count", "batch_parameter", "batch_from", "batch_to":
 			allowed = true
 		}
 		if !allowed || len(entries) == 0 {
@@ -69,7 +72,14 @@ func generationDraftValues(form url.Values) (map[string]string, error) {
 		}
 		// Drafts preserve unfinished text verbatim, including whitespace and
 		// temporarily invalid numeric values. Submission validates separately.
-		if len(name) > 100 || len(entries[0]) > 64<<10 {
+		fieldLimit := 64 << 10
+		if form.Get("template_id") == "minimax-h3-video" && form.Get("video_long_enabled") == "true" {
+			switch name {
+			case "positive_prompt", "assistant_original_prompt", "assistant_suggestion", "assistant_draft":
+				fieldLimit = 4 * promptassistant.PromptCharacterLimitForVideo(promptassistant.ModeTextToVideo, 20)
+			}
+		}
+		if len(name) > 100 || len(entries[0]) > fieldLimit {
 			return nil, errors.New("поле черновика слишком большое")
 		}
 		values[name] = entries[0]
@@ -120,7 +130,7 @@ func (a *App) generationDraftPayloadFromForm(ctx context.Context, userID int64, 
 			id = asset.ID
 		}
 		name := strings.TrimSpace(form.Get("draft_name_" + field))
-		if name == "" && index < 4 {
+		if name == "" && index < maxGenerationReferenceSlots {
 			name = form.Get(fmt.Sprintf("image_source_name_%d", index+1))
 		}
 		if name == "" {

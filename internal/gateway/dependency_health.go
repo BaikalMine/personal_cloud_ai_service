@@ -11,16 +11,18 @@ import (
 	"sync"
 	"time"
 
+	"ai-access-gateway/internal/inference"
 	"ai-access-gateway/internal/mining"
 )
 
 const (
-	dependencyComfyUI       = "comfyui"
-	dependencyOpenWebUI     = "openwebui"
-	dependencyOllama        = "ollama"
-	dependencyModerator     = "moderator"
-	dependencyMiningAgent   = "mining-agent"
-	dependencySystemMonitor = "system-monitor"
+	dependencyComfyUI         = "comfyui"
+	dependencyOpenWebUI       = "openwebui"
+	dependencyOllama          = "ollama"
+	dependencyModerator       = "moderator"
+	dependencyMiningAgent     = "mining-agent"
+	dependencySystemMonitor   = "system-monitor"
+	dependencyInferenceWorker = "inference-worker"
 
 	defaultDependencyCheckInterval = 10 * time.Second
 	defaultDependencyStaleAfter    = 45 * time.Second
@@ -282,14 +284,23 @@ func (a *App) dependencyMonitor() *dependencyMonitor {
 }
 
 func (a *App) dependencySpecs() []dependencySpec {
-	return []dependencySpec{
+	specs := []dependencySpec{
 		{Key: dependencyComfyUI, Name: "ComfyUI", Configured: a.cfg.ComfyUIUpstream != nil, Probe: a.httpDependencyProbe(a.cfg.ComfyUIUpstream, "", a.cfg.ComfyUIUpstreamAuthHeader)},
-		{Key: dependencyOpenWebUI, Name: "OpenWebUI", Configured: a.cfg.OpenWebUIUpstream != nil, Probe: a.httpDependencyProbe(a.cfg.OpenWebUIUpstream, "", a.cfg.OpenWebUIUpstreamAuth)},
 		{Key: dependencyOllama, Name: "Промт-ассистент", Configured: a.cfg.OllamaUpstream != nil && strings.TrimSpace(a.cfg.PromptAssistantModel) != "", Probe: a.httpDependencyProbe(a.cfg.OllamaUpstream, "", "")},
 		{Key: dependencyModerator, Name: "Проверка 18+", Configured: a.cfg.ContentModeratorUpstream != nil, Probe: a.httpDependencyProbe(a.cfg.ContentModeratorUpstream, "/healthz", "")},
 		{Key: dependencyMiningAgent, Name: "Управление майнингом", Configured: a.mining != nil && a.mining.Configured(), Probe: a.agentDependencyProbe(a.mining)},
 		{Key: dependencySystemMonitor, Name: "Мониторинг Windows", Configured: a.systemMonitor != nil && a.systemMonitor.Configured(), RequiresData: true, Probe: a.agentDependencyProbe(a.systemMonitor)},
 	}
+	if a.cfg.PromptAssistantDurableJobs || a.cfg.LoraCaptionDurableInference {
+		specs = append(specs, dependencySpec{Key: dependencyInferenceWorker, Name: "Исполнитель ассистентов", Configured: a.cfg.InferenceWorkerURL != nil,
+			Probe: func(ctx context.Context) (string, *time.Time, bool, error) {
+				if err := inference.ProbeReadiness(ctx, a.cfg.InferenceWorkerURL); err != nil {
+					return "", nil, false, errors.New("Исполнитель ассистентов недоступен или не готов. Проверьте его запуск и подключение к БД.")
+				}
+				return "Исполнитель работает, подключение к БД подтверждено.", nil, false, nil
+			}})
+	}
+	return specs
 }
 
 func (a *App) refreshDependencyStatuses(ctx context.Context) {

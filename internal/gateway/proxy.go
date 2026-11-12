@@ -20,6 +20,7 @@ import (
 const openWebUIHTMLLimit = 4 << 20
 
 var comfyAdminOnlyPathPrefixes = []string{
+	"/api/lm",
 	"/manager",
 	"/customnode",
 	"/snapshot",
@@ -97,6 +98,7 @@ func (a *App) proxyRootHandler(service string, upstream *url.URL, authHeader str
 func (a *App) proxyHandlerWithPath(service, prefix string, upstream *url.URL, authHeader string, stripPrefix bool) http.Handler {
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
+			stripComfyGPUHeaders(req.Header)
 			user := a.currentUser(req)
 			originalHost := req.Host
 			req.URL.Scheme = upstream.Scheme
@@ -150,11 +152,7 @@ func (a *App) proxyHandlerWithPath(service, prefix string, upstream *url.URL, au
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			w.WriteHeader(http.StatusBadGateway)
-			_ = a.tpl.ExecuteTemplate(w, "bad_gateway", map[string]any{
-				"Title": "Сервис недоступен", "Service": service,
-				"AssetVersion": a.tpl.AssetVersion,
-			})
+			a.upstreamUnavailablePage(w, r, service)
 		},
 		FlushInterval: -1,
 	}
@@ -215,6 +213,11 @@ func (a *App) proxyHandlerWithPath(service, prefix string, upstream *url.URL, au
 					defer a.releaseComfyInputReservation(reservation)
 				}
 				if uploadErr != nil {
+					var validation *uploadValidationError
+					if errors.As(uploadErr, &validation) {
+						writeGenerationError(w, http.StatusBadRequest, validation.Error())
+						return
+					}
 					status := http.StatusBadRequest
 					var tooLarge *http.MaxBytesError
 					if errors.As(uploadErr, &tooLarge) {

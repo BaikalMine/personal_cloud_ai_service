@@ -1,0 +1,21 @@
+{{define "admin_profile_tasks"}}
+<section class="profile-band" aria-labelledby="profile-tasks-heading">
+  <div class="panel-heading"><h2 id="profile-tasks-heading">Задачи пользователя</h2></div>
+  {{$q := .TaskQuery}}
+  <form method="get" action="/admin/users/{{.Profile.ID}}#profile-results" class="profile-list-filters">
+    <input type="hidden" name="tab" value="tasks">
+    <label class="ui-field"><span class="ui-field-label">Поиск по имени или ID</span><input type="search" name="q" maxlength="200" value="{{$q.Tasks.Search}}"></label>
+    <label class="ui-field"><span class="ui-field-label">Тип задачи</span><select name="kind"><option value="">Все типы</option><option value="generation" {{if eq $q.Tasks.Kind "generation"}}selected{{end}}>Генерация</option><option value="lora_training" {{if eq $q.Tasks.Kind "lora_training"}}selected{{end}}>Обучение LoRA</option><option value="lora_caption" {{if eq $q.Tasks.Kind "lora_caption"}}selected{{end}}>Описание кадра</option><option value="lora_caption_series" {{if eq $q.Tasks.Kind "lora_caption_series"}}selected{{end}}>Описания набора</option></select></label>
+    <label class="ui-field"><span class="ui-field-label">Состояние</span><select name="state"><option value="">Все</option>{{range adminProfileTaskStates $q.Tasks.Kind}}<option value="{{.Value}}" {{if eq $q.Tasks.State .Value}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>
+    <div class="profile-filter-actions"><button type="submit"><i data-lucide="search" aria-hidden="true"></i>Найти</button><a class="button ghost" href="/admin/users/{{.Profile.ID}}?tab=tasks#profile-results">Сбросить</a></div>
+  </form>
+  <div id="profile-results" class="profile-results" tabindex="-1">
+    <p class="profile-list-count">Найдено задач: {{formatNumber .TaskTotal}}</p>
+    <div class="table-scroll"><table class="profile-data-table"><thead><tr><th>Задача</th><th>Тип</th><th>Состояние</th><th>Создана</th></tr></thead><tbody>
+      {{range .ProfileTasks}}<tr data-profile-task="{{.ID}}"><td data-label="Задача"><details class="profile-row-details"><summary>{{.Name}}</summary><dl class="key-values"><div><dt>ID</dt><dd>{{.ID}}</dd></div>{{if .Message}}<div><dt>Состояние</dt><dd>{{.Message}}</dd></div>{{end}}{{if .Stage}}<div><dt>Этап</dt><dd>{{.Stage}}</dd></div>{{end}}<div><dt>Обновлено</dt><dd>{{formatTime .UpdatedAt}}</dd></div>{{if .FinishedAt}}<div><dt>Завершено</dt><dd>{{formatTime .FinishedAt}}</dd></div>{{end}}{{if .ExpiresAt}}<div><dt>Хранится до</dt><dd>{{formatTime .ExpiresAt}}</dd></div>{{end}}{{if .Series}}<div><dt>Кадры</dt><dd>{{.Series.Completed}} готово из {{.Series.Total}}; ошибок {{.Series.Failed}}</dd></div>{{end}}</dl>{{if .InspectURL}}<a href="{{.InspectURL}}">Открыть трассу генерации</a>{{end}}</details></td><td data-label="Тип">{{.KindLabel}}</td><td data-label="Состояние"><span class="badge {{.Tone}}">{{.StateLabel}}</span>{{if .CancellationPending}}<small>Ожидается остановка</small>{{end}}</td><td data-label="Создана">{{formatTime .CreatedAt}}</td></tr>
+      {{else}}<tr><td colspan="4" class="muted">Задач с такими условиями нет.</td></tr>{{end}}
+    </tbody></table></div>
+    <nav class="profile-task-pagination" aria-label="Страницы задач">{{if $q.Cursor}}<a class="button ghost" href="{{.TaskFirstURL}}"><i data-lucide="chevrons-left" aria-hidden="true"></i>К новым задачам</a>{{end}}{{if .TaskNextURL}}<a class="button ghost" href="{{.TaskNextURL}}">Более ранние<i data-lucide="arrow-right" aria-hidden="true"></i></a>{{end}}</nav>
+  </div>
+</section>
+{{end}}

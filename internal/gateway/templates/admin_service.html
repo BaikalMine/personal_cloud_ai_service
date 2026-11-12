@@ -1,35 +1,62 @@
 {{define "admin_service"}}
-{{template "head" .}}
-{{template "admin_nav" .}}
-<main class="page" id="main-content">
-  <section class="hero">
-    <div><p class="eyebrow">Аналитика сервиса за 30 дней</p><h1>{{.Analytics.DisplayName}}</h1></div>
-    <div class="actions">
-      <a class="button ghost" href="/admin/services/comfyui">ComfyUI</a>
-      <a class="button ghost" href="/admin/services/openwebui">OpenWebUI</a>
-    </div>
+{{template "head" .}}{{template "admin_nav" .}}
+{{template "admin_resource_assets" .}}
+<main class="page resource-page" id="main-content" data-resource-page data-service="{{.Resource.Service}}" data-profile-version="" data-resource-endpoint="{{.ResourceEndpoint}}" data-csrf="{{.CSRF}}" data-owner="{{.CurrentUser.ID}}">
+  <header class="resource-head"><h1>{{.Title}}</h1></header>
+  <nav class="resource-tabs" aria-label="Сервисы"><a href="/admin/services/comfyui" aria-current="page">ComfyUI</a><a href="/admin/mining">Майнинг</a></nav>
+  {{template "admin_resource_controls" .}}
+  <div data-resource-private>
+    {{if eq .Resource.Service "comfyui"}}<section class="comfy-runtime" data-comfy-runtime aria-labelledby="comfy-runtime-title">
+      <header class="resource-section-head"><h2 id="comfy-runtime-title">Управление ComfyUI</h2><span data-runtime-state role="status">Проверяем процесс</span></header>
+      <p class="resource-meta" data-runtime-detail></p><p class="resource-meta" data-runtime-exit></p>
+      <div class="comfy-runtime-actions"><button type="button" data-runtime-action="start" disabled><i data-lucide="play" aria-hidden="true"></i>Запустить</button><button type="button" class="ghost" data-runtime-action="restart" disabled><i data-lucide="rotate-cw" aria-hidden="true"></i>Перезапустить</button><button type="button" class="ghost danger" data-runtime-action="stop" disabled><i data-lucide="square" aria-hidden="true"></i>Остановить</button><button type="button" class="ghost icon-button" data-runtime-refresh title="Проверить процесс" aria-label="Проверить процесс"><i data-lucide="refresh-cw" aria-hidden="true"></i></button></div>
+      <p data-runtime-message role="status" hidden></p>
+      <dialog class="confirm-dialog" data-runtime-confirm aria-labelledby="runtime-confirm-title"><div class="confirm-dialog__body"><h2 id="runtime-confirm-title" data-runtime-title></h2><p>Продолжить управление процессом ComfyUI?</p><label class="ui-choice" data-runtime-force-label hidden><input type="checkbox" data-runtime-force><span>Разрешить остановку, если очередь не отвечает</span></label></div><div class="confirm-dialog__actions"><button type="button" class="ghost" data-runtime-cancel>Отмена</button><button type="button" data-runtime-submit>Подтвердить</button></div></dialog>
+    </section>{{end}}
+    {{template "admin_resource_snapshot" .Resource}}
+  </div>
+</main></body></html>
+{{end}}
+
+{{define "admin_resource_assets"}}
+<link rel="stylesheet" href="/static/admin-resources.css?v={{.AssetVersion}}">
+<script defer src="/static/admin-resources.js?v={{.AssetVersion}}"></script>
+<script defer src="/static/comfy-runtime.js?v={{.AssetVersion}}"></script>
+{{end}}
+
+{{define "admin_resource_controls"}}
+<div class="resource-toolbar"><span data-resource-live role="status">Снимок при открытии</span><a class="button ghost icon-button" href="{{if eq .Resource.Service "mining"}}/admin/mining{{else}}/admin/services/{{.Resource.Service}}{{end}}" data-resource-refresh title="Обновить состояние" aria-label="Обновить состояние"><i data-lucide="refresh-cw" aria-hidden="true"></i></a></div>
+<div class="ui-status-banner is-warning" data-resource-error hidden><span data-resource-error-message></span> <a href="/login" data-resource-login hidden>Войти</a><a href="/admin/mining" data-resource-reload hidden>Перезагрузить профили</a></div>
+{{end}}
+
+{{define "admin_resource_snapshot"}}
+<div data-resource-snapshot>
+  <section class="resource-overview" aria-label="Состояние сервиса">
+    <div class="resource-state"><span class="resource-signal" data-tone="{{.Tone}}">{{.Label}}</span><p>{{.Detail}}</p><small>Получено страницей: <time>{{formatTime .At}}</time></small></div>
+    <dl class="resource-source"><div><dt>{{if .Mining}}Агент майнинга{{else}}Проверка сервиса{{end}}</dt><dd>{{.Dependency.StateLabel}}</dd></div><div><dt>Последняя проверка</dt><dd>{{with .Dependency.LastCheckedAt}}<time>{{formatTime .}}</time>{{else}}Не выполнялась{{end}}</dd></div><div><dt>Последний успешный ответ</dt><dd>{{with .Dependency.LastSuccessAt}}<time>{{formatTime .}}</time>{{else}}Не получен{{end}}</dd></div>{{if .Dependency.LastError}}<div><dt>Ошибка связи</dt><dd>{{.Dependency.LastError}}</dd></div>{{end}}</dl>
   </section>
-  <section class="grid cards">
-    <article class="card"><span class="muted">Запросы</span><strong class="big">{{formatNumber .Analytics.Requests}}</strong></article>
-    <article class="card"><span class="muted">Пользователи</span><strong class="big">{{formatNumber .Analytics.Users}}</strong></article>
-    <article class="card"><span class="muted">Передано</span><strong class="big">{{formatBytes .Analytics.Bytes}}</strong></article>
-    <article class="card"><span class="muted">Ошибки</span><strong class="big">{{formatNumber .Analytics.Errors}}</strong></article>
-    <article class="card"><span class="muted">Среднее время ответа</span><strong class="big">{{formatDuration .Analytics.AverageDuration}}</strong></article>
-    <article class="card"><span class="muted">Активные WebSocket-соединения</span><strong class="big">{{formatNumber .Analytics.ActiveWebSockets}}</strong></article>
+  {{if not .Mining}}{{template "admin_resource_gpu" .}}{{end}}
+  {{with .Mining}}{{if .Running}}<section class="resource-miners" aria-labelledby="running-miners-title"><header class="resource-section-head"><h2 id="running-miners-title">Сейчас работает</h2></header>
+    {{range .External}}<div class="mining-file-row"><div class="mining-file-identity"><strong>{{.ProcessName}}</strong><small>Внешний запуск · PID: {{range $i,$pid := .PIDs}}{{if $i}}, {{end}}{{$pid}}{{end}}</small>{{if .ScriptPath}}<code>{{.ScriptPath}}</code>{{else}}<span class="resource-warning">BAT не удалось подтвердить</span>{{end}}</div>{{if .ScriptPath}}<a class="button ghost" href="/admin/mining?pick={{urlquery .ScriptPath}}#new-miner" data-mining-pick="{{.ScriptPath}}" data-process="{{.ProcessName}}" data-name="{{.ProcessName}}"><i data-lucide="plus" aria-hidden="true"></i>Добавить профиль</a>{{end}}</div>{{end}}
+    {{range .Miners}}{{if .State.Running}}<div class="mining-file-row"><div class="mining-file-identity"><strong>{{.Name}}</strong><small>{{.ProcessName}}</small><code>{{.State.ScriptPath}}</code></div><a class="button ghost" href="#miner-{{.ID}}">Профиль</a></div>{{end}}{{end}}
+  </section>{{end}}{{end}}
+  <section class="resource-pauses" aria-labelledby="resource-pause-title"><header class="resource-section-head"><h2 id="resource-pause-title">Удержание майнинга</h2>{{if not .Mining}}<a href="/admin/mining">Управление майнингом</a>{{end}}</header>
+    {{range .Pauses}}<div class="resource-pause"><strong>{{.Label}}</strong><span>Задач: {{.Count}}</span><span>С <time>{{formatTime .Since}}</time></span>{{if .Ready}}<span>Ожидают снятия удержания: {{.Ready}}</span>{{end}}</div>{{else}}<p class="resource-meta">Активных удержаний нет. Это не подтверждение свободного GPU.</p>{{end}}
   </section>
-  <section class="panel">
-    <h2>Активность по дням</h2>
-    <div class="service-chart">
-      {{range .Analytics.Trend}}
-      <div class="service-chart-row">
-        <span>{{.Label}}</span>
-        <div class="bar"><i style="width: {{pct .RequestPercent}}%"></i></div>
-        <b>{{formatNumber .Requests}}</b>
-        <small>Пользователи: {{formatNumber .Users}} &middot; ошибки: {{formatNumber .Errors}} &middot; {{formatBytes .Bytes}}</small>
-      </div>
-      {{end}}
-    </div>
+  {{with .Analytics}}<section class="resource-analytics" aria-labelledby="resource-analytics-title"><header class="resource-section-head"><h2 id="resource-analytics-title">Активность за 30 дней</h2></header><dl class="resource-totals"><div><dt>Запросы</dt><dd>{{formatNumber .Requests}}</dd></div><div><dt>Пользователи</dt><dd>{{formatNumber .Users}}</dd></div><div><dt>Передано</dt><dd>{{formatBytes .Bytes}}</dd></div><div><dt>Ошибки</dt><dd>{{formatNumber .Errors}}</dd></div><div><dt>Средний ответ</dt><dd>{{formatDuration .AverageDuration}}</dd></div><div><dt>WebSocket сейчас</dt><dd>{{formatNumber .ActiveWebSockets}}</dd></div></dl>
+    <table class="resource-trend" aria-label="Активность по дням"><thead><tr><th>День</th><th>Запросы</th><th>Пользователи</th><th>Ошибки</th><th>Передано</th></tr></thead><tbody>{{if gt .Requests 0}}{{range .Trend}}<tr><th scope="row">{{.Label}}</th><td><span>{{formatNumber .Requests}}</span><meter min="0" max="100" value="{{pct .RequestPercent}}" aria-label="Доля максимума за период">{{pct .RequestPercent}}%</meter></td><td data-label="Пользователи">{{formatNumber .Users}}</td><td data-label="Ошибки">{{formatNumber .Errors}}</td><td data-label="Передано">{{formatBytes .Bytes}}</td></tr>{{end}}{{else}}<tr><td colspan="5">Запросов за этот период нет.</td></tr>{{end}}</tbody></table>
+  </section>{{end}}
+</div>
+{{end}}
+
+{{define "admin_resource_gpu"}}
+  <section class="resource-gpu" data-resource-gpu aria-labelledby="resource-gpu-title"><header class="resource-section-head"><h2 id="resource-gpu-title">GPU и задачи Gateway</h2><a href="/admin">Операции</a></header>
+    <div class="resource-observation"><strong>{{.ObservationLabel}}</strong><span>{{if .ObservedAt.IsZero}}Время наблюдения неизвестно{{else}}Проверка исполнителей: <time>{{formatTime .ObservedAt}}</time>{{end}}</span>{{if .ObservationDetail}}<p>{{.ObservationDetail}}</p>{{end}}</div>
+    <div class="resource-gpu-groups">{{range .GPU}}<div class="resource-gpu-group"><h3>{{.Title}}</h3><dl><div><dt>Работают</dt><dd>{{.Running}}</dd></div><div><dt>Зарезервировано</dt><dd>{{.Reserved}}</dd></div><div><dt>Не подтверждены</dt><dd class="{{if .Unconfirmed}}resource-warning{{end}}">{{.Unconfirmed}}</dd></div><div><dt>Ожидают</dt><dd>{{.Waiting}}</dd></div><div><dt>Приостановлены</dt><dd>{{.Paused}}</dd></div></dl></div>{{else}}<p>Данные очереди не получены.</p>{{end}}</div>
+    <p class="resource-meta">Задачи Gateway: {{if .GPUAt.IsZero}}время не получено{{else}}<time>{{formatTime .GPUAt}}</time>{{end}}. Внешние задачи в эти числа не входят.</p>
   </section>
-</main>
-</body></html>
+{{end}}
+
+{{define "admin_miner_state"}}
+<div data-miner-state="{{.ID}}"><span class="resource-signal" data-tone="{{.Tone}}">{{.Label}}</span><small>{{if .CollectedAt.IsZero}}Ответ агента не получен{{else}}Проверка: <time>{{formatTime .CollectedAt}}</time>{{end}}</small>{{if and .Running (not .StartedAt.IsZero)}}<small>Запущен: <time>{{formatTime .StartedAt}}</time></small>{{end}}{{with .PIDs}}<small>PID: {{range $index, $pid := .}}{{if $index}}, {{end}}{{$pid}}{{end}}</small>{{end}}{{if .Reason}}<p>{{.Reason}}</p>{{end}}</div>
 {{end}}

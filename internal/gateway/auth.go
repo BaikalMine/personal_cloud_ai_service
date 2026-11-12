@@ -18,24 +18,22 @@ import (
 
 func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
-		a.render(w, r, "login", map[string]any{
-			"Title": "Вход",
-			"Next":  safeNext(r.URL.Query().Get("next")),
-		})
+		a.renderAuthPage(w, r, http.StatusOK, "login", AuthPageView{Next: r.URL.Query().Get("next")})
 		return
 	}
 	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "GET, HEAD, POST")
 		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 	if !validFormOrigin(r) {
-		http.Error(w, "источник запроса запрещён", http.StatusForbidden)
+		a.renderAuthPage(w, r, http.StatusForbidden, "login", AuthPageView{Error: "Источник запроса не подтверждён. Откройте форму входа заново."})
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	ip := a.clientIP(r)
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "неверные данные формы", http.StatusBadRequest)
+		a.renderAuthPage(w, r, http.StatusBadRequest, "login", AuthPageView{Error: "Не удалось прочитать форму. Введите данные снова."})
 		return
 	}
 	identity := strings.TrimSpace(r.Form.Get("login"))
@@ -45,6 +43,11 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	password := r.Form.Get("password")
 	nextURL := safeNext(r.Form.Get("next"))
+	view := AuthPageView{Login: identity, Next: nextURL}
+	fail := func(status int, field, message string) {
+		view.ErrorField, view.Error = field, message
+		a.renderAuthPage(w, r, status, "login", view)
+	}
 	limitKey := loginRateLimitKey(ip, identity)
 	limitIP := rateLimitIP(ip)
 	if !limiterAllows(a.loginIPLimiter, limitIP) || !limiterAllows(a.loginLimiter, limitKey) {
@@ -55,7 +58,7 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 			})
 			recordLimiterFailure(a.loginAuditLimiter, limitIP)
 		}
-		a.render(w, r, "login", map[string]any{"Title": "Вход", "Error": "Слишком много попыток входа. Попробуйте позже."})
+		fail(http.StatusOK, "", "Слишком много попыток входа. Попробуйте позже.")
 		return
 	}
 
@@ -68,13 +71,13 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 		err = sql.ErrNoRows
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		http.Error(w, "ошибка базы данных", http.StatusInternalServerError)
+		fail(http.StatusServiceUnavailable, "", "Вход временно недоступен. Повторите попытку позже.")
 		return
 	}
 	userFound := err == nil
 	releasePasswordWork, acquired := acquireBoundedSlot(r.Context(), a.passwordWorkSlots, 3*time.Second)
 	if !acquired {
-		a.render(w, r, "login", map[string]any{"Title": "Вход", "Error": "Сервер занят проверкой входа. Повторите попытку через несколько секунд.", "Next": nextURL})
+		fail(http.StatusOK, "", "Сервер занят проверкой входа. Повторите попытку через несколько секунд.")
 		return
 	}
 	passwordValid := security.VerifyPassword(passwordHash, password)
@@ -103,27 +106,27 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		a.audit(r.Context(), nil, "user_login_failed", "user", nil, ip, r.UserAgent(), map[string]any{"identity": truncate(identity, 256), "reason": reason})
-		a.render(w, r, "login", map[string]any{"Title": "Вход", "Error": "Неверный логин или пароль.", "Next": nextURL})
+		fail(http.StatusOK, "login", "Неверный логин или пароль.")
 		return
 	}
 	if hashErr != nil {
-		http.Error(w, "не удалось обновить защиту пароля", http.StatusInternalServerError)
+		fail(http.StatusServiceUnavailable, "", "Не удалось завершить вход. Повторите попытку позже.")
 		return
 	}
 	if upgradedHash != "" {
 		if err := a.store.UpdatePassword(r.Context(), user.ID, upgradedHash); err != nil {
-			http.Error(w, "ошибка обновления защиты пароля", http.StatusInternalServerError)
+			fail(http.StatusServiceUnavailable, "", "Не удалось завершить вход. Повторите попытку позже.")
 			return
 		}
 	}
 
 	if err := a.store.RecordLoginSuccess(r.Context(), user.ID); err != nil {
-		http.Error(w, "ошибка базы данных", http.StatusInternalServerError)
+		fail(http.StatusServiceUnavailable, "", "Не удалось завершить вход. Повторите попытку позже.")
 		return
 	}
 	token, err := a.createSession(r.Context(), user.ID, ip, r.UserAgent())
 	if err != nil {
-		http.Error(w, "не удалось создать сессию", http.StatusInternalServerError)
+		fail(http.StatusServiceUnavailable, "", "Не удалось создать сессию. Повторите вход.")
 		return
 	}
 	if a.loginLimiter != nil {
@@ -224,92 +227,95 @@ func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleInvite(w http.ResponseWriter, r *http.Request) {
 	token := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/invite/"))
 	if token == "" || strings.Contains(token, "/") {
-		http.NotFound(w, r)
+		a.notFoundPage(w, r)
 		return
 	}
-	if r.Method == http.MethodGet {
-		access, err := a.store.AvailableInvite(r.Context(), security.HashToken(token))
-		if err != nil {
-			a.render(w, r, "invite", map[string]any{"Title": "Приглашение", "Invalid": true})
-			return
-		}
-		a.render(w, r, "invite", map[string]any{"Title": "Создание аккаунта", "Token": token, "Access": access})
-		return
-	}
-	if r.Method != http.MethodPost {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodPost {
+		w.Header().Set("Allow", "GET, HEAD, POST")
 		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
-	if !validFormOrigin(r) {
-		http.Error(w, "источник запроса запрещён", http.StatusForbidden)
+	view := AuthPageView{State: "active"}
+	fail := func(status int, state, field, message string) {
+		view.State, view.ErrorField, view.Error = state, field, message
+		a.renderAuthPage(w, r, status, "invite", view)
+	}
+	if r.Method == http.MethodPost {
+		if !validFormOrigin(r) {
+			fail(http.StatusForbidden, "unavailable", "", "Источник запроса не подтверждён. Откройте приглашение заново.")
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		if err := r.ParseForm(); err != nil {
+			fail(http.StatusBadRequest, "unavailable", "", "Не удалось прочитать форму. Введите данные снова.")
+			return
+		}
+		view.Username = strings.TrimSpace(r.Form.Get("username"))
+		view.Email = strings.TrimSpace(r.Form.Get("email"))
+		if !limiterAllows(a.inviteLimiter, rateLimitIP(a.clientIP(r))) {
+			fail(http.StatusOK, "active", "", "Слишком много попыток регистрации. Попробуйте позже.")
+			return
+		}
+	}
+	access, err := a.store.AvailableInvite(r.Context(), security.HashToken(token))
+	if err != nil {
+		if errors.Is(err, store.ErrInviteUnavailable) {
+			if r.Method == http.MethodPost {
+				recordLimiterFailure(a.inviteLimiter, rateLimitIP(a.clientIP(r)))
+			}
+			fail(http.StatusOK, "invalid", "", "Приглашение недействительно, просрочено, отозвано или уже использовано.")
+		} else {
+			fail(http.StatusServiceUnavailable, "unavailable", "", "Не удалось проверить приглашение. Повторите проверку позже.")
+		}
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "неверные данные формы", http.StatusBadRequest)
+	view.Access = &access
+	if r.Method != http.MethodPost {
+		a.renderAuthPage(w, r, http.StatusOK, "invite", view)
 		return
 	}
-	username := strings.TrimSpace(r.Form.Get("username"))
-	email := strings.TrimSpace(r.Form.Get("email"))
 	password := r.Form.Get("password")
-	if validationError := validateCredentials(username, email, password); validationError != "" {
-		a.render(w, r, "invite", map[string]any{
-			"Title": "Создание аккаунта", "Token": token,
-			"Error": validationError,
-		})
+	if field, message := credentialValidation(view.Username, view.Email, password); message != "" {
+		fail(http.StatusOK, "active", field, message)
 		return
 	}
 	ip := a.clientIP(r)
 	limitIP := rateLimitIP(ip)
-	if !limiterAllows(a.inviteLimiter, limitIP) {
-		a.render(w, r, "invite", map[string]any{"Title": "Создание аккаунта", "Token": token, "Error": "Слишком много попыток регистрации. Попробуйте позже."})
-		return
-	}
-	access, err := a.store.AvailableInvite(r.Context(), security.HashToken(token))
-	if err != nil {
-		recordLimiterFailure(a.inviteLimiter, limitIP)
-		a.render(w, r, "invite", map[string]any{"Title": "Создание аккаунта", "Token": token, "Invalid": true})
-		return
-	}
 	recordLimiterFailure(a.inviteLimiter, limitIP)
 	releasePasswordWork, acquired := acquireBoundedSlot(r.Context(), a.passwordWorkSlots, 3*time.Second)
 	if !acquired {
-		a.render(w, r, "invite", map[string]any{"Title": "Создание аккаунта", "Token": token, "Access": access, "Error": "Сервер занят обработкой регистраций. Повторите попытку через несколько секунд."})
+		fail(http.StatusOK, "active", "", "Сервер занят обработкой регистраций. Повторите попытку через несколько секунд.")
 		return
 	}
 	passwordHash, err := security.HashPassword(password)
 	releasePasswordWork()
 	if err != nil {
-		http.Error(w, "ошибка обработки пароля", http.StatusInternalServerError)
+		fail(http.StatusServiceUnavailable, "active", "", "Не удалось защитить пароль. Повторите попытку позже.")
 		return
 	}
 	userID, inviteID, err := a.store.RegisterFromInvite(r.Context(), store.RegisterFromInviteParams{
-		TokenHash:    security.HashToken(token),
-		Username:     username,
-		Email:        email,
-		PasswordHash: passwordHash,
-		IP:           ip,
+		TokenHash: security.HashToken(token), Username: view.Username, Email: view.Email,
+		PasswordHash: passwordHash, IP: ip,
 	})
-	if errors.Is(err, store.ErrInviteUnavailable) {
-		a.render(w, r, "invite", map[string]any{"Title": "Создание аккаунта", "Token": token, "Invalid": true})
+	switch {
+	case errors.Is(err, store.ErrInviteUnavailable):
+		view.Access = nil
+		fail(http.StatusOK, "invalid", "", "Приглашение больше недоступно. Запросите новое у администратора.")
 		return
-	}
-	if errors.Is(err, store.ErrUsernameExists) {
-		a.render(w, r, "invite", map[string]any{"Title": "Создание аккаунта", "Token": token, "Error": "Этот логин уже занят."})
+	case errors.Is(err, store.ErrUsernameExists):
+		fail(http.StatusOK, "active", "username", "Этот логин уже занят.")
 		return
-	}
-	if errors.Is(err, store.ErrEmailExists) {
-		a.render(w, r, "invite", map[string]any{"Title": "Создание аккаунта", "Token": token, "Error": "Этот email уже используется."})
+	case errors.Is(err, store.ErrEmailExists):
+		fail(http.StatusOK, "active", "email", "Этот email уже используется.")
 		return
-	}
-	if err != nil {
-		http.Error(w, "ошибка базы данных", http.StatusInternalServerError)
+	case err != nil:
+		fail(http.StatusServiceUnavailable, "uncertain", "", "Результат регистрации не подтверждён. Попробуйте войти с указанными данными, прежде чем регистрироваться повторно.")
 		return
 	}
 	if a.inviteLimiter != nil {
 		a.inviteLimiter.Clear(limitIP)
 	}
-	a.audit(r.Context(), &userID, "invite_used", "invite", &inviteID, a.clientIP(r), r.UserAgent(), map[string]any{"username": username})
+	a.audit(r.Context(), &userID, "invite_used", "invite", &inviteID, ip, r.UserAgent(), map[string]any{"username": view.Username})
 	http.Redirect(w, r, "/login", http.StatusFound)
 }
 
@@ -365,30 +371,35 @@ func (a *App) cookieSecure(r *http.Request) bool {
 }
 
 func validateCredentials(username, email, password string) string {
+	_, message := credentialValidation(username, email, password)
+	return message
+}
+
+func credentialValidation(username, email, password string) (string, string) {
 	if len(username) < 3 || len(username) > 48 {
-		return "Логин должен содержать от 3 до 48 символов."
+		return "username", "Логин должен содержать от 3 до 48 символов."
 	}
 	for _, r := range username {
 		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-') {
-			return "Логин может содержать только латинские буквы, цифры, точку, подчёркивание и дефис."
+			return "username", "Логин может содержать только латинские буквы, цифры, точку, подчёркивание и дефис."
 		}
 	}
 	if email != "" {
 		if len(email) > 254 {
-			return "Адрес email слишком длинный."
+			return "email", "Адрес email слишком длинный."
 		}
 		parsed, err := mail.ParseAddress(email)
 		if err != nil || parsed.Address != email {
-			return "Укажите корректный адрес email."
+			return "email", "Укажите корректный адрес email."
 		}
 	}
 	if errors.Is(security.ValidatePassword(password), security.ErrPasswordTooShort) {
-		return "Пароль должен содержать не менее 10 символов."
+		return "password", "Пароль должен содержать не менее 10 символов."
 	}
 	if errors.Is(security.ValidatePassword(password), security.ErrPasswordTooLong) {
-		return "Пароль не должен превышать 256 символов."
+		return "password", "Пароль не должен превышать 256 символов."
 	}
-	return ""
+	return "", ""
 }
 
 func (a *App) csrfToken(r *http.Request) string {

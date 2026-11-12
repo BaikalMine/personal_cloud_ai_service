@@ -1,7 +1,7 @@
 const { test, expect } = require("@playwright/test");
 const AxeBuilder = require("@axe-core/playwright").default;
 const path = require("node:path");
-const { settlePage, assertNoViewportOverflow, expectFocusInside } = require("./helpers.cjs");
+const { settlePage, assertNoViewportOverflow, expectFocusInside, chooseWorkflow } = require("./helpers.cjs");
 
 async function open(page, theme = "dark", route = "/preview/generate") {
   await page.context().clearCookies({ name: "preview_generation_draft" });
@@ -23,6 +23,7 @@ test("assistant panel fits both themes, focuses correctly and applies only on re
     await open(page, theme);
     await expectFocusInside(page, "#prompt-assistant");
     await request(page);
+    await expect(page.locator("#prompt-assistant-draft")).not.toBeFocused();
     await expect(page.locator("#positive-prompt")).toHaveValue("A ceramic vase on a table, soft daylight.");
     await expect(page.locator("#prompt-assistant-diff")).not.toHaveAttribute("open", "");
     await page.locator("#prompt-assistant-edit").click();
@@ -64,7 +65,7 @@ test("source corrections are scoped and stale manual drafts survive model change
   expect(new URLSearchParams((await sent).postData()).get("image_correction_1")).toBe("Light hair, not dark.");
   await page.locator("#prompt-assistant-draft").fill("Keep this manually edited proposal.");
   await page.keyboard.press("Escape");
-  await page.locator('[data-preset-id="photoflow-krea2-edit"]').click();
+  await chooseWorkflow(page, "photoflow-krea2-edit");
   await page.locator("#prompt-assistant-open").click();
   await expect(page.locator("#prompt-assistant-stale")).toBeVisible();
   await expect(page.locator("#prompt-assistant-apply")).toBeDisabled();

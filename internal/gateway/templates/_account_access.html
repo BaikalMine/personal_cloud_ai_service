@@ -1,0 +1,27 @@
+{{define "account_access"}}
+<section class="account-section"><header><h2>Доступ аккаунта</h2></header><div class="account-section-body">
+  {{template "account_deadline" .}}
+  <ul class="account-capabilities">{{$s := .Access.Settings}}
+    {{if $s.TextToImage}}<li><i data-lucide="image" aria-hidden="true"></i>Фото по описанию</li>{{end}}
+    {{if $s.ImageToImage}}<li><i data-lucide="image-plus" aria-hidden="true"></i>Редактирование фото</li>{{end}}
+    {{if $s.Video}}<li><i data-lucide="video" aria-hidden="true"></i>Видео, до {{$s.MaxVideoQuality}}p</li>{{end}}
+    {{if $s.Training}}<li><i data-lucide="graduation-cap" aria-hidden="true"></i>Обучение LoRA</li>{{end}}
+    {{if $s.AdvancedSettings}}<li><i data-lucide="sliders-horizontal" aria-hidden="true"></i>Расширенные настройки</li>{{end}}
+  </ul>
+  {{if eq .Access.Label "Нет доступа"}}<p class="account-note">Доступ к сервисам не назначен. Обратитесь к администратору.</p>{{end}}
+  <dl class="account-facts"><div><dt>Приоритет заданий</dt><dd>{{if $s.QueuePriority}}Повышенный{{else}}Обычный{{end}}</dd></div>{{if or $s.QuickGeneration $s.Training}}<div><dt>Пауза майнинга</dt><dd>{{if $s.PauseMining}}Разрешена{{else}}Не назначена{{end}}</dd></div>{{end}}</dl>
+</div></section>
+<section class="account-section"><header><h2>Квоты генерации</h2></header><div class="account-section-body">
+  {{if .QuotaLoadError}}<div class="account-message" role="alert"><p>Не удалось проверить расход квот. Остаток пока неизвестен.</p><a href="/account/profile?tab=access">Повторить проверку</a></div>{{else}}
+  {{if .Access.Quotas}}<dl class="account-quotas">{{range .Access.Quotas}}<div><dt>{{.Family}}</dt><dd><strong>{{.Daily}}</strong><span>{{.Total}}</span></dd></div>{{end}}</dl><p class="account-note">Суточные квоты считаются по Москве.</p>{{else}}<p class="account-note">Генерация фото и видео не назначена.</p>{{end}}
+  {{end}}
+  <details class="account-details"><summary>Использование сервисов</summary>{{if .StatsLoadError}}<p class="account-note">Статистика временно недоступна.</p>{{else}}
+    <dl class="account-facts"><div><dt>Запросы за последние 7 дней</dt><dd>{{.Stats.WeekRequests}}</dd></div><div><dt>Запросы за сохранённую историю</dt><dd>{{.Stats.TotalRequests}}</dd></div><div><dt>Передано из сервисов</dt><dd>{{formatBytes .Stats.TotalBytesOut}}</dd></div></dl>
+    {{if .Stats.ByService}}<ul class="account-service-usage">{{range .Stats.ByService}}<li><strong>{{.Service}}</strong><span>{{.Requests}} запросов</span><span>{{.Errors}} ошибок</span></li>{{end}}</ul>{{end}}
+  {{end}}</details>
+</div></section>
+{{if .CanChangeUsername}}<section class="account-section" id="generation-resources"><header><h2>Ресурсы заданий</h2></header><div class="account-section-body">
+  <form method="post" action="/account/quick-generation-priority" data-account-form><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="return_to" value="account-access"><fieldset class="account-fields" {{if .WriteUncertain}}disabled{{end}}><legend class="visually-hidden">Приоритет заданий</legend><label class="ui-choice ui-choice--row account-preference"><input type="checkbox" name="enabled" {{if .PriorityPreference}}checked{{end}}><span>Приоритет моих заданий<small>Для новых заданий в очереди.</small></span></label><div class="account-form-actions"><button type="submit" class="ghost"><i data-lucide="save" aria-hidden="true"></i>Сохранить приоритет</button><p data-account-progress role="status"></p></div></fieldset></form>
+  <form method="post" action="/account/generation-mining" data-account-form><input type="hidden" name="csrf" value="{{.CSRF}}"><fieldset class="account-fields" {{if .WriteUncertain}}disabled{{end}}><legend class="visually-hidden">Пауза майнинга</legend><label class="ui-choice ui-choice--row account-preference"><input type="checkbox" name="pause_mining_for_quick_generation" {{if .MiningPreference}}checked{{end}}><span>Приостанавливать майнинг<small>Во время генерации и работы ассистента.</small></span></label><div class="account-form-actions"><button type="submit" class="ghost"><i data-lucide="save" aria-hidden="true"></i>Сохранить настройку майнинга</button><p data-account-progress role="status"></p></div></fieldset></form>
+</div></section>{{end}}
+{{end}}

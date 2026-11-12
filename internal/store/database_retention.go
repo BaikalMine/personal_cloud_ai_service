@@ -44,6 +44,18 @@ func (s *Store) CleanupDatabaseRetention(ctx context.Context, cutoffs domain.Dat
 		Errors:      make(map[string]string),
 	}
 	tasks := []retentionDeleteTask{
+		{name: "comfy_input_cleanup_receipts", before: report.StartedAt.Add(-domain.ComfyCleanupReceiptRetention), query: `
+			WITH doomed AS (
+			 SELECT input_id FROM comfy_input_cleanup_receipts WHERE confirmed_at<$1
+			 ORDER BY confirmed_at,input_id LIMIT $2 FOR UPDATE SKIP LOCKED
+			)
+			DELETE FROM comfy_input_cleanup_receipts item USING doomed WHERE item.input_id=doomed.input_id`},
+		{name: "comfy_output_cleanup_receipts", before: report.StartedAt.Add(-domain.ComfyCleanupReceiptRetention), query: `
+			WITH doomed AS (
+			 SELECT tombstone_id FROM comfy_output_cleanup_receipts WHERE confirmed_at<$1
+			 ORDER BY confirmed_at,tombstone_id LIMIT $2::integer FOR UPDATE SKIP LOCKED
+			)
+			DELETE FROM comfy_output_cleanup_receipts item USING doomed WHERE item.tombstone_id=doomed.tombstone_id`},
 		{name: "proxy_requests", before: cutoffs.ProxyRequests, query: `
 			WITH doomed AS (
 				SELECT id FROM proxy_requests WHERE created_at < $1
@@ -327,6 +339,8 @@ func databaseOldestQueries() map[string]string {
 		"feature_suggestion_scans":         `SELECT MIN(created_at) FROM feature_suggestion_scans`,
 		"comfy_input_assets":               `SELECT MIN(created_at) FROM comfy_input_assets`,
 		"comfy_output_cleanup_tombstones":  `SELECT MIN(created_at) FROM comfy_output_cleanup_tombstones`,
+		"comfy_output_cleanup_receipts":    `SELECT MIN(confirmed_at) FROM comfy_output_cleanup_receipts`,
+		"comfy_input_cleanup_receipts":     `SELECT MIN(confirmed_at) FROM comfy_input_cleanup_receipts`,
 		"content_change_revision":          `SELECT MIN(changed_at) FROM content_change_revision`,
 		"database_cleanup_state":           `SELECT MIN(updated_at) FROM database_cleanup_state`,
 		"schema_migrations":                `SELECT MIN(applied_at) FROM schema_migrations`,

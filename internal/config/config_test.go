@@ -6,6 +6,164 @@ import (
 	"time"
 )
 
+func TestComfyGPUGuardConfiguration(t *testing.T) {
+	testGPUGuardConfiguration(t, "COMFY")
+}
+
+func TestOllamaGPUGuardConfiguration(t *testing.T) {
+	testGPUGuardConfiguration(t, "OLLAMA")
+}
+
+func testGPUGuardConfiguration(t *testing.T, executor string) {
+	t.Setenv("DATABASE_URL", "postgres://gateway:test@postgres:5432/gateway?sslmode=disable")
+	t.Setenv("ADMIN_PASSWORD", "strong-admin-password")
+	t.Setenv("SESSION_SECRET", "01234567890123456789012345678901")
+	if executor == "OLLAMA" {
+		t.Setenv("LORA_CAPTION_DURABLE_INFERENCE", "true")
+		t.Setenv("PROMPT_ASSISTANT_DURABLE_JOBS", "true")
+	}
+	for _, tc := range []struct {
+		name, required, fenced, key string
+		ok                          bool
+	}{
+		{"default", "", "", "", true},
+		{"enabled", "true", "true", strings.Repeat("k", 64), true},
+		{"no mining fence", "true", "false", strings.Repeat("k", 64), false},
+		{"short key", "true", "true", "short", false},
+		{"long key", "true", "true", strings.Repeat("k", 257), false},
+		{"whitespace key", "true", "true", strings.Repeat("k", 32) + " key", false},
+		{"non ASCII key", "true", "true", strings.Repeat("k", 32) + "\u00e9", false},
+		{"invalid switch", "invalid", "true", strings.Repeat("k", 64), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(executor+"_GPU_GUARD_REQUIRED", tc.required)
+			t.Setenv(executor+"_GPU_GUARD_TOKEN", tc.key)
+			t.Setenv("MINING_FENCED_COMMANDS", tc.fenced)
+			cfg, err := Load()
+			if (err == nil) != tc.ok {
+				t.Fatalf("configuration: %v", err)
+			}
+			enabled := cfg.ComfyGPUGuardRequired
+			if executor == "OLLAMA" {
+				enabled = cfg.OllamaGPUGuardRequired
+			}
+			if tc.ok && enabled != (tc.required == "true") {
+				t.Fatal("incorrect enabled state")
+			}
+		})
+	}
+}
+
+func TestOllamaGPUGuardRequiresSeparateCredential(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://gateway:test@postgres:5432/gateway?sslmode=disable")
+	t.Setenv("ADMIN_PASSWORD", "strong-admin-password")
+	t.Setenv("SESSION_SECRET", "01234567890123456789012345678901")
+	t.Setenv("MINING_FENCED_COMMANDS", "true")
+	t.Setenv("LORA_CAPTION_DURABLE_INFERENCE", "true")
+	t.Setenv("PROMPT_ASSISTANT_DURABLE_JOBS", "true")
+	for _, prefix := range []string{"OLLAMA", "COMFY"} {
+		t.Setenv(prefix+"_GPU_GUARD_REQUIRED", "true")
+		t.Setenv(prefix+"_GPU_GUARD_TOKEN", strings.Repeat("k", 64))
+	}
+	if _, err := Load(); err == nil {
+		t.Fatal("shared executor credential accepted")
+	}
+	t.Setenv("OLLAMA_GPU_GUARD_TOKEN", strings.Repeat("o", 64))
+	if _, err := Load(); err != nil {
+		t.Fatal(err)
+	}
+	for _, flag := range []string{"LORA_CAPTION_DURABLE_INFERENCE", "PROMPT_ASSISTANT_DURABLE_JOBS"} {
+		t.Run(flag, func(t *testing.T) {
+			t.Setenv(flag, "false")
+			if _, err := Load(); err == nil {
+				t.Fatal("direct model path accepted with owned admission required")
+			}
+		})
+	}
+}
+
+func TestRestoreDrillModeConfiguration(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://gateway:test@postgres:5432/gateway?sslmode=disable")
+	t.Setenv("ADMIN_PASSWORD", "strong-admin-password")
+	t.Setenv("SESSION_SECRET", "01234567890123456789012345678901")
+	for _, value := range []string{"", "false", "true", "invalid"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("RESTORE_DRILL_MODE", value)
+			cfg, err := Load()
+			if value == "invalid" {
+				if err == nil || !strings.Contains(err.Error(), "RESTORE_DRILL_MODE") {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err != nil || cfg.RestoreDrillMode != (value == "true") {
+				t.Fatal(cfg.RestoreDrillMode, err)
+			}
+		})
+	}
+}
+
+func TestInferenceWorkerURLConfiguration(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://gateway:test@postgres:5432/gateway?sslmode=disable")
+	t.Setenv("ADMIN_PASSWORD", "strong-admin-password")
+	t.Setenv("SESSION_SECRET", "01234567890123456789012345678901")
+	for _, address := range []string{"", "http://127.0.0.1:8096", "https://worker.example.test", "file:///tmp/worker", "http://secret:password@worker", "invalid"} {
+		t.Run(address, func(t *testing.T) {
+			t.Setenv("INFERENCE_WORKER_URL", address)
+			cfg, err := Load()
+			valid := address == "" || address == "http://127.0.0.1:8096" || address == "https://worker.example.test"
+			if (err == nil) != valid {
+				t.Fatal(err)
+			}
+			if valid && cfg.InferenceWorkerURL == nil {
+				t.Fatal("missing endpoint")
+			}
+		})
+	}
+}
+
+func TestDurableAssistantConfiguration(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://gateway:test@postgres:5432/gateway?sslmode=disable")
+	t.Setenv("ADMIN_PASSWORD", "strong-admin-password")
+	t.Setenv("SESSION_SECRET", "01234567890123456789012345678901")
+	for _, value := range []string{"", "false", "true", "invalid"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("PROMPT_ASSISTANT_DURABLE_JOBS", value)
+			cfg, err := Load()
+			if value == "invalid" {
+				if err == nil || !strings.Contains(err.Error(), "PROMPT_ASSISTANT_DURABLE_JOBS") {
+					t.Fatalf("invalid switch: %v", err)
+				}
+				return
+			}
+			if err != nil || cfg.PromptAssistantDurableJobs != (value == "true") {
+				t.Fatalf("switch %q: %v %v", value, cfg.PromptAssistantDurableJobs, err)
+			}
+		})
+	}
+}
+
+func TestDurableCaptionConfiguration(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://gateway:test@postgres:5432/gateway?sslmode=disable")
+	t.Setenv("ADMIN_PASSWORD", "strong-admin-password")
+	t.Setenv("SESSION_SECRET", "01234567890123456789012345678901")
+	for _, value := range []string{"", "false", "true", "invalid"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("LORA_CAPTION_DURABLE_INFERENCE", value)
+			cfg, err := Load()
+			if value == "invalid" {
+				if err == nil || !strings.Contains(err.Error(), "LORA_CAPTION_DURABLE_INFERENCE") {
+					t.Fatalf("invalid switch: %v", err)
+				}
+				return
+			}
+			if err != nil || cfg.LoraCaptionDurableInference != (value == "true") {
+				t.Fatalf("switch %q: %v %v", value, cfg.LoraCaptionDurableInference, err)
+			}
+		})
+	}
+}
+
 func TestLoadValidConfiguration(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://gateway:test@postgres:5432/gateway?sslmode=disable")
 	t.Setenv("ADMIN_USERNAME", "admin")

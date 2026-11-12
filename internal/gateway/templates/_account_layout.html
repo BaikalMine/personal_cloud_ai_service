@@ -1,0 +1,16 @@
+{{define "account_head"}}
+{{template "head" .}}{{template "nav" .}}
+<link rel="stylesheet" href="/static/account-pages.css?v={{.AssetVersion}}">
+<script src="/static/account-pages.js?v={{.AssetVersion}}" defer></script>
+{{end}}
+{{define "account_heading"}}
+<header class="account-heading"><p>Настройки аккаунта</p><h1>{{.Title}}</h1></header>
+<nav class="account-tabs" aria-label="Разделы настроек">{{range .AccountTabs}}<a href="{{.URL}}" {{if .Active}}aria-current="page"{{end}}>{{.Label}}</a>{{end}}</nav>
+{{end}}
+{{define "account_messages"}}
+{{if and .Error (not .ErrorField)}}<div class="account-message" role="alert"><p>{{.Error}}</p>{{if .WriteUncertain}}{{if eq .AccountTab "password"}}<a href="/login?next=%2Faccount%2Fpassword">Проверить вход</a>{{else}}<a href="{{.AccountRefreshURL}}">Обновить данные</a>{{end}}{{end}}</div>{{end}}
+{{if .Success}}<p class="account-success" role="status">{{.Success}}</p>{{end}}
+{{end}}
+{{define "account_deadline"}}
+<dl class="account-facts"><div><dt>Аккаунт</dt><dd>{{roleLabel .CurrentUser.Role}}</dd></div><div><dt>Срок аккаунта</dt><dd>{{if .CurrentUser.AccountExpiresAt.Valid}}До {{.CurrentUser.AccountExpiresAt.Time.UTC.Format "02.01.2006 15:04"}} UTC{{else}}Без ограничения{{end}}</dd></div></dl>
+{{end}}

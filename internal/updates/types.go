@@ -66,6 +66,15 @@ type ComfyAssetDeleteOutcome struct {
 type ComfyOutputDeleteRequest = ComfyAssetDeleteRequest
 type ComfyOutputDeleteResult = ComfyAssetDeleteResult
 
+// Inspection is a read-only observation. Matched bytes are not freed bytes and
+// the result does not authorize a later deletion without another identity check.
+type ComfyAssetInspectResult struct {
+	Protocol  int                       `json:"protocol"`
+	CheckedAt time.Time                 `json:"checked_at"`
+	Complete  bool                      `json:"complete"`
+	Items     []ComfyAssetDeleteOutcome `json:"items"`
+}
+
 func ValidComponent(name string) bool {
 	switch name {
 	case ComponentGateway, ComponentComfyUI, ComponentOpenWebUI:

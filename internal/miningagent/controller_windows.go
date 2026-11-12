@@ -47,9 +47,20 @@ type windowsController struct {
 	managedPIDs        []int
 	scriptPath         string
 	startedAt          time.Time
+	owned              *ownedProcessGroup
+	ownedHidden        bool
+	ownedRequestPath   string
 }
 
 func NewController(rootDir, outputLog string, archivePrefixes ...string) (Controller, error) {
+	return newWindowsController(rootDir, outputLog, false, archivePrefixes...)
+}
+
+func NewOwnedController(rootDir, outputLog string, archivePrefixes ...string) (Controller, error) {
+	return newWindowsController(rootDir, outputLog, true, archivePrefixes...)
+}
+
+func newWindowsController(rootDir, outputLog string, owned bool, archivePrefixes ...string) (*windowsController, error) {
 	root, err := canonicalDirectory(rootDir)
 	if err != nil {
 		return nil, fmt.Errorf("mining root: %w", err)
@@ -64,14 +75,39 @@ func NewController(rootDir, outputLog string, archivePrefixes ...string) (Contro
 		stateFile:     filepath.Join(filepath.Dir(outputLog), "managed-miner.json"),
 		archivePolicy: policy,
 	}
+	if owned {
+		controller.owned, err = openOwnedProcessGroup(filepath.Join(filepath.Dir(controller.stateFile), "mining-process-owner.lock"))
+		if err != nil {
+			return nil, err
+		}
+	}
 	controller.restoreManagedState()
 	return controller, nil
+}
+
+func (c *windowsController) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.owned != nil {
+		return c.owned.Close()
+	}
+	return nil
 }
 
 func (c *windowsController) State(ctx context.Context, processName string) (mining.State, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.stateLocked(ctx, processName)
+	state, err := c.stateLocked(ctx, processName)
+	if err == nil && c.owned != nil {
+		active, ownedErr := c.owned.Active()
+		if ownedErr != nil {
+			return state, ownedErr
+		}
+		if active > 0 && !state.Running && (c.managedProcessName == "" || strings.EqualFold(c.managedProcessName, processName)) {
+			return state, errors.New("дерево процессов майнера ещё запускается или завершается")
+		}
+	}
+	return state, err
 }
 
 func (c *windowsController) Script(ctx context.Context, rawPath string) (mining.Script, error) {
@@ -114,11 +150,38 @@ func (c *windowsController) Start(ctx context.Context, request mining.Request) (
 }
 
 func (c *windowsController) startLocked(ctx context.Context, request mining.Request) (mining.State, error) {
+	scriptPath, pathErr := c.allowedScript(request.ScriptPath)
+	if pathErr != nil {
+		return mining.State{}, fmt.Errorf("%w: %s", errCommandRejected, pathErr)
+	}
+	request.ScriptPath = scriptPath
 	state, err := c.stateLocked(ctx, request.ProcessName)
 	if err != nil {
 		return state, err
 	}
+	if c.owned != nil {
+		active, ownedErr := c.owned.Active()
+		if ownedErr != nil {
+			return state, ownedErr
+		}
+		if active > 0 && (!state.Running || !strings.EqualFold(c.managedProcessName, request.ProcessName) || !c.ownedScriptMatches(request.ScriptPath)) {
+			return state, fmt.Errorf("%w: предыдущее дерево процессов майнера ещё не завершено", errCommandRejected)
+		}
+	}
+	inventory, inventoryErr := c.inventoryLocked(ctx)
+	if inventoryErr != nil {
+		return state, inventoryErr
+	}
+	if err := inventoryAllowsStart(inventory, request); err != nil {
+		return state, fmt.Errorf("%w: %s", errCommandRejected, err)
+	}
 	if state.Running {
+		for _, observed := range inventory.States {
+			if strings.EqualFold(observed.ProcessName, request.ProcessName) && sameWindowsPath(observed.ScriptPath, scriptPath) {
+				state = observed
+				break
+			}
+		}
 		state.Message = "Майнинг уже запущен."
 		return state, nil
 	}
@@ -129,10 +192,6 @@ func (c *windowsController) startLocked(ctx context.Context, request mining.Requ
 		}
 		cancel()
 		c.resetManagedLocked()
-	}
-	scriptPath, err := c.allowedScript(request.ScriptPath)
-	if err != nil {
-		return state, err
 	}
 	if err := c.prepareOutputLog(); err != nil {
 		return state, err
@@ -145,19 +204,35 @@ func (c *windowsController) startLocked(ctx context.Context, request mining.Requ
 	// The visible console is the tracked process itself. This makes a stop
 	// command close the exact console window instead of leaving wrappers behind.
 	command.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNewConsole | createNewProcessGroup, HideWindow: false}
-	if err := command.Start(); err != nil {
-		return state, fmt.Errorf("start mining script: %w", err)
+	var managedPID int
+	var wait func() error
+	if c.owned != nil {
+		process, err := c.owned.Start(ctx, command, !c.ownedHidden)
+		if err != nil {
+			return state, err
+		}
+		managedPID, wait = process.PID, process.Wait
+		c.managedProcessName = request.ProcessName
+		c.ownedRequestPath, _ = filepath.Abs(request.ScriptPath)
+	} else {
+		if err := command.Start(); err != nil {
+			return state, fmt.Errorf("start mining script: %w", err)
+		}
+		managedPID, wait = command.Process.Pid, command.Wait
 	}
-	managedPID := command.Process.Pid
 	c.managedPID = managedPID
 	c.managedLauncherSHA = launcherSHA
 	c.scriptPath = scriptPath
 	c.startedAt = time.Now()
 	go func() {
-		_ = command.Wait()
+		_ = wait()
 		c.mu.Lock()
 		if c.managedPID == managedPID {
-			c.resetManagedLocked()
+			if c.owned == nil {
+				c.resetManagedLocked()
+			} else if active, err := c.owned.Active(); err == nil && active == 0 {
+				c.resetManagedLocked()
+			}
 		}
 		c.mu.Unlock()
 	}()
@@ -169,12 +244,22 @@ func (c *windowsController) startLocked(ctx context.Context, request mining.Requ
 		cancel()
 		if probeErr == nil && state.Running {
 			c.setManagedLocked(request.ProcessName, state.PIDs, scriptPath, time.Now())
+			state.ScriptPath, state.StartedAt = scriptPath, c.startedAt
 			state.Message = "Майнинг запущен."
 			return state, nil
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if c.owned != nil {
+		cleanupErr := c.owned.Stop(cleanupCtx)
+		cancel()
+		if cleanupErr != nil {
+			return state, fmt.Errorf("завершение неудачного запуска майнера не подтверждено: %w", cleanupErr)
+		}
+		c.resetManagedLocked()
+		return state, errors.New("майнер не появился после запуска; управляемое дерево завершено")
+	}
 	_ = runTaskkill(cleanupCtx, "/PID", strconv.Itoa(c.managedPID))
 	cancel()
 	c.resetManagedLocked()
@@ -192,9 +277,28 @@ func (c *windowsController) stopLocked(ctx context.Context, request mining.Reque
 	if err != nil {
 		return state, err
 	}
+	if c.owned != nil {
+		active, ownedErr := c.owned.Active()
+		if ownedErr != nil {
+			return state, ownedErr
+		}
+		if active > 0 {
+			if !c.ownedScriptMatches(request.ScriptPath) || !strings.EqualFold(c.managedProcessName, request.ProcessName) {
+				return state, fmt.Errorf("%w: активное дерево принадлежит другому профилю майнинга", errCommandRejected)
+			}
+			if err := c.owned.Stop(ctx); err != nil {
+				return state, err
+			}
+			c.resetManagedLocked()
+			state.Running = false
+			state.PIDs = nil
+			state.Message = "Майнинг остановлен, дерево процессов завершено."
+			return state, nil
+		}
+	}
 	scriptPath, err := c.allowedScript(request.ScriptPath)
 	if err != nil {
-		return state, err
+		return state, fmt.Errorf("%w: %s", errCommandRejected, err)
 	}
 	candidates := state.PIDs
 	if strings.EqualFold(c.managedProcessName, request.ProcessName) && len(c.managedPIDs) > 0 {
@@ -251,14 +355,21 @@ func (c *windowsController) stopLocked(ctx context.Context, request mining.Reque
 
 func (c *windowsController) stateLocked(ctx context.Context, processName string) (mining.State, error) {
 	pids, err := processIDs(ctx, processName)
-	state := mining.State{
-		Running:     len(pids) > 0,
-		PIDs:        pids,
-		ScriptPath:  c.scriptPath,
-		ProcessName: processName,
-		StartedAt:   c.startedAt,
-	}
+	state := observedProfileState(processName, c.managedProcessName, c.scriptPath, pids, c.managedPIDs, c.startedAt)
 	return state, err
+}
+
+func (c *windowsController) ownedScriptMatches(raw string) bool {
+	path, err := filepath.Abs(raw)
+	if err != nil {
+		return false
+	}
+	// Keep the submitted alias usable even if the launcher file was removed.
+	if strings.EqualFold(path, c.ownedRequestPath) || strings.EqualFold(path, c.scriptPath) {
+		return true
+	}
+	resolved, err := c.allowedScript(path)
+	return err == nil && strings.EqualFold(resolved, c.scriptPath)
 }
 
 func (c *windowsController) allowedScript(rawPath string) (string, error) {
@@ -372,17 +483,8 @@ func processIDs(ctx context.Context, processName string) ([]int, error) {
 	return pids, nil
 }
 
-type windowsProcess struct {
-	PID            int    `json:"ProcessId"`
-	ParentPID      int    `json:"ParentProcessId"`
-	Name           string `json:"Name"`
-	CommandLine    string `json:"CommandLine"`
-	ExecutablePath string `json:"ExecutablePath"`
-	CreationUnix   int64  `json:"CreationUnix"`
-}
-
 func windowsProcesses(ctx context.Context) ([]windowsProcess, error) {
-	command := exec.CommandContext(ctx, "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", `@(Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine,ExecutablePath,@{Name='CreationUnix';Expression={if ($_.CreationDate) { ([DateTimeOffset]$_.CreationDate).ToUnixTimeSeconds() } else { 0 }}}) | ConvertTo-Json -Compress`)
+	command := exec.CommandContext(ctx, "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); @(Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine,ExecutablePath,@{Name='CreationUnix';Expression={if ($_.CreationDate) { ([DateTimeOffset]$_.CreationDate).ToUnixTimeSeconds() } else { 0 }}}) | ConvertTo-Json -Compress`)
 	command.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNoWindow, HideWindow: true}
 	output, err := command.Output()
 	if err != nil {
@@ -408,9 +510,17 @@ func (c *windowsController) verifiedMinerProcessTree(ctx context.Context, minerP
 		byPID[process.PID] = process
 	}
 	scriptPath = strings.ToLower(scriptPath)
-	scriptName := strings.ToLower(filepath.Base(scriptPath))
-	rootDir := strings.ToLower(c.rootDir)
 	scriptDir := filepath.Dir(scriptPath)
+	catalog, err := launchFiles(ctx, c.rootDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	var scripts []string
+	for _, file := range catalog.Files {
+		if file.Kind == "script" {
+			scripts = append(scripts, file.Path)
+		}
+	}
 	managedState := managedMinerState{
 		ProcessName: c.managedProcessName,
 		PIDs:        c.managedPIDs,
@@ -424,19 +534,24 @@ func (c *windowsController) verifiedMinerProcessTree(ctx context.Context, minerP
 		if !exists || !strings.EqualFold(current.Name, processName) {
 			continue
 		}
+		if current.ExecutablePath != "" && !pathWithinDirectoryFold(c.rootDir, current.ExecutablePath) {
+			continue
+		}
 		durableMatch := managedProcessStateMatches(current.PID, current.Name, current.CreationUnix, processName, scriptPath, managedState)
 		if durableMatch && current.ExecutablePath != "" && pathWithinDirectoryFold(scriptDir, current.ExecutablePath) {
 			verified[minerPID] = struct{}{}
 		}
-		for hops := 0; exists && hops < 8 && current.ParentPID > 0; hops++ {
+		seen := map[int]bool{current.PID: true}
+		for hops := 0; exists && hops < 16 && current.ParentPID > 0; hops++ {
 			parent, found := byPID[current.ParentPID]
-			if !found {
+			if !found || seen[parent.PID] || (current.CreationUnix > 0 && parent.CreationUnix > current.CreationUnix) {
 				break
 			}
+			seen[parent.PID] = true
 			name := strings.ToLower(parent.Name)
 			commandLine := strings.ToLower(parent.CommandLine)
 			isShell := name == "cmd.exe" || name == "powershell.exe" || name == "pwsh.exe"
-			referencesScript := strings.Contains(commandLine, scriptPath) || (strings.Contains(commandLine, rootDir) && strings.Contains(commandLine, scriptName))
+			referencesScript := sameWindowsPath(commandScriptPath(commandLine, scripts), scriptPath)
 			if isShell && referencesScript {
 				verified[minerPID] = struct{}{}
 				consoles[parent.PID] = struct{}{}
@@ -535,6 +650,7 @@ func (c *windowsController) resetManagedLocked() {
 	c.managedProcessName = ""
 	c.managedPIDs = nil
 	c.scriptPath = ""
+	c.ownedRequestPath = ""
 	c.startedAt = time.Time{}
 	_ = os.Remove(c.stateFile)
 }

@@ -1,0 +1,56 @@
+{{define "gallery_viewer"}}
+<dialog class="gallery-viewer" id="gallery-lightbox" hidden aria-labelledby="gallery-viewer-title">
+  <header class="gallery-viewer-header">
+    <h2 id="gallery-viewer-title" data-gallery-lightbox-name>Результат</h2>
+    <div class="gallery-viewer-navigation"><button class="icon-button ghost image-comparison-toggle" type="button" data-viewer-original hidden aria-pressed="false" title="Сравнить с оригиналом" aria-label="Сравнить с оригиналом"><i data-lucide="columns-2" aria-hidden="true"></i></button><button class="icon-button ghost" type="button" data-viewer-previous title="Предыдущий результат" aria-label="Предыдущий результат"><i data-lucide="chevron-left" aria-hidden="true"></i></button><output data-viewer-index></output><button class="icon-button ghost" type="button" data-viewer-next title="Следующий результат" aria-label="Следующий результат"><i data-lucide="chevron-right" aria-hidden="true"></i></button></div>
+    <button class="icon-button ghost generation-lightbox-close" type="button" data-gallery-close title="Закрыть просмотр" aria-label="Закрыть просмотр"><i data-lucide="x" aria-hidden="true"></i></button>
+  </header>
+  <div class="gallery-viewer-tabs ui-segmented" role="tablist" aria-label="Просмотр результата">
+    <button class="ui-segment" id="gallery-viewer-media-tab" type="button" role="tab" aria-selected="true" aria-controls="gallery-viewer-media" data-viewer-tab="media">Медиа</button>
+    <button class="ui-segment" id="gallery-viewer-facts-tab" type="button" role="tab" aria-selected="false" aria-controls="gallery-viewer-inspector" tabindex="-1" data-viewer-tab="facts">Паспорт</button>
+  </div>
+  <div class="gallery-viewer-body">
+    <section class="gallery-viewer-media" id="gallery-viewer-media" aria-labelledby="gallery-viewer-media-tab">
+      <div class="gallery-media-viewport" data-viewer-stage tabindex="0" aria-label="Область просмотра результата"></div>
+      <div class="gallery-zoom-toolbar" data-viewer-zoom>
+        <button class="icon-button ghost" type="button" data-zoom="fit" title="Вписать целиком" aria-label="Вписать целиком"><i data-lucide="maximize" aria-hidden="true"></i></button>
+        <button class="icon-button ghost" type="button" data-zoom="actual" title="Масштаб 1:1" aria-label="Масштаб 1:1"><i data-lucide="scan" aria-hidden="true"></i></button>
+        <button class="icon-button ghost" type="button" data-zoom="out" title="Уменьшить" aria-label="Уменьшить"><i data-lucide="minus" aria-hidden="true"></i></button>
+        <output data-zoom-value>100%</output>
+        <button class="icon-button ghost" type="button" data-zoom="in" title="Увеличить" aria-label="Увеличить"><i data-lucide="plus" aria-hidden="true"></i></button>
+      </div>
+    </section>
+    <aside class="gallery-inspector" id="gallery-viewer-inspector" aria-labelledby="gallery-viewer-facts-tab">
+      <div class="gallery-inspector-scroll">
+        <p class="gallery-inspector-status" data-inspector-status role="status"></p><button class="ghost" type="button" data-inspector-retry hidden>Повторить загрузку</button>
+        <section class="gallery-inspector-section"><h3>Описание</h3><p class="gallery-inspector-prompt" data-inspector-prompt></p><button class="icon-button ghost" type="button" data-inspector-copy title="Копировать описание" aria-label="Копировать описание"><i data-lucide="copy" aria-hidden="true"></i></button></section>
+        <section class="gallery-inspector-section"><h3>Параметры запуска</h3><dl data-inspector-parameters></dl></section>
+        <section class="gallery-inspector-section"><h3>Готовый файл</h3><p data-inspector-measurement-status role="status"></p><dl data-inspector-measurements></dl><button class="ghost" type="button" data-inspector-measure hidden>Проверить файл</button></section>
+        <section class="gallery-inspector-section"><h3>Происхождение и хранение</h3><dl data-inspector-lineage></dl><div class="gallery-inspector-links" data-inspector-links></div></section>
+        <section class="gallery-inspector-section"><h3>Теги и коллекции</h3><p data-inspector-organization></p><button class="ghost" type="button" data-inspector-organize><i data-lucide="folder-pen" aria-hidden="true"></i>Изменить</button></section>
+        <details class="gallery-technical" data-inspector-technical hidden><summary>Технический паспорт</summary><p data-inspector-evidence></p><a class="button ghost" data-inspector-download-passport download><i data-lucide="download" aria-hidden="true"></i>Скачать JSON</a><pre data-inspector-raw tabindex="0" aria-label="Сохранённый технический паспорт"></pre></details>
+      </div>
+    </aside>
+  </div>
+  <footer class="gallery-viewer-actions">
+    <button class="button" type="button" data-viewer-use><i data-lucide="arrow-up-right" aria-hidden="true"></i>Использовать</button>
+    <button class="icon-button ghost" type="button" data-viewer-compare title="Сравнить" aria-label="Сравнить"><i data-lucide="columns-2" aria-hidden="true"></i></button>
+    <button class="icon-button ghost" type="button" data-viewer-postprocess title="Улучшить результат" aria-label="Улучшить результат"><i data-lucide="sliders-horizontal" aria-hidden="true"></i></button>
+    <button class="icon-button ghost" type="button" data-gallery-lightbox-repeat title="Повторить" aria-label="Повторить" hidden><i data-lucide="repeat-2" aria-hidden="true"></i></button>
+    <button class="icon-button ghost" type="button" data-gallery-lightbox-repeat-now title="Повторить сразу" aria-label="Повторить сразу" hidden><i data-lucide="play" aria-hidden="true"></i></button>
+    <a class="button ghost icon-button" data-gallery-lightbox-download download title="Скачать оригинал" aria-label="Скачать оригинал"><i data-lucide="download" aria-hidden="true"></i></a>
+  </footer>
+</dialog>
+<dialog class="gallery-comparison" id="gallery-compare-dialog" hidden aria-labelledby="gallery-compare-title">
+  <header class="gallery-viewer-header"><h2 id="gallery-compare-title">Сравнение вариантов</h2><button class="icon-button ghost" type="button" data-gallery-compare-close title="Закрыть сравнение" aria-label="Закрыть сравнение"><i data-lucide="x" aria-hidden="true"></i></button></header>
+  <div class="gallery-compare-grid" data-gallery-compare-grid></div>
+  <div class="gallery-compare-playback" data-compare-playback hidden><button class="icon-button ghost" type="button" data-compare-play title="Воспроизвести оба видео" aria-label="Воспроизвести оба видео"><i data-lucide="play" aria-hidden="true"></i></button><input type="range" min="0" max="1000" value="0" data-compare-time aria-label="Позиция обоих видео"><output data-compare-time-label>0:00</output><p data-compare-playback-status role="status" hidden></p></div>
+  <footer class="gallery-zoom-toolbar" data-compare-zoom>
+    <button class="icon-button ghost" type="button" data-zoom="fit" title="Вписать оба результата" aria-label="Вписать оба результата"><i data-lucide="maximize" aria-hidden="true"></i></button>
+    <button class="icon-button ghost" type="button" data-zoom="actual" title="Общий масштаб 1:1" aria-label="Общий масштаб 1:1"><i data-lucide="scan" aria-hidden="true"></i></button>
+    <button class="icon-button ghost" type="button" data-zoom="out" title="Уменьшить оба результата" aria-label="Уменьшить оба результата"><i data-lucide="minus" aria-hidden="true"></i></button>
+    <output data-zoom-value>100%</output>
+    <button class="icon-button ghost" type="button" data-zoom="in" title="Увеличить оба результата" aria-label="Увеличить оба результата"><i data-lucide="plus" aria-hidden="true"></i></button>
+  </footer>
+</dialog>
+{{end}}

@@ -99,7 +99,7 @@ func krea2EditWorkflowManifest() workflowManifest {
 			{ID: "tone", Name: "Тон и LUT", Description: "Финальная коррекция цвета и резкости.", ToggleParameter: "lut_enabled", RequiredClasses: []string{"LCImageAdjust", "LCApplyLUT"}, Order: 50},
 		},
 		QualityProfiles: []workflowQualityProfileManifest{{ID: "balanced", Name: "Баланс", Description: "Проверенный профиль identity edit.", Default: true, Parameters: map[string]workflowProfileParameterManifest{"steps": profileValue(8), "cfg": profileValue(1), "reference_boost": profileValue(4), "grounding_pixels": profileValue(768), "upscale_factor": profileValue(1.5), "upscale_steps": profileValue(4), "upscale_denoise": profileValue(0.15)}}},
-		PromptAssistant: workflowAssistantManifest{Profile: "flux-edit", Allowed: true, VisionReferences: true, ReferenceIdentifiers: map[string][]string{"edit": {"<Picture 1>", "<Picture 2>"}}, Rules: []string{"Сначала проанализировать оба загруженных изображения.", "Явно разделить, что сохранить из основного фото и что перенести из второго референса."}},
+		PromptAssistant: workflowAssistantManifest{Profile: "krea2-edit", Allowed: true, VisionReferences: true, ReferenceIdentifiers: map[string][]string{"edit": {"<Picture 1>", "<Picture 2>"}}, Rules: []string{"Проанализировать все загруженные изображения.", "Написать короткую инструкцию редактирования для Krea2 Identity Edit, не переписывая исходное фото в длинное описание.", "Явно разделить, что сохранить из основного фото и что перенести из второго референса."}},
 		Output:          workflowOutputManifest{Kinds: []string{"image"}, Postprocessing: []string{"upscale", "cleanup", "skin", "tone", "lut"}},
 	}
 }

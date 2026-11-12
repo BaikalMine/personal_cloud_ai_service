@@ -12,7 +12,9 @@ import (
 )
 
 const userNotificationColumns = `
-	n.id,n.user_id,n.generation_job_id,j.public_id,n.kind,n.title,n.message,n.href,n.read_at,n.created_at`
+	n.id,n.user_id,COALESCE(n.generation_job_id,0),COALESCE(j.public_id,''),n.kind,n.title,n.message,n.href,n.read_at,n.created_at,
+	CASE WHEN n.generation_job_id IS NOT NULL THEN 'generation' WHEN n.training_job_id IS NOT NULL THEN 'lora_training' ELSE 'lora_caption_series' END,
+	COALESCE(j.public_id,t.public_id,n.caption_series_id)`
 
 type notificationScanner interface {
 	Scan(dest ...any) error
@@ -24,7 +26,7 @@ func scanUserNotification(scanner notificationScanner) (domain.UserNotification,
 	var readAt sql.NullTime
 	if err := scanner.Scan(
 		&notification.ID, &notification.UserID, &notification.GenerationJobID, &notification.GenerationJobPublicID,
-		&kind, &notification.Title, &notification.Message, &notification.Href, &readAt, &notification.CreatedAt,
+		&kind, &notification.Title, &notification.Message, &notification.Href, &readAt, &notification.CreatedAt, &notification.SourceKind, &notification.SourceID,
 	); err != nil {
 		return domain.UserNotification{}, err
 	}
@@ -44,7 +46,9 @@ func (s *Store) UserNotificationSummary(ctx context.Context, userID int64) (doma
 	err := s.db.QueryRowContext(ctx, `SELECT
 		COALESCE(r.revision,0),
 		(SELECT count(*) FROM user_notifications n WHERE n.user_id=u.id AND n.read_at IS NULL),
-		(SELECT count(*) FROM generation_jobs j WHERE j.user_id=u.id AND j.state NOT IN ('completed','failed','cancelled','expired')),
+		(SELECT count(*) FROM generation_jobs j WHERE j.user_id=u.id AND j.state NOT IN ('completed','failed','cancelled','expired'))
+		+(SELECT count(*) FROM lora_training_jobs j WHERE j.user_id=u.id AND j.state NOT IN ('completed','failed','cancelled'))
+		+(SELECT count(*) FROM lora_caption_jobs j WHERE j.user_id=u.id AND j.state IN ('queued','running')),
 		COALESCE(p.in_app_enabled,true),COALESCE(p.success_enabled,true),COALESCE(p.browser_enabled,false),
 		COALESCE(p.updated_at,u.created_at)
 		FROM users u
@@ -73,7 +77,8 @@ func (s *Store) ListUserNotifications(ctx context.Context, userID int64, limit i
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT `+userNotificationColumns+`
 		FROM user_notifications n
-		JOIN generation_jobs j ON j.id=n.generation_job_id
+		LEFT JOIN generation_jobs j ON j.id=n.generation_job_id AND j.user_id=n.user_id
+		LEFT JOIN lora_training_jobs t ON t.id=n.training_job_id AND t.user_id=n.user_id
 		WHERE n.user_id=$1
 		ORDER BY n.created_at DESC,n.id DESC
 		LIMIT $2`, userID, limit)

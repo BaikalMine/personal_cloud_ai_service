@@ -13,6 +13,19 @@ import (
 	"ai-access-gateway/internal/loratraining"
 )
 
+func TestTrainingProgressIgnoresUnrelatedRatios(t *testing.T) {
+	controller := &Controller{config: Config{RootDir: t.TempDir()}, jobs: map[string]*jobRecord{"job": {Spec: loratraining.JobSpec{MaxSteps: 1600}, Status: loratraining.JobStatus{Progress: 40}}}}
+	controller.commandLine("job", "running", "training", 40, 94, "Loaded 1/1")
+	controller.commandLine("job", "running", "training", 40, 94, "steps: 100%|###| 100/100 [00:01<00:00]")
+	if got := controller.jobs["job"].Status.Progress; got != 40 {
+		t.Fatalf("unrelated progress accepted: %d", got)
+	}
+	controller.commandLine("job", "running", "training", 40, 94, "steps: 50%|#####| 800/1600 [10:00<10:00]")
+	if got := controller.jobs["job"].Status.Progress; got != 67 {
+		t.Fatalf("training progress = %d", got)
+	}
+}
+
 func TestTrainingArgsUseFamilySpecificMusubiScripts(t *testing.T) {
 	t.Parallel()
 	controller := &Controller{config: Config{TunerDir: `C:\musubi`}}
@@ -24,6 +37,51 @@ func TestTrainingArgsUseFamilySpecificMusubiScripts(t *testing.T) {
 	}
 	if !containsSuffix(flux, "flux_2_train_network.py") || !containsPair(flux, "--network_module", "networks.lora_flux_2") || !containsPair(flux, "--model_version", "klein-base-9b") || !slices.Contains(flux, "--fp8_text_encoder") {
 		t.Fatalf("unexpected Flux.2 command: %v", flux)
+	}
+}
+
+func TestFindTrainingOutputRequiresExactFinalFile(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		finalFile  bool
+		finalDir   bool
+		checkpoint bool
+		wantOK     bool
+	}{
+		{name: "final file", finalFile: true, wantOK: true},
+		{name: "final file and checkpoint", finalFile: true, checkpoint: true, wantOK: true},
+		{name: "checkpoint only", checkpoint: true},
+		{name: "missing output"},
+		{name: "directory instead of final file", finalDir: true, checkpoint: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			final := filepath.Join(dir, "portrait.safetensors")
+			if tc.finalFile {
+				if err := os.WriteFile(final, []byte("final"), 0o640); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.finalDir {
+				if err := os.Mkdir(final, 0o750); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.checkpoint {
+				if err := os.WriteFile(filepath.Join(dir, "portrait-000400.safetensors"), []byte("checkpoint"), 0o640); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := findTrainingOutput(dir, "portrait")
+			if tc.wantOK {
+				if err != nil || got != final {
+					t.Fatalf("findTrainingOutput = %q, %v; want %q", got, err, final)
+				}
+			} else if err == nil || got != "" {
+				t.Fatalf("findTrainingOutput = %q, %v; want empty path and error", got, err)
+			}
+		})
 	}
 }
 

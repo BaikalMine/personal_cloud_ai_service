@@ -17,7 +17,8 @@ func TestAccountProfileRendersNotificationCenterAndPreferences(t *testing.T) {
 	}
 	var rendered bytes.Buffer
 	err = templates.ExecuteTemplate(&rendered, "account_profile", map[string]any{
-		"Title": "Профиль", "AssetVersion": templates.AssetVersion, "CSRF": "test-csrf",
+		"Title": "Уведомления", "AssetVersion": templates.AssetVersion, "CSRF": "test-csrf",
+		"AccountTab": "notifications", "AccountTabs": AccountTabs("notifications"),
 		"CurrentUser":             &domain.User{ID: 7, Username: "alice"},
 		"NotificationSummary":     domain.UserNotificationSummary{Revision: 9, UnreadCount: 2, ActiveCount: 1},
 		"NotificationPreferences": domain.UserNotificationPreferences{InAppEnabled: true, SuccessEnabled: true},
@@ -26,8 +27,8 @@ func TestAccountProfileRendersNotificationCenterAndPreferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"data-notification-center", "Задачи и уведомления", "data-shell-active-count", "data-notification-unread-count",
-		"Krea2, Flux2 и MiniMax H3", "data-notification-settings", "В интерфейсе", "Успешные генерации", "В браузере",
+		"data-notification-center", "Задачи и уведомления", "data-notification-active-total", "data-notification-unread-count",
+		"События задач", "data-notification-settings", "В интерфейсе", "Успешные задачи", "В браузере",
 		"/static/notifications.css", "/static/notifications.js",
 	} {
 		if !strings.Contains(rendered.String(), expected) {

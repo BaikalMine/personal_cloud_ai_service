@@ -120,6 +120,7 @@ func (a *App) loraDatasetView(ctx context.Context, row domain.LoraDatasetRow) (l
 			if err != nil {
 				return view, err
 			}
+			a.restoreLoraDatasetQuality(&asset)
 			view.Assets[item.AssetID] = asset
 		}
 		if seen[asset.Hash] {
@@ -150,6 +151,8 @@ func writeLoraDatasetError(w http.ResponseWriter, err error) {
 		status, message = http.StatusRequestEntityTooLarge, "Достигнут лимит: 20 датасетов, 100 версий, 100 изображений и 512 МБ на набор, 2 ГБ на пользователя."
 	case errors.Is(err, store.ErrLoraCaptionQuota):
 		status, message = http.StatusTooManyRequests, "В очереди уже 100 описаний или достигнут лимит 500 сохранённых заданий. Дождитесь завершения и очистки старых записей."
+	case errors.Is(err, store.ErrLoraCaptionInferencePending):
+		status, message = http.StatusConflict, "Предыдущее описание ещё не завершено. Повторный запуск пока недоступен."
 	case errors.Is(err, store.ErrLoraDatasetInUse):
 		status, message = http.StatusConflict, "Эта версия используется активным обучением."
 	case errors.Is(err, store.ErrLoraTrainingAlreadyActive):
@@ -186,6 +189,10 @@ func (a *App) handleLoraDatasets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parts = parts[1:]
+	if len(parts) == 1 && parts[0] == "gallery-import" || len(parts) == 2 && parts[0] == "gallery-import" && parts[1] == "discard" {
+		a.handleGalleryDatasetImport(w, r, len(parts) == 2)
+		return
+	}
 	userID := a.currentUser(r).ID
 	if len(parts) > 0 && parts[0] == "gallery" && r.Method == http.MethodGet {
 		if len(parts) == 1 {
@@ -252,6 +259,10 @@ func (a *App) handleLoraDatasets(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a.writeLoraDatasetView(w, r, row, http.StatusCreated)
+		return
+	}
+	if parts[0] == "assets" && len(parts) == 3 && parts[2] == "quality" && r.Method == http.MethodPost {
+		a.handleLoraDatasetQuality(w, r, parts[1])
 		return
 	}
 	if parts[0] == "assets" && len(parts) == 2 && r.Method == http.MethodGet {

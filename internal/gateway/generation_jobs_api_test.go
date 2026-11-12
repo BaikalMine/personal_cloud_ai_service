@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -11,6 +12,22 @@ import (
 	contentcrypto "ai-access-gateway/internal/content"
 	"ai-access-gateway/internal/domain"
 )
+
+func TestGenerationJobMissingComfyStatusDoesNotMoveArchivingBackwards(t *testing.T) {
+	userID := int64(1)
+	job := domain.GenerationJob{State: domain.GenerationJobArchiving, UserID: &userID, PromptID: "lost-prompt"}
+	app := &App{}
+	for _, status := range []generationStatus{
+		{Known: false, State: "queued"},
+		{Known: true, State: "queued"},
+		{Known: true, State: "running"},
+	} {
+		updated, err := app.reconcileGenerationJobStatus(context.Background(), job, status)
+		if err != nil || updated.State != domain.GenerationJobArchiving {
+			t.Fatalf("status %#v moved archived job to %s: %v", status, updated.State, err)
+		}
+	}
+}
 
 func TestGenerationJobViewTranslatesTerminalJob(t *testing.T) {
 	cipher, err := contentcrypto.NewCipher("generation-job-view-test")

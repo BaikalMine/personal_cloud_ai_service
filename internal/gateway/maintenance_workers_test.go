@@ -37,6 +37,16 @@ func TestMaintenanceWorkersRunIndependentlyAndStop(t *testing.T) {
 
 	waitForSignal(t, slowStarted, "slow worker did not start")
 	waitForSignal(t, fastFinished, "fast worker was blocked by slow worker")
+	// Run's signal precedes publication of its result; cancelling here can
+	// legitimately stop the worker before it records a successful completion.
+	deadline := time.Now().Add(time.Second)
+	for registry.snapshot()[1].LastSuccessAt == nil {
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatal("fast worker did not publish success")
+		}
+		time.Sleep(time.Millisecond)
+	}
 	cancel()
 	waitForSignal(t, done, "workers did not stop after context cancellation")
 

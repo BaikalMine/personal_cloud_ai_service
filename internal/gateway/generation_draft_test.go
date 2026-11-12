@@ -22,13 +22,14 @@ func TestGenerationDraftValues(t *testing.T) {
 		"lora_model_strength_1": {"0,"}, "video_sage_attention": {"false"}, "batch_count": {"12"},
 		"assistant_enabled": {"true"}, "assistant_draft": {"edited suggestion"}, "image_role_4": {"style"},
 		"assistant_stale": {"true"}, "assistant_corrections": {`{"Picture 1":{"text":"light hair","source":"owned.png"}}`},
+		"parent_job_id": {"source-job"}, "assistant_model": {"large-text"},
 		"csrf": {"secret"}, "client_request_id": {"request"}, "input_audio": {"private/path"},
 		"input_image_2": {"private/path"}, "user_id": {"99"}, "unrecognized": {"value"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(values) != 10 || values["positive_prompt"] != "  unfinished\n" || values["lora_model_strength_1"] != "0," || values["assistant_stale"] != "true" || !strings.Contains(values["assistant_corrections"], "light hair") {
+	if len(values) != 12 || values["assistant_model"] != "large-text" || values["parent_job_id"] != "source-job" || values["positive_prompt"] != "  unfinished\n" || values["lora_model_strength_1"] != "0," || values["assistant_stale"] != "true" || !strings.Contains(values["assistant_corrections"], "light hair") {
 		t.Fatalf("draft fields: %#v", values)
 	}
 	if _, err := generationDraftValues(url.Values{"positive_prompt": {strings.Repeat("x", (64<<10)+1)}}); err == nil {
@@ -83,8 +84,31 @@ func assertGenerationDraftAPI(t *testing.T, ctx context.Context, db *sql.DB, app
 			t.Fatalf("finalize: %v %v", ok, err)
 		}
 	}
+	ownedPath := comfyUploadNamespace(app.comfyClientID(userID)) + "/source.png"
+	jobValues := map[string]string{"positive_prompt": "saved source", "input_image": ownedPath,
+		"input_image_9": ownedPath, "input_audio": ownedPath, "input_video": ownedPath,
+		"input_image_2": comfyUploadNamespace(app.comfyClientID(foreignID)) + "/source.png",
+		"input_image_3": comfyUploadNamespace(app.comfyClientID(userID)) + "/removed.png",
+		"image_role_9":  "clothing", "image_source_name_9": "outfit.png"}
+	jobAssets, missing, sourceErr := app.generationJobSourceAssets(ctx, userID, jobValues)
+	if sourceErr != nil || !missing || len(jobAssets) != 6 {
+		t.Fatalf("job source assets: %+v %v %v", jobAssets, missing, sourceErr)
+	}
+	for _, item := range jobAssets {
+		want := item.Field != "input_image_2" && item.Field != "input_image_3"
+		if item.Available != want || want && (item.ID != assetID || item.Value != ownedPath || item.URL == "") || !want && (item.Value != "" || item.URL != "" || item.ID != "") {
+			t.Fatalf("job source ownership: %+v", item)
+		}
+		if _, exists := jobValues[item.Field]; exists {
+			t.Fatal("raw input path survived source restoration")
+		}
+	}
+	if jobValues["positive_prompt"] != "saved source" || jobValues["image_role_9"] != "clothing" {
+		t.Fatal("source recipe was modified")
+	}
 	form := url.Values{"csrf": {csrf}, "draft_revision": {"0"}, "positive_prompt": {"draft private prompt"},
-		"lora_1": {"Krea2/portrait.safetensors"}, "lora_model_strength_1": {"0.75"},
+		"parent_job_id": {"source-job"},
+		"lora_1":        {"Krea2/portrait.safetensors"}, "lora_model_strength_1": {"0.75"},
 		"input_image":            {comfyUploadNamespace(app.comfyClientID(userID)) + "/source.png"},
 		"draft_name_input_image": {"my portrait.png"}, "draft_asset_input_image_2": {foreignAssetID},
 		"draft_pending_input_audio": {"voice.wav"}, "assistant_enabled": {"true"}, "assistant_draft": {"manual edits"},
@@ -105,7 +129,7 @@ func assertGenerationDraftAPI(t *testing.T, ctx context.Context, db *sql.DB, app
 		t.Fatal("draft was stored in plaintext")
 	}
 	restored := decode(request(userID, http.MethodGet, "/generate/draft", nil, http.StatusOK))
-	if restored.Values["lora_model_strength_1"] != "0.75" || restored.Values["assistant_draft"] != "manual edits" {
+	if restored.Values["parent_job_id"] != "source-job" || restored.Values["lora_model_strength_1"] != "0.75" || restored.Values["assistant_draft"] != "manual edits" {
 		t.Fatalf("restore: %+v", restored)
 	}
 	if decode(request(foreignID, http.MethodGet, "/generate/draft", nil, http.StatusOK)) != nil {

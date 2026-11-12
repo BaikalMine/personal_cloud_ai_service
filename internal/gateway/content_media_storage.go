@@ -96,10 +96,11 @@ func (a *App) materializeContentMedia(ctx context.Context, media domain.ContentM
 		return nil, fmt.Errorf("create media read spool: %w", err)
 	}
 	result = &materializedContentMedia{file: file, path: file.Name(), release: release}
+	spool := result
 	cleanup := true
 	defer func() {
 		if cleanup {
-			_ = result.Close()
+			_ = spool.Close()
 			result = nil
 		}
 	}()
@@ -110,6 +111,10 @@ func (a *App) materializeContentMedia(ctx context.Context, media domain.ContentM
 		plain, err := a.contentCipher.DecryptBytes(media.PayloadCipher)
 		if err != nil {
 			return nil, err
+		}
+		if media.SizeBytes > 0 && int64(len(plain)) != media.SizeBytes {
+			clear(plain)
+			return nil, errors.New("inline media size mismatch")
 		}
 		written, err = io.Copy(file, bytes.NewReader(plain))
 		clear(plain)
@@ -124,7 +129,7 @@ func (a *App) materializeContentMedia(ctx context.Context, media domain.ContentM
 			if err != nil {
 				return fmt.Errorf("decrypt media chunk %d: %w", index, err)
 			}
-			if len(plain) != plainSize {
+			if len(plain) != plainSize || media.SizeBytes > 0 && written+int64(len(plain)) > media.SizeBytes {
 				clear(plain)
 				return fmt.Errorf("media chunk %d contains %d bytes, want %d", index, len(plain), plainSize)
 			}

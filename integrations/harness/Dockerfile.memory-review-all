@@ -1,0 +1,6 @@
+ARG BASE
+FROM ${BASE}
+USER root
+COPY --chown=node:node ui/chat-memory-review*.mjs ui/chat-memory-review-client.js ui/chat-memory-client.js ui/mobile.css /opt/harness/node_modules/@ai-gateway/harness-ui/
+RUN node /opt/harness/node_modules/@ai-gateway/harness-ui/build.mjs
+USER node

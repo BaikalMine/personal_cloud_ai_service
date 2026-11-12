@@ -3,19 +3,23 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"ai-access-gateway/internal/domain"
 	"ai-access-gateway/internal/gateway"
 	"ai-access-gateway/internal/mining"
-	"ai-access-gateway/internal/updates"
 )
 
 func main() {
+	address := flag.String("addr", ":18080", "HTTP listen address for fixture preview")
+	flag.Parse()
 	templates, err := gateway.ParseTemplates()
 	if err != nil {
 		log.Fatal(err)
@@ -145,7 +149,12 @@ func main() {
 	}}
 
 	mux := http.NewServeMux()
-	registerDraftPreview(mux, now)
+	mux.HandleFunc("/generate/jobs/comparison", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"available": false})
+	})
+	registerGenerationRepeatPreview(mux)
+	draftPreview := registerDraftPreview(mux, now)
 	datasets := registerDatasetPreview(mux, now)
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("internal/gateway/static"))))
 	mux.HandleFunc("/preview/studio-result.jpg", func(w http.ResponseWriter, r *http.Request) {
@@ -155,7 +164,15 @@ func main() {
 		w.Header().Set("Content-Type", "image/svg+xml")
 		_, _ = w.Write([]byte(previewSVG))
 	})
-	mux.HandleFunc("/admin/content/media/", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/admin/content/media/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/admin/content/media/42042" || r.URL.Path == "/admin/content/media/42043" {
+			http.ServeFile(w, r, "docs/frontend/prototype/assets/portrait.jpg")
+			return
+		}
+		if r.URL.Path == "/admin/content/media/42044" {
+			http.ServeFile(w, r, "cmd/ui-preview/testdata/task-preview.mp4")
+			return
+		}
 		w.Header().Set("Content-Type", "image/svg+xml")
 		_, _ = w.Write([]byte(previewSVG))
 	})
@@ -163,10 +180,21 @@ func main() {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = w.Write([]byte(`{"name":"preview-input.png","subfolder":"preview"}`))
 	})
-	mux.HandleFunc("/generate/prompt-assistant", func(w http.ResponseWriter, r *http.Request) {
+	var assistantPreviewJobs sync.Map
+	assistantPreview := func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		if r.Method == http.MethodGet {
+			job, ok := assistantPreviewJobs.Load(r.Form.Get("id"))
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(job)
+			return
+		}
 		references := make([]map[string]any, 0, 6)
-		for number := 1; number <= 4; number++ {
+		for number := 1; number <= 9; number++ {
 			field := "input_image"
 			if number > 1 {
 				field = fmt.Sprintf("input_image_%d", number)
@@ -199,12 +227,30 @@ func main() {
 			})
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		result := map[string]any{
 			"prompt":     "Preserve the subject's recognizable facial features and natural skin texture. Replace the jacket with a structured deep-red leather jacket with silver hardware, retain the original waist-up composition, soft directional studio light, neutral background, and realistic editorial photography.",
 			"references": references, "model": "Gemma 4 e4b", "correlation_id": "preview-assistant-01",
 			"usage": map[string]any{"prompt_tokens": 286, "completion_tokens": 174},
-		})
-	})
+		}
+		if r.Form.Has("cfg") {
+			negative := ""
+			if cfg, err := strconv.ParseFloat(r.Form.Get("cfg"), 64); err == nil && cfg > 1 {
+				negative = "blurry, distorted anatomy"
+			}
+			result["negative_prompt"] = negative
+		}
+		if r.URL.Path == "/generate/prompt-assistant/jobs" {
+			id := r.Form.Get("request_id")
+			result["correlation_id"] = id
+			job := map[string]any{"id": id, "state": "completed", "status": "Вариант готов", "context": r.Form.Get("context"), "original": r.Form.Get("prompt"), "original_negative": r.Form.Get("negative_prompt"), "result": result, "expires_at": time.Now().Add(24 * time.Hour).Format(time.RFC3339)}
+			assistantPreviewJobs.Store(id, job)
+			_ = json.NewEncoder(w).Encode(job)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(result)
+	}
+	mux.HandleFunc("/generate/prompt-assistant", assistantPreview)
+	mux.HandleFunc("/generate/prompt-assistant/jobs", assistantPreview)
 	mux.HandleFunc("/generate/prompt-assistant/decision", func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		decision := r.Form.Get("decision")
@@ -215,7 +261,11 @@ func main() {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = w.Write([]byte(`{"name":"gallery-preview.png","subfolder":"preview","type":"input"}`))
 	})
-	mux.HandleFunc("/generate/library/images", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/generate/library/images", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Has("media") {
+			galleryPreviewExactImage(w, r)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(w).Encode(map[string]any{"images": []map[string]any{
 			{"id": 1, "url": "/preview/result.svg", "filename": "AI-Gateway-Krea2-portrait.png", "model_name": "Krea2 Raw INT8 Mixed", "created_unix": now.Add(-8 * time.Minute).UnixMilli(), "expires_unix": now.Add(23*time.Hour + 52*time.Minute).UnixMilli(), "sensitive": false},
@@ -252,6 +302,15 @@ func main() {
 	mux.HandleFunc("/generate/queue", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(w).Encode(map[string]any{"running": 1, "pending": 2, "estimated_wait_seconds": 1260, "average_task_seconds": 420, "current_task": "ComfyUI выполняет генерацию"})
+	})
+	mux.HandleFunc("/generate/capabilities", func(w http.ResponseWriter, _ *http.Request) {
+		catalog, err := gateway.GenerationCapabilitiesForUser(admin)
+		if err != nil {
+			http.Error(w, "invalid preview workflow catalog", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(catalog)
 	})
 	mux.HandleFunc("/generate/jobs/detail", func(w http.ResponseWriter, r *http.Request) {
 		jobID := r.URL.Query().Get("job_id")
@@ -313,14 +372,6 @@ func main() {
 		flusher.Flush()
 		<-r.Context().Done()
 	})
-	mux.HandleFunc("/account/notifications", func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Accept") == "application/json" {
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			_, _ = w.Write([]byte(`{"in_app_enabled":true,"success_enabled":true,"browser_enabled":false}`))
-			return
-		}
-		http.Redirect(w, r, "/preview/profile?notifications_updated=1#notification-settings", http.StatusSeeOther)
-	})
 	mux.HandleFunc("/generate/jobs/cancel", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = w.Write([]byte(`{"cancelled":false,"job":{"message":"Отмена отправлена в ComfyUI"}}`))
@@ -353,14 +404,31 @@ func main() {
 			for key, value := range values {
 				data[key] = value
 			}
+			if name == "admin_dashboard" {
+				data = previewOperationsData(data, r.URL.Query().Get("scenario"))
+			}
+			if name == "generate" && r.URL.Query().Get("assistant_models") != "" {
+				data["PromptAssistantDurableJobs"] = true
+				if r.URL.Query().Get("assistant_models") == "available" {
+					data["PromptAssistantModels"] = []map[string]any{
+						{"ID": "large-text", "Label": "Текстовая модель 31B", "Vision": false},
+						{"ID": "vision", "Label": "Модель с анализом референсов", "Vision": true},
+					}
+				}
+			}
+			if !previewAccessListData(w, r, name, data, now) {
+				return
+			}
 			data["Title"] = title
 			data["ThemePreference"] = gateway.ThemePreference(r)
 			data["NavigationPath"] = map[string]string{
-				"generate": "/generate", "gallery": "/gallery", "lora_training": "/train-lora",
+				"generate": "/generate", "gallery": "/gallery", "lora_training": "/train-lora", "tasks": "/tasks",
 				"admin_dashboard": "/admin", "admin_users": "/admin/users", "admin_user_detail": "/admin/users/2",
 				"admin_invites": "/admin/invites", "admin_content": "/admin/content", "admin_workflows": "/admin/workflows",
 				"admin_lora_training": "/admin/lora-training", "admin_metrics": "/admin/metrics", "admin_storage": "/admin/storage",
 				"admin_updates": "/admin/updates", "admin_mining": "/admin/mining", "admin_audit": "/admin/audit",
+				"admin_release": "/admin/updates", "admin_sessions": "/admin/sessions",
+				"admin_suggestions": "/admin/suggestions", "suggestions": "/suggestions",
 			}[name]
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			if err := templates.ExecuteTemplate(w, name, data); err != nil {
@@ -368,14 +436,15 @@ func main() {
 			}
 		}
 	}
+	registerTaskPreview(mux, render, now, generationJobs, generationBatches)
 	loraProfiles := []map[string]any{
 		{"ID": "krea2-raw-official-bf16", "Family": "krea2", "Name": "Krea 2 Raw Official", "BaseModel": "krea2Raw_v10.safetensors", "Description": "Рекомендуемая база: обучение на Raw, использование LoRA в Krea 2 Turbo или Raw.", "Ready": true},
 		{"ID": "flux2-klein-9b-pornmaster-v4-base", "Family": "flux2-klein", "Name": "Flux.2 Klein 9B PornMaster v4 Base", "BaseModel": "pornmasterFlux2Klein_v4BaseBf16.safetensors", "Description": "Обучаемая base-модель Flux.2 Klein 9B.", "Ready": true},
 	}
 	loraPresets := []map[string]any{
-		{"ID": "quick", "Name": "Пробный", "Description": "800 шагов · rank 16. Быстрая проверка датасета и триггера."},
-		{"ID": "balanced", "Name": "Основной", "Description": "1600 шагов · rank 32. Базовый вариант для большинства задач."},
-		{"ID": "detailed", "Name": "Детальный", "Description": "2800 шагов · rank 32. Для чистого разнообразного датасета."},
+		{"ID": "quick", "Name": "Пробный", "Description": "800 шагов · rank 16. Быстрая проверка датасета и триггера.", "Steps": 800, "NetworkDim": 16, "NetworkAlpha": 16, "LearningRate": 0.0001},
+		{"ID": "balanced", "Name": "Основной", "Description": "1600 шагов · rank 32. Базовый вариант для большинства задач.", "Steps": 1600, "NetworkDim": 32, "NetworkAlpha": 32, "LearningRate": 0.0001},
+		{"ID": "detailed", "Name": "Детальный", "Description": "2800 шагов · rank 32. Для чистого разнообразного датасета.", "Steps": 2800, "NetworkDim": 32, "NetworkAlpha": 32, "LearningRate": 0.00008},
 	}
 	loraJobs := []map[string]any{
 		{
@@ -416,7 +485,7 @@ func main() {
 	})
 	mux.HandleFunc("/api/lora-training/jobs/", func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(r.URL.Path, "/api/lora-training/jobs/")
-		for _, job := range loraAPIJobs {
+		for _, job := range append(datasets.jobs(r), loraAPIJobs...) {
 			if job["id"] == id {
 				copyJob := make(map[string]any, len(job)+1)
 				for key, value := range job {
@@ -432,15 +501,24 @@ func main() {
 		}
 		http.NotFound(w, r)
 	})
-	mux.HandleFunc("/preview/lora-training", render("lora_training", "Обучение LoRA", map[string]any{
+	loraTrainingPage := render("lora_training", "Обучение LoRA", map[string]any{
 		"Profiles": loraProfiles, "ReadyProfiles": 2, "Presets": loraPresets,
 		"Form": map[string]any{"ProfileID": "krea2-raw-official-bf16", "ConceptType": "character", "Preset": "balanced", "Resolution": 768},
 		"Jobs": loraJobs,
-	}))
-	mux.HandleFunc("/preview/admin-lora-training", render("admin_lora_training", "Обучение LoRA", map[string]any{
-		"Profiles": loraProfiles, "ReadyProfiles": 2, "Jobs": loraJobs,
-		"ActiveJobs": 1, "CompletedJobs": 1, "FailedJobs": 0,
-	}))
+	})
+	mux.HandleFunc("/preview/lora-training", loraTrainingPage)
+	loraLibraryPage := render("lora_library", "Мои LoRA", map[string]any{})
+	registerModelLibraryPreview(mux, render)
+	registerLoraLibraryPreview(mux, now)
+	mux.HandleFunc("/preview/lora-library", loraLibraryPage)
+	mux.HandleFunc("GET /train-lora", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Has("dataset") || r.URL.Query().Has("version") || r.URL.Query().Has("run") || r.URL.Query().Get("new") == "1" {
+			loraTrainingPage(w, r)
+			return
+		}
+		loraLibraryPage(w, r)
+	})
+	registerAdminTrainingPreview(mux, render, templates, now, loraProfiles)
 
 	mux.HandleFunc("/preview/app", render("app", "Рабочее пространство", map[string]any{
 		"Services":     []gateway.ServiceStatus{{Name: "ComfyUI", Online: true, Latency: 24 * time.Millisecond, Detail: "Готов"}, {Name: "OpenWebUI", Online: true, Latency: 41 * time.Millisecond, Detail: "Готов"}},
@@ -450,6 +528,13 @@ func main() {
 		"MiningStatus": "",
 	}))
 	mux.HandleFunc("/preview/components", render("ui_components", "Компоненты интерфейса", map[string]any{}))
+	mux.HandleFunc("GET /generate", func(w http.ResponseWriter, r *http.Request) {
+		target := "/preview/generate"
+		if r.URL.RawQuery != "" {
+			target += "?" + r.URL.RawQuery
+		}
+		http.Redirect(w, r, target, http.StatusSeeOther)
+	})
 	mux.HandleFunc("/preview/generate", render("generate", "Быстрая генерация", map[string]any{
 		"Workflows": []map[string]any{
 			{"ID": "text-to-image", "Name": "Текст в изображение", "Description": "Создаёт изображение по вашему описанию.", "RequiresImage": false},
@@ -458,17 +543,31 @@ func main() {
 		},
 		"GenerationPresets": []map[string]any{
 			{"ID": "photoflow-krea2", "TemplateID": "text-to-image", "Name": "PhotoFlow Krea2", "Description": "Двухэтапная генерация с апскейлом и детализацией.", "Family": "krea2", "Available": true, "ModelID": "krea2:test", "ModelCount": 2, "DefaultSteps": 8, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "LoraStrength": 0.8},
+			{"ID": "krea2-ultra", "TemplateID": "text-to-image", "Name": "Krea2 · Ультра качество", "Description": "Экспериментальный профиль Lonecat", "Family": "krea2", "Available": true, "ModelID": "krea2:turbo", "ModelCount": 1, "DefaultSteps": 10, "DefaultCFG": 2, "DefaultSampler": "euler", "DefaultScheduler": "simple", "LoraStrength": 0},
+			{"ID": "krea2-pro", "TemplateID": "text-to-image", "Name": "Krea2 · Ультра качество · полный", "Description": "Полный профиль Lonecat", "Family": "krea2", "Available": true, "ModelID": "krea2:turbo", "ModelCount": 1, "DefaultSteps": 10, "DefaultCFG": 2, "DefaultSampler": "euler", "DefaultScheduler": "simple", "LoraStrength": 0},
 			{"ID": "photoflow-krea2-edit", "TemplateID": "image-to-image", "Name": "Krea 2: редактирование", "Description": "Редактирование первого фото с опциональным вторым референсом.", "Family": "krea2", "Available": true, "ModelID": "krea2:test", "ModelCount": 2, "DefaultSteps": 8, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "LoraStrength": 0.8, "RequiresImage": true, "AllowsImages": true, "MaxInputImages": 2},
 			{"ID": "photoflow-flux2-edit", "TemplateID": "image-to-image", "Name": "Flux2 Редактирование", "Description": "Редактирование основного изображения и до трёх дополнительных референсов.", "Family": "flux2", "Available": true, "ModelID": "flux2:test", "ModelCount": 1, "DefaultSteps": 20, "DefaultCFG": 5, "DefaultSampler": "euler", "DefaultScheduler": "normal", "RequiresImage": true, "AllowsImages": true, "MaxInputImages": 4},
+			{"ID": "qwen-image21", "TemplateID": "text-to-image", "Name": "Qwen Image 2.1", "Description": "Изображение по тексту.", "Family": "qwen21", "Available": true, "ModelID": "qwen21:test", "ModelCount": 1, "DefaultSteps": 25, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple"},
+			{"ID": "moss-image", "TemplateID": "text-to-image", "Name": "MOSS Image", "Description": "Генерация с нуля", "Family": "moss", "Available": true, "ModelID": "moss:test", "ModelCount": 1, "DefaultSteps": 30, "DefaultCFG": 3, "DefaultSampler": "euler", "DefaultScheduler": "simple"},
+			{"ID": "qwen-image21-edit", "TemplateID": "image-to-image", "Name": "Qwen 2.1", "Description": "Изменяет первое фото по инструкции и до девяти референсов.", "Family": "qwen21", "Available": true, "ModelID": "qwen21:test", "ModelCount": 1, "DefaultSteps": 25, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "RequiresImage": true, "AllowsImages": true, "MaxInputImages": 10},
 			{"ID": "minimax-h3-video", "TemplateID": "minimax-h3-video", "Name": "MiniMaxH3 Видео", "Description": "Текст в видео, ключевые кадры или мультимодальные референсы.", "Family": "minimax_h3", "Available": true, "ModelID": "minimax:h3", "ModelCount": 2, "DefaultSteps": 25, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "RequiresImage": false, "AllowsImages": true, "MaxInputImages": 4},
+			{"ID": "aihub-minimax-h3", "TemplateID": "minimax-h3-video", "Name": "AIHUB H3 + Photo Carousel", "Description": "Видео и фотокарусель", "Family": "minimax_h3", "Available": true, "ModelID": "minimax:aihub", "ModelCount": 1, "DefaultSteps": 6, "DefaultCFG": 1, "DefaultSampler": "er_sde", "DefaultScheduler": "beta57", "RequiresImage": false, "AllowsImages": true, "MaxInputImages": 9},
 		},
 		"QuickModels": []map[string]any{
+			{"ID": "moss:test", "DisplayName": "MOSS Image INT8", "Family": "moss", "Available": true, "DefaultSteps": 30, "DefaultCFG": 3, "DefaultSampler": "euler", "DefaultScheduler": "simple"},
+			{"ID": "krea2:turbo", "DisplayName": "Krea2 Turbo FP8", "Family": "krea2", "Available": true, "DefaultSteps": 8, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "LoraStrength": 0},
+			{"ID": "minimax:aihub", "DisplayName": "10Eros Max H3 beta5 INT8", "Family": "minimax_h3", "Available": true, "AIHubOnly": true, "VideoIntegratedTurbo": true, "VideoReferenceOnly": true, "DefaultSteps": 6, "DefaultCFG": 1, "DefaultSampler": "er_sde", "DefaultScheduler": "beta57"},
+			{"ID": "minimax:aihub-regular", "DisplayName": "MiniMax H3 Ref2VA · без Turbo", "Family": "minimax_h3", "Available": true, "AIHubOnly": true, "VideoIntegratedTurbo": false, "VideoReferenceOnly": true, "DefaultSteps": 25, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple"},
 			{"ID": "krea2:test", "DisplayName": "Krea2 / Raw INT8 Mixed", "Family": "krea2", "Available": true, "DefaultSteps": 8, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "LoraStrength": 0.8},
 			{"ID": "flux2:test", "DisplayName": "Flux 2 / Klein 9B", "Family": "flux2", "Available": true, "DefaultSteps": 20, "DefaultCFG": 5, "DefaultSampler": "euler", "DefaultScheduler": "flux2"},
+			{"ID": "qwen21:test", "DisplayName": "Qwen Image 2.1 INT8", "Family": "qwen21", "Available": true, "DefaultSteps": 25, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple"},
 			{"ID": "minimax:h3", "DisplayName": "MiniMax H3 v5 · FL2VA + REF2VA", "Family": "minimax_h3", "Available": true, "DefaultSteps": 25, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "DefaultVideoShift": 11, "DefaultAudioShift": 3},
 			{"ID": "minimax:eros", "DisplayName": "H3 Eros Max beta4 · встроенный Turbo", "Family": "minimax_h3", "Available": true, "VideoIntegratedTurbo": true, "VideoReferenceOnly": true, "DefaultSteps": 8, "DefaultCFG": 1, "DefaultSampler": "euler", "DefaultScheduler": "simple", "DefaultVideoShift": 12, "DefaultAudioShift": 7},
 		},
+		"MossLoraSlots":  []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+		"MossLoraGroups": []map[string]any{{"Name": "MOSS Image", "Loras": []map[string]any{{"Name": "MOSSImage/ceramic-style.safetensors", "DisplayName": "Ceramic Style", "DefaultStrength": 1}}}},
 		"LoraGroups": []map[string]any{
+			{"Name": "Обученные LoRA", "Loras": []map[string]any{{"Name": "Trained/Krea2/preview/ceramic-study.safetensors", "DisplayName": "Ceramic Study (демо)", "DefaultStrength": 1.0}}},
 			{"Name": "Базовые Krea2", "Loras": []map[string]any{{"Name": "lenovo_krea2.safetensors", "DisplayName": "Lenovo Krea2", "DefaultStrength": 0.8, "Default": true}, {"Name": "krea2_turbo.safetensors", "DisplayName": "Krea2 Turbo", "DefaultStrength": 1.0}}},
 			{"Name": "Реализм и детали", "Loras": []map[string]any{{"Name": "Krea2-realism-V2.safetensors", "DisplayName": "Krea2 Realism V2", "DefaultStrength": 1.0}, {"Name": "Detailer-KREA2.safetensors", "DisplayName": "Detailer Krea2", "DefaultStrength": 2.0}}},
 			{"Name": "Стили", "Loras": []map[string]any{{"Name": "AltGirlKreaV1.5.safetensors", "DisplayName": "AltGirl Krea", "DefaultStrength": 1.0}}},
@@ -514,43 +613,19 @@ func main() {
 		{"VariantID": int64(104), "TemplateID": "minimax-h3-video", "WorkflowID": "minimax-h3-video", "WorkflowName": "MiniMax H3 · видео", "Scenario": "Видео", "ModelName": "MiniMax H3 FL2VA", "Prompt": "Камера медленно приближается, волосы и ткань естественно движутся от лёгкого ветра.", "Seed": int64(45876641139403), "State": "completed", "CreatedAt": now.Add(-95 * time.Minute), "HasMedia": true, "CompareCount": 1, "Media": map[string]any{"ID": int64(5), "URL": "/preview/result.svg", "Filename": "AI-Gateway-MiniMaxH3-video.mp4", "MediaType": "video", "SizeBytes": int64(94 << 20), "ExpiresUnix": now.Add(22*time.Hour + 25*time.Minute).UnixMilli(), "Sensitive": false, "Pinned": false, "Favorite": false, "Tags": []string{"камера", "движение"}, "Collections": []domain.GenerationMediaCollection{galleryCollections[1]}, "GenerationJobPublicID": "gen_01HZYC11"}},
 		{"VariantID": int64(105), "TemplateID": "image-to-image", "WorkflowID": "photoflow-krea2-edit", "WorkflowName": "Krea2 · фото и промт", "Scenario": "Фото и промт", "ModelName": "Krea2 Edit", "Prompt": "Сохранить объект и заменить фон.", "Seed": int64(90144), "State": "failed", "ErrorMessage": "ComfyUI отклонил входные параметры workflow.", "CreatedAt": now.Add(-110 * time.Minute), "HasMedia": false, "CompareCount": 0},
 	}
-	mux.HandleFunc("/preview/gallery", render("gallery", "Моя галерея", map[string]any{"Items": galleryItems, "Collections": galleryCollections, "ImageCount": 4, "VideoCount": 1, "PinnedCount": 1, "FavoriteCount": 2, "ErrorCount": 1, "CanUseImageToImage": true, "CanUseMiniMaxVideo": true, "CanReuseImages": true}))
-	mux.HandleFunc("/preview/gallery-empty", render("gallery", "Моя галерея", map[string]any{"Items": []map[string]any{}, "Collections": []domain.GenerationMediaCollection{}, "ImageCount": 0, "VideoCount": 0, "PinnedCount": 0, "FavoriteCount": 0, "ErrorCount": 0, "CanUseImageToImage": true, "CanUseMiniMaxVideo": true, "CanReuseImages": true}))
-	mux.HandleFunc("/preview/login", render("login", "Вход", map[string]any{"CurrentUser": nil, "Next": ""}))
-	mux.HandleFunc("/preview/profile", render("account_profile", "Профиль", map[string]any{
-		"ProfileUsername": "admin", "ProfileEmail": "admin@example.local", "CanChangeUsername": true,
-		"NotificationPreferences": domain.UserNotificationPreferences{InAppEnabled: true, SuccessEnabled: true, BrowserEnabled: false},
-	}))
-	mux.HandleFunc("/account/profile", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/preview/profile", http.StatusFound)
-	})
-	mux.HandleFunc("/preview/password", render("account_password", "Смена пароля", map[string]any{}))
-	mux.HandleFunc("/preview/admin-password", render("account_password", "Смена пароля", map[string]any{"AdminWorkspace": true}))
-	accountSessions := []domain.AccountSession{
-		{ID: 71, Current: true, IP: "192.168.1.86", UserAgent: "Chrome 139 · Windows 11", CreatedAt: now.Add(-8 * time.Hour), LastSeenAt: now.Add(-time.Minute), ExpiresAt: now.Add(22 * time.Hour)},
-		{ID: 68, IP: "192.168.1.24", UserAgent: "Chrome Mobile · Android 15 with a deliberately long device description", CreatedAt: now.Add(-36 * time.Hour), LastSeenAt: now.Add(-3 * time.Hour), ExpiresAt: now.Add(12 * time.Hour)},
+	for index, item := range galleryItems {
+		item["JobID"] = fmt.Sprintf("gallery-preview-job-%03d", index)
 	}
-	mux.HandleFunc("/preview/account-sessions", render("account_sessions", "Активные сессии", map[string]any{"Sessions": accountSessions}))
-	mux.HandleFunc("/preview/invite", render("invite", "Создание аккаунта", map[string]any{
-		"CurrentUser": nil,
-		"Invalid":     false,
-		"Token":       "preview",
-		"Access": domain.InviteAccess{
-			GrantComfyUI:                    true,
-			GrantOpenWebUI:                  true,
-			GrantQuickGeneration:            true,
-			GrantTextToImage:                true,
-			GrantVideo:                      true,
-			GrantAdvancedGenerationSettings: true,
-			PauseMiningForQuickGeneration:   true,
-			QueuePriority:                   true,
-			GenerationDailyLimit:            12,
-			GenerationTotalLimit:            50,
-			VideoGenerationDailyLimit:       2,
-			VideoGenerationTotalLimit:       8,
-			MaxVideoGenerationQuality:       720,
-		},
-	}))
+	registerGalleryPreview(mux, galleryItems)
+	registerPostprocessPreview(mux, render, galleryItems, now)
+	mux.HandleFunc("/preview/gallery", func(w http.ResponseWriter, r *http.Request) {
+		render("gallery", "Моя галерея", map[string]any{"Items": galleryItems, "Collections": draftPreview.collectionList(w, r), "ImageCount": 4, "VideoCount": 1, "PinnedCount": 1, "FavoriteCount": 2, "ErrorCount": 1, "CanUseImageToImage": true, "CanUseMiniMaxVideo": true, "CanReuseImages": true, "CanTrainImageLora": true})(w, r)
+	})
+	mux.HandleFunc("/preview/gallery-empty", func(w http.ResponseWriter, r *http.Request) {
+		render("gallery", "Моя галерея", map[string]any{"Items": []map[string]any{}, "Collections": draftPreview.collectionList(w, r), "ImageCount": 0, "VideoCount": 0, "PinnedCount": 0, "FavoriteCount": 0, "ErrorCount": 0, "CanUseImageToImage": true, "CanUseMiniMaxVideo": true, "CanReuseImages": true, "CanTrainImageLora": true})(w, r)
+	})
+	registerAuthPagesPreview(mux, render, now)
+	registerAccountPagesPreview(mux, render, now)
 	hostHistory := []domain.HostMetric{
 		{RecordedAt: now.Add(-23 * time.Hour), CPUPercent: 24, MemoryUsedBytes: 23 << 30, MemoryTotalBytes: 64 << 30, GPUAvailable: true, GPUName: "NVIDIA GeForce RTX", GPUPercent: 8, GPUMemoryUsedBytes: 5 << 30, GPUMemoryTotalBytes: 24 << 30},
 		{RecordedAt: now.Add(-18 * time.Hour), CPUPercent: 32, MemoryUsedBytes: 25 << 30, MemoryTotalBytes: 64 << 30, GPUAvailable: true, GPUName: "NVIDIA GeForce RTX", GPUPercent: 27, GPUMemoryUsedBytes: 9 << 30, GPUMemoryTotalBytes: 24 << 30},
@@ -605,6 +680,12 @@ func main() {
 	backgroundWorkers := append([]gateway.MaintenanceWorkerState{}, workers[:3]...)
 	backgroundWorkers = append(backgroundWorkers, workers[4:]...)
 	operations := map[string]any{
+		"GPU": []map[string]any{
+			{"Kind": "generation", "Title": "Генерация", "Running": 1, "Reserved": 0, "Waiting": 2, "Unconfirmed": 0, "Paused": 0},
+			{"Kind": "lora_training", "Title": "Обучение LoRA", "Running": 0, "Reserved": 0, "Waiting": 1, "Unconfirmed": 0, "Paused": 0},
+			{"Kind": "lora_caption", "Title": "Описание кадров", "Running": 0, "Reserved": 0, "Waiting": 5, "Unconfirmed": 0, "Paused": 0},
+			{"Kind": "prompt_assistant", "Title": "Промпт-ассистент", "Running": 0, "Reserved": 0, "Waiting": 1, "Unconfirmed": 0, "Paused": 1},
+		},
 		"GeneratedAt": now, "OverallState": "critical", "OverallLabel": "Нужно вмешательство", "OverallDetail": "Критичных состояний: 2; предупреждений: 3",
 		"Attention": []map[string]any{
 			{"Key": "overdue-jobs", "Severity": "critical", "Title": "Задания не меняют состояние", "Detail": "Откройте трассу и проверьте последний завершённый этап.", "Count": 1, "Href": "#active-jobs", "Action": "К заданиям"},
@@ -629,7 +710,7 @@ func main() {
 		},
 		"Failures": operationsFailures, "ProblemWorkers": []gateway.MaintenanceWorkerState{workers[3]}, "BackgroundWorkers": backgroundWorkers,
 	}
-	mux.HandleFunc("/preview/admin", render("admin_dashboard", "Обзор системы", map[string]any{
+	operationsData := map[string]any{
 		"System": gateway.SystemOverview{
 			DatabaseBytes: 184 << 20,
 			OnlineUsers: []domain.OnlineUser{
@@ -653,7 +734,23 @@ func main() {
 			Trend:            chart,
 		},
 		"Operations": operations,
-	}))
+	}
+	mux.HandleFunc("/preview/admin", render("admin_dashboard", "Операции", operationsData))
+	mux.HandleFunc("/admin/operations/overview", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		data := previewOperationsData(operationsData, r.URL.Query().Get("scenario"))
+		var fragment strings.Builder
+		if err := templates.ExecuteTemplate(&fragment, "admin_operations_snapshot", data); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(map[string]any{"snapshot_html": fragment.String(), "system": data["System"]})
+	})
 	serviceStats := []domain.ServiceUsage{{Service: "comfyui", Requests: 516, Users: 3, Bytes: 6400000000, Errors: 2}, {Service: "openwebui", Requests: 308, Users: 3, Bytes: 18400000, Errors: 1}}
 	observability := map[string]any{
 		"Generation": domain.GenerationObservabilitySummary{ActiveJobs: 2, OverdueJobs: 1, Completed: 18, Failed: 2, Cancelled: 1, SuccessRate: 90, QueueP50MS: 13800, QueueP95MS: 64200, ExecutionP50MS: 186000, ExecutionP95MS: 1274000, ObservationHours: 24},
@@ -686,11 +783,7 @@ func main() {
 		"GeneratedAt":    now,
 		"OverdueAfter":   45 * time.Minute,
 	}
-	mux.HandleFunc("/preview/metrics", render("admin_metrics", "Наблюдаемость", map[string]any{
-		"Stats":         domain.AdminStats{RequestsToday: 147, Requests7Days: 824, ActiveWebSockets: 2, ErrorRate: "0,8%", Trend: chart},
-		"ServiceStats":  serviceStats,
-		"Observability": observability,
-	}))
+	registerMetricsPreview(mux, render, now, observability, serviceStats)
 	traceJob := domain.GenerationJob{ID: 41, PublicID: "job-preview-minimax-000001", CorrelationID: "correlation-preview-minimax-000001", UsernameSnapshot: "rayka", RequestID: "request-preview-minimax-000001", PromptID: "9a0b0e16-67b2-46c2-ae10-dc09901bb919", TemplateID: "minimax-h3-video", WorkflowID: "minimax-h3-video-v4", ModelName: "MiniMax_H3_FL2VA_pruned_int8", Seed: 3950205217521, State: domain.GenerationJobFailed, StatusMessage: "ComfyUI завершил генерацию с ошибкой", ErrorCode: "comfy_execution_failed", ErrorMessage: "RTXVideoSuperResolution: отсутствует обязательный параметр resize_type", Attempt: 1, InputCount: 2, CreatedAt: now.Add(-58 * time.Minute), StateChangedAt: now.Add(-37 * time.Minute), FinishedAt: timePointer(now.Add(-37 * time.Minute))}
 	trace := domain.GenerationJobTrace{
 		Job: traceJob,
@@ -736,38 +829,22 @@ func main() {
 			},
 		},
 	}))
+	registerStoragePreview(mux, now)
 	serviceAnalytics := domain.ServiceAnalytics{
 		Service: "comfyui", DisplayName: "ComfyUI", Requests: 516, Users: 3, Bytes: 6400000000, Errors: 2, AverageDuration: 1160, ActiveWebSockets: 2,
 		Trend: []domain.ServiceTrendPoint{{Label: "Сегодня", Requests: 84, Users: 3, Errors: 1, Bytes: 1600000000, RequestPercent: 100}, {Label: "Вчера", Requests: 61, Users: 3, Bytes: 1200000000, RequestPercent: 73}, {Label: "10 июл", Requests: 46, Users: 2, Errors: 1, Bytes: 920000000, RequestPercent: 55}},
 	}
-	mux.HandleFunc("/preview/service", render("admin_service", "ComfyUI", map[string]any{"Analytics": serviceAnalytics}))
-	mux.HandleFunc("/preview/mining", render("admin_mining", "Управление майнингом", map[string]any{"Mining": miningOverview, "Error": "", "Status": ""}))
-	mux.HandleFunc("/preview/updates", render("admin_updates", "Обновления", map[string]any{
-		"Updates": updates.Status{Available: true, Components: []updates.ComponentStatus{
-			{Name: updates.ComponentGateway, DisplayName: "AI Access Gateway", Configured: true, CurrentVersion: "16278624f83b", LatestVersion: "16278624f83b"},
-			{Name: updates.ComponentComfyUI, DisplayName: "ComfyUI", Configured: true, CurrentVersion: "9a9fdb10ed14", LatestVersion: "9a9fdb10ed14"},
-			{Name: updates.ComponentOpenWebUI, DisplayName: "Open WebUI", Configured: true, CurrentVersion: "v0.9.5", LatestVersion: "v0.11.0", UpdateAvailable: true, CanInstall: true},
-		}},
-		"Overview": gateway.UpdateOverview{Available: 1, Current: 2},
-		"Message":  "",
-	}))
-	mux.HandleFunc("/preview/workflows", render("admin_workflows", "Совместимость workflow", map[string]any{
-		"Report": map[string]any{
-			"Snapshot":    map[string]any{"FetchedAt": now.Add(-2 * time.Minute)},
-			"SourceLabel": "свежий каталог ComfyUI",
-			"Fingerprint": "c42b3f9a7d81",
-			"NodeCount":   418,
-			"Compatible":  7,
-			"Failed":      1,
-			"Unavailable": 1,
-			"Results": []map[string]any{
-				{"Status": "error", "Scenario": "Полная обработка видео", "Family": "MiniMax H3 v5", "Description": "RIFE, RTX, ColorMatch и Sharpen", "Model": "MiniMax H3 FL2VA INT8 ConvRot", "NodeCount": 31, "Issues": []map[string]any{{"Label": "Финальный апскейл", "Message": "У ноды отсутствует обязательный параметр resize_type.", "ClassType": "RTXVideoSuperResolution", "InputName": "resize_type"}}},
-				{"Status": "unavailable", "Scenario": "Готовность модели", "Family": "Flux2", "Description": "Модель отсутствует в установленном ComfyUI", "Model": "Flux 2 Klein 9B", "NodeCount": 0, "Issues": []map[string]any{{"Label": "Зависимости модели", "Message": "Checkpoint не найден в каталоге diffusion_models."}}},
-				{"Status": "ok", "Scenario": "Первый и последний кадр", "Family": "MiniMax H3 v5", "Description": "FL2VA с двумя точными кадрами", "Model": "MiniMax H3 FL2VA INT8 ConvRot", "NodeCount": 24, "Issues": []map[string]any{}},
-			},
-		},
-		"Message": "",
-	}))
+	registerResourcesPreview(mux, render, templates, now, serviceAnalytics)
+	registerUpdatesPreview(mux, render, now)
+	release := previewReleaseSnapshot(now)
+	mux.HandleFunc("/preview/release", render("admin_release", "Версии и совместимость", map[string]any{"Release": release}))
+	mux.HandleFunc("/admin/release", render("admin_release", "Версии и совместимость", map[string]any{"Release": release}))
+	mux.HandleFunc("/admin/release/status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", `attachment; filename="gateway-builds.json"`)
+		_ = json.NewEncoder(w).Encode(release)
+	})
+	registerWorkflowPreview(mux, render, now)
 	users := []domain.UserRow{
 		{ID: 1, Username: "admin", Email: "admin@example.local", Role: "admin", CanUseComfyUI: true, CanUseOpenWebUI: true, Requests: 96, LastLoginAt: sql.NullTime{Time: now.Add(-time.Hour), Valid: true}},
 		{ID: 2, Username: "rayka", Email: "rayka@example.local", Role: "user", CanUseComfyUI: true, CanUseOpenWebUI: true, CanUseQuickGeneration: true, CanGenerateTextToImage: true, CanGenerateVideo: true, CanUseAdvancedGenerationSettings: true, PauseMiningForQuickGeneration: true, QueuePriority: true, GenerationDailyLimit: 12, GenerationTotalLimit: 50, GenerationTotalUsed: 17, VideoGenerationDailyLimit: 2, VideoGenerationTotalLimit: 8, VideoGenerationTotalUsed: 3, MaxVideoGenerationQuality: 720, Requests: 302, LastLoginAt: sql.NullTime{Time: now.Add(-8 * time.Minute), Valid: true}, AccountExpiresAt: sql.NullTime{Time: now.Add(5*time.Hour + 43*time.Minute + 18*time.Second), Valid: true}},
@@ -775,27 +852,17 @@ func main() {
 		{ID: 4, Username: "disabled-user-with-long-name", Email: "long.address@example.local", Role: "user", Disabled: true, CanUseComfyUI: true, Requests: 4, AccountExpiresAt: sql.NullTime{Time: now.Add(-2 * time.Minute), Valid: true}},
 	}
 	mux.HandleFunc("/preview/users", render("admin_users", "Пользователи", map[string]any{"Users": users, "Query": ""}))
-	adminSessions := []domain.SessionRow{
-		{ID: 71, Username: "admin", IP: "192.168.1.86", UserAgent: "Chrome 139 · Windows 11", CreatedAt: now.Add(-8 * time.Hour), LastSeenAt: now.Add(-time.Minute), ExpiresAt: now.Add(22 * time.Hour)},
-		{ID: 68, Username: "rayka", IP: "192.168.1.24", UserAgent: "Chrome Mobile · Android 15 with a deliberately long device description", CreatedAt: now.Add(-36 * time.Hour), LastSeenAt: now.Add(-3 * time.Hour), ExpiresAt: now.Add(12 * time.Hour)},
-	}
-	mux.HandleFunc("/preview/admin-sessions", render("admin_sessions", "Активные сессии", map[string]any{"Sessions": adminSessions}))
-	audits := []domain.AuditRow{
-		{ID: 15, Actor: "admin", Action: "user_service_access_updated", TargetType: "user", TargetID: sql.NullInt64{Int64: 2, Valid: true}, IP: "192.168.1.86", CreatedAt: now.Add(-4 * time.Minute), Metadata: `{"quick_generation":true,"video":true}`},
-		{ID: 14, Action: "temporary_users_cleanup", TargetType: "system", IP: "127.0.0.1", CreatedAt: now.Add(-2 * time.Hour), Metadata: `{"deleted":2}`},
-	}
-	mux.HandleFunc("/preview/audit", render("admin_audit", "Журнал аудита", map[string]any{"Audits": audits}))
+	mux.HandleFunc("/admin/users", render("admin_users", "Пользователи", map[string]any{"Users": previewLongAccessUsers(now)}))
+	registerSecurityListsPreview(mux, render, now)
 	invites := []domain.InviteRow{
 		{ID: 48, CreatedBy: "admin", MaxUses: 1, ExpiresAt: now.Add(48 * time.Hour), GrantQuickGeneration: true, GrantTextToImage: true, GrantVideo: true, GrantAdvancedGenerationSettings: true, PauseMiningForQuickGeneration: true, QueuePriority: true, GenerationDailyLimit: 12, GenerationTotalLimit: 50, VideoGenerationDailyLimit: 2, VideoGenerationTotalLimit: 8, MaxVideoGenerationQuality: 720, Status: "active", CreatedAt: now.Add(-time.Hour)},
 		{ID: 47, CreatedBy: "admin", MaxUses: 3, UsedCount: 1, ExpiresAt: now.Add(24 * time.Hour), Revoked: true, GrantOpenWebUI: true, Status: "revoked", CreatedAt: now.Add(-4 * time.Hour)},
 		{ID: 46, CreatedBy: "admin", MaxUses: 1, UsedCount: 1, ExpiresAt: now.Add(-24 * time.Hour), GrantComfyUI: true, Status: "used", CreatedAt: now.Add(-72 * time.Hour)},
 	}
 	mux.HandleFunc("/preview/invites", render("admin_invites", "Invites UI preview", map[string]any{"Invites": invites, "InviteLink": "https://ai.example.test/invite/preview-token"}))
+	registerInviteTemplatesPreview(mux, render, previewLongAccessInvites(now))
 	profile := domain.User{ID: 2, Username: "rayka", Email: sql.NullString{String: "rayka@example.local", Valid: true}, Role: "user", CanUseComfyUI: true, CanUseOpenWebUI: true, CanUseQuickGeneration: true, CanGenerateTextToImage: true, CanGenerateVideo: true, CanUseAdvancedGenerationSettings: true, PauseMiningForQuickGeneration: true, QueuePriority: true, GenerationDailyLimit: 12, GenerationTotalLimit: 50, GenerationTotalUsed: 17, VideoGenerationDailyLimit: 2, VideoGenerationTotalLimit: 8, VideoGenerationTotalUsed: 3, MaxVideoGenerationQuality: 720, CreatedAt: now.Add(-720 * time.Hour), LastLoginAt: sql.NullTime{Time: now.Add(-8 * time.Minute), Valid: true}, AccountExpiresAt: sql.NullTime{Time: now.Add(5*time.Hour + 43*time.Minute + 18*time.Second), Valid: true}}
-	mux.HandleFunc("/preview/user", render("admin_user_detail", "Пользователь rayka", map[string]any{
-		"Profile": profile, "Stats": domain.UserStats{TotalRequests: 302, TotalBytesOut: 4200000000, LastService: "ComfyUI", Chart: chart, ByService: []domain.ServiceUsage{{Service: "comfyui", Requests: 210, Bytes: 4100000000, Errors: 1}, {Service: "openwebui", Requests: 92, Bytes: 8700000}}}, "Activities": activities,
-		"PasswordStatus": "", "AccessStatus": "", "SecurityStatus": "", "AccountLocked": false,
-	}))
+	registerUserProfilePreview(mux, render, profile, domain.UserStats{TotalRequests: 302, TotalBytesOut: 4200000000, LastService: "ComfyUI", Chart: chart, ByService: []domain.ServiceUsage{{Service: "comfyui", Requests: 210, Bytes: 4100000000, Errors: 1}, {Service: "openwebui", Requests: 92, Bytes: 8700000}}}, now)
 	mux.HandleFunc("/admin/content/events", func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		if !ok {
@@ -808,29 +875,24 @@ func main() {
 		flusher.Flush()
 		<-r.Context().Done()
 	})
-	mux.HandleFunc("/preview/content", render("admin_content", "AI-контент", map[string]any{
+	registerAdminContentPreview(mux, render, map[string]any{
 		"Username": "", "Service": "", "Query": "",
 		"ContentRevision": int64(45),
 		"Overview":        gateway.ContentOverview{Total: 28, ComfyUI: 11, OpenWebUI: 17, WithMedia: 6},
 		"RetentionStats":  domain.ContentRetentionStats{EventCount: 28, MediaCount: 6, MediaBytes: 2480000 * 6, NextMediaExpiry: timePointer(now.Add(18 * time.Hour)), NextEventExpiry: timePointer(now.Add(6 * 24 * time.Hour))},
 		"Events": []gateway.ContentEventView{
-			{ID: 3, Key: "job-preview-krea", Version: "45-krea", UserID: 2, Username: "rayka", GenerationJobID: int64Pointer(303), JobID: "job-preview-krea", RequestID: "request-preview-krea", CorrelationID: "trace_preview_krea_1234", Service: "comfyui", Kind: "generation_task", Model: "Krea2 / Raw INT8 Mixed", Prompt: "Editorial portrait of a woman holding a perfume bottle in a bright studio.", Metadata: `{"seed":284797972294826,"megapixels":1.9}`, Assistant: &gateway.ContentAssistantView{Applied: true, Template: "photographic", Model: "qwen3-vl-e4b", OriginalPrompt: "Девушка показывает флакон духов", Suggestion: "Create an editorial portrait of a woman naturally presenting a premium perfume bottle."}, GenerationState: "completed", JobState: "completed", StateLabel: "Готово", StateClass: "is-complete", StatusMessage: "Задание завершено", Stages: previewContentStages(now.Add(-6*time.Minute), false), MediaCount: 1, Media: []domain.ContentMediaSummary{{ID: 42, EventID: 3, MediaType: "image", UpdatedAt: now.Add(-5 * time.Minute)}}, CreatedAt: now.Add(-6 * time.Minute), UpdatedAt: now.Add(-5 * time.Minute), ExpiresAt: now.Add(7 * 24 * time.Hour)},
-			{ID: 2, Key: "job-preview-flux", Version: "45-flux", UserID: 2, Username: "rayka", GenerationJobID: int64Pointer(302), JobID: "job-preview-flux", Service: "comfyui", Kind: "generation_task", Model: "Flux 2 / Klein 9B", Prompt: "Adult editorial portrait used to verify sensitive-content masking.", Metadata: `{"seed":1019794942414480}`, GenerationState: "completed", JobState: "completed", StateLabel: "Готово", StateClass: "is-complete", Sensitive: true, MediaCount: 1, Media: []domain.ContentMediaSummary{{ID: 43, EventID: 2, MediaType: "image", UpdatedAt: now.Add(-7 * time.Minute)}}, CreatedAt: now.Add(-8 * time.Minute), UpdatedAt: now.Add(-7 * time.Minute), ExpiresAt: now.Add(7 * 24 * time.Hour)},
+			{ID: 3, Key: "job-preview-krea", Version: "45-krea", UserID: 2, Username: "rayka", GenerationJobID: int64Pointer(303), JobID: "job-preview-krea", RequestID: "request-preview-krea", CorrelationID: "trace_preview_krea_1234", Service: "comfyui", Kind: "generation_task", Model: "Krea2 / Raw INT8 Mixed", Prompt: "Editorial portrait of a woman holding a perfume bottle in a bright studio.", Metadata: `{"seed":284797972294826,"megapixels":1.9}`, Assistant: &gateway.ContentAssistantView{Applied: true, Template: "photographic", Model: "qwen3-vl-e4b", OriginalPrompt: "Девушка показывает флакон духов", Suggestion: "Create an editorial portrait of a woman naturally presenting a premium perfume bottle."}, GenerationState: "completed", JobState: "completed", StateLabel: "Готово", StateClass: "is-complete", StatusMessage: "Задание завершено", Stages: previewContentStages(now.Add(-6*time.Minute), false), MediaCount: 1, Media: []domain.ContentMediaSummary{{ID: 42042, EventID: 3, MediaType: "image", UpdatedAt: now.Add(-5 * time.Minute)}}, CreatedAt: now.Add(-6 * time.Minute), UpdatedAt: now.Add(-5 * time.Minute), ExpiresAt: now.Add(7 * 24 * time.Hour)},
+			{ID: 2, Key: "job-preview-flux", Version: "45-flux", UserID: 2, Username: "rayka", GenerationJobID: int64Pointer(302), JobID: "job-preview-flux", Service: "comfyui", Kind: "generation_task", Model: "Flux 2 / Klein 9B", Prompt: "Adult editorial portrait used to verify sensitive-content masking.", Metadata: `{"seed":1019794942414480}`, GenerationState: "completed", JobState: "completed", StateLabel: "Готово", StateClass: "is-complete", Sensitive: true, MediaCount: 1, Media: []domain.ContentMediaSummary{{ID: 42043, EventID: 2, MediaType: "image", UpdatedAt: now.Add(-7 * time.Minute)}}, CreatedAt: now.Add(-8 * time.Minute), UpdatedAt: now.Add(-7 * time.Minute), ExpiresAt: now.Add(7 * 24 * time.Hour)},
 			{ID: 1, Key: "job-preview-error", Version: "45-error", UserID: 2, Username: "rayka", GenerationJobID: int64Pointer(301), JobID: "job-preview-error", Service: "comfyui", Kind: "generation_task", Model: "Krea2 / Raw INT8 Mixed", Prompt: "A detailed fashion portrait with dramatic lighting.", Metadata: `{"seed":45876641139403}`, GenerationState: "error", JobState: "failed", StateLabel: "Ошибка", StateClass: "is-error", StatusMessage: "ComfyUI отклонил workflow", ErrorCode: "comfy_submission_failed", ErrorMessage: "Выбранная модель больше не доступна в ComfyUI", Stages: previewContentStages(now.Add(-10*time.Minute), true), CreatedAt: now.Add(-10 * time.Minute), UpdatedAt: now.Add(-9 * time.Minute), ExpiresAt: now.Add(7 * 24 * time.Hour)},
 			{ID: 4, Key: "event-4", Version: "45-archived", Username: "old-user", AuthorDeleted: true, Service: "comfyui", Kind: "comfyui_prompt", Model: "Krea2 / Raw INT8 Mixed", Prompt: "Archived generation with parameters retained for review.", Metadata: `{"seed":8675309}`, GenerationState: "completed", StateLabel: "Готово", StateClass: "is-complete", GeneratedMediaCount: 1, MediaExpired: true, MediaExpiresAt: now.Add(-2 * time.Hour), CreatedAt: now.Add(-26 * time.Hour), UpdatedAt: now.Add(-2 * time.Hour), ExpiresAt: now.Add(6 * 24 * time.Hour)},
 		},
-	}))
+	}, now)
 	mux.HandleFunc("/preview/media", render("admin_media_viewer", "Просмотр результата", map[string]any{"Filename": "AI-Gateway-preview-result.png", "MediaID": int64(42), "MediaType": "image"}))
 	previewUserSuggestions := []map[string]any{
 		{"ID": int64(12), "KindLabel": "Workflow", "Title": "Портретный workflow с несколькими референсами", "Description": "Нужен готовый путь для переноса одежды и фона из отдельных изображений.", "Status": "draft", "StatusLabel": "Черновик", "StatusClass": "neutral", "StatusHint": "Можно продолжить редактирование и отправить позже.", "AttachmentCount": 1, "CanEdit": true, "UpdatedAt": now.Add(-18 * time.Minute)},
 		{"ID": int64(11), "KindLabel": "LoRA", "Title": "LoRA для естественного движения ткани", "Description": "Адаптер для MiniMax H3 с более спокойным движением волос и одежды.", "Status": "scanning", "StatusLabel": "Проверяется", "StatusClass": "info", "StatusHint": "Проверяем приложенные ссылки и JSON.", "AttachmentCount": 2, "UpdatedAt": now.Add(-2 * time.Hour)},
 		{"ID": int64(8), "KindLabel": "Модель", "Title": "Модель для предметной съёмки", "Description": "Нужна модель для каталожных кадров небольших объектов.", "Status": "accepted", "StatusLabel": "Принято", "StatusClass": "ok", "StatusHint": "Предложение принято в работу без автоматической установки.", "AttachmentCount": 0, "ReviewComment": "Добавили в список на тестирование качества.", "UpdatedAt": now.Add(-26 * time.Hour)},
 	}
-	mux.HandleFunc("/preview/suggestions", render("suggestions", "Предложения", map[string]any{
-		"VirusTotalConfigured": true,
-		"Form":                 map[string]any{"ID": int64(0), "Kind": "workflow", "Title": "", "Description": "", "Links": "", "JSONName": "", "JSONSize": int64(0)},
-		"Suggestions":          previewUserSuggestions,
-	}))
 	previewSuggestions := []map[string]any{
 		{
 			"ID": int64(9), "Username": "rayka", "KindLabel": "LoRA", "Title": "Новая LoRA для портретного движения", "Description": "Добавить адаптер для более естественного движения волос и ткани.", "Status": "review", "StatusLabel": "На рассмотрении", "StatusClass": "warning", "CreatedAt": now.Add(-5 * time.Hour),
@@ -847,13 +909,11 @@ func main() {
 			"ID": int64(7), "Username": "old-user", "AuthorDeleted": true, "KindLabel": "Другое", "Title": "Добавить готовый профиль света", "Description": "Текстовое предложение без вложений: администратор видит только это описание.", "Status": "accepted", "StatusLabel": "Принято", "StatusClass": "ok", "CreatedAt": now.Add(-48 * time.Hour), "AttachmentCount": 0, "ScanStatusLabel": "Без вложений", "ReviewComment": "Принято в список продуктовых улучшений.", "ReviewedByUsername": "admin", "ReviewedAt": timePointer(now.Add(-36 * time.Hour)),
 		},
 	}
-	mux.HandleFunc("/preview/admin-suggestions", render("admin_suggestions", "Предложения", map[string]any{"VirusTotalConfigured": true, "PublicIntakeEnabled": false, "Suggestions": previewSuggestions}))
-	mux.HandleFunc("/preview/bad-gateway", render("bad_gateway", "Сервис недоступен", map[string]any{"Service": "ComfyUI"}))
-	mux.HandleFunc("/preview/forbidden", render("service_forbidden", "Доступ запрещён", map[string]any{"Service": "ComfyUI"}))
+	registerSuggestionsPreview(mux, render, previewUserSuggestions, previewSuggestions)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/preview/admin", http.StatusFound) })
 
-	log.Println("UI preview listening on http://0.0.0.0:18080")
-	log.Fatal(http.ListenAndServe(":18080", mux))
+	log.Printf("UI preview listening on %s", *address)
+	log.Fatal(http.ListenAndServe(*address, mux))
 }
 
 func timePointer(value time.Time) *time.Time {

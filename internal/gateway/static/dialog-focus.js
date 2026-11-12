@@ -3,6 +3,7 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.AIGatewayDialogFocus = api;
 })(typeof window !== "undefined" ? window : null, function dialogFocusFactory() {
+  const stacksByDocument = new WeakMap();
   const focusableSelector = [
     "a[href]",
     "button",
@@ -23,6 +24,9 @@
 
   const createFocusTrap = ({ root, documentRef } = {}) => {
     const documentObject = documentRef || (typeof document !== "undefined" ? document : null);
+    const stack = documentObject ? stacksByDocument.get(documentObject) || [] : [];
+    if (documentObject) stacksByDocument.set(documentObject, stack);
+    const registration = { root };
     let active = false;
     let returnFocus = null;
     let escapeAction = null;
@@ -34,16 +38,23 @@
     };
 
     const deactivate = ({ restore = true } = {}) => {
+      const position = stack.indexOf(registration);
+      const wasTop = position >= 0 && position === stack.length - 1;
+      if (position >= 0) stack.splice(position, 1);
       if (active) documentObject?.removeEventListener?.("keydown", handleKeydown, true);
       active = false;
       escapeAction = null;
       const target = returnFocus;
       returnFocus = null;
-      if (restore && target?.isConnected !== false) focus(target);
+      if (restore && wasTop && target?.isConnected !== false) focus(target);
     };
 
     const handleKeydown = (event) => {
-      if (!active || root?.hidden) return;
+      if (!active || event.defaultPrevented) return;
+      // Lower dialogs keep their state but cannot handle the upper dialog's keys.
+      const top = stack.findLast(({ root: surface }) => !surface.hidden && surface.isConnected !== false
+        && (surface.tagName !== "DIALOG" || surface.open));
+      if (top !== registration) return;
       if (event.key === "Escape" && escapeAction) {
         event.preventDefault();
         event.stopPropagation();
@@ -70,6 +81,7 @@
       returnFocus = trigger || documentObject.activeElement;
       escapeAction = typeof onEscape === "function" ? onEscape : null;
       active = true;
+      stack.push(registration);
       documentObject.addEventListener?.("keydown", handleKeydown, true);
       focus(initialFocus) || focus(focusableElements(root)[0]);
     };

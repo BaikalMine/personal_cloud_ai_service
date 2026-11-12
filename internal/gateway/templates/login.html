@@ -1,17 +1,21 @@
 {{define "login"}}
 {{template "head" .}}
-<main class="auth-shell" id="main-content">
-  <section class="auth-card">
-    <p class="eyebrow">Защищённый доступ</p>
-    <h1>Вход в AI Gateway</h1>
-    <p class="muted">Используйте выданную учётную запись.</p>
-    {{if .Error}}<p class="alert">{{.Error}}</p>{{end}}
-    <form method="post" action="/login">
-      <input type="hidden" name="next" value="{{.Next}}">
-      <label class="ui-field"><span class="ui-field-label">Логин или e-mail</span><input name="login" autocomplete="username" placeholder="Ваш логин или e-mail" required autofocus></label>
-      <label class="ui-field"><span class="ui-field-label">Пароль</span><input name="password" type="password" autocomplete="current-password" placeholder="Ваш пароль" required></label>
-      <button type="submit">Войти</button>
+<link rel="stylesheet" href="/static/auth-pages.css?v={{.AssetVersion}}">
+<script src="/static/auth-pages.js?v={{.AssetVersion}}" defer></script>
+<main class="entry-page" id="main-content" data-auth-page>
+  <section class="entry-form-area" aria-labelledby="auth-title">
+    <a class="entry-brand" href="/"><span aria-hidden="true">AI</span>AI Gateway</a>
+    <header><h1 id="auth-title">Вход</h1></header>
+    {{if and .Auth.Error (not .Auth.ErrorField)}}<p class="entry-message" role="alert">{{.Auth.Error}}</p>{{end}}
+    <form method="post" action="/login" class="entry-form" data-auth-form>
+      <input type="hidden" name="next" value="{{.Auth.Next}}">
+      <label class="ui-field"><span class="ui-field-label" id="auth-login-label">Логин или e-mail</span><input id="auth-login" name="login" value="{{.Auth.Login}}" autocomplete="username" autocapitalize="none" spellcheck="false" required maxlength="254" aria-labelledby="auth-login-label" {{if eq .Auth.ErrorField "login"}}aria-invalid="true" aria-describedby="auth-error"{{end}} autofocus></label>
+      <div class="ui-field"><label class="ui-field-label" id="auth-password-label" for="auth-password">Пароль</label><div class="entry-password"><input id="auth-password" name="password" type="password" autocomplete="current-password" required aria-labelledby="auth-password-label" {{if eq .Auth.ErrorField "login"}}aria-invalid="true" aria-describedby="auth-error"{{end}}><button class="ghost icon-button" type="button" data-password-toggle aria-label="Показать пароль" title="Показать пароль" aria-pressed="false" hidden><i data-lucide="eye" aria-hidden="true"></i></button></div></div>
+      {{if .Auth.ErrorField}}<p class="entry-field-error" id="auth-error" role="alert"><a href="#auth-login">{{.Auth.Error}}</a></p>{{end}}
+      <button type="submit"><i data-lucide="log-in" aria-hidden="true"></i>Войти</button>
+      <p class="entry-progress" data-auth-progress role="status" aria-live="polite"></p>
     </form>
+    <p class="entry-note">Нет доступа или забыли пароль? Обратитесь к администратору.</p>
   </section>
 </main>
 </body></html>

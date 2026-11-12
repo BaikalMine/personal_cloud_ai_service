@@ -1,0 +1,42 @@
+{{define "generation_repeat_assets"}}
+<link rel="stylesheet" href="/static/generation-repeat.css?v={{.AssetVersion}}">
+<script src="/static/generation-repeat-state.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/generation-repeat.js?v={{.AssetVersion}}" defer></script>
+{{end}}
+{{define "generation_repeat_dialog"}}
+<dialog id="generation-repeat" class="ui-dialog generation-repeat" data-owner="{{.CurrentUser.ID}}" data-csrf="{{.CSRF}}" aria-labelledby="generation-repeat-title">
+  <header class="generation-repeat-header">
+    <h2 id="generation-repeat-title" tabindex="-1">Повтор генерации</h2>
+    <button type="button" class="button ghost icon-button" data-repeat-close aria-label="Закрыть повтор" title="Закрыть повтор"><i data-lucide="x" aria-hidden="true"></i></button>
+  </header>
+  <div class="generation-repeat-body">
+    <p class="generation-repeat-message" data-repeat-message role="status" tabindex="-1"></p>
+    <div data-repeat-details hidden>
+      <div class="generation-repeat-overview">
+        <figure class="generation-repeat-source">
+          <div class="generation-repeat-media" data-repeat-media></div>
+          <figcaption><span>Исходный результат</span><div class="generation-repeat-media-nav" data-repeat-media-nav hidden><button type="button" class="button ghost icon-button" data-repeat-previous aria-label="Предыдущий результат" title="Предыдущий результат"><i data-lucide="chevron-left" aria-hidden="true"></i></button><span data-repeat-media-count></span><button type="button" class="button ghost icon-button" data-repeat-next aria-label="Следующий результат" title="Следующий результат"><i data-lucide="chevron-right" aria-hidden="true"></i></button></div></figcaption>
+        </figure>
+        <section class="generation-repeat-recipe" aria-label="Параметры повтора">
+          <h3>Новый запуск</h3>
+          <dl class="generation-repeat-facts" data-repeat-facts></dl>
+          <p class="generation-repeat-quota" data-repeat-quota></p>
+          <a class="button ghost" data-repeat-edit><i data-lucide="pencil" aria-hidden="true"></i>Редактировать копию</a>
+        </section>
+      </div>
+      <details class="ui-disclosure generation-repeat-prompt"><summary><span class="ui-disclosure-label">Промпт</span><i data-lucide="chevron-down" aria-hidden="true"></i></summary><p data-repeat-prompt></p></details>
+      <section class="generation-repeat-differences" data-repeat-changes hidden aria-labelledby="generation-repeat-changes-title"><h3 id="generation-repeat-changes-title">Изменения</h3><div data-repeat-differences></div></section>
+      <ul class="generation-repeat-warnings" data-repeat-warnings></ul>
+      <details class="ui-disclosure generation-repeat-technical" data-repeat-technical hidden><summary><span class="ui-disclosure-label">Технические различия</span><i data-lucide="chevron-down" aria-hidden="true"></i></summary><div data-repeat-technical-differences></div></details>
+      <details class="ui-disclosure generation-repeat-inputs" data-repeat-inputs hidden><summary><span class="ui-disclosure-label">Исходные материалы</span><i data-lucide="chevron-down" aria-hidden="true"></i></summary><ul data-repeat-assets></ul></details>
+    </div>
+  </div>
+  <footer class="generation-repeat-actions">
+    <button type="button" class="button" data-repeat-submit hidden><i data-lucide="repeat-2" aria-hidden="true"></i>Подтвердить повтор</button>
+    <button type="button" class="button" data-repeat-recover hidden><i data-lucide="refresh-cw" aria-hidden="true"></i>Уточнить запуск</button>
+    <button type="button" class="button ghost" data-repeat-check hidden><i data-lucide="rotate-cw" aria-hidden="true"></i>Проверить заново</button>
+    <button type="button" class="button ghost" data-repeat-discard hidden>Отказаться от запроса</button>
+    <a class="button" data-repeat-task hidden><i data-lucide="list-checks" aria-hidden="true"></i>Открыть задание</a>
+  </footer>
+</dialog>
+{{end}}

@@ -1,97 +1,126 @@
 {{define "admin_content"}}
 {{template "head" .}}
 {{template "admin_nav" .}}
-<main class="page" id="main-content" data-admin-content-page data-content-revision="{{.ContentRevision}}">
-  <section class="hero admin-hero">
-    <div><p class="eyebrow">Контроль использования</p><h1>AI-контент</h1><p class="content-intro">Каждый запрос, помощь ассистента, стадии генерации и результат собраны в одном задании.</p></div>
-    <span class="live-badge is-connecting" data-content-live-indicator aria-live="polite" title="Параметры хранятся {{.Retention.AIContentLabel}}, результаты — {{.Retention.GenerationMediaLabel}}"><i></i><span data-content-live-label>Подключаем живые обновления</span></span>
-  </section>
-  <section class="content-retention-report" aria-label="Хранение AI-контента">
-    <div><span>Записи журнала</span><strong>{{formatNumber .RetentionStats.EventCount}}</strong><small>хранятся {{.Retention.AIContentLabel}}</small></div>
-    <div><span>Медиа в хранилище</span><strong>{{formatBytes .RetentionStats.MediaBytes}}</strong><small>{{formatNumber .RetentionStats.MediaCount}} {{fileLabel .RetentionStats.MediaCount}}</small></div>
-    <div><span>Ближайшее удаление медиа</span><strong>{{with .RetentionStats.NextMediaExpiry}}{{formatTime .}}{{else}}Очередь пуста{{end}}</strong><small>результаты хранятся {{.Retention.GenerationMediaLabel}}</small></div>
-    <div><span>Ближайшее удаление записи</span><strong>{{with .RetentionStats.NextEventExpiry}}{{formatTime .}}{{else}}Очередь пуста{{end}}</strong><small>параметры живут дольше файла</small></div>
-  </section>
-  <section class="content-overview" data-content-overview aria-label="Сводка по заданиям">
-    <div><span>Заданий</span><strong>{{.Overview.Total}}</strong></div>
-    <div><span>ComfyUI</span><strong>{{.Overview.ComfyUI}}</strong></div>
-    <div><span>OpenWebUI</span><strong>{{.Overview.OpenWebUI}}</strong></div>
-    <div><span>С результатом</span><strong>{{.Overview.WithMedia}}</strong></div>
-  </section>
-  <form class="content-filters" method="get" action="/admin/content">
-    <div class="ui-field-grid content-filter-fields">
-      <label class="ui-field"><span class="ui-field-label">Пользователь</span><input name="user" value="{{.Username}}" placeholder="Логин"></label>
-      <label class="ui-field"><span class="ui-field-label">Сервис</span><select name="service"><option value="">Все сервисы</option><option value="comfyui" {{if eq .Service "comfyui"}}selected{{end}}>ComfyUI</option><option value="openwebui" {{if eq .Service "openwebui"}}selected{{end}}>OpenWebUI</option></select></label>
-      <label class="ui-field content-search"><span class="ui-field-label">Поиск</span><input name="q" value="{{.Query}}" placeholder="Промпт, ответ, модель, ошибка, ID"></label>
+<link rel="stylesheet" href="/static/admin-content.css?v={{.AssetVersion}}">
+<script src="/static/admin-content.js?v={{.AssetVersion}}" defer></script>
+<main class="page content-workspace" id="main-content" data-admin-content-page data-content-revision="{{.ContentRevision}}">
+  <header class="content-page-header">
+    <h1>AI-контент</h1>
+    <div class="content-live-controls" data-content-controls hidden>
+      <span class="live-badge is-connecting" data-content-live-indicator role="status"><i aria-hidden="true"></i><span data-content-live-label>Подключение</span></span>
+      <button type="button" class="button ghost content-icon-button" data-content-refresh aria-label="Обновить задания" title="Обновить задания"><i data-lucide="refresh-cw" aria-hidden="true"></i></button>
     </div>
-    <div class="content-filter-actions"><button type="submit">Показать</button>{{if or .Username .Service .Query}}<a class="button ghost" href="/admin/content">Сбросить</a>{{end}}</div>
-  </form>
-  <div class="content-list-heading" data-content-list-heading><strong>Задания</strong><span>{{if .Overview.Total}}Откройте карточку, чтобы увидеть весь путь запроса{{else}}Новых заданий пока нет{{end}}</span></div>
-  <section class="content-gallery" data-admin-content-gallery>
-    {{range .Events}}
-    <article class="content-gallery-card ui-media-card{{if .Sensitive}} sensitive-media{{end}}{{if eq .GenerationState "error"}} content-gallery-card-error is-error{{end}}" data-content-task-key="{{.Key}}" data-content-version="{{.Version}}">
-      <button class="content-gallery-preview" type="button" data-content-task-open="{{.Key}}" {{if .Sensitive}}data-sensitive-media{{end}} aria-label="Открыть задание пользователя {{.Username}}">
-        {{if .Media}}
-          {{$preview := index .Media 0}}
-          {{if eq $preview.MediaType "video"}}<video muted loop playsinline preload="metadata" src="/admin/content/media/{{$preview.ID}}?raw=1"></video><span class="content-gallery-play" aria-hidden="true">&#9654;</span>{{else}}<img loading="lazy" src="/admin/content/media/{{$preview.ID}}?raw=1" alt="Результат генерации пользователя {{.Username}}">{{end}}
-          {{if gt .MediaCount 1}}<span class="content-gallery-count">+{{.MediaCount}}</span>{{end}}
-          {{if .Sensitive}}<span class="sensitive-media-cover"><b>Контент 18+</b><small>Нажмите, чтобы показать</small></span>{{end}}
-        {{else if eq .GenerationState "error"}}
-          <span class="content-generation-preview is-error"><small>Задание завершилось с ошибкой</small><strong>{{if .ErrorMessage}}{{.ErrorMessage}}{{else}}Результат не был создан{{end}}</strong><em>{{if .StatusMessage}}{{.StatusMessage}}{{else}}Параметры сохранены для разбора{{end}}</em></span>
-        {{else if eq .GenerationState "cancelled"}}
-          <span class="content-generation-preview is-cancelled"><small>{{.StateLabel}}</small><strong>{{if .StatusMessage}}{{.StatusMessage}}{{else}}Задача остановлена до результата{{end}}</strong><em>Промт и параметры сохранены в журнале</em></span>
-        {{else if .MediaExpired}}
-          <span class="content-generation-preview is-archived"><small>Архив параметров</small><strong>Медиа удалено по сроку хранения</strong><em>Результат хранился {{$.Retention.GenerationMediaLabel}}; параметры по-прежнему доступны</em></span>
-        {{else if eq .GenerationState "queued"}}
-          <span class="content-generation-preview is-pending"><small>{{.StateLabel}}</small><strong>{{if .StatusMessage}}{{.StatusMessage}}{{else}}Задание готовится к запуску{{end}}</strong><em>{{.Prompt}}</em></span>
-        {{else if eq .GenerationState "running"}}
-          <span class="content-generation-preview is-pending"><small>{{.StateLabel}}</small><strong>{{if .StatusMessage}}{{.StatusMessage}}{{else}}ComfyUI обрабатывает задачу{{end}}</strong><em>{{.Prompt}}</em></span>
-        {{else}}
-          <span class="content-text-preview"><small>{{if eq .Kind "prompt_assistant"}}Черновик промт-ассистента{{else if eq .Service "openwebui"}}Диалог с локальной моделью{{else}}Промт генерации{{end}}</small><strong>{{.Prompt}}</strong>{{if .Assistant}}<em>Ассистент подготовил вариант промта</em>{{else if .Response}}<em>Ответ модели сохранён</em>{{end}}</span>
-        {{end}}
-      </button>
-      <div class="content-gallery-meta">
-        <div class="content-gallery-owner">
-          {{if .AuthorDeleted}}<span class="content-owner-deleted"><strong>{{.Username}}</strong><small>Учётная запись удалена</small></span>{{else}}<a class="content-owner-link" href="/admin/users/{{.UserID}}">{{.Username}}</a>{{end}}
-          <span class="badge {{if eq .Service "comfyui"}}content-service-comfy{{else if eq .Service "ollama"}}content-service-ollama{{else}}content-service-openweb{{end}}">{{if eq .Service "comfyui"}}ComfyUI{{else if eq .Service "ollama"}}Ассистент{{else}}OpenWebUI{{end}}</span>
-        </div>
-        <time>{{formatTime .CreatedAt}}</time>
+  </header>
+  <div class="ui-status-banner content-access" data-content-access hidden><span>Доступ завершён. Войдите снова.</span><a class="button" href="/login">Войти</a></div>
+  <div data-content-private>
+    <form class="content-filters" method="get" action="/admin/content" role="search" aria-label="Поиск последних заданий">
+      <div class="ui-field-grid content-filter-fields">
+        <label class="ui-field content-search"><span class="ui-field-label">Поиск в последних заданиях</span><input name="q" type="search" value="{{.Query}}" placeholder="Промпт, ответ, модель, ошибка, ID" maxlength="200"></label>
+        <label class="ui-field"><span class="ui-field-label">Пользователь</span><input name="user" value="{{.Username}}" placeholder="Логин" maxlength="80"></label>
+        <label class="ui-field"><span class="ui-field-label">Сервис</span><select name="service"><option value="">Все сервисы</option><option value="comfyui" {{if eq .Service "comfyui"}}selected{{end}}>ComfyUI</option><option value="openwebui" {{if eq .Service "openwebui"}}selected{{end}}>OpenWebUI</option><option value="ollama" {{if eq .Service "ollama"}}selected{{end}}>Ассистент</option></select></label>
       </div>
-      <div class="content-gallery-footer"><span class="content-generation-state {{.StateClass}}">{{.StateLabel}}</span><span class="content-gallery-model">{{if .Model}}{{.Model}}{{else}}Модель не зафиксирована{{end}}</span>{{if .Stages}}<span class="content-stage-count">{{len .Stages}} этапов</span>{{end}}</div>
-    </article>
+      <div class="content-filter-actions"><button type="submit"><i data-lucide="search" aria-hidden="true"></i>Найти</button>{{if or .Username .Service .Query}}<a class="button ghost content-icon-button" href="/admin/content" aria-label="Сбросить фильтры" title="Сбросить фильтры"><i data-lucide="x" aria-hidden="true"></i></a>{{end}}</div>
+    </form>
+    <section class="content-overview" data-content-overview aria-label="Сводка выборки">
+      <div><span>В выборке</span><strong>{{.Overview.Total}}</strong></div>
+      <div><span>ComfyUI</span><strong>{{.Overview.ComfyUI}}</strong></div>
+      <div><span>OpenWebUI</span><strong>{{.Overview.OpenWebUI}}</strong></div>
+      <div><span>С медиа</span><strong>{{.Overview.WithMedia}}</strong></div>
+    </section>
+    <details class="content-retention">
+      <summary>Хранение AI-контента</summary>
+      <section class="content-retention-report" data-content-retention aria-label="Сроки и объёмы хранения">
+        <div><span>Записи журнала</span><strong>{{formatNumber .RetentionStats.EventCount}}</strong><small>хранятся {{.Retention.AIContentLabel}}</small></div>
+        <div><span>Медиа в хранилище</span><strong>{{formatBytes .RetentionStats.MediaBytes}}</strong><small>{{formatNumber .RetentionStats.MediaCount}} {{fileLabel .RetentionStats.MediaCount}}</small></div>
+        <div><span>Ближайшее удаление медиа</span><strong>{{with .RetentionStats.NextMediaExpiry}}{{formatTime .}}{{else}}Очередь пуста{{end}}</strong><small>результаты хранятся {{.Retention.GenerationMediaLabel}}</small></div>
+        <div><span>Ближайшее удаление записи</span><strong>{{with .RetentionStats.NextEventExpiry}}{{formatTime .}}{{else}}Очередь пуста{{end}}</strong><small>параметры хранятся {{.Retention.AIContentLabel}}</small></div>
+      </section>
+    </details>
+    <div class="content-list-heading" data-content-list-heading><h2>Последние задания</h2><span>Показано: {{if .Events}}{{len .Events}}{{else}}0{{end}}</span></div>
+    <section class="content-gallery" data-admin-content-gallery aria-label="Последние задания">
+    {{range .Events}}
+      <article class="content-gallery-card{{if .Sensitive}} sensitive-media{{end}}{{if eq .GenerationState "error"}} is-error{{end}}" data-content-task-key="{{.Key}}" data-content-version="{{.Version}}" data-content-media-signature="{{.Sensitive}}:{{range .Media}}{{.ID}}@{{.UpdatedAt.UnixNano}};{{end}}">
+        <button class="content-gallery-preview" type="button" data-content-task-open="{{.Key}}" aria-label="Открыть задание пользователя {{.Username}}">
+          {{if .Media}}
+            {{$preview := index .Media 0}}
+            {{if eq $preview.MediaType "video"}}<video muted playsinline preload="metadata" src="/admin/content/media/{{$preview.ID}}?raw=1"></video><span class="content-gallery-play" aria-hidden="true"><i data-lucide="play"></i></span>{{else}}<img loading="lazy" src="/admin/content/media/{{$preview.ID}}?raw=1" alt="Результат генерации пользователя {{.Username}}">{{end}}
+            {{if .Sensitive}}<span class="sensitive-media-cover"><b>18+</b><small>Показать</small></span>{{end}}
+          {{else}}
+            <span class="content-placeholder" aria-hidden="true"><i data-lucide="{{if eq .GenerationState "error"}}triangle-alert{{else if .MediaExpired}}archive{{else if eq .GenerationState "cancelled"}}circle-x{{else if or (eq .GenerationState "running") (eq .GenerationState "queued")}}timer{{else}}message-square-text{{end}}"></i></span>
+          {{end}}
+        </button>
+        <div class="content-task-summary">
+          <div class="content-task-kind"><span>{{if eq .Service "comfyui"}}ComfyUI{{else if eq .Service "ollama"}}Ассистент{{else}}OpenWebUI{{end}}</span><span class="content-generation-state {{.StateClass}}">{{.StateLabel}}</span>{{if .Media}}<span>{{.MediaCount}} {{fileLabel .MediaCount}}</span>{{end}}</div>
+          <button type="button" class="content-task-title" data-content-task-open="{{.Key}}" aria-label="Подробности задания пользователя {{.Username}}"><span class="content-gallery-model">{{if .Model}}{{.Model}}{{else}}Модель не зафиксирована{{end}}</span><i data-lucide="arrow-up-right" aria-hidden="true"></i></button>
+          <p class="content-task-note">{{if eq .GenerationState "error"}}{{if .ErrorMessage}}{{.ErrorMessage}}{{else}}Задание завершилось с ошибкой{{end}}{{else if .MediaExpired}}Медиа удалено по сроку хранения{{else if .StatusMessage}}{{.StatusMessage}}{{else if eq .Service "openwebui"}}{{if .Response}}Ответ модели сохранён{{else}}Ответ не зафиксирован{{end}}{{else if .Assistant}}{{if .Assistant.Applied}}Вариант ассистента применён{{else}}Ответ ассистента сохранён{{end}}{{else if eq .GenerationState "cancelled"}}Задание отменено{{else if .Media}}Результат сохранён{{else}}Параметры сохранены{{end}}</p>
+        </div>
+        <div class="content-gallery-meta">
+          {{if .AuthorDeleted}}<span class="content-owner-deleted"><strong>{{.Username}}</strong><small>Учётная запись удалена</small></span>{{else}}<a class="content-owner-link" href="/admin/users/{{.UserID}}">{{.Username}}</a>{{end}}
+          <time>{{formatTime .CreatedAt}}</time>
+        </div>
+      </article>
     <template id="content-task-detail-{{.Key}}" data-content-task-detail-key="{{.Key}}" data-content-version="{{.Version}}">
-      <article class="content-detail">
+      <article class="content-detail" data-content-media-signature="{{.Sensitive}}:{{range .Media}}{{.ID}}@{{.UpdatedAt.UnixNano}};{{end}}">
         <header class="content-detail-header">
-          <div><p class="section-kicker">{{if eq .Service "comfyui"}}Единое задание генерации{{else if eq .Service "ollama"}}Черновик промт-ассистента{{else}}Диалог OpenWebUI{{end}}</p><h2>{{.Username}}</h2>{{if .AuthorDeleted}}<span class="content-deleted-note">Учётная запись удалена, автор сохранён в истории</span>{{end}}{{if .Model}}<span>{{.Model}}</span>{{end}}</div>
+          <div><p class="section-kicker">{{if eq .Service "comfyui"}}Генерация{{else if eq .Service "ollama"}}Черновик промпт-ассистента{{else}}Диалог OpenWebUI{{end}}</p><h2>{{.Username}}</h2>{{if .AuthorDeleted}}<span class="content-deleted-note">Учётная запись удалена, автор сохранён в истории</span>{{end}}{{if .Model}}<span>{{.Model}}</span>{{end}}</div>
           <div><span class="content-generation-state {{.StateClass}}">{{.StateLabel}}</span><time>{{formatTime .CreatedAt}}</time><small>Запись хранится до {{formatTime .ExpiresAt}}</small></div>
         </header>
-        {{if .Media}}<section class="content-detail-media{{if .Sensitive}} sensitive-media{{end}}"><div class="content-detail-heading"><h3>Результат</h3><span>{{.MediaCount}} {{fileLabel .MediaCount}}</span></div><div class="content-detail-media-grid">{{range .Media}}{{if eq .MediaType "video"}}<video controls playsinline preload="metadata" src="/admin/content/media/{{.ID}}?raw=1"></video>{{else}}<img loading="lazy" src="/admin/content/media/{{.ID}}?raw=1" alt="Результат генерации">{{end}}{{end}}</div></section>{{end}}
-        {{if .MediaExpired}}<section class="content-detail-state is-archived"><strong>Файл результата очищен по сроку хранения</strong><span>Сам результат хранился до {{formatTime .MediaExpiresAt}}. Промт, seed и настройки останутся до {{formatTime .ExpiresAt}}.</span></section>{{else if eq .GenerationState "error"}}<section class="content-detail-state is-error"><strong>{{if .ErrorMessage}}{{.ErrorMessage}}{{else}}Задание завершилось с ошибкой{{end}}</strong><span>{{if .StatusMessage}}{{.StatusMessage}}{{else}}Результат не создан. Параметры и стадии сохранены для разбора.{{end}}{{if .ErrorCode}} Код: {{.ErrorCode}}.{{end}}</span></section>{{else if eq .GenerationState "cancelled"}}<section class="content-detail-state is-cancelled"><strong>{{if .StatusMessage}}{{.StatusMessage}}{{else}}Задание было остановлено{{end}}</strong><span>Результат не создавался. Параметры сохранены для повторного запуска.</span></section>{{end}}
+        <div class="content-detail-tabs" role="tablist" aria-label="Разделы задания">
+          <button type="button" role="tab" data-content-tab="result" id="content-tab-result-{{.Key}}" aria-controls="content-pane-result-{{.Key}}" aria-selected="true">Результат</button>
+          <button type="button" role="tab" data-content-tab="prompt" id="content-tab-prompt-{{.Key}}" aria-controls="content-pane-prompt-{{.Key}}" aria-selected="false" tabindex="-1">Промпт</button>
+          {{if .Stages}}<button type="button" role="tab" data-content-tab="stages" id="content-tab-stages-{{.Key}}" aria-controls="content-pane-stages-{{.Key}}" aria-selected="false" tabindex="-1">Этапы</button>{{end}}
+          <button type="button" role="tab" data-content-tab="data" id="content-tab-data-{{.Key}}" aria-controls="content-pane-data-{{.Key}}" aria-selected="false" tabindex="-1">Данные</button>
+        </div>
+        <div data-content-pane="result" role="tabpanel" id="content-pane-result-{{.Key}}" aria-labelledby="content-tab-result-{{.Key}}" tabindex="0">
+        {{if .Media}}<section class="content-detail-media{{if .Sensitive}} sensitive-media{{end}}" data-content-result-media><div class="content-detail-heading"><h3>Результат</h3><span>{{.MediaCount}} {{fileLabel .MediaCount}}</span></div>{{if .Sensitive}}<button type="button" class="button ghost content-reveal" data-content-reveal><i data-lucide="eye" aria-hidden="true"></i>Показать контент 18+</button>{{end}}<div class="content-detail-media-grid">{{range .Media}}{{if eq .MediaType "video"}}<figure><video controls playsinline preload="metadata" src="/admin/content/media/{{.ID}}?raw=1"></video>{{template "content_media_actions" .}}</figure>{{else}}<figure><img loading="lazy" src="/admin/content/media/{{.ID}}?raw=1" alt="Результат генерации">{{template "content_media_actions" .}}</figure>{{end}}{{end}}</div></section>{{end}}
+        {{if .MediaExpired}}<section class="content-detail-state is-archived"><strong>Файл результата очищен по сроку хранения</strong><span>Результат хранился {{$.Retention.GenerationMediaLabel}}, до {{formatTime .MediaExpiresAt}}. Промпт, seed и настройки останутся до {{formatTime .ExpiresAt}}.</span></section>{{else if eq .GenerationState "error"}}<section class="content-detail-state is-error"><strong>{{if .ErrorMessage}}{{.ErrorMessage}}{{else}}Задание завершилось с ошибкой{{end}}</strong><span>{{if .StatusMessage}}{{.StatusMessage}}{{else}}Результат не создан. Параметры и стадии сохранены для разбора.{{end}}{{if .ErrorCode}} Код: {{.ErrorCode}}.{{end}}</span></section>{{else if eq .GenerationState "cancelled"}}<section class="content-detail-state is-cancelled"><strong>{{if .StatusMessage}}{{.StatusMessage}}{{else}}Задание было остановлено{{end}}</strong><span>Результат не создавался. Параметры сохранены для повторного запуска.</span></section>{{end}}
+        {{if and (not .Media) (not .MediaExpired) (ne .GenerationState "error") (ne .GenerationState "cancelled")}}
+          {{if .Assistant}}<section class="content-detail-section"><div class="content-block-heading"><h3>Ответ ассистента</h3></div><pre>{{.Assistant.Suggestion}}</pre></section>
+          {{else if eq .Service "openwebui"}}<section class="content-detail-section"><h3>Ответ модели</h3><pre>{{if .Response}}{{.Response}}{{else}}Ответ не зафиксирован{{end}}</pre></section>
+          {{else}}<section class="content-detail-state"><strong>{{.StateLabel}}</strong><span>{{if .StatusMessage}}{{.StatusMessage}}{{else}}Медиа не зафиксировано{{end}}</span></section>{{end}}
+        {{end}}
+        </div>
+        {{if .Stages}}<div data-content-pane="stages" role="tabpanel" id="content-pane-stages-{{.Key}}" aria-labelledby="content-tab-stages-{{.Key}}" tabindex="0" hidden>
         {{if .Stages}}<section class="content-detail-section content-stage-section"><div class="content-block-heading"><h3>Стадии задания</h3><span>{{len .Stages}} событий</span></div><ol class="content-stage-list">{{range .Stages}}<li class="{{.Tone}}"><i aria-hidden="true"></i><div><strong>{{.Label}}</strong><span>{{if .ErrorMessage}}{{.ErrorMessage}}{{else}}{{.Message}}{{end}}</span></div><time>{{formatTime .CreatedAt}}{{if gt .DurationMS 0}} · {{.DurationMS}} мс{{end}}</time></li>{{end}}</ol></section>{{end}}
+        </div>{{end}}
+        <div data-content-pane="prompt" role="tabpanel" id="content-pane-prompt-{{.Key}}" aria-labelledby="content-tab-prompt-{{.Key}}" tabindex="0" hidden>
         {{if .Assistant}}
           <section class="content-detail-section content-prompt-flow">
-            <div class="content-block-heading"><h3>Работа с промтом</h3><span class="badge {{if .Assistant.Applied}}ok{{end}}">{{if eq .Assistant.Decision "edited_after_apply"}}Изменён после применения{{else if eq .Assistant.Decision "applied"}}Вариант применён{{else if eq .Assistant.Decision "kept_original"}}Оставлен исходный{{else if .Assistant.Applied}}Вариант применён{{else}}Решение не принято{{end}}</span></div>
+            <div class="content-block-heading"><h3>Работа с промптом</h3><span class="badge {{if .Assistant.Applied}}ok{{end}}">{{if eq .Assistant.Decision "edited_after_apply"}}Изменён после применения{{else if eq .Assistant.Decision "applied"}}Вариант применён{{else if eq .Assistant.Decision "kept_original"}}Оставлен исходный{{else if .Assistant.Applied}}Вариант применён{{else}}Решение не принято{{end}}</span></div>
             <dl class="content-assistant-facts"><div><dt>Шаблон</dt><dd>{{if .Assistant.Template}}{{.Assistant.Template}}{{else}}Не указан{{end}}</dd></div><div><dt>Модель ассистента</dt><dd>{{if .Assistant.Model}}{{.Assistant.Model}}{{else}}Локальная модель{{end}}</dd></div><div><dt>Think</dt><dd>{{if .Assistant.Think}}Включён{{else}}Выключен{{end}}</dd></div></dl>
-            <div class="content-prompt-step"><span>1</span><div class="content-assistant-copy"><div class="content-block-heading"><h3>Запрос пользователя</h3><button type="button" class="content-copy" data-copy-target="#content-assistant-original-{{.Key}}">Копировать</button></div><pre id="content-assistant-original-{{.Key}}">{{.Assistant.OriginalPrompt}}</pre></div></div>
-            <div class="content-prompt-step"><span>2</span><div class="content-assistant-copy"><div class="content-block-heading"><h3>Ответ ассистента</h3><button type="button" class="content-copy" data-copy-target="#content-assistant-suggestion-{{.Key}}">Копировать</button></div><pre id="content-assistant-suggestion-{{.Key}}">{{.Assistant.Suggestion}}</pre></div></div>
-            {{if eq .Service "comfyui"}}<div class="content-prompt-step is-final"><span>3</span><div class="content-assistant-copy"><div class="content-block-heading"><h3>Применённый итоговый промт</h3><button type="button" class="content-copy" data-copy-target="#content-final-prompt-{{.Key}}">Копировать</button></div><pre id="content-final-prompt-{{.Key}}">{{.Prompt}}</pre></div></div>{{end}}
+            <div class="content-prompt-step"><span>1</span><div class="content-assistant-copy"><div class="content-block-heading"><h3>Запрос пользователя</h3><button type="button" class="button ghost content-icon-button" data-content-copy="#content-assistant-original-{{.Key}}" aria-label="Копировать" title="Копировать"><i data-lucide="copy" aria-hidden="true"></i></button></div><pre id="content-assistant-original-{{.Key}}">{{.Assistant.OriginalPrompt}}</pre></div></div>
+            <div class="content-prompt-step"><span>2</span><div class="content-assistant-copy"><div class="content-block-heading"><h3>Ответ ассистента</h3><button type="button" class="button ghost content-icon-button" data-content-copy="#content-assistant-suggestion-{{.Key}}" aria-label="Копировать" title="Копировать"><i data-lucide="copy" aria-hidden="true"></i></button></div><pre id="content-assistant-suggestion-{{.Key}}">{{.Assistant.Suggestion}}</pre></div></div>
+            {{if eq .Service "comfyui"}}<div class="content-prompt-step is-final"><span>3</span><div class="content-assistant-copy"><div class="content-block-heading"><h3>Применённый итоговый промпт</h3><button type="button" class="button ghost content-icon-button" data-content-copy="#content-final-prompt-{{.Key}}" aria-label="Копировать" title="Копировать"><i data-lucide="copy" aria-hidden="true"></i></button></div><pre id="content-final-prompt-{{.Key}}">{{.Prompt}}</pre></div></div>{{end}}
           </section>
         {{else if eq .Service "openwebui"}}
-          <section class="content-detail-section"><div class="content-block-heading"><h3>Запрос пользователя</h3><button type="button" class="content-copy" data-copy-target="#content-detail-prompt-{{.Key}}">Копировать</button></div><pre id="content-detail-prompt-{{.Key}}">{{.Prompt}}</pre></section>
-          <section class="content-detail-section"><div class="content-block-heading"><h3>Ответ модели</h3>{{if .Response}}<button type="button" class="content-copy" data-copy-target="#content-detail-response-{{.Key}}">Копировать</button>{{end}}</div><pre id="content-detail-response-{{.Key}}" {{if not .Response}}class="content-empty"{{end}}>{{if .Response}}{{.Response}}{{else}}Ответ не зафиксирован{{end}}</pre></section>
+          <section class="content-detail-section"><div class="content-block-heading"><h3>Запрос пользователя</h3><button type="button" class="button ghost content-icon-button" data-content-copy="#content-detail-prompt-{{.Key}}" aria-label="Копировать" title="Копировать"><i data-lucide="copy" aria-hidden="true"></i></button></div><pre id="content-detail-prompt-{{.Key}}">{{.Prompt}}</pre></section>
+          <section class="content-detail-section"><div class="content-block-heading"><h3>Ответ модели</h3>{{if .Response}}<button type="button" class="button ghost content-icon-button" data-content-copy="#content-detail-response-{{.Key}}" aria-label="Копировать" title="Копировать"><i data-lucide="copy" aria-hidden="true"></i></button>{{end}}</div><pre id="content-detail-response-{{.Key}}" {{if not .Response}}class="content-empty"{{end}}>{{if .Response}}{{.Response}}{{else}}Ответ не зафиксирован{{end}}</pre></section>
         {{else}}
-          <section class="content-detail-section"><div class="content-block-heading"><h3>Итоговый промт</h3>{{if .Prompt}}<button type="button" class="content-copy" data-copy-target="#content-detail-prompt-{{.Key}}">Копировать</button>{{end}}</div><pre id="content-detail-prompt-{{.Key}}" {{if not .Prompt}}class="content-empty"{{end}}>{{if .Prompt}}{{.Prompt}}{{else}}Промт не успел сохраниться до ошибки{{end}}</pre></section>
+          <section class="content-detail-section"><div class="content-block-heading"><h3>Итоговый промпт</h3>{{if .Prompt}}<button type="button" class="button ghost content-icon-button" data-content-copy="#content-detail-prompt-{{.Key}}" aria-label="Копировать" title="Копировать"><i data-lucide="copy" aria-hidden="true"></i></button>{{end}}</div><pre id="content-detail-prompt-{{.Key}}" {{if not .Prompt}}class="content-empty"{{end}}>{{if .Prompt}}{{.Prompt}}{{else}}Промпт не успел сохраниться до ошибки{{end}}</pre></section>
         {{end}}
-        {{if and (eq .Service "comfyui") .Response}}<section class="content-detail-section"><div class="content-block-heading"><h3>Негативный промт</h3><button type="button" class="content-copy" data-copy-target="#content-detail-response-{{.Key}}">Копировать</button></div><pre id="content-detail-response-{{.Key}}">{{.Response}}</pre></section>{{end}}
-        {{if .Metadata}}<section class="content-detail-section"><div class="content-block-heading"><h3>Параметры задания</h3><button type="button" class="content-copy" data-copy-target="#content-detail-metadata-{{.Key}}">Копировать</button></div><pre id="content-detail-metadata-{{.Key}}" class="content-metadata">{{.Metadata}}</pre></section>{{end}}
+        {{if and (eq .Service "comfyui") .Response}}<section class="content-detail-section"><div class="content-block-heading"><h3>Негативный промпт</h3><button type="button" class="button ghost content-icon-button" data-content-copy="#content-detail-response-{{.Key}}" aria-label="Копировать" title="Копировать"><i data-lucide="copy" aria-hidden="true"></i></button></div><pre id="content-detail-response-{{.Key}}">{{.Response}}</pre></section>{{end}}
+        </div>
+        <div data-content-pane="data" role="tabpanel" id="content-pane-data-{{.Key}}" aria-labelledby="content-tab-data-{{.Key}}" tabindex="0" hidden>
+        {{if .Metadata}}<section class="content-detail-section"><div class="content-block-heading"><h3>Параметры задания</h3><button type="button" class="button ghost content-icon-button" data-content-copy="#content-detail-metadata-{{.Key}}" aria-label="Копировать" title="Копировать"><i data-lucide="copy" aria-hidden="true"></i></button></div><pre id="content-detail-metadata-{{.Key}}" class="content-metadata">{{.Metadata}}</pre></section>{{end}}
         <footer class="content-detail-footer">{{if .JobID}}<span>Задание <code>{{.JobID}}</code></span>{{end}}{{if .RequestID}}<span>Запрос <code>{{.RequestID}}</code></span>{{end}}{{if .ExternalID}}<span>ComfyUI <code>{{.ExternalID}}</code></span>{{end}}{{if .CorrelationID}}<span>Трассировка <code>{{.CorrelationID}}</code></span>{{end}}{{if gt .MediaCount 0}}<span class="badge ok">Медиа: {{.MediaCount}}</span>{{else if gt .GeneratedMediaCount 0}}<span class="badge">Файлы очищены: {{.GeneratedMediaCount}}</span>{{end}}</footer>
+        </div>
       </article>
     </template>
     {{else}}
-    <div class="empty-state" data-content-empty><strong>Заданий не найдено</strong><span>Измените фильтры или дождитесь новых запросов.</span></div>
+      <div class="empty-state" data-content-empty><strong>Заданий не найдено</strong><span>{{if or .Username .Service .Query}}По текущим фильтрам нет последних заданий.{{else}}Запросов пока нет.{{end}}</span>{{if or .Username .Service .Query}}<a class="button ghost" href="/admin/content">Сбросить фильтры</a>{{end}}</div>
     {{end}}
-  </section>
+    </section>
+  </div>
 </main>
-<div class="content-detail-dialog" id="content-detail-dialog" hidden role="dialog" aria-modal="true" aria-label="Полная запись AI-контента"><button class="content-detail-backdrop" type="button" data-content-detail-close aria-label="Закрыть просмотр"></button><div class="content-detail-window ui-dialog"><div class="content-detail-toolbar ui-dialog__toolbar"><span>Путь задания</span><button class="content-detail-close" type="button" data-content-detail-close aria-label="Закрыть просмотр">&#10005;</button></div><div class="content-detail-body" id="content-detail-body"></div></div></div>
+<div class="content-detail-dialog" id="content-detail-dialog" hidden role="dialog" aria-modal="true" aria-label="Полная запись AI-контента">
+  <button class="content-detail-backdrop" type="button" data-content-detail-close tabindex="-1" aria-label="Закрыть просмотр"></button>
+  <div class="content-detail-window ui-dialog">
+    <div class="content-detail-toolbar ui-dialog__toolbar"><span>Задание</span><span data-content-copy-status role="status"></span><button class="button ghost content-icon-button" type="button" data-content-detail-close aria-label="Закрыть просмотр" title="Закрыть просмотр"><i data-lucide="x" aria-hidden="true"></i></button></div>
+    <div class="content-detail-body" id="content-detail-body"></div>
+  </div>
+</div>
 </body></html>
+{{end}}
+{{define "content_media_actions"}}
+<figcaption><a class="button ghost content-icon-button" href="/admin/content/media/{{.ID}}" target="_blank" rel="noopener" aria-label="Открыть оригинал" title="Открыть оригинал"><i data-lucide="expand" aria-hidden="true"></i></a><a class="button ghost content-icon-button" href="/admin/content/media/{{.ID}}?download=1" aria-label="Скачать оригинал" title="Скачать оригинал"><i data-lucide="download" aria-hidden="true"></i></a></figcaption>
 {{end}}

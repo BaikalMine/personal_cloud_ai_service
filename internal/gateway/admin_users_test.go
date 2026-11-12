@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"ai-access-gateway/internal/domain"
+	"ai-access-gateway/internal/store"
 )
 
 func TestAdminUsersRendersAccountLifetime(t *testing.T) {
@@ -16,16 +17,17 @@ func TestAdminUsersRendersAccountLifetime(t *testing.T) {
 		t.Fatal(err)
 	}
 	expiresAt := time.Date(2026, 8, 31, 18, 45, 0, 0, time.UTC)
-	users := []domain.UserRow{
-		{ID: 1, Username: "permanent", Role: "user"},
-		{ID: 2, Username: "temporary", Role: "user", AccountExpiresAt: sql.NullTime{Time: expiresAt, Valid: true}},
+	users := []store.UserAccessRow{
+		{User: domain.User{ID: 1, Username: "permanent", Role: "user"}},
+		{User: domain.User{ID: 2, Username: "temporary", Role: "user", AccountExpiresAt: sql.NullTime{Time: expiresAt, Valid: true}}},
 	}
 	var rendered bytes.Buffer
-	if err := templates.ExecuteTemplate(&rendered, "admin_users", map[string]any{"Title": "Пользователи", "Users": users}); err != nil {
+	view := BuildUserAccessList(store.UserAccessPage{AccessListPage: store.AccessListPage{Total: 2, Now: expiresAt.Add(-time.Hour)}, Items: users})
+	if err := templates.ExecuteTemplate(&rendered, "admin_users", map[string]any{"Title": "Пользователи", "AccessList": view}); err != nil {
 		t.Fatal(err)
 	}
 	page := rendered.String()
-	for _, expected := range []string{"Постоянная", "Временная", "Без автоматического удаления", "Удаление:", `data-account-expiry="1788201900000"`} {
+	for _, expected := range []string{"Постоянный аккаунт", "Временный аккаунт", "Удаление:", `data-account-expiry="1788201900000"`} {
 		if !strings.Contains(page, expected) {
 			t.Fatalf("users page does not contain %q", expected)
 		}

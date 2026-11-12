@@ -41,7 +41,7 @@ func TestWorkflowManifestCatalogIsValid(t *testing.T) {
 func generationControlTemplates(t *testing.T) []byte {
 	t.Helper()
 	var body []byte
-	for _, name := range []string{"_generation_sections.html", "_generation_options.html"} {
+	for _, name := range []string{"_generation_sections.html", "_generation_options.html", "_generation_moss.html"} {
 		part, err := embeddedFS.ReadFile("templates/" + name)
 		if err != nil {
 			t.Fatal(err)
@@ -226,6 +226,19 @@ func TestWorkflowManifestResolverDoesNotGuessBetweenEditFamilies(t *testing.T) {
 
 func TestWorkflowManifestRequiredClassesExistInCompatibilityFixture(t *testing.T) {
 	info := compatibilityFixtureObjectInfo(t)
+	for classType, node := range loadObjectInfoFixture(t, "krea2-pro.json").Nodes {
+		if _, exists := info[classType]; !exists {
+			info[classType] = node
+		}
+	}
+	for classType, node := range aiHubTestSchema(t) {
+		if _, exists := info[classType]; !exists {
+			info[classType] = node
+		}
+	}
+	for classType, node := range loadObjectInfoFixture(t, "minimax-long.json").Nodes {
+		info[classType] = node
+	}
 	for _, manifest := range workflowManifests() {
 		classes := append([]string(nil), manifest.RequiredClasses...)
 		for _, mode := range manifest.Modes {
@@ -248,11 +261,11 @@ func TestWorkflowManifestsAreFilteredByGenerationAccess(t *testing.T) {
 		t.Fatalf("anonymous manifests = %d, want 0", len(got))
 	}
 	imageOnly := &User{CanUseQuickGeneration: true, CanGenerateImageToImage: true}
-	if got := workflowManifestsForUser(manifests, imageOnly); len(got) != 2 {
-		t.Fatalf("image-only manifests = %d, want 2", len(got))
+	if got := workflowManifestsForUser(manifests, imageOnly); len(got) != 3 {
+		t.Fatalf("image-only manifests = %d, want 3", len(got))
 	}
 	video := &User{CanUseQuickGeneration: true, CanGenerateVideo: true}
-	if got := workflowManifestsForUser(manifests, video); len(got) != 1 || got[0].ID != "minimax-h3-video" {
+	if got := workflowManifestsForUser(manifests, video); len(got) != 2 || got[0].ID != "minimax-h3-video" || got[1].ID != aiHubWorkflowID {
 		t.Fatalf("video manifests = %#v", got)
 	}
 }
@@ -276,7 +289,7 @@ func TestGenerationCapabilitiesHandlerReturnsOnlyAccessibleManifests(t *testing.
 	if err := json.Unmarshal(response.Body.Bytes(), &catalog); err != nil {
 		t.Fatal(err)
 	}
-	if catalog.SchemaVersion != workflowManifestSchemaVersion || len(catalog.Workflows) != 2 {
+	if catalog.SchemaVersion != workflowManifestSchemaVersion || len(catalog.Workflows) != 3 {
 		t.Fatalf("capability catalog = %#v", catalog)
 	}
 	for _, manifest := range catalog.Workflows {

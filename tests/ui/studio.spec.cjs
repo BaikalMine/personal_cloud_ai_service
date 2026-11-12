@@ -1,7 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { test, expect } = require("@playwright/test");
-const { settlePage, installPreviewClock, assertNoViewportOverflow } = require("./helpers.cjs");
+const { settlePage, installPreviewClock, assertNoViewportOverflow, chooseWorkflow } = require("./helpers.cjs");
 
 async function open(page, theme = "dark") {
   await page.context().clearCookies({ name: "preview_generation_draft" });
@@ -22,9 +22,14 @@ test("studio primary task and all modes fit in both themes", async ({ page }, in
     await expect(page.locator("#positive-prompt")).toBeVisible();
     const prompt = await page.locator("#positive-prompt").boundingBox();
     expect(prompt.y + 100).toBeLessThan(page.viewportSize().height);
+    if (page.viewportSize().width < 900) {
+      await expect(page.locator('#studio-editor')).toHaveCSS('overflow-y', 'visible');
+      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    }
     const editor = await page.locator("#studio-editor").boundingBox();
     const dock = await page.locator("#generation-run-dock").boundingBox();
     expect(editor.y + editor.height).toBeLessThanOrEqual(dock.y);
+    await page.evaluate(() => window.scrollTo(0, 0));
     await expect(page.locator("[data-step], #workflow-next")).toHaveCount(0);
     await assertNoViewportOverflow(page, `${theme} studio`);
     await page.screenshot({ path: info.outputPath(`studio-${theme}.png`) });
@@ -42,12 +47,15 @@ test("studio primary task and all modes fit in both themes", async ({ page }, in
     }
     await page.locator('[data-workflow-id="image-to-image"]').click();
     for (const preset of ["photoflow-krea2-edit", "photoflow-flux2-edit"]) {
-      await page.locator(`[data-preset-id="${preset}"]`).click();
+      await chooseWorkflow(page, preset);
       await assertNoViewportOverflow(page, `${theme} ${preset}`);
       await page.locator("#studio-settings-open").click();
       await assertNoViewportOverflow(page, `${theme} ${preset} settings`);
       await page.keyboard.press("Escape");
     }
+    await page.locator(".studio-saved > summary").click();
+    await page.locator("#generation-draft-save").click();
+    await expect(page.locator("#generation-draft-status")).toHaveText("Сохранено");
     expect(errors).toEqual([]);
   }
 });
@@ -81,7 +89,7 @@ test("inactive references stay in the draft but not in generation or assistant r
   let assistantBody;
   await page.route("**/generate/prompt-assistant", route => {
     assistantBody = new URLSearchParams(route.request().postData());
-    return route.fulfill({ json: { prompt: "A person in a sunny garden.", model: "preview" } });
+    return route.fulfill({ json: { prompt: "A person in a sunny garden.", model: "preview", correlation_id: "studio-assistant-inactive-references" } });
   });
   await page.locator("#prompt-assistant-open").click();
   await page.locator("#prompt-assistant-improve").click();
@@ -133,7 +141,7 @@ test("one launch waits for uploads and preserves the previous result", async ({ 
   await page.route("**/generate/run", async route => {
     calls += 1;
     launched = new URLSearchParams(route.request().postData());
-    return route.fulfill({ status: 400, json: { error: "Test-only launch stopped before GPU execution" } });
+    return route.fulfill({ status: 400, json: { error: "Test-only launch stopped before GPU execution", state: "error", job_id: "studio-rejected-job-0001", request_id: launched.get("client_request_id") } });
   });
   await page.locator("#generation-submit").dblclick();
   await expect.poll(() => calls).toBe(1);

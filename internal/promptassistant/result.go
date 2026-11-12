@@ -25,6 +25,7 @@ const (
 // Image and video requests are separated because the MiniMax Context-IR response
 // is materially longer than an image prompt.
 type ModelPolicy struct {
+	ReasoningTimeout     time.Duration
 	ImageNumPredict      int
 	ImageThinkNumPredict int
 	VideoNumPredict      int
@@ -35,6 +36,7 @@ type ModelPolicy struct {
 }
 
 type RequestPolicy struct {
+	NumCtx     int           `json:"num_ctx,omitempty"`
 	NumPredict int           `json:"num_predict"`
 	Timeout    time.Duration `json:"-"`
 	TimeoutMS  int64         `json:"timeout_ms"`
@@ -63,17 +65,24 @@ type ReferenceUnderstanding struct {
 }
 
 type Result struct {
-	Execution  ExecutionOutcome         `json:"-"`
-	Model      string                   `json:"model,omitempty"`
-	Prompt     string                   `json:"prompt"`
-	References []ReferenceUnderstanding `json:"references"`
-	Usage      Usage                    `json:"usage"`
-	Policy     RequestPolicy            `json:"policy"`
+	LongParts      int                      `json:"-"`
+	AudioPrompt    string                   `json:"audio_prompt,omitempty"`
+	NegativePrompt string                   `json:"negative_prompt,omitempty"`
+	Execution      ExecutionOutcome         `json:"-"`
+	Model          string                   `json:"model,omitempty"`
+	Prompt         string                   `json:"prompt"`
+	References     []ReferenceUnderstanding `json:"references"`
+	Usage          Usage                    `json:"usage"`
+	Policy         RequestPolicy            `json:"policy"`
 }
 
+var ErrMissingAudioPrompt = errors.New("локальная модель не вернула отдельный вариант озвучки LTX; повторите запрос")
+
 type modelResult struct {
-	Prompt     string `json:"prompt"`
-	References []struct {
+	AudioPrompt    string `json:"audio_prompt"`
+	NegativePrompt string `json:"negative_prompt"`
+	Prompt         string `json:"prompt"`
+	References     []struct {
 		Identifier string `json:"id"`
 		Summary    string `json:"summary"`
 		Use        string `json:"use"`
@@ -82,7 +91,8 @@ type modelResult struct {
 
 func DefaultModelPolicy() ModelPolicy {
 	return ModelPolicy{
-		ImageNumPredict: DefaultImageNumPredict, ImageThinkNumPredict: DefaultImageThinkNumPredict,
+		ReasoningTimeout: 15 * time.Minute,
+		ImageNumPredict:  DefaultImageNumPredict, ImageThinkNumPredict: DefaultImageThinkNumPredict,
 		VideoNumPredict: DefaultVideoNumPredict, VideoThinkNumPredict: DefaultVideoThinkNumPredict,
 		ImageTimeout: DefaultImageTimeout, VideoTimeout: DefaultVideoTimeout, KeepAlive: DefaultKeepAlive,
 	}
@@ -99,6 +109,9 @@ func PromptCharacterLimit(mode Mode) int {
 
 func (policy ModelPolicy) normalized() ModelPolicy {
 	defaults := DefaultModelPolicy()
+	if policy.ReasoningTimeout <= 0 {
+		policy.ReasoningTimeout = defaults.ReasoningTimeout
+	}
 	if policy.ImageNumPredict <= 0 {
 		policy.ImageNumPredict = defaults.ImageNumPredict
 	}
@@ -142,7 +155,21 @@ func (policy ModelPolicy) request(mode Mode, profile Profile, think bool) Reques
 	return result
 }
 
-func structuredResponseInstruction(mode Mode, references []ImageReference, video VideoContext) string {
+func structuredResponseInstruction(mode Mode, profile Profile, references []ImageReference, video VideoContext) string {
+	audioContract := ""
+	audioExample := ""
+	if wantsLTXAudio(video) {
+		audioExample = `,"audio_prompt":"separate soundtrack description, preserving explicitly requested speech verbatim"`
+		audioContract = ` Also return a nonempty audio_prompt string for the separate LTX 2.5 soundtrack. Preserve all explicitly supplied spoken words verbatim in their original language, without translating or adding dialogue. Describe speaker delivery, timing, ambience and sound effects separately from quoted speech in concise natural prose; never put production instructions inside speech quotes. If no dialogue was requested, describe non-speech sound only. Keep this soundtrack consistent with the visual prompt and requested duration. Do not claim to hear attached media. Maximum 4000 characters for audio_prompt.`
+	}
+	if profile == ProfileQwen21Edit {
+		audioExample = `,"negative_prompt":"unwanted visual qualities, or an empty string"`
+		audioContract = ` Also return a negative_prompt string separately from prompt. It should list only unwanted visual qualities relevant to this edit; never put desired changes or image identifiers in the negative prompt. Do not invent exclusions that conflict with the user's request. If CFG is 1, negative_prompt must be empty because that setting cannot use negative conditioning. Maximum 4000 characters.`
+	}
+	if mode == ModeTextToVideo && ValidLongVideoParts(video.LongParts) {
+		audioExample = `,"overall_soundscape":"continuous synchronized sound, without invented speech","non_diegetic_music":"N/A unless requested"`
+		audioContract = ` For this long-video transport ONLY, put the four visual Context-IR sections (subject_definitions, summary, retention_analysis, detailed_description) and the complete numbered Shot plan inside prompt. Return overall_soundscape and non_diegetic_music as the two separate required top-level JSON strings shown above, NOT inside prompt. The server appends these two fields as the final Context-IR sections. Both fields must be nonempty. Use at most 1536 characters for overall_soundscape and 512 for non_diegetic_music. Set non_diegetic_music to N/A when music was not requested. Describe continuous action-synchronized sound for the entire film, never invent speech. This overrides earlier instructions to place all six sections inside prompt.`
+	}
 	expected := expectedReferenceMap(mode, references, video)
 	identifiers := make([]string, 0, len(expected))
 	for _, reference := range expected {
@@ -152,12 +179,48 @@ func structuredResponseInstruction(mode Mode, references []ImageReference, video
 	if len(identifiers) > 0 {
 		list = strings.Join(identifiers, ", ")
 	}
+	mediaNote := "Audio 1 and Video 1 are workflow attachments that are not available to your vision input: describe only their declared role and never claim that you inspected their contents."
+	if len(video.VideoStoryboard) > 0 {
+		mediaNote = "Video 1 is supplied as a sampled storyboard after all Picture images. Describe only visible sampled events and composition, not unheard audio or unseen actions. Audio and the voice sample have NOT been listened to or transcribed."
+	}
 	return fmt.Sprintf(`
 
 Transport response contract (this overrides earlier output-only formatting instructions): return exactly one valid JSON object and nothing else:
-{"prompt":"the final production-ready English prompt","references":[{"id":"Picture 1","summary":"short concrete understanding","use":"how this reference is used"}]}
+{"references":[{"id":"Picture 1","summary":"short concrete understanding","use":"how this reference is used"}],"prompt":"the final production-ready English prompt"%s}
 
-The references array must contain exactly these identifiers in this order: %s. Do not add identifiers that are not listed. For every Picture entry, inspect the attached image and summarize concrete visible identity, appearance, clothing, object, pose, style, or background details relevant to its assigned role. Keep summary and use concise and write them in the same human language as the user's request. Audio 1 and Video 1 are workflow attachments that are not available to your vision input: describe only their declared role and never claim that you inspected their contents. When no identifiers are listed, return an empty references array. The prompt field must still follow all preceding model-specific prompt rules.`, list)
+The references array must contain exactly these identifiers in this order: %s. Do not add identifiers that are not listed. For every Picture entry, inspect the attached image and summarize concrete visible identity, appearance, clothing, object, pose, style, or background details relevant to its assigned role. Keep summary and use concise and write them in the same human language as the user's request. %s When no identifiers are listed, return an empty references array. The prompt field must still follow all preceding model-specific prompt rules.%s`, audioExample, list, mediaNote, audioContract)
+}
+
+func ltxResponseSchema(mode Mode) map[string]any {
+	return map[string]any{
+		"type": "object", "additionalProperties": false,
+		"required": []string{"references", "prompt", "audio_prompt"},
+		"properties": map[string]any{
+			"prompt":       map[string]any{"type": "string", "minLength": 1, "maxLength": PromptCharacterLimit(mode)},
+			"audio_prompt": map[string]any{"type": "string", "minLength": 1, "maxLength": 4000},
+			"references": map[string]any{"type": "array", "items": map[string]any{
+				"type": "object", "additionalProperties": false,
+				"required": []string{"id", "summary", "use"},
+				"properties": map[string]any{
+					"id":      map[string]any{"type": "string"},
+					"summary": map[string]any{"type": "string"},
+					"use":     map[string]any{"type": "string"},
+				},
+			}},
+		},
+	}
+}
+
+func qwen21ResponseSchema(mode Mode) map[string]any {
+	schema := ltxResponseSchema(mode)
+	schema["required"] = []string{"references", "prompt", "negative_prompt"}
+	delete(schema["properties"].(map[string]any), "audio_prompt")
+	schema["properties"].(map[string]any)["negative_prompt"] = map[string]any{"type": "string", "maxLength": 4000}
+	return schema
+}
+
+func wantsLTXAudio(video VideoContext) bool {
+	return video.AIHubMode != "" && video.AIHubMode != "carousel" && video.AudioSource == "ltx"
 }
 
 func expectedReferenceMap(mode Mode, references []ImageReference, video VideoContext) []ReferenceUnderstanding {
@@ -182,6 +245,10 @@ func expectedReferenceMap(mode Mode, references []ImageReference, video VideoCon
 			Summary: "Видеореференс подключён к workflow; его содержимое ассистент не анализировал.",
 			Use:     "Ориентир для движения, темпа и временной структуры.", Inspected: false,
 		})
+		if len(video.VideoStoryboard) > 0 {
+			result[len(result)-1].Inspected = true
+			result[len(result)-1].Summary = "Проанализированы отдельные кадры видео, без прослушивания звука."
+		}
 	}
 	if mode == ModeTextToVideo && video.AudioReference {
 		result = append(result, ReferenceUnderstanding{
@@ -189,6 +256,9 @@ func expectedReferenceMap(mode Mode, references []ImageReference, video VideoCon
 			Summary: "Аудиореференс подключён к workflow; его содержимое ассистент не анализировал.",
 			Use:     "Ориентир для голоса, звучания и синхронизации.", Inspected: false,
 		})
+	}
+	if mode == ModeTextToVideo && video.VoiceReference {
+		result = append(result, ReferenceUnderstanding{Identifier: "Voice 1", Kind: "audio", Role: "voice_sample", Summary: "Образец голоса подключён к Seed-VC; содержимое не прослушивалось.", Use: "Замена голоса после генерации звука.", Inspected: false})
 	}
 	return result
 }
@@ -221,11 +291,20 @@ func referenceUse(role string) string {
 }
 
 func parseModelResult(raw string, mode Mode, references []ImageReference, video VideoContext) (Result, error) {
+	return parseModelResultWithLimit(raw, expectedReferenceMap(mode, references, video), PromptCharacterLimitForVideo(mode, video.LongParts))
+}
+
+func parseModelResultWithReferences(raw string, mode Mode, references []ReferenceUnderstanding) (Result, error) {
+	return parseModelResultWithLimit(raw, references, PromptCharacterLimit(mode))
+}
+
+func parseModelResultWithLimit(raw string, references []ReferenceUnderstanding, limit int) (Result, error) {
 	content := stripModelEnvelope(raw)
 	if content == "" {
 		return Result{}, errors.New("локальная модель не вернула вариант промта")
 	}
-	expected := expectedReferenceMap(mode, references, video)
+	expected := make([]ReferenceUnderstanding, len(references))
+	copy(expected, references)
 	var decoded modelResult
 	if err := json.Unmarshal([]byte(content), &decoded); err != nil {
 		if len(expected) > 0 {
@@ -235,7 +314,6 @@ func parseModelResult(raw string, mode Mode, references []ImageReference, video 
 		if prompt == "" {
 			return Result{}, errors.New("локальная модель не вернула вариант промта")
 		}
-		limit := PromptCharacterLimit(mode)
 		if utf8.RuneCountInString(prompt) > limit {
 			return Result{}, fmt.Errorf("локальная модель вернула промт длиннее %d символов", limit)
 		}
@@ -245,7 +323,6 @@ func parseModelResult(raw string, mode Mode, references []ImageReference, video 
 	if decoded.Prompt == "" {
 		return Result{}, errors.New("локальная модель не вернула вариант промта")
 	}
-	limit := PromptCharacterLimit(mode)
 	if utf8.RuneCountInString(decoded.Prompt) > limit {
 		return Result{}, fmt.Errorf("локальная модель вернула промт длиннее %d символов", limit)
 	}
@@ -261,7 +338,7 @@ func parseModelResult(raw string, mode Mode, references []ImageReference, video 
 	}
 	for index := range expected {
 		value, ok := provided[strings.ToLower(expected[index].Identifier)]
-		if expected[index].Kind == "image" {
+		if expected[index].Kind == "image" || expected[index].Kind == "video" && expected[index].Inspected {
 			if !ok || value.summary == "" {
 				return Result{}, fmt.Errorf("локальная модель не описала референс %s", expected[index].Identifier)
 			}
@@ -272,7 +349,15 @@ func parseModelResult(raw string, mode Mode, references []ImageReference, video 
 			expected[index].Use = value.use
 		}
 	}
-	return Result{Prompt: decoded.Prompt, References: expected}, nil
+	decoded.AudioPrompt = strings.TrimSpace(decoded.AudioPrompt)
+	if utf8.RuneCountInString(decoded.AudioPrompt) > 4000 {
+		return Result{}, errors.New("локальная модель вернула озвучку длиннее 4000 символов")
+	}
+	decoded.NegativePrompt = strings.TrimSpace(decoded.NegativePrompt)
+	if utf8.RuneCountInString(decoded.NegativePrompt) > 4000 {
+		return Result{}, errors.New("локальная модель вернула негативный промт длиннее 4000 символов")
+	}
+	return Result{Prompt: decoded.Prompt, AudioPrompt: decoded.AudioPrompt, NegativePrompt: decoded.NegativePrompt, References: expected}, nil
 }
 
 func stripModelEnvelope(value string) string {
@@ -297,7 +382,7 @@ func normalizeReferenceIdentifier(value string) string {
 		return ""
 	}
 	kind := strings.ToLower(parts[0])
-	if kind != "picture" && kind != "video" && kind != "audio" {
+	if kind != "picture" && kind != "video" && kind != "audio" && kind != "voice" {
 		return ""
 	}
 	return strings.ToUpper(kind[:1]) + kind[1:] + " " + parts[1]

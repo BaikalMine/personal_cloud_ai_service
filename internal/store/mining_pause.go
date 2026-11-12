@@ -7,13 +7,57 @@ import (
 	"ai-access-gateway/internal/domain"
 )
 
-func (s *Store) CreateQuickGenerationMiningLease(ctx context.Context, lease domain.QuickGenerationMiningLease) error {
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO quick_generation_mining_leases
-			(id, correlation_id, prompt_id, user_id, miner_id, script_path, process_name, resume_mining, generation_job_id, lora_training_job_id, resume_ready)
-		VALUES ($1, $2, NULLIF($3,''), $4, $5, $6, $7, $8, NULLIF($9,0), NULLIF($10,0), $11)
-	`, lease.ID, lease.CorrelationID, lease.PromptID, lease.UserID, lease.MinerID, lease.ScriptPath, lease.ProcessName, lease.ResumeMining, lease.GenerationJobID, lease.LoraTrainingJobID, lease.ResumeReady)
+type miningLeaseExecutor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+const miningLeaseColumns = `id,correlation_id,COALESCE(prompt_id,''),COALESCE(generation_job_id,0),COALESCE(lora_training_job_id,0),user_id,miner_id,script_path,process_name,resume_mining,created_at,resume_ready,COALESCE(gpu_work_id,''),executor_permit_id,executor_owner_id,executor_generation`
+
+func insertMiningLease(ctx context.Context, executor miningLeaseExecutor, lease domain.QuickGenerationMiningLease) error {
+	_, err := executor.ExecContext(ctx, `INSERT INTO quick_generation_mining_leases
+		(id,correlation_id,prompt_id,user_id,miner_id,script_path,process_name,resume_mining,generation_job_id,lora_training_job_id,resume_ready,gpu_work_id,executor_permit_id,executor_owner_id,executor_generation)
+		VALUES($1,$2,NULLIF($3,''),$4,$5,$6,$7,$8,NULLIF($9,0),NULLIF($10,0),$11,NULLIF($12,''),$13,$14,$15)`,
+		lease.ID, lease.CorrelationID, lease.PromptID, lease.UserID, lease.MinerID, lease.ScriptPath, lease.ProcessName,
+		lease.ResumeMining, lease.GenerationJobID, lease.LoraTrainingJobID, lease.ResumeReady, lease.GPUWorkID, lease.ExecutorPermitID, lease.ExecutorOwnerID, lease.ExecutorGeneration)
 	return err
+}
+
+func (s *Store) CreateQuickGenerationMiningLease(ctx context.Context, lease domain.QuickGenerationMiningLease) error {
+	if lease.GPUWorkID != "" || lease.ExecutorPermitID != "" {
+		return ErrGPUWorkInput
+	}
+	return insertMiningLease(ctx, s.db, lease)
+}
+
+// The linkage and ownership check are atomic with the insert. Reconciliation
+// cannot fence an expired reservation and then receive a late mining lease.
+func (s *Store) CreateGPUInferenceMiningLease(ctx context.Context, lease domain.QuickGenerationMiningLease, token string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, work, err := lockGPUWork(ctx, tx, lease.GPUWorkID)
+	if err != nil {
+		return err
+	}
+	if (work.Kind != domain.GPUWorkCaption && work.Kind != domain.GPUWorkAssistant && work.Kind != domain.GPUWorkHarnessUltra) ||
+		work.State != domain.GPUWorkHeld || work.Phase != "preparing_resources" || work.LeaseToken != token ||
+		work.CancellationRequested || work.UserID == nil || *work.UserID != lease.UserID ||
+		lease.GenerationJobID != 0 || lease.LoraTrainingJobID != 0 || lease.ResumeReady {
+		return ErrGPUWorkConflict
+	}
+	var live bool
+	if err = tx.QueryRowContext(ctx, `SELECT $1::timestamptz>clock_timestamp()`, work.LeaseUntil).Scan(&live); err != nil {
+		return err
+	}
+	if !live {
+		return ErrGPUWorkConflict
+	}
+	if err = insertMiningLease(ctx, tx, lease); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // Persist completion separately from the attempt to restart the miner. A lost
@@ -38,7 +82,7 @@ func (s *Store) AttachQuickGenerationMiningLease(ctx context.Context, leaseID, p
 
 func (s *Store) ActiveQuickGenerationMiningLease(ctx context.Context) (domain.QuickGenerationMiningLease, error) {
 	return scanQuickGenerationMiningLease(s.db.QueryRowContext(ctx, `
-		SELECT id, correlation_id, COALESCE(prompt_id,''), COALESCE(generation_job_id,0), COALESCE(lora_training_job_id,0), user_id, miner_id, script_path, process_name, resume_mining, created_at, resume_ready
+		SELECT `+miningLeaseColumns+`
 		FROM quick_generation_mining_leases
 		ORDER BY created_at ASC LIMIT 1
 	`))
@@ -46,28 +90,28 @@ func (s *Store) ActiveQuickGenerationMiningLease(ctx context.Context) (domain.Qu
 
 func (s *Store) QuickGenerationMiningLeaseByPrompt(ctx context.Context, promptID string) (domain.QuickGenerationMiningLease, error) {
 	return scanQuickGenerationMiningLease(s.db.QueryRowContext(ctx, `
-		SELECT id, correlation_id, COALESCE(prompt_id,''), COALESCE(generation_job_id,0), COALESCE(lora_training_job_id,0), user_id, miner_id, script_path, process_name, resume_mining, created_at, resume_ready
+		SELECT `+miningLeaseColumns+`
 		FROM quick_generation_mining_leases WHERE prompt_id = $1
 	`, promptID))
 }
 
 func (s *Store) QuickGenerationMiningLeaseByJobID(ctx context.Context, jobID int64) (domain.QuickGenerationMiningLease, error) {
 	return scanQuickGenerationMiningLease(s.db.QueryRowContext(ctx, `
-		SELECT id, correlation_id, COALESCE(prompt_id,''), COALESCE(generation_job_id,0), COALESCE(lora_training_job_id,0), user_id, miner_id, script_path, process_name, resume_mining, created_at, resume_ready
+		SELECT `+miningLeaseColumns+`
 		FROM quick_generation_mining_leases WHERE generation_job_id = $1
 	`, jobID))
 }
 
 func (s *Store) QuickGenerationMiningLeaseByLoraTrainingJobID(ctx context.Context, jobID int64) (domain.QuickGenerationMiningLease, error) {
 	return scanQuickGenerationMiningLease(s.db.QueryRowContext(ctx, `
-		SELECT id, correlation_id, COALESCE(prompt_id,''), COALESCE(generation_job_id,0), COALESCE(lora_training_job_id,0), user_id, miner_id, script_path, process_name, resume_mining, created_at, resume_ready
+		SELECT `+miningLeaseColumns+`
 		FROM quick_generation_mining_leases WHERE lora_training_job_id = $1
 	`, jobID))
 }
 
 func (s *Store) ListQuickGenerationMiningLeases(ctx context.Context) ([]domain.QuickGenerationMiningLease, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, correlation_id, COALESCE(prompt_id,''), COALESCE(generation_job_id,0), COALESCE(lora_training_job_id,0), user_id, miner_id, script_path, process_name, resume_mining, created_at, resume_ready
+		SELECT `+miningLeaseColumns+`
 		FROM quick_generation_mining_leases ORDER BY created_at ASC
 	`)
 	if err != nil {
@@ -93,7 +137,7 @@ func (s *Store) DeleteQuickGenerationMiningLease(ctx context.Context, leaseID st
 	defer tx.Rollback()
 	lease, err := scanQuickGenerationMiningLease(tx.QueryRowContext(ctx, `
 		DELETE FROM quick_generation_mining_leases WHERE id = $1
-		RETURNING id, correlation_id, COALESCE(prompt_id,''), COALESCE(generation_job_id,0), COALESCE(lora_training_job_id,0), user_id, miner_id, script_path, process_name, resume_mining, created_at, resume_ready
+		RETURNING `+miningLeaseColumns+`
 	`, leaseID))
 	if err != nil {
 		return domain.QuickGenerationMiningLease{}, 0, err
@@ -114,7 +158,7 @@ type quickGenerationMiningLeaseScanner interface {
 
 func scanQuickGenerationMiningLease(row quickGenerationMiningLeaseScanner) (domain.QuickGenerationMiningLease, error) {
 	var lease domain.QuickGenerationMiningLease
-	err := row.Scan(&lease.ID, &lease.CorrelationID, &lease.PromptID, &lease.GenerationJobID, &lease.LoraTrainingJobID, &lease.UserID, &lease.MinerID, &lease.ScriptPath, &lease.ProcessName, &lease.ResumeMining, &lease.CreatedAt, &lease.ResumeReady)
+	err := row.Scan(&lease.ID, &lease.CorrelationID, &lease.PromptID, &lease.GenerationJobID, &lease.LoraTrainingJobID, &lease.UserID, &lease.MinerID, &lease.ScriptPath, &lease.ProcessName, &lease.ResumeMining, &lease.CreatedAt, &lease.ResumeReady, &lease.GPUWorkID, &lease.ExecutorPermitID, &lease.ExecutorOwnerID, &lease.ExecutorGeneration)
 	if err != nil && err != sql.ErrNoRows {
 		return domain.QuickGenerationMiningLease{}, err
 	}

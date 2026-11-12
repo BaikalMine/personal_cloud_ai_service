@@ -24,7 +24,7 @@
           ...state,
           loading: false,
           items: Array.isArray(action.items) ? action.items : [],
-          revision: Math.max(Number(state.revision) || 0, Number(action.revision) || 0),
+          revision: Number(action.revision) || 0,
           error: "",
         };
       case "SET_REVISION":

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -19,7 +20,7 @@ const loraTrainingColumns = `
 	network_dim, network_alpha, learning_rate, seed, sample_count, dataset_bytes, dataset_path,
 	state, stage, progress, message, error_message, agent_job_id, artifact_name, artifact_bytes,
 	cancellation_requested_at, started_at, finished_at, created_at, updated_at,
-	COALESCE(dataset_snapshot_id,''), dataset_snapshot_hash, agent_submission_started_at`
+	COALESCE(dataset_snapshot_id,''), dataset_snapshot_hash, agent_submission_started_at, dispatch_token, provenance`
 
 func (s *Store) CreateLoraTrainingJob(ctx context.Context, params domain.CreateLoraTrainingJobParams) (domain.LoraTrainingJob, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -45,6 +46,14 @@ func (s *Store) CreateLoraTrainingJob(ctx context.Context, params domain.CreateL
 	} else if params.DatasetSnapshotHash != "" {
 		return domain.LoraTrainingJob{}, ErrLoraDatasetAsset
 	}
+	job, err := insertLoraTrainingJob(ctx, tx, params)
+	if err != nil {
+		return job, err
+	}
+	return job, tx.Commit()
+}
+
+func insertLoraTrainingJob(ctx context.Context, tx *sql.Tx, params domain.CreateLoraTrainingJobParams) (domain.LoraTrainingJob, error) {
 	row := tx.QueryRowContext(ctx, `
 		INSERT INTO lora_training_jobs (
 			public_id,user_id,username_snapshot,request_id,profile_id,family,base_model,name,output_name,
@@ -66,7 +75,7 @@ func (s *Store) CreateLoraTrainingJob(ctx context.Context, params domain.CreateL
 	if err != nil {
 		return job, err
 	}
-	return job, tx.Commit()
+	return job, nil
 }
 
 func (s *Store) LoraTrainingJobByPublicID(ctx context.Context, publicID string, userID int64, admin bool) (domain.LoraTrainingJob, error) {
@@ -118,7 +127,10 @@ func (s *Store) listLoraTrainingJobs(ctx context.Context, query string, args ...
 	return jobs, rows.Err()
 }
 
-func (s *Store) ClaimNextLoraTrainingJob(ctx context.Context) (domain.LoraTrainingJob, error) {
+func (s *Store) ClaimNextLoraTrainingJob(ctx context.Context, token string) (domain.LoraTrainingJob, error) {
+	if token == "" || !gpuTextValid(token, 96) {
+		return domain.LoraTrainingJob{}, ErrGPUWorkInput
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.LoraTrainingJob{}, err
@@ -142,8 +154,8 @@ func (s *Store) ClaimNextLoraTrainingJob(ctx context.Context) (domain.LoraTraini
 	}
 	job, err := scanLoraTrainingJob(tx.QueryRowContext(ctx, `
 		UPDATE lora_training_jobs SET state='uploading',stage='Передаём датасет агенту',progress=2,
-			message='Подготавливаем защищённую передачу файлов.',updated_at=now()
-		WHERE id=$1 RETURNING `+loraTrainingColumns, id))
+			message='Подготавливаем защищённую передачу файлов.',dispatch_token=$2,updated_at=now()
+		WHERE id=$1 RETURNING `+loraTrainingColumns, id, token))
 	if err != nil {
 		return domain.LoraTrainingJob{}, err
 	}
@@ -153,7 +165,7 @@ func (s *Store) ClaimNextLoraTrainingJob(ctx context.Context) (domain.LoraTraini
 	return job, nil
 }
 
-func (s *Store) RequeueLoraTrainingJob(ctx context.Context, id int64, message string) (domain.LoraTrainingJob, error) {
+func (s *Store) RequeueLoraTrainingJob(ctx context.Context, id int64, token, message string) (domain.LoraTrainingJob, error) {
 	return scanLoraTrainingJob(s.db.QueryRowContext(ctx, `
 		UPDATE lora_training_jobs SET
 			state=CASE WHEN cancellation_requested_at IS NULL THEN 'queued' ELSE 'cancelled' END,
@@ -161,10 +173,10 @@ func (s *Store) RequeueLoraTrainingJob(ctx context.Context, id int64, message st
 			progress=CASE WHEN cancellation_requested_at IS NULL THEN 0 ELSE 100 END,
 			message=CASE WHEN cancellation_requested_at IS NULL THEN $2 ELSE 'Задание отменено во время передачи датасета.' END,
 			finished_at=CASE WHEN cancellation_requested_at IS NULL THEN finished_at ELSE COALESCE(finished_at,now()) END,
-			updated_at=now()
-		WHERE id=$1 AND state='uploading' AND agent_job_id='' AND agent_submission_started_at IS NULL
+			dispatch_token='',updated_at=now()
+		WHERE id=$1 AND dispatch_token=$3 AND $3<>'' AND state='uploading' AND agent_job_id='' AND agent_submission_started_at IS NULL
 		RETURNING `+loraTrainingColumns,
-		id, message,
+		id, message, token,
 	))
 }
 
@@ -187,11 +199,11 @@ func (s *Store) AttachLoraTrainingAgentJob(ctx context.Context, id int64, agentJ
 	return nil
 }
 
-func (s *Store) BeginLoraTrainingSubmission(ctx context.Context, id int64) (domain.LoraTrainingJob, error) {
+func (s *Store) BeginLoraTrainingSubmission(ctx context.Context, id int64, token string) (domain.LoraTrainingJob, error) {
 	return scanLoraTrainingJob(s.db.QueryRowContext(ctx, `UPDATE lora_training_jobs
 		SET agent_submission_started_at=now(),updated_at=now()
-		WHERE id=$1 AND state='uploading' AND agent_job_id='' AND agent_submission_started_at IS NULL AND cancellation_requested_at IS NULL
-		RETURNING `+loraTrainingColumns, id))
+		WHERE id=$1 AND dispatch_token=$2 AND $2<>'' AND state='uploading' AND agent_job_id='' AND agent_submission_started_at IS NULL AND cancellation_requested_at IS NULL
+		RETURNING `+loraTrainingColumns, id, token))
 }
 
 func (s *Store) SetLoraTrainingHandoffMessage(ctx context.Context, id int64, message string) error {
@@ -202,6 +214,7 @@ func (s *Store) SetLoraTrainingHandoffMessage(ctx context.Context, id int64, mes
 }
 
 type UpdateLoraTrainingJobParams struct {
+	Provenance    *domain.LoraTrainingProvenance
 	State         domain.LoraTrainingState
 	Stage         string
 	Progress      int
@@ -215,15 +228,65 @@ func (s *Store) UpdateLoraTrainingJob(ctx context.Context, id int64, params Upda
 	if !params.State.Valid() {
 		return errors.New("invalid LoRA training state")
 	}
-	_, err := s.db.ExecContext(ctx, `
+	execute := s.db.ExecContext
+	var tx *sql.Tx
+	var encoded any
+	if params.Provenance != nil {
+		var err error
+		tx, err = s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		job, err := scanLoraTrainingJob(tx.QueryRowContext(ctx, `SELECT `+loraTrainingColumns+` FROM lora_training_jobs WHERE id=$1 FOR UPDATE`, id))
+		if err != nil {
+			return err
+		}
+		if err := validateLoraProvenanceBinding(job, params); err != nil {
+			return err
+		}
+		merged, err := domain.MergeLoraProvenance(job.Provenance, params.Provenance)
+		if err != nil {
+			return err
+		}
+		data, err := json.Marshal(merged)
+		if err != nil || len(data) > 16384 {
+			return domain.ErrLoraProvenance
+		}
+		encoded, execute = string(data), tx.ExecContext
+	}
+	_, err := execute(ctx, `
 		UPDATE lora_training_jobs SET state=$2,stage=$3,progress=$4,message=$5,error_message=$6,
-			artifact_name=$7,artifact_bytes=$8,
+			artifact_name=$7,artifact_bytes=$8,provenance=COALESCE($9::jsonb,provenance),
 			started_at=CASE WHEN $2 IN ('preparing','caching','running','installing') THEN COALESCE(started_at,now()) ELSE started_at END,
 			finished_at=CASE WHEN $2 IN ('completed','failed','cancelled') THEN COALESCE(finished_at,now()) ELSE finished_at END,
 			updated_at=now()
 		WHERE id=$1
-	`, id, params.State, params.Stage, params.Progress, params.Message, params.ErrorMessage, params.ArtifactName, params.ArtifactBytes)
+	`, id, params.State, params.Stage, params.Progress, params.Message, params.ErrorMessage, params.ArtifactName, params.ArtifactBytes, encoded)
+	if err == nil && tx != nil {
+		return tx.Commit()
+	}
 	return err
+}
+
+func validateLoraProvenanceBinding(job domain.LoraTrainingJob, params UpdateLoraTrainingJobParams) error {
+	p := params.Provenance
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	seed := job.Seed
+	if seed > 1<<32-1 {
+		seed %= 1 << 32
+	}
+	expected := domain.LoraExecutionParameters{Resolution: job.Resolution, MaxSteps: job.MaxTrainSteps,
+		NetworkDim: job.NetworkDim, NetworkAlpha: job.NetworkAlpha, LearningRate: job.LearningRate,
+		Seed: seed, SampleCount: job.SampleCount}
+	if p.GatewayJobID != job.PublicID || p.Profile.ID != job.ProfileID || p.Profile.Family != job.Family ||
+		p.Profile.BaseModel != job.BaseModel || p.Parameters != expected ||
+		params.State == domain.LoraTrainingCompleted && (p.Artifact == nil || p.Artifact.Name != params.ArtifactName || p.Artifact.Bytes != params.ArtifactBytes) {
+		return domain.ErrLoraProvenance
+	}
+	return nil
 }
 
 func (s *Store) RequestLoraTrainingCancellation(ctx context.Context, publicID string, userID int64, admin bool) (domain.LoraTrainingJob, error) {
@@ -261,7 +324,7 @@ func (s *Store) RecoverLoraTrainingJobs(ctx context.Context) (int64, error) {
 				ELSE 'Отмена завершена после перезапуска Gateway.'
 			END,
 			finished_at=CASE WHEN cancellation_requested_at IS NULL THEN finished_at ELSE COALESCE(finished_at,now()) END,
-			updated_at=now()
+			dispatch_token='',updated_at=now()
 		WHERE state='uploading' AND agent_job_id='' AND agent_submission_started_at IS NULL
 	`)
 	if err != nil {
@@ -297,6 +360,7 @@ type loraTrainingScanner interface {
 func scanLoraTrainingJob(scanner loraTrainingScanner) (domain.LoraTrainingJob, error) {
 	var job domain.LoraTrainingJob
 	var state string
+	var provenance []byte
 	var cancellationRequestedAt, startedAt, finishedAt sql.NullTime
 	err := scanner.Scan(
 		&job.ID, &job.PublicID, &job.UserID, &job.UsernameSnapshot, &job.RequestID, &job.ProfileID, &job.Family, &job.BaseModel,
@@ -305,10 +369,15 @@ func scanLoraTrainingJob(scanner loraTrainingScanner) (domain.LoraTrainingJob, e
 		&state, &job.Stage, &job.Progress, &job.Message, &job.ErrorMessage, &job.AgentJobID, &job.ArtifactName, &job.ArtifactBytes,
 		&cancellationRequestedAt, &startedAt, &finishedAt, &job.CreatedAt, &job.UpdatedAt,
 		&job.DatasetSnapshotID, &job.DatasetSnapshotHash,
-		&job.AgentSubmissionStartedAt,
+		&job.AgentSubmissionStartedAt, &job.DispatchToken, &provenance,
 	)
 	if err != nil {
 		return domain.LoraTrainingJob{}, err
+	}
+	if len(provenance) > 0 {
+		if len(provenance) > 16384 || json.Unmarshal(provenance, &job.Provenance) != nil || job.Provenance.Validate() != nil {
+			return domain.LoraTrainingJob{}, domain.ErrLoraProvenance
+		}
 	}
 	job.State = domain.LoraTrainingState(state)
 	if cancellationRequestedAt.Valid {

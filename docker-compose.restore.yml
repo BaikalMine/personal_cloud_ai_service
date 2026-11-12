@@ -52,6 +52,7 @@ services:
     build: .
     environment:
       DATABASE_URL: postgres://gateway_restore:gateway-restore-password@postgres:5432/gateway_restore?sslmode=disable
+      RESTORE_DRILL_MODE: "true"
       ADMIN_USERNAME: restore-admin
       ADMIN_PASSWORD: restore-only-admin-password
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET from .env is required to validate encrypted data}
@@ -69,6 +70,11 @@ services:
       COMFYUI_UPSTREAM: http://127.0.0.1:1
       OPENWEBUI_UPSTREAM: http://127.0.0.1:1
       OLLAMA_UPSTREAM: http://127.0.0.1:1
+      LORA_TRAINING_AGENT_URL: http://127.0.0.1:1
+      LORA_TRAINING_AGENT_TOKEN: ""
+      INFERENCE_WORKER_URL: http://127.0.0.1:1
+      LORA_CAPTION_DURABLE_INFERENCE: "false"
+      PROMPT_ASSISTANT_DURABLE_JOBS: "false"
       CONTENT_MODERATOR_UPSTREAM: http://127.0.0.1:1
       MINING_AGENT_URL: http://127.0.0.1:1
       MINING_AGENT_TOKEN: restore-mining-agent-token-0000000000000000

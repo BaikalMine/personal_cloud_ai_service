@@ -1,0 +1,37 @@
+{{define "admin_release"}}
+{{template "head" .}}
+{{template "admin_nav" .}}
+<link rel="stylesheet" href="/static/release.css?v={{.AssetVersion}}">
+<main class="page release-page" id="main-content">
+  <a class="release-back" href="/admin/updates"><i data-lucide="arrow-left" aria-hidden="true"></i>Обновления</a>
+  <header class="release-heading">
+    <h1>Версии и совместимость</h1>
+    <div class="release-actions">
+      <a class="button ghost icon-button" href="/admin/release" title="Обновить данные" aria-label="Обновить данные"><i data-lucide="refresh-cw" aria-hidden="true"></i></a>
+      <a class="button ghost" href="/admin/release/status" download><i data-lucide="download" aria-hidden="true"></i>Отчёт JSON</a>
+    </div>
+  </header>
+  <section class="release-runtime" aria-labelledby="release-gateway">
+    <h2 id="release-gateway">Gateway <code>{{.Release.Gateway.Build.Version}}</code></h2>
+    <dl class="release-facts">
+      <div><dt>Коммит работающей сборки</dt><dd><code>{{if .Release.Gateway.Build.Revision}}{{.Release.Gateway.Build.Revision}}{{else}}Не указан{{end}}</code></dd></div>
+      <div><dt>Собрано</dt><dd>{{if .Release.Gateway.Build.BuiltAt}}<time datetime="{{.Release.Gateway.Build.BuiltAt}}">{{.Release.Gateway.Build.BuiltAt}}</time>{{else}}Не указано{{end}}</dd></div>
+      <div><dt>Привязка к выпуску</dt><dd>{{if .Release.Gateway.Build.ReleaseIdentified}}Указана{{else}}Не подтверждена{{end}}</dd></div>
+    </dl>
+  </section>
+  <section aria-labelledby="release-peers">
+    <div class="release-section-heading"><h2 id="release-peers">Компоненты</h2><p>Проверено <time datetime="{{.Release.CheckedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.Release.CheckedAt.Format "02.01.2006 15:04:05 MST"}}</time></p></div>
+    <div class="release-peers">
+    {{range .Release.Peers}}
+      <article class="release-peer" aria-label="{{.Name}}">
+        <div class="release-peer-name"><h3>{{.Name}}</h3><span class="release-status" data-state="{{.Check.Status}}">{{.StatusLabel}}</span></div>
+        <div class="release-peer-build">{{with .Check.Report}}<strong>{{.Build.Version}}</strong><code>{{if .Build.ShortRevision}}{{.Build.ShortRevision}}{{else}}Коммит не указан{{end}}</code>{{else}}<span class="muted">Сборка неизвестна</span>{{end}}</div>
+        <div class="release-peer-detail">{{if .Guidance}}<p>{{.Guidance}}</p>{{end}}{{with .Check.Report}}<details><summary>Данные сборки</summary><dl class="release-facts"><div><dt>Коммит</dt><dd><code>{{if .Build.Revision}}{{.Build.Revision}}{{else}}Не указан{{end}}</code></dd></div><div><dt>Собрано</dt><dd>{{if .Build.BuiltAt}}{{.Build.BuiltAt}}{{else}}Не указано{{end}}</dd></div><div><dt>Изменения исходников</dt><dd>{{if eq .Build.Modified "false"}}Нет{{else if eq .Build.Modified "true"}}Есть{{else}}Неизвестно{{end}}</dd></div><div><dt>Платформа</dt><dd>{{.Build.Platform}}, {{.Build.GoVersion}}</dd></div><div><dt>API</dt><dd>{{range .Contracts}}<span class="release-contract">{{.Name}} v{{.Version}}</span>{{end}}</dd></div></dl></details>{{end}}</div>
+      </article>
+    {{end}}
+    </div>
+  </section>
+  <p class="release-limit">Совместимость API не подтверждает готовность моделей, состояние базы данных или безопасность отката.</p>
+</main>
+</body></html>
+{{end}}

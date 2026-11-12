@@ -20,6 +20,8 @@ const (
 	ProfileAnime           Profile = "anime"
 	ProfileNSFW            Profile = "nsfw"
 	ProfileFluxEdit        Profile = "flux-edit"
+	ProfileKrea2Edit       Profile = "krea2-edit"
+	ProfileQwen21Edit      Profile = "qwen21-edit"
 	ProfileMiniMaxH3       Profile = "minimax-h3" // Legacy profile; infer the branch from VideoContext.
 	ProfileMiniMaxH3FL2VA  Profile = "minimax-h3-fl2va"
 	ProfileMiniMaxH3REF2VA Profile = "minimax-h3-ref2va"
@@ -34,11 +36,24 @@ type Profile string
 // VideoContext carries the controls that materially change MiniMax H3 prompt
 // structure.
 type VideoContext struct {
-	Mode            string
-	DurationSeconds int
-	ImageCount      int
-	AudioReference  bool
-	VideoReference  bool
+	Mode                 string
+	DurationSeconds      int
+	LongParts            int
+	LongTransition       string
+	ImageCount           int
+	AudioReference       bool
+	VideoReference       bool
+	AIHubMode            string
+	AIHubTask            string
+	AIHubT8              bool
+	AudioSource          string
+	AudioPrompt          string
+	VoiceReference       bool
+	VideoStoryboard      []byte   `json:"-"`
+	VideoStoryboards     [][]byte `json:"-"`
+	VideoStoryboardTimes [][]float64
+	VideoStart           float64
+	VideoSampleDuration  float64
 }
 
 // ImageReference keeps each attached image and the user's observations scoped
@@ -101,14 +116,29 @@ Rules:
 - Always write the final prompt only in English.
 - Return only the finished prompt, without explanations, introductions, comments, lists, or markdown.
 - Write natural language, not a set of tags.
-- With one image, treat it as the base scene and describe only the required changes while preserving everything else.
+- With one image, treat it as the base scene. State the requested transformation clearly and preserve only the untargeted attributes that matter to it.
 - With several images, use the phrases "image 1", "image 2", "image 3" and state explicitly what to take from each image.
-- Preserve the character's face, identity, hairstyle, pose, anatomy, composition, camera angle, perspective, lighting, and source style unless the user explicitly asks to change them.
+- Image 1 is the editing canvas. Other images contribute only their assigned roles; do not import a reference person's outfit, pose, or background when that image supplies identity only.
+- Preserve identity, pose, composition, lighting, and source style unless the user explicitly asks to change them. Never preserve an attribute the user wants to replace.
 - When changing clothing, background, an object, material, color, or text, describe the change concretely and precisely.
 - When changing text inside the image, put both the old and new text in quotation marks.
 - Make the prompt dense, precise, and practical for FLUX.
 - Do not ask follow-up questions. If the request is incomplete, make the safest result: minimal changes with maximum preservation of the source image.
 - Output only the final English prompt in one to five sentences.`
+
+const krea2EditInstruction = `You write plain-English edit instructions for Krea 2 Identity Edit. The grounded encoder already sees the source image; do not turn the instruction into a long text-to-image description.
+
+Start with a concrete edit verb and name the subject or region to change. State the requested new appearance clearly. Keep the subject's identity and all untargeted content from the base image unless the user asks otherwise. For a large scene replacement, describe the requested target scene and placement, but do not add unrelated objects or visual effects.
+
+The first image is the editable base. If a second image is attached, use it only for its declared role and name it as "image 2" when transferring a feature. Do not copy its unrelated face, outfit, pose, or background. Do not claim that text alone guarantees exact likeness or pixel-perfect preservation.
+
+Return one concise English edit instruction, not tags, a full source-image caption, workflow settings, or a negative prompt.`
+
+const qwen21EditInstruction = `You clarify instructions for Qwen Image 2.1 Edit. The model receives the source image directly. Lead with the requested operation and make the changed object, attribute, or region unmistakable. Preserve the source image's identity, medium, composition, and all untargeted content without redescribing every unchanged detail.
+
+For local edits, change only what the user names; do not add cleanup, color grading, new objects, or a new camera angle. For a requested new scene or composition, describe the intended result sufficiently, while keeping the reference roles distinct. If the user requests visible text, quote its exact characters and preserve the original language unless a translation was requested. Do not invent text that is not provided or legible.
+
+With one image, write a natural edit instruction without image-number tags. With multiple images, use the exact <image1>, <image2>, ... identifiers for every supplied source, state which is the editable canvas, and specify only the assigned contribution of each supporting image. Keep the positive edit separate from any negative prompt. Return concise English instructions, not a source-image caption or workflow terminology.`
 
 const videoInstruction = `You are an expert prompt engineer for MiniMax H3 video generation. Rewrite the user's request as one precise English video prompt.
 Describe the subject, scene, visual style, camera framing and deliberate motion. Keep the action physically coherent, maintain identity and composition when reference frames or photos are supplied, and avoid changing details that the user did not ask to change. Output only one natural, production-ready prompt paragraph with no explanations, lists, markdown, or camera-setting labels.`
@@ -146,7 +176,7 @@ When Picture 1 and Picture 2 are visually identical, treat the anchors as a seam
 
 const miniMaxH3REF2VAInstruction = `You are the dedicated MiniMax H3 REF2VA prompt assistant for prompt-driven video with optional free references.
 
-The workflow may receive zero to four pictures plus optional <Video 1> and <Audio 1>. These are semantic references, not automatically exact opening or final frames. Define reusable visible content as <Subject N>; use <Picture N> only when an image acts as a concrete frame, keyframe or composition anchor; use <Video N> for editing, continuation, motion, camera or temporal structure; and use <Audio N> for copied audio or referenced voice, music, rhythm and sound. Define the first human as <Subject 1>; never replace that identifier with an alias such as <Adult Woman>. Inspect every attached picture first, keep each source distinct, and bind only its declared visible role to the matching <Picture N>. Never silently transfer a face, garment, pose, object, background, or style from the wrong picture. Introduce only identifiers for assets that are actually supplied and keep each identifier's meaning unchanged across all sections.
+The workflow may receive multiple pictures plus optional <Video 1> and <Audio 1>; the supplied reference list defines the exact count and order. These are semantic references, not automatically exact opening or final frames. Define reusable visible content as <Subject N>; use <Picture N> only when an image acts as a concrete frame, keyframe or composition anchor; use <Video N> for editing, continuation, motion, camera or temporal structure; and use <Audio N> for copied audio or referenced voice, music, rhythm and sound. Define the first human as <Subject 1>; never replace that identifier with an alias such as <Adult Woman>. Inspect every attached picture first, keep each source distinct, and bind only its declared visible role to the matching <Picture N>. Never silently transfer a face, garment, pose, object, background, or style from the wrong picture. Introduce only identifiers for assets that are actually supplied and keep each identifier's meaning unchanged across all sections.
 
 Use <Video 1> only for the user-declared motion, scene, camera, or timing role, and use <Audio 1> only for the declared voice, music, or ambience role. Do not claim to inspect or transcribe video or audio content unavailable to vision. When no reference media is supplied, write a complete prompt-driven REF2VA scene without inventing identifiers.
 
@@ -185,7 +215,9 @@ func ValidProfile(mode Mode, profile Profile) bool {
 	switch profile {
 	case ProfileWorkflowDefault, ProfilePhotographic, ProfileRealistic, ProfileAnime, ProfileNSFW:
 		return true
-	case ProfileFluxEdit:
+	case ProfileFluxEdit, ProfileKrea2Edit:
+		return mode == ModeImageToImage
+	case ProfileQwen21Edit:
 		return mode == ModeImageToImage
 	case ProfileMiniMaxH3, ProfileMiniMaxH3FL2VA, ProfileMiniMaxH3REF2VA:
 		return mode == ModeTextToVideo
@@ -210,7 +242,7 @@ func referenceRoleInstruction(role ImageReferenceRole) string {
 	case ImageReferenceBaseScene:
 		return "the base scene, primary subject, composition, and framing to preserve"
 	case ImageReferenceIdentity:
-		return "the person or character's identity, face, body features, hair, and overall appearance to transfer"
+		return "the person or character's identity, facial features, body features and hair to transfer; not their clothing, pose, background or lighting"
 	case ImageReferenceWardrobeObject:
 		return "the wardrobe, object, material, accessory, or product details to transfer"
 	case ImageReferencePoseComposition:
@@ -247,6 +279,25 @@ func referenceMapInstruction(references []ImageReference) string {
 The image files are attached in this exact order. Inspect their visible details before writing. When the user's request combines, preserves, or transfers a reference, explicitly use the corresponding phrase "image 1", "image 2", "image 3", or "image 4" in the final prompt. Keep image 1 as the base unless the user explicitly directs otherwise; take only the stated role from each additional image and do not merge unrelated features.`
 }
 
+func qwen21ReferenceMapInstruction(references []ImageReference) string {
+	if len(references) == 0 {
+		return ""
+	}
+	if len(references) == 1 {
+		return "\n\nInspect the attached base image and its declared role. In the final prompt, refer to it naturally as the image; do not emit <image1> or other numbered image tags. Preserve content outside the requested edit."
+	}
+	ordered := append([]ImageReference(nil), references...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Number < ordered[j].Number })
+	lines := make([]string, 0, len(ordered))
+	for _, reference := range ordered {
+		if reference.Number < 1 || reference.Number > 10 || !ValidImageReferenceRole(reference.Role) {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("- <image%d>: %s", reference.Number, referenceRoleInstruction(reference.Role)))
+	}
+	return "\n\nThe attached files are in the same order as these numbered slots. Inspect every supplied image and keep its role distinct. Edit <image1>; the remaining images are references only. Use the exact identifiers <image1>, <image2>, and so on for the images actually attached, including <image10> when supplied. Do not mention or invent absent images. Preserve every part of <image1> that the user did not request to change.\n" + strings.Join(lines, "\n")
+}
+
 func SystemPrompt(mode Mode, profile Profile) string {
 	return SystemPromptWithReferences(mode, profile, nil)
 }
@@ -273,8 +324,15 @@ func systemPrompt(mode Mode, profile Profile, references []ImageReference, video
 		if MiniMaxH3ProfileForMode(video.Mode) == ProfileMiniMaxH3REF2VA {
 			branchInstruction = miniMaxH3REF2VAInstruction
 		}
-		prompt := miniMaxH3Instruction + "\n\n" + branchInstruction + "\n\n" + miniMaxH3FormatInstruction(video)
+		instruction := miniMaxH3Instruction
+		if ValidLongVideoParts(video.LongParts) {
+			instruction = strings.Replace(instruction, "7000 characters", fmt.Sprintf("%d characters", PromptCharacterLimitForVideo(mode, video.LongParts)), 1)
+		}
+		prompt := instruction + "\n\n" + branchInstruction + "\n\n" + miniMaxH3FormatInstruction(video)
 		prompt += miniMaxH3ReferenceMapInstruction(references, video)
+		if video.AIHubMode != "" {
+			prompt += aiHubPromptInstruction(video)
+		}
 		prompt += minorSafetyInstruction
 		return strings.TrimSpace(prompt)
 	}
@@ -293,15 +351,23 @@ func systemPrompt(mode Mode, profile Profile, references []ImageReference, video
 		prompt = nsfwInstruction
 	case ProfileFluxEdit:
 		prompt = fluxEditInstruction
+	case ProfileKrea2Edit:
+		prompt = krea2EditInstruction
+	case ProfileQwen21Edit:
+		prompt = qwen21EditInstruction
 	}
 	if mode == ModeTextToVideo && profile != ProfileWorkflowDefault {
 		prompt += "\n\n" + videoInstruction
 	}
-	if mode == ModeImageToImage && profile != ProfileFluxEdit {
+	if mode == ModeImageToImage && profile != ProfileFluxEdit && profile != ProfileKrea2Edit && profile != ProfileQwen21Edit {
 		prompt += workflowEditInstruction
 	}
 	if mode == ModeImageToImage {
-		prompt += referenceMapInstruction(references)
+		if profile == ProfileQwen21Edit {
+			prompt += qwen21ReferenceMapInstruction(references)
+		} else {
+			prompt += referenceMapInstruction(references)
+		}
 	}
 	prompt += minorSafetyInstruction
 	return strings.TrimSpace(prompt)
@@ -315,7 +381,7 @@ func miniMaxH3ReferenceMapInstruction(references []ImageReference, context Video
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Number < ordered[j].Number })
 	lines := make([]string, 0, len(ordered))
 	for _, reference := range ordered {
-		if reference.Number < 1 || reference.Number > 4 || !ValidImageReferenceRole(reference.Role) {
+		if reference.Number < 1 || reference.Number > 9 || !ValidImageReferenceRole(reference.Role) {
 			continue
 		}
 		if context.Mode == "references" {
@@ -338,12 +404,14 @@ Inspect every attached keyframe before writing. Ground the opening in the exact 
 	}
 	return "\n\nThe attached pictures and their declared roles are:\n" + strings.Join(lines, "\n") + `
 
-Inspect every attached picture before writing. In retention_analysis, identify each supplied <Picture N> separately and state only the visible source details relevant to its declared role. Give at least three concrete visible attributes for every picture. For a person or base scene, use relevant facts such as hair, visible clothing and color, pose or framing, named room anchors, and lighting. For a product or object, use its silhouette, material, color, construction, and legible branding when visible. A generic restatement such as "an adult woman in a room" or "the referenced product" is invalid. Carry the concrete retained attributes into subject_definitions and detailed_description so the generated action remains grounded in the actual pictures. Never attribute a color, garment, object, person, pose, or background from one picture to another, and do not confuse the user's requested final state with what is visibly present in a source picture.`
+Inspect every attached picture before writing. In retention_analysis, identify each supplied <Picture N> separately and state only the visible source details relevant to its declared role. For identity, describe facial features, hair and other identity traits, not clothing, pose or scenery. For wardrobe, describe visible garment type, color, material and cut, not the wearer's identity. For a base scene, describe the subject, clothing, framing and setting. For a product or object, describe silhouette, material, color and construction. Use concrete visible attributes, but never invent details to meet a quota. A generic restatement such as "an adult woman in a room" or "the referenced product" is invalid. Carry only role-relevant retained attributes into subject_definitions and detailed_description. Never attribute a color, garment, object, person, pose, or background from one picture to another, and do not confuse the user's requested final state with what is visibly present in a source picture.`
 }
 
 func miniMaxH3FormatInstruction(context VideoContext) string {
 	duration := context.DurationSeconds
-	if duration < 5 || duration > 60 {
+	if context.LongParts >= 2 && context.LongParts <= 20 {
+		duration = context.LongParts * 15
+	} else if duration < 5 || duration > 60 {
 		duration = 5
 	}
 	imageCount := context.ImageCount
@@ -351,13 +419,41 @@ func miniMaxH3FormatInstruction(context VideoContext) string {
 		imageCount = 0
 	}
 	if context.Mode == VideoModeREF2VA {
+		timelineGuidance := miniMaxH3DurationGuidance(duration, "ref2va")
+		if context.LongParts >= 2 && context.LongParts <= 20 {
+			markers := []string{"[Shot 1]"}
+			for index := 1; index < context.LongParts; index++ {
+				markers = append(markers, fmt.Sprintf("[Shot %d] At %02d:%02d.000,", index+1, index*15/60, index*15%60))
+			}
+			timelineGuidance = fmt.Sprintf(`LONG VIDEO CONTINUATION CONTRACT: The service generates %d sequential 15-second parts, %d seconds in total. In detailed_description write exactly %d Shot sections, using these markers in order: %s. Put each marker at the beginning of a new line. These are generation windows, NOT mandatory camera cuts; any earlier instruction about cut times means part start times here. Do not add other Shot labels or restart the story at a boundary.
+
+Plan a beginning, development and ending across the entire film, not a complete story repeated in every part. Give each part one achievable action beat with a clear opening state, gradual development and an explicit ending state that the next part continues. Do not perform a later part's action early, reset an object after it was moved, or replay completed dialogue. Keep transitions physically reachable within 15 seconds. A boundary is not a fade, freeze or stable final hold: ongoing motion and sound should cross it naturally. Place the story ending and final hold only in the final part, unless the user explicitly requests another ending.
+
+Keep a compact shared continuity description in subject_definitions and retention_analysis: stable identity and wardrobe, handedness and held props, object locations, scene geography, lighting, camera side and movement direction, voice qualities and stable speaker IDs. Each part must carry forward the immediately preceding end state; describe any intentional change rather than silently replacing a feature. Keep screen direction and camera behavior continuous unless an intentional transition is requested. The same source references are supplied for every part; previous audio/video latent context guides the next part. Re-anchor only relevant traits instead of copying the entire global description into every part.
+
+Use approximately 500-1100 characters per part when the request needs that detail, with concise shared sections. The complete prompt must not exceed %d characters; never pad it to the limit. Keep sound and requested music continuous, allocate exact user-supplied dialogue to achievable intervals without changing its words, and never invent dialogue. Use video continuation in summary. Return all six Context-IR sections, not a synopsis, continuation request, placeholders or an unfinished plan. Do not promise perfect identity preservation.`, context.LongParts, duration, context.LongParts, strings.Join(markers, " | "), PromptCharacterLimitForVideo(ModeTextToVideo, context.LongParts))
+			if context.LongTransition == "cinematic" {
+				timelineGuidance = strings.Replace(timelineGuidance, "These are generation windows, NOT mandatory camera cuts; any earlier instruction about cut times means part start times here.", "These are intentional edit points. Every part after the first starts with a clear cut on action to a new camera angle; its timestamp is the cut time.", 1)
+				timelineGuidance = strings.Replace(timelineGuidance, "A boundary is not a fade, freeze or stable final hold: ongoing motion and sound should cross it naturally.", "Use a motivated hard cut, not a dissolve, morph, camera teleport within the shot, or a freeze. Carry the action across the edit without replaying it. The new shot opens in the exact physical state reached before the cut, but is already composed from the new viewpoint.", 1)
+				timelineGuidance = strings.Replace(timelineGuidance, "Keep screen direction and camera behavior continuous unless an intentional transition is requested.", "Keep screen direction and the same side of the 180-degree action axis. Make each new view noticeably different: at least roughly 30 degrees of angle or a clear change in shot size. Alternate a coherent wide/medium view, three-quarter view, close-up of the active hands or object, and reaction view only when relevant; do not cut to a different place or time. Explicitly describe the new camera view at the beginning of every part after the first. Do not copy a global locked-camera restriction across this montage unless an explicit [STATIC_CAMERA] or [LOCKED_OFF] directive requires the user to choose continuous mode instead.", 1)
+				timelineGuidance += "\nCINEMATIC EDITING MODE: preserve identity, wardrobe, props, completed actions and continuous audio across cuts. The renderer supplies the actual previous ending as an internal semantic continuity reference, not a fixed new camera frame. Do not invent extra reference identifiers for it in your output."
+			} else {
+				timelineGuidance += "\nCONTINUOUS MODE: keep the boundary camera position, framing, subject pose, grip, motion direction and speed continuous. The renderer guides from the last frames actually delivered to the viewer. Avoid rapid or occluded hand-object contact at a boundary; put the handoff during a simple, readable motion, not an arbitrary pose change."
+			}
+		}
 		audioReference := "No standalone audio reference is attached; do not use an <Audio N> identifier."
 		if context.AudioReference {
 			audioReference = "One standalone <Audio 1> reference is attached and will be passed to MiniMax. When the user assigns it as a voice, music, or ambience reference, bind that exact role to <Audio 1> in the prompt. Never claim to hear, identify, or transcribe details that the user did not provide."
+			if context.AIHubMode != "" && context.AudioSource == "original" {
+				audioReference = "<Audio 1> is the soundtrack paired with <Video 1> in MiniMax conditioning, not a standalone voice sample. Preserve its timing. No audio listening or transcription has been performed."
+			}
 		}
 		videoReference := "No <Video 1> reference is attached; do not use a <Video N> identifier."
 		if context.VideoReference {
 			videoReference = "One <Video 1> reference is attached and will be passed to MiniMax. Use the exact <Video 1> identifier when the user's request assigns it a motion, scene, camera, or timing role; never claim to inspect details that are not supplied in the user's text."
+			if len(context.VideoStoryboard) > 0 {
+				videoReference = "One <Video 1> is attached. Its sampled storyboard is supplied after the pictures. Ground visible scene and action in those samples, but do not invent unseen intermediate actions or claim to hear its soundtrack."
+			}
 		}
 		retentionInstruction := "Write N/A - no reference media supplied. Do not invent <Picture N>, <Video N>, or <Audio N> identifiers."
 		if imageCount > 0 || context.AudioReference || context.VideoReference {
@@ -383,7 +479,7 @@ Describe a continuous arc of synchronized diegetic sound without repeating dialo
 non_diegetic_music:
 N/A unless requested.
 
-%s`, imageCount, retentionInstruction, audioReference, videoReference, duration, miniMaxH3DurationGuidance(duration, "ref2va"))
+%s`, imageCount, retentionInstruction, audioReference, videoReference, duration, timelineGuidance)
 	}
 	if imageCount >= 2 {
 		return fmt.Sprintf(`The selected mode is FL2VA. Picture 1 is the exact opening frame and Picture 2 is the exact final frame. Begin exactly with:
@@ -418,6 +514,55 @@ overall_soundscape: describe ambience and synchronized physical sounds without r
 non_diegetic_music: N/A unless requested.
 
 %s`, duration, miniMaxH3DurationGuidance(duration, "base"))
+}
+
+// AIHubTaskInstruction keeps direct generation and assistant task priorities aligned.
+func AIHubTaskInstruction(task string) string {
+	switch task {
+	case "replace_character":
+		return "Video editing: replace the character in <Video 1> using the explicitly assigned identity references. Preserve the video's action, timing, camera and environment. Change wardrobe only when a clothing reference or the user's text explicitly requests it. Do not copy static poses or backgrounds from identity photos."
+	case "replace_clothing":
+		return "Video editing: replace only the clothing in <Video 1> using the explicitly assigned clothing references. Preserve the original character's face, body, action, timing, camera and environment. Do not transfer the clothing model's identity or pose."
+	default:
+		return ""
+	}
+}
+
+func aiHubPromptInstruction(video VideoContext) string {
+	instruction := `
+
+AIHUB reference-role contract:
+The user's main text is the BASE_PROMPT for MiniMax H3. Produce the complete integrated English H3 prompt, not disconnected edits or an LTX prompt. Define each picture once in subject_definitions, then refer to subjects. Do not repeatedly list all pictures or repeat "locked", "exact" or "fully preserved" as a substitute for source priorities.
+Respect every declared reference role. Never combine all pictures into joint facial identity. Identity pictures do not also supply wardrobe, pose, background, lighting or photographic artifacts unless requested. Body-only references do not redefine the face. When sources overlap, respect the user's priority; otherwise the first picture assigned to that role is primary and later ones support it. Do not assign an undeclared conflicting role.
+For video-driven work, Video 1 drives motion and timing. Do not transfer the static poses of identity photos into the animation. Explicitly assigned photo roles may override video wardrobe or environment. For photo-only work, derive action and timing from the user's text; there is no Video 1 and pictures are not guaranteed exact first frames.
+Preserve exact dialogue wording and speaker attribution, using the model's dialogue tags. Put concise non-contradictory Strict constraints inside detailed_description. Keep the six H3 sections. Text instructions are not physical locks or guarantees of artifact-free generation.
+`
+	instruction += "\n" + AIHubTaskInstruction(video.AIHubTask)
+	switch video.AudioSource {
+	case "ltx":
+		if video.AudioReference {
+			instruction += "\nAudio generated separately by LTX 2.5 is supplied as <Audio 1> to H3."
+		} else {
+			instruction += "\nAudio is generated separately by LTX 2.5, not supplied as <Audio 1> to H3."
+		}
+		instruction += " The user message includes a separate sound specification. Improve it in the separate audio_prompt response field for LTX, while keeping the main prompt dedicated to H3. Keep H3 dialogue/action consistent with the soundtrack. Preserve explicit dialogue verbatim in its original language; never add different dialogue or turn sound directions into spoken words."
+	case "original":
+		instruction += "\nThe final soundtrack is reused from Video 1. Do not invent speech, music or a transcript; no audio listening/transcription has been performed."
+		if video.AudioReference {
+			instruction += " Its original soundtrack is also paired with <Video 1> as <Audio 1> in H3 conditioning. Request retention of its timing and sound, without inventing unheard words."
+		}
+	case "none":
+		instruction += "\nThe result is a still-image carousel. Do not invent audible dialogue or promise an audio track."
+	default:
+		instruction += "\nH3 generates the soundtrack from the main prompt. Include requested speech, ambience and music in its appropriate sections."
+	}
+	if video.VoiceReference {
+		instruction += "\nA voice sample is connected only to Seed-VC after soundtrack generation. Preserve its declared voice-replacement purpose, but do not invent its words, gender or timbre. It is not an H3 <Audio 1> conditioning input."
+	}
+	if video.AIHubT8 {
+		instruction += "\nT8 locks the selected external audio latent before H3 sampling. This is separate from reference conditioning and does not guarantee accurate lip synchronization."
+	}
+	return instruction
 }
 
 func miniMaxH3DurationGuidance(duration int, structure string) string {

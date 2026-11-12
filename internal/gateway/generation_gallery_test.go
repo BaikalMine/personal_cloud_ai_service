@@ -91,7 +91,7 @@ func TestGenerationGalleryTemplateRendersMediaAndRepeatAction(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := output.String()
-	for _, wanted := range []string{"data-user-gallery", "/static/gallery.js", "/generate?variant=43", "/generate/library/7", "Контент 18+", "data-media-type=\"video\"", "data-gallery-use-open", "photoflow-flux2-edit", "gallery-lightbox"} {
+	for _, wanted := range []string{"data-user-gallery", "/static/gallery.js", "/generate?variant=43", "/generate/library/7", "Контент 18+", "data-media-type=\"video\"", "data-gallery-use-open", "data-gallery-destinations", "/static/gallery-use.js", "gallery-lightbox"} {
 		if !strings.Contains(body, wanted) {
 			t.Fatalf("gallery output does not contain %q", wanted)
 		}
@@ -118,8 +118,8 @@ func TestGenerationGalleryTemplateShowsOnlyAllowedReuseWorkflows(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := output.String()
-	if !strings.Contains(body, "minimax-h3-video") || strings.Contains(body, "photoflow-krea2-edit") || strings.Contains(body, "photoflow-flux2-edit") {
-		t.Fatalf("reuse workflow permissions were not applied: %s", body)
+	if !strings.Contains(body, "data-gallery-destinations") || strings.Contains(body, `name="destination"`) || strings.Contains(body, "photoflow-krea2-edit") || strings.Contains(body, "photoflow-flux2-edit") {
+		t.Fatal("compatible destinations must be populated by the owner-scoped API, not a hardcoded template list")
 	}
 
 	data["CanUseMiniMaxVideo"] = false

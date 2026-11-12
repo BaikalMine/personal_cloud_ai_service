@@ -1,0 +1,39 @@
+{{define "storage_database"}}
+<section data-storage-database aria-label="База данных">
+  <dl class="storage-facts storage-metrics">
+    <div><dt>PostgreSQL</dt><dd>{{formatBytes .Storage.DatabaseBytes}}<small>Весь размер базы</small></dd></div>
+    <div><dt>Таблицы и индексы</dt><dd>{{formatBytes .Storage.VisibleTableBytes}}<small>Пользовательские таблицы</small></dd></div>
+    <div><dt>Оценка строк</dt><dd>{{formatNumber .Storage.EstimatedRows}}<small>Статистика PostgreSQL</small></dd></div>
+    <div><dt>Последняя очистка</dt><dd>{{formatNumber .Storage.Cleanup.TotalDeleted}}<small>Удалено строк, не файлов</small></dd></div>
+  </dl>
+  <section class="storage-band" aria-labelledby="storage-cleanup-title">
+    <div class="storage-heading"><h2 id="storage-cleanup-title">Очистка базы данных</h2><span class="storage-state" data-tone="{{if eq .Storage.Cleanup.Status "ok"}}success{{else}}warning{{end}}">{{.Storage.Cleanup.StatusLabel}}</span></div>
+    <dl class="storage-facts">
+      <div><dt>Последний запуск</dt><dd>{{with .Storage.Cleanup.LastStartedAt}}{{formatTime .}}{{else}}Не запускалась{{end}}</dd></div>
+      <div><dt>Последний успех</dt><dd>{{with .Storage.Cleanup.LastSuccessAt}}{{formatTime .}}{{else}}Нет подтверждения{{end}}</dd></div>
+      <div><dt>Длительность</dt><dd>{{formatDuration .Storage.Cleanup.DurationMS}}</dd></div>
+      <div><dt>Период проверки</dt><dd>15 минут</dd></div>
+    </dl>
+    <div class="storage-cleanup-results">
+      {{range .Storage.Cleanup.Items}}<div><span><strong>{{.Label}}</strong><small>{{.Table}}</small></span>{{if .Error}}<span class="storage-state" data-tone="danger">Не завершено</span><p>{{.Error}}</p>{{else}}<strong>{{formatNumber .Deleted}} строк</strong>{{end}}</div>
+      {{else}}<p class="muted">На последнем проходе удалять было нечего.</p>{{end}}
+    </div>
+  </section>
+  <section class="storage-band" aria-labelledby="storage-tables-title">
+    <div class="storage-heading"><h2 id="storage-tables-title">Сроки хранения</h2>{{if gt .Storage.UnmappedCount 0}}<span class="storage-state" data-tone="warning">Без политики: {{.Storage.UnmappedCount}}</span>{{end}}</div>
+    <div class="table-scroll"><table class="compact-table storage-db-table"><thead><tr><th>Данные</th><th>Строки</th><th>Размер</th><th>Самая старая запись</th><th>Срок</th><th>Владелец</th></tr></thead><tbody>
+    {{range .Storage.ManagedTables}}<tr>
+      <td data-label="Данные"><strong>{{.Label}}</strong><small>{{.Name}}</small></td>
+      <td data-label="Строки">≈ {{formatNumber .EstimatedRows}}</td><td data-label="Размер">{{formatBytes .TotalBytes}}</td>
+      <td data-label="Самая старая запись">{{with .OldestAt}}{{formatTime .}}{{else}}Нет данных{{end}}</td>
+      <td data-label="Срок"><span>{{.Retention}}</span>{{if .Configuration}}<small>{{.Configuration}}</small>{{end}}</td><td data-label="Владелец">{{.Owner}}</td>
+    </tr>{{else}}<tr><td colspan="6">Таблицы не найдены.</td></tr>{{end}}
+    </tbody></table></div>
+  </section>
+  <details class="ui-disclosure storage-band"><summary><span class="ui-disclosure-label">Постоянные и служебные данные · {{formatNumber (len .Storage.LifecycleTables)}}</span><i data-lucide="chevron-down" aria-hidden="true"></i></summary>
+    <div class="table-scroll"><table class="compact-table storage-db-table"><thead><tr><th>Данные</th><th>Строки</th><th>Размер</th><th>Самая старая запись</th><th>Жизненный цикл</th><th>Владелец</th></tr></thead><tbody>
+    {{range .Storage.LifecycleTables}}<tr><td data-label="Данные"><strong>{{.Label}}</strong><small>{{.Name}}</small></td><td data-label="Строки">≈ {{formatNumber .EstimatedRows}}</td><td data-label="Размер">{{formatBytes .TotalBytes}}</td><td data-label="Самая старая запись">{{with .OldestAt}}{{formatTime .}}{{else}}Нет данных{{end}}</td><td data-label="Жизненный цикл">{{.Retention}}</td><td data-label="Владелец">{{.Owner}}</td></tr>
+    {{else}}<tr><td colspan="6">Служебных таблиц нет.</td></tr>{{end}}</tbody></table></div>
+  </details>
+</section>
+{{end}}
