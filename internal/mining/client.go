@@ -84,10 +84,11 @@ type ComfyMemoryTrim struct {
 }
 
 type Client struct {
-	baseURL    *url.URL
-	token      string
-	http       *http.Client
-	updateHTTP *http.Client
+	baseURL     *url.URL
+	token       string
+	http        *http.Client
+	commandHTTP *http.Client
+	updateHTTP  *http.Client
 }
 
 func NewClient(baseURL *url.URL, token string) *Client {
@@ -103,6 +104,8 @@ func NewClient(baseURL *url.URL, token string) *Client {
 	// and optionally restarting the miner. The client timeout still bounds the
 	// request, while the ordinary four-second header timeout must not apply.
 	updateTransport.ResponseHeaderTimeout = 0
+	commandTransport := transport.Clone()
+	commandTransport.ResponseHeaderTimeout = 0
 	return &Client{
 		baseURL: baseURL,
 		token:   strings.TrimSpace(token),
@@ -110,7 +113,8 @@ func NewClient(baseURL *url.URL, token string) *Client {
 			Timeout:   5 * time.Second,
 			Transport: transport,
 		},
-		updateHTTP: &http.Client{Timeout: updateTimeout, Transport: updateTransport},
+		updateHTTP:  &http.Client{Timeout: updateTimeout, Transport: updateTransport},
+		commandHTTP: &http.Client{Timeout: 25 * time.Second, Transport: commandTransport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 	}
 }
 
@@ -296,7 +300,11 @@ func (c *Client) command(ctx context.Context, path string, command Request) (Sta
 	if err != nil {
 		return State{}, err
 	}
-	return c.do(ctx, http.MethodPost, c.resolve(path), bytes.NewReader(payload))
+	state, err := c.do(ctx, http.MethodPost, c.resolve(path), bytes.NewReader(payload))
+	if err == nil && (!state.Available || state.Running != (path == "/v1/start")) {
+		err = errors.New("состояние майнера после команды не подтверждено")
+	}
+	return state, err
 }
 
 func (c *Client) do(ctx context.Context, method string, target *url.URL, body io.Reader) (State, error) {
@@ -309,15 +317,27 @@ func (c *Client) do(ctx context.Context, method string, target *url.URL, body io
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
-	response, err := c.http.Do(request)
+	client := c.http
+	if method == http.MethodPost {
+		client = c.commandHTTP
+	}
+	response, err := client.Do(request)
 	if err != nil {
 		return State{Message: "Windows-agent недоступен."}, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	defer response.Body.Close()
 	limited := io.LimitReader(response.Body, maxResponseBytes)
-	var state State
-	if err := json.NewDecoder(limited).Decode(&state); err != nil {
+	var decoded struct {
+		State
+		Available *bool `json:"available"`
+		Running   *bool `json:"running"`
+	}
+	if err := json.NewDecoder(limited).Decode(&decoded); err != nil {
 		return State{}, fmt.Errorf("decode mining agent response: %w", err)
+	}
+	state := decoded.State
+	if decoded.Running != nil {
+		state.Running = *decoded.Running
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		if state.Message == "" {
@@ -325,7 +345,10 @@ func (c *Client) do(ctx context.Context, method string, target *url.URL, body io
 		}
 		return state, fmt.Errorf("mining agent returned %s", response.Status)
 	}
-	state.Available = true
+	state.Available = decoded.Available == nil || *decoded.Available
+	if method == http.MethodPost && decoded.Running == nil {
+		return state, errors.New("ответ агента не содержит состояния майнера после команды")
+	}
 	if state.CollectedAt.IsZero() {
 		state.CollectedAt = time.Now().UTC()
 	}

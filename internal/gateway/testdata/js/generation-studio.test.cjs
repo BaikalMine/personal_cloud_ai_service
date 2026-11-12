@@ -1,6 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { activeImageLimit, chooseModel, settingChanges, fragmentBounds, bindReferencePlayer } = require("../../static/generation-studio.js");
+const { activeImageLimit, chooseModel, settingChanges, compactModelLabel, fragmentBounds, bindReferencePlayer } = require("../../static/generation-studio.js");
 const { downloadURL } = require("../../static/generation-lightbox.js");
 
 test("studio excludes every reference from text-only image generation", () => {
@@ -11,7 +11,7 @@ test("studio uses workflow limits and distinguishes exact frames from references
   assert.equal(activeImageLimit({ requiresImage: true, maximum: 4 }), 4);
   assert.equal(activeImageLimit({ allowsImages: true, maximum: 4, isVideo: true, videoMode: "frames" }), 2);
   assert.equal(activeImageLimit({ allowsImages: true, maximum: 4, isVideo: true, videoMode: "references" }), 4);
-  assert.equal(activeImageLimit({ allowsImages: true, maximum: 10 }), 4);
+  assert.equal(activeImageLimit({ allowsImages: true, maximum: 10 }), 10);
 });
 
 test("model fallback stays within the available visible options", () => {
@@ -29,6 +29,14 @@ test("profile feedback reports only actual changes with display labels", () => {
   assert.deepEqual(settingChanges(before, after), [{ name: "steps", label: "Steps", before: "8", after: "10" }]);
 });
 
+test("model labels omit folder noise but keep versions, precision and file identity", () => {
+  assert.equal(compactModelLabel("Krea2 / cyberrealisticKrea2_v40_3245336"), "Cyberrealistic Krea2 v40 3245336");
+  assert.equal(compactModelLabel("MOSSImage\\pornmasterMoss_v1.safetensors"), "Pornmaster Moss v1");
+  assert.equal(compactModelLabel("Qwen Image 2.1 INT8"), "Qwen Image 2.1 INT8");
+  assert.equal(compactModelLabel("Krea2 / krea2_turbo_bf16"), "Krea2 turbo BF16");
+  assert.equal(compactModelLabel("MiniMax H3 v5 · FL2VA + REF2VA"), "MiniMax H3 v5 · FL2VA + REF2VA");
+});
+
 test("fragment bounds clamp to source duration and accept negative audio offsets", () => {
   assert.deepEqual(fragmentBounds(3, 5, 6), { start: 3, end: 6 });
   assert.deepEqual(fragmentBounds("1,5", "2,5", 6), { start: 1.5, end: 4 });
@@ -38,6 +46,34 @@ test("fragment bounds clamp to source duration and accept negative audio offsets
   assert.equal(fragmentBounds(0, 5, Infinity), null);
   assert.equal(fragmentBounds(0, 5, NaN), null);
   assert.equal(downloadURL("blob:https://example.com/abc"), "blob:https://example.com/abc");
+});
+
+test("reference player ignores late compatible previews after source replacement", async () => {
+  const events = {}, revoked = [];
+  let finish, signal, calls = 0, urls = 0;
+  const media = { duration: 31, videoWidth: 0, addEventListener: (name, cb) => { events[name] = cb; },
+    pause() { events.pause?.(); }, load() {}, removeAttribute() { this.src = ""; }, getAttribute() { return this.src; } };
+  const button = { addEventListener: (_, cb) => { button.click = cb; } }, status = {};
+  const player = bindReferencePlayer({ media, button, status, start: () => 0, duration: () => 30,
+    fallback: args => { calls++; signal = args.signal; return new Promise(resolve => { finish = resolve; }); },
+    urlAPI: { createObjectURL: () => `blob:${++urls}`, revokeObjectURL: url => revoked.push(url) } });
+  player.setSource({});
+  events.loadeddata(); events.loadeddata();
+  assert.equal(calls, 1);
+  player.setSource("/new-reference.mp4");
+  assert.equal(signal.aborted, true);
+  finish({ blob: {}, duration: 31 });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(media.src, "/new-reference.mp4");
+  assert.equal(player.sourceDuration, null);
+  events.error();
+  finish({ blob: {}, duration: 31 });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(media.src, "blob:2");
+  assert.equal(player.sourceDuration, 31);
+  assert.match(status.textContent, /30/);
+  player.clear();
+  assert.deepEqual(revoked, ["blob:1", "blob:2"]);
 });
 
 test("reference player releases owned blobs, pauses fragments, and never rewrites inputs", async () => {

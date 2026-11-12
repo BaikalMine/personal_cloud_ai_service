@@ -1,7 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { test, expect } = require("@playwright/test");
-const { settlePage, openStudioOptions, assertNoViewportOverflow } = require("./helpers.cjs");
+const { settlePage, openStudioOptions, assertNoViewportOverflow, chooseWorkflow } = require("./helpers.cjs");
 
 const fact = (page, label) => page.locator("#generation-summary-facts > div").filter({ has: page.locator("dt", { hasText: label }) }).locator("dd");
 async function open(page, theme = "dark") {
@@ -15,6 +15,10 @@ async function expandSummary(page) {
   if (await page.locator("#generation-summary").getAttribute("open") === null) await page.locator("#generation-summary > summary").click();
 }
 async function assertDock(page) {
+  if (page.viewportSize().width < 900) {
+    await expect(page.locator('#studio-editor')).toHaveCSS('overflow-y', 'visible');
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  }
   const editor = await page.locator("#studio-editor").boundingBox();
   const dock = await page.locator("#generation-run-dock").boundingBox();
   expect(editor.height).toBeGreaterThan(60);
@@ -86,14 +90,14 @@ test("video summary tracks quality, optional processing and batch duration", asy
 test("edit summary uses the chosen photo, family pipeline and clears removed sources", async ({ page }, info) => {
   await open(page, "light");
   await page.locator('[data-workflow-id="image-to-image"]').click();
-  await page.locator('[data-preset-id="photoflow-krea2-edit"]').click();
+  await chooseWorkflow(page, "photoflow-krea2-edit");
   await expandSummary(page);
   await expect(fact(page, "Ожидаемый итог")).toHaveText("После выбора фото");
   const buffer = fs.readFileSync(path.join(__dirname, "../../docs/frontend/prototype/assets/portrait.jpg"));
   await page.locator("#source-image").setInputFiles({ name: "portrait.jpg", mimeType: "image/jpeg", buffer });
   await expect(fact(page, "Ожидаемый итог")).not.toHaveText("После выбора фото");
   await expect(fact(page, "Ожидаемый итог")).toHaveText(await fact(page, "Базовый размер").textContent());
-  await page.locator('[data-preset-id="photoflow-flux2-edit"]').click();
+  await chooseWorkflow(page, "photoflow-flux2-edit");
   await openStudioOptions(page);
   await page.locator('[name="flux_upscale_mode"]').selectOption("both");
   await page.keyboard.press("Escape");

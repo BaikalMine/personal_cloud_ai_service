@@ -38,6 +38,8 @@
           ...state,
           workflowID: String(action.workflowID || ""),
           workflowAvailable: Boolean(action.available),
+          ...(action.requiresImage !== undefined ? { requiresImage: Boolean(action.requiresImage) } : {}),
+          ...(action.allowsImages !== undefined ? { allowsImages: Boolean(action.allowsImages) } : {}),
         };
       case "SET_SELECTIONS":
         return {

@@ -69,13 +69,14 @@ func TestWorkspaceNavigationPermissions(t *testing.T) {
 		allowed []string
 	}{
 		{"limited", domain.User{Role: "user"}, []string{"/app"}},
-		{"generation", domain.User{Role: "user", CanUseQuickGeneration: true}, []string{"/generate", "/gallery", "/app"}},
-		{"training", domain.User{Role: "user", CanTrainImageLora: true}, []string{"/train-lora", "/app"}},
-		{"comfy", domain.User{Role: "user", CanUseComfyUI: true}, []string{"/comfyui/", "/app"}},
-		{"chat", domain.User{Role: "user", CanUseOpenWebUI: true}, []string{"/openwebui/", "/app"}},
-		{"admin", domain.User{Role: "admin"}, []string{"/generate", "/gallery", "/train-lora", "/comfyui/", "/openwebui/", "/app", "https://admin.example/admin"}},
+		{"generation", domain.User{Role: "user", CanUseQuickGeneration: true}, []string{"/generate", "/gallery", "/tasks", "/app"}},
+		{"training", domain.User{Role: "user", CanTrainImageLora: true}, []string{"/train-lora", "/tasks", "/app"}},
+		{"comfy", domain.User{Role: "user", CanUseComfyUI: true}, []string{"/app"}},
+		{"chat", domain.User{Role: "user", CanUseOpenWebUI: true}, []string{"/app"}},
+		{"admin", domain.User{Role: "admin"}, []string{"/generate", "/gallery", "/tasks", "/train-lora", "/harness/", "/app", "https://admin.example/admin"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			tc.allowed = append(tc.allowed, "/models")
 			view := workspaceNavigation(&tc.user, false, false, "https://admin.example", "https://public.example")
 			links := map[string]bool{}
 			for _, group := range view.Groups {
@@ -99,6 +100,31 @@ func TestWorkspaceNavigationPermissions(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRawServiceCardsAreAbsentForAllRoles(t *testing.T) {
+	tpl, err := ParseTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, role := range []string{"user", "admin"} {
+		var rendered bytes.Buffer
+		user := &User{Role: role, CanUseComfyUI: true, CanUseOpenWebUI: true, CanUseQuickGeneration: true}
+		err := tpl.ExecuteTemplate(&rendered, "app", map[string]any{
+			"CurrentUser": user, "Stats": UserStats{}, "Services": []ServiceStatus{{}, {}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"ComfyUI", "OpenWebUI", `href="/comfyui/"`, `href="/openwebui/"`} {
+			if strings.Contains(rendered.String(), name) {
+				t.Fatalf("role=%s unexpected visibility of %s", role, name)
+			}
+		}
+		if !strings.Contains(rendered.String(), `href="/generate"`) {
+			t.Fatal("studio link lost")
+		}
 	}
 }
 

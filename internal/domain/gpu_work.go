@@ -10,6 +10,7 @@ const (
 	GPUWorkTraining      GPUWorkKind  = "lora_training"
 	GPUWorkCaption       GPUWorkKind  = "lora_caption"
 	GPUWorkAssistant     GPUWorkKind  = "prompt_assistant"
+	GPUWorkHarnessUltra  GPUWorkKind  = "harness_ultra"
 	GPUWorkWaiting       GPUWorkState = "waiting"
 	GPUWorkHeld          GPUWorkState = "held"
 	GPUWorkUncertain     GPUWorkState = "uncertain"
@@ -22,7 +23,7 @@ const (
 )
 
 func (kind GPUWorkKind) Valid() bool {
-	return kind == GPUWorkGeneration || kind == GPUWorkTraining || kind == GPUWorkCaption || kind == GPUWorkAssistant
+	return kind == GPUWorkGeneration || kind == GPUWorkTraining || kind == GPUWorkCaption || kind == GPUWorkAssistant || kind == GPUWorkHarnessUltra
 }
 
 type GPUResource struct {
@@ -46,6 +47,7 @@ type GPUWork struct {
 	LeaseToken            string
 	LeaseUntil            *time.Time
 	ExternalID            string
+	InferenceCompletion   string
 	CancellationRequested bool
 	ReadyUntil            time.Time
 	QueuedAt              time.Time
@@ -62,6 +64,7 @@ type GPUWorkRequest struct {
 	JobKey     string
 	UserID     int64
 	Priority   bool
+	QueuedAt   time.Time
 }
 
 type GPUAdmission struct {

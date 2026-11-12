@@ -21,7 +21,24 @@ func (a *App) pauseMiningForQuickGeneration(ctx context.Context, user *User, job
 	if user == nil || !user.PauseMiningForQuickGeneration {
 		return nil, "", nil
 	}
-	return a.reserveMiningForGPUWork(ctx, user, jobID, 0)
+	return a.reserveMiningForGPUWork(ctx, user, jobID, 0, nil, nil)
+}
+
+func (a *App) pauseMiningForInference(ctx context.Context, user *User, work domain.GPUWork) (*domain.QuickGenerationMiningLease, string, error) {
+	if a.gpuCoordinator == nil || user == nil || !user.PauseMiningForQuickGeneration {
+		return a.pauseMiningForQuickGeneration(ctx, user, 0)
+	}
+	if err := a.store.SetGPUInferencePreparation(ctx, work.ID, work.LeaseToken, false); err != nil {
+		return nil, "", err
+	}
+	lease, warning, err := a.reserveMiningForGPUWork(ctx, user, 0, 0, &work, nil)
+	if err != nil {
+		return lease, warning, err
+	}
+	if err = a.store.SetGPUInferencePreparation(ctx, work.ID, work.LeaseToken, true); err != nil {
+		return lease, warning, err
+	}
+	return lease, warning, nil
 }
 
 func (a *App) pauseMiningForLoraTraining(ctx context.Context, user *User, jobID int64) (*domain.QuickGenerationMiningLease, string, error) {
@@ -37,19 +54,33 @@ func (a *App) pauseMiningForLoraTraining(ctx context.Context, user *User, jobID 
 			return nil, "", fmt.Errorf("проверить резервирование GPU для LoRA: %w", err)
 		}
 	}
-	return a.reserveMiningForGPUWork(ctx, user, 0, jobID)
+	return a.reserveMiningForGPUWork(ctx, user, 0, jobID, nil, nil)
 }
 
-func (a *App) reserveMiningForGPUWork(ctx context.Context, user *User, generationJobID, loraTrainingJobID int64) (*domain.QuickGenerationMiningLease, string, error) {
+func (a *App) reserveMiningForGPUWork(ctx context.Context, user *User, generationJobID, loraTrainingJobID int64, gpuWork *domain.GPUWork, permit *domain.GPUExecutorPermitRequest) (*domain.QuickGenerationMiningLease, string, error) {
 	a.miningPauseMu.Lock()
 	defer a.miningPauseMu.Unlock()
+	createLease := func(lease *domain.QuickGenerationMiningLease) error {
+		if permit != nil {
+			lease.ExecutorPermitID, lease.ExecutorOwnerID, lease.ExecutorGeneration = permit.ID, permit.OwnerID, permit.OwnerGeneration
+			return a.store.CreateHarnessMiningLease(ctx, *lease, *permit)
+		}
+		if gpuWork != nil {
+			lease.GPUWorkID = gpuWork.ID
+			return a.store.CreateGPUInferenceMiningLease(ctx, *lease, gpuWork.LeaseToken)
+		}
+		return a.store.CreateQuickGenerationMiningLease(ctx, *lease)
+	}
 
 	existing, err := a.store.ActiveQuickGenerationMiningLease(ctx)
 	if err == nil {
 		overview := a.miningOverview(ctx, true, false)
+		if miningUncontrolled(overview) {
+			return nil, "", errors.New("работает внешний майнер или несколько майнеров; сначала добавьте точный BAT в профиль и выберите один запуск")
+		}
 		wasRunning := overview.Available && overview.Running && overview.Active != nil
 		if wasRunning && overview.Active != nil {
-			state, stopErr := a.mining.Stop(ctx, mining.Request{ScriptPath: overview.Active.ScriptPath, ProcessName: overview.Active.ProcessName})
+			state, stopErr := a.stopMining(ctx, mining.Request{ScriptPath: overview.Active.ScriptPath, ProcessName: overview.Active.ProcessName})
 			if stopErr != nil {
 				return nil, "", fmt.Errorf("остановить майнинг: %w", stopErr)
 			}
@@ -61,10 +92,13 @@ func (a *App) reserveMiningForGPUWork(ctx context.Context, user *User, generatio
 			ID: newRequestID(), CorrelationID: correlationIDFromContext(ctx), GenerationJobID: generationJobID, LoraTrainingJobID: loraTrainingJobID, UserID: user.ID, MinerID: existing.MinerID,
 			ScriptPath: existing.ScriptPath, ProcessName: existing.ProcessName, ResumeMining: existing.ResumeMining || wasRunning,
 		}
-		if err := a.store.CreateQuickGenerationMiningLease(ctx, lease); err != nil {
+		if err := createLease(&lease); err != nil {
 			return nil, "", fmt.Errorf("создать резервирование майнинга: %w", err)
 		}
 		if !overview.Available {
+			if a.cfg.MiningFencedCommands {
+				return &lease, "", errors.New("остановка майнинга не подтверждена")
+			}
 			return &lease, miningPriorityDegradationWarning(overview), nil
 		}
 		return &lease, "", nil
@@ -74,6 +108,9 @@ func (a *App) reserveMiningForGPUWork(ctx context.Context, user *User, generatio
 	}
 
 	overview := a.miningOverview(ctx, true, false)
+	if miningUncontrolled(overview) {
+		return nil, "", errors.New("работает внешний майнер или несколько майнеров; автоматическая остановка не выполнялась")
+	}
 	target := overview.Active
 	if target == nil {
 		target = overview.Default
@@ -86,11 +123,11 @@ func (a *App) reserveMiningForGPUWork(ctx context.Context, user *User, generatio
 		ID: newRequestID(), CorrelationID: correlationIDFromContext(ctx), GenerationJobID: generationJobID, LoraTrainingJobID: loraTrainingJobID, UserID: user.ID, MinerID: target.ID,
 		ScriptPath: target.ScriptPath, ProcessName: target.ProcessName, ResumeMining: true,
 	}
-	if err := a.store.CreateQuickGenerationMiningLease(ctx, lease); err != nil {
+	if err := createLease(&lease); err != nil {
 		return nil, "", fmt.Errorf("создать резервирование майнинга: %w", err)
 	}
 	if wasRunning {
-		state, stopErr := a.mining.Stop(ctx, mining.Request{ScriptPath: target.ScriptPath, ProcessName: target.ProcessName})
+		state, stopErr := a.stopMining(ctx, mining.Request{ScriptPath: target.ScriptPath, ProcessName: target.ProcessName})
 		if stopErr != nil || state.Running {
 			_, _, deleteErr := a.store.DeleteQuickGenerationMiningLease(ctx, lease.ID)
 			if deleteErr != nil {
@@ -110,6 +147,9 @@ func (a *App) reserveMiningForGPUWork(ctx context.Context, user *User, generatio
 		"lease_id": lease.ID, "username": user.Username, "process_name": target.ProcessName, "was_running": wasRunning,
 	})
 	if !overview.Available {
+		if a.cfg.MiningFencedCommands {
+			return &lease, "", errors.New("остановка майнинга не подтверждена")
+		}
 		return &lease, miningPriorityDegradationWarning(overview), nil
 	}
 	if !wasRunning {
@@ -172,6 +212,22 @@ func (a *App) releaseMiningPauseForJob(ctx context.Context, jobID int64) bool {
 }
 
 func (a *App) releaseMiningPauseForLoraTraining(ctx context.Context, jobID int64) bool {
+	if a.gpuCoordinator != nil {
+		job, err := a.store.LoraTrainingJobByID(ctx, jobID)
+		if err != nil {
+			return false
+		}
+		if !job.State.Terminal() && job.AgentSubmissionStartedAt != nil {
+			return false
+		}
+		code := "executor_terminal"
+		if job.AgentSubmissionStartedAt == nil {
+			code = "dispatch_fenced"
+		}
+		if err := a.gpuCoordinator.release(ctx, domain.GPUWorkTraining, job.PublicID, code); err != nil {
+			return false
+		}
+	}
 	lease, err := a.store.QuickGenerationMiningLeaseByLoraTrainingJobID(ctx, jobID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return true
@@ -216,29 +272,52 @@ func (a *App) releaseMiningPause(ctx context.Context, leaseID string) bool {
 	if len(leases) > 1 || !lease.ResumeMining {
 		return remove()
 	}
-	// Keep the final durable lease until Start is confirmed. A process exit
-	// during network I/O must leave a retryable resume request in PostgreSQL.
-	overview := a.miningOverview(ctx, true, false)
-	if !overview.Available {
-		log.Printf("resume mining after quick generation: %s", overview.Message)
-		return false
-	}
-	if overview.Running {
+	resume := func() bool {
+		if a.gpuCoordinator != nil {
+			if _, err := a.store.ActiveGPUWork(ctx, domain.GPUPrimaryResource); !errors.Is(err, sql.ErrNoRows) {
+				return false
+			}
+			if err := a.gpuCoordinator.observe(ctx); err != nil {
+				return false
+			}
+			resource, err := a.store.GPUResource(ctx, domain.GPUPrimaryResource)
+			if err != nil || resource.Observation != "idle" || !resource.ValidUntil.After(time.Now()) {
+				return false
+			}
+		}
+		// Keep the final durable lease until Start is confirmed. A process exit
+		// during network I/O must leave a retryable resume request in PostgreSQL.
+		overview := a.miningOverview(ctx, true, false)
+		if !overview.Available {
+			log.Printf("resume mining after quick generation: %s", overview.Message)
+			return false
+		}
+		if overview.Running {
+			return remove()
+		}
+		state, err := a.resumeMiningCommand(ctx, mining.Request{ScriptPath: lease.ScriptPath, ProcessName: lease.ProcessName})
+		if err != nil || !state.Running {
+			if err != nil {
+				log.Printf("resume mining after quick generation: %v", err)
+			} else {
+				log.Printf("resume mining after quick generation: miner did not start")
+			}
+			return false
+		}
+		a.audit(ctx, &lease.UserID, "mining_resumed_after_quick_generation", "miner", &lease.MinerID, "", "", map[string]any{
+			"lease_id": lease.ID, "prompt_id": lease.PromptID, "process_name": lease.ProcessName,
+		})
 		return remove()
 	}
-	state, err := a.mining.Start(ctx, mining.Request{ScriptPath: lease.ScriptPath, ProcessName: lease.ProcessName})
-	if err != nil || !state.Running {
-		if err != nil {
-			log.Printf("resume mining after quick generation: %v", err)
-		} else {
-			log.Printf("resume mining after quick generation: miner did not start")
-		}
-		return false
+	if a.gpuCoordinator == nil {
+		return resume()
 	}
-	a.audit(ctx, &lease.UserID, "mining_resumed_after_quick_generation", "miner", &lease.MinerID, "", "", map[string]any{
-		"lease_id": lease.ID, "prompt_id": lease.PromptID, "process_name": lease.ProcessName,
+	var resumed bool
+	err = a.store.WithGPUAdmissionGuard(ctx, func() error {
+		resumed = resume()
+		return nil
 	})
-	return remove()
+	return err == nil && resumed
 }
 
 func (a *App) finishInferenceMiningPause(lease *domain.QuickGenerationMiningLease, execution promptassistant.ExecutionOutcome) {
@@ -271,6 +350,15 @@ func (a *App) refreshQuickGenerationMiningLeases(ctx context.Context) (int64, er
 		processed++
 		if lease.ResumeReady {
 			a.releaseMiningPause(ctx, lease.ID)
+			continue
+		}
+		if lease.ExecutorPermitID != "" {
+			settled, err := a.store.HarnessMiningLeaseSettled(ctx, lease)
+			if err != nil {
+				refreshErrors = append(refreshErrors, err)
+			} else if settled {
+				a.releaseMiningPause(ctx, lease.ID)
+			}
 			continue
 		}
 		if lease.LoraTrainingJobID > 0 {

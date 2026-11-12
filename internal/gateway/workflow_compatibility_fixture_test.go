@@ -82,7 +82,7 @@ func TestAdminWorkflowCompatibilityTemplateRendersOperationalStates(t *testing.T
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	err = templates.ExecuteTemplate(&output, "admin_workflows", map[string]any{
+	data := map[string]any{
 		"Title": "Совместимость workflow", "CSRF": "csrf", "AssetVersion": "asset", "PublicBaseURL": "https://ai.example.test",
 		"Report": workflowCompatibilityReport{
 			SourceLabel: "получен из ComfyUI", Fingerprint: "0123456789ab", NodeCount: 420, Compatible: 1, Failed: 1,
@@ -91,7 +91,9 @@ func TestAdminWorkflowCompatibilityTemplateRendersOperationalStates(t *testing.T
 				{Scenario: "Полная обработка видео", Family: "MiniMax H3 v5", Model: "MiniMax H3", Status: workflowCompatibilityErrorStatus, Issues: []workflowCompatibilityIssue{{Label: "Финальный апскейл", Message: "Не найден resize_type", ClassType: "RTXVideoSuperResolution", InputName: "resize_type"}}},
 			},
 		},
-	})
+	}
+	data["View"] = newWorkflowCompatibilityView(data["Report"].(workflowCompatibilityReport).Results, nil)
+	err = templates.ExecuteTemplate(&output, "admin_workflows", data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,10 +108,14 @@ func TestAdminWorkflowCompatibilityTemplateRendersOperationalStates(t *testing.T
 func compatibilityFixtureObjectInfo(t *testing.T) map[string]comfyNodeInfo {
 	t.Helper()
 	info := make(map[string]comfyNodeInfo)
-	for _, filename := range []string{"krea2.json", "flux2.json", "minimax_h3_v4.json"} {
+	for _, filename := range []string{"krea2.json", "krea2-ultra.json", "flux2.json", "minimax_h3_v4.json"} {
 		for classType, node := range loadObjectInfoFixture(t, filename).Nodes {
 			info[classType] = node
 		}
+	}
+	aihub := aiHubTestSchema(t)
+	for _, name := range []string{"GatewayAIHubReferenceFrames", "GatewayAIHubVideoStream", "GatewayAIHubEnhanceImages"} {
+		info[name] = aihub[name]
 	}
 	definitions, err := loadWorkflowDefinitions()
 	if err != nil {
@@ -123,6 +129,7 @@ func compatibilityFixtureObjectInfo(t *testing.T) map[string]comfyNodeInfo {
 		}
 	}
 	for _, classType := range []string{
+		"ModelAttentionBackend", "ResizeImageMaskNode",
 		"BasicGuider", "BasicScheduler", "CR Apply LoRA Stack", "CR LoRA Stack", "H3AIMDOResidencyLimiter",
 		"H3MemoryOptimization", "H3SparseAttentionAdvanced", "ImageSharpenKJ", "KSamplerSelect", "LCColorMatch",
 		"Image Filter Adjustments", "Image Levels Adjustment", "LCGetImage", "LCImageMaskResize", "LCVRAMCacheClear", "LoadAudio", "LoadImage", "MiniMaxH3ImageToVideo",

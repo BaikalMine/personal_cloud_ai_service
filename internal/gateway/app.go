@@ -38,31 +38,79 @@ var staticJavaScriptAssetPaths = []string{
 	"static/theme.js",
 	"static/shell.js",
 	"static/app.js",
+	"static/operations.js",
+	"static/admin-content.js",
+	"static/admin-ultra.js",
+	"static/live-events.js",
+	"static/admin-access.js",
+	"static/admin-user-access.js",
+	"static/storage-state.js",
+	"static/storage-operations.js",
+	"static/storage.js",
 	"static/dialog-focus.js",
 	"static/gallery.js",
+	"static/gallery-state.js",
+	"static/gallery-viewport.js",
+	"static/gallery-viewer.js",
+	"static/gallery-use.js",
 	"static/lora-training.js",
+	"static/lora-training-workspace.js",
+	"static/lora-library.js",
+	"static/model-library.js",
+	"static/model-downloads.js",
+	"static/comfy-runtime.js",
+	"static/model-maintenance.js",
+	"static/lora-repeat.js",
 	"static/lora-dataset-state.js",
+	"static/lora-dataset-quality.js",
 	"static/lora-caption-state.js",
 	"static/lora-caption-panel.js",
 	"static/lora-dataset-editor.js",
 	"static/vendor/lucide.js",
 	"static/generate.js",
 	"static/generation-assistant.js",
+	"static/generation-assistant-progress.js",
 	"static/generation-batch.js",
 	"static/generation-draft.js",
+	"static/generation-collections.js",
+	"static/collection-workspace.js",
+	"static/generation-job-source.js",
+	"static/postprocess-view.js",
+	"static/generation-repeat-state.js",
+	"static/generation-repeat.js",
+	"static/generation-postprocess-state.js",
+	"static/generation-postprocess.js",
+	"static/lora-verification.js",
+	"static/generation-assistant-jobs.js",
 	"static/generation-history.js",
+	"static/generation-results.js",
+	"static/generation-feedback.js",
 	"static/generation-job.js",
 	"static/generation-lightbox.js",
+	"static/image-comparison.js",
 	"static/generation-media.js",
+	"static/generation-payload.js",
+	"static/generation-submission.js",
 	"static/generation-recipes.js",
 	"static/generation-store.js",
 	"static/generation-summary.js",
 	"static/generation-output.js",
+	"static/generation-krea-pro.js",
+	"static/krea-pro-options.json",
 	"static/generation-video.js",
 	"static/generation-wizard.js",
 	"static/generation-studio.js",
 	"static/notifications.js",
 	"static/suggestions.js",
+	"static/auth-pages.js",
+	"static/account-pages.js",
+	"static/task-model.js",
+	"static/task-gpu.js",
+	"static/admin-training.js",
+	"static/admin-resources.js",
+	"static/admin-updates.js",
+	"static/admin-security.js",
+	"static/tasks.js",
 }
 
 var staticJavaScriptAssets = func() map[string]string {
@@ -74,17 +122,42 @@ var staticJavaScriptAssets = func() map[string]string {
 }()
 
 var staticCSSAssets = map[string]string{
-	"/static/theme.css":                "static/theme.css",
-	"/static/style.css":                "static/style.css",
-	"/static/controls.css":             "static/controls.css",
-	"/static/studio.css":               "static/studio.css",
-	"/static/generation-assistant.css": "static/generation-assistant.css",
-	"/static/lora-caption-panel.css":   "static/lora-caption-panel.css",
-	"/static/shell.css":                "static/shell.css",
-	"/static/notifications.css":        "static/notifications.css",
+	"/static/model-library.css":           "static/model-library.css",
+	"/static/release.css":                 "static/release.css",
+	"/static/admin-access.css":            "static/admin-access.css",
+	"/static/admin-user-profile.css":      "static/admin-user-profile.css",
+	"/static/theme.css":                   "static/theme.css",
+	"/static/style.css":                   "static/style.css",
+	"/static/controls.css":                "static/controls.css",
+	"/static/studio.css":                  "static/studio.css",
+	"/static/collection-workspace.css":    "static/collection-workspace.css",
+	"/static/generation-assistant.css":    "static/generation-assistant.css",
+	"/static/lora-caption-panel.css":      "static/lora-caption-panel.css",
+	"/static/lora-training-workspace.css": "static/lora-training-workspace.css",
+	"/static/shell.css":                   "static/shell.css",
+	"/static/notifications.css":           "static/notifications.css",
+	"/static/tasks.css":                   "static/tasks.css",
+	"/static/lora-library.css":            "static/lora-library.css",
+	"/static/lora-verification.css":       "static/lora-verification.css",
+	"/static/generation-repeat.css":       "static/generation-repeat.css",
+	"/static/generation-postprocess.css":  "static/generation-postprocess.css",
+	"/static/gallery.css":                 "static/gallery.css",
+	"/static/image-comparison.css":        "static/image-comparison.css",
+	"/static/storage.css":                 "static/storage.css",
+	"/static/admin-content.css":           "static/admin-content.css",
+	"/static/admin-ultra.css":             "static/admin-ultra.css",
+	"/static/admin-workflows.css":         "static/admin-workflows.css",
+	"/static/admin-training.css":          "static/admin-training.css",
+	"/static/admin-resources.css":         "static/admin-resources.css",
+	"/static/admin-updates.css":           "static/admin-updates.css",
+	"/static/admin-metrics.css":           "static/admin-metrics.css",
+	"/static/admin-security.css":          "static/admin-security.css",
+	"/static/suggestions.css":             "static/suggestions.css",
+	"/static/auth-pages.css":              "static/auth-pages.css",
+	"/static/account-pages.css":           "static/account-pages.css",
 }
 
-var frontendAssetPaths = append([]string{"static/theme.css", "static/style.css", "static/controls.css", "static/studio.css", "static/generation-assistant.css", "static/lora-caption-panel.css", "static/shell.css", "static/notifications.css"}, staticJavaScriptAssetPaths...)
+var frontendAssetPaths = append([]string{"static/model-library.css", "static/theme.css", "static/style.css", "static/controls.css", "static/studio.css", "static/generation-assistant.css", "static/lora-caption-panel.css", "static/lora-training-workspace.css", "static/shell.css", "static/notifications.css", "static/tasks.css", "static/lora-library.css", "static/lora-verification.css", "static/generation-repeat.css", "static/generation-postprocess.css", "static/gallery.css", "static/image-comparison.css", "static/storage.css", "static/release.css", "static/admin-content.css", "static/admin-workflows.css", "static/admin-training.css", "static/admin-resources.css", "static/admin-updates.css", "static/admin-metrics.css", "static/admin-security.css", "static/suggestions.css", "static/auth-pages.css", "static/account-pages.css"}, staticJavaScriptAssetPaths...)
 
 type Templates struct {
 	*template.Template
@@ -97,60 +170,78 @@ func Run() error {
 	if err != nil {
 		return err
 	}
-	if err := prepareMediaSpool(cfg.MediaSpoolDir); err != nil {
-		return err
-	}
 	startupCtx, cancelStartup := context.WithTimeout(context.Background(), 2*time.Minute)
-	db, err := database.Open(startupCtx, cfg.DatabaseURL)
+	db, err := openGatewayRuntime(startupCtx, cfg)
 	if err != nil {
 		cancelStartup()
 		return err
 	}
 	defer db.Close()
-	if err := database.Migrate(startupCtx, db); err != nil {
-		cancelStartup()
-		return err
+	if cfg.ReleaseValidation != nil {
+		if err := database.RequireCurrentSchema(startupCtx, db); err != nil {
+			cancelStartup()
+			return err
+		}
+		spool, err := os.MkdirTemp("", "gateway-release-validation-")
+		if err != nil {
+			cancelStartup()
+			return err
+		}
+		defer os.RemoveAll(spool)
+		cfg = releaseValidationConfig(cfg, spool)
+	} else {
+		if err := prepareMediaSpool(cfg.MediaSpoolDir); err != nil {
+			cancelStartup()
+			return err
+		}
+		if err := database.Migrate(startupCtx, db); err != nil {
+			cancelStartup()
+			return err
+		}
 	}
 	repository := store.New(db)
-	adminPasswordHash, err := security.HashPassword(cfg.AdminPassword)
-	if err != nil {
+	if !cfg.RestoreDrillMode && cfg.ReleaseValidation == nil {
+		adminPasswordHash, err := security.HashPassword(cfg.AdminPassword)
+		if err != nil {
+			cancelStartup()
+			return err
+		}
+		if err := repository.EnsureBootstrapAdmin(startupCtx, cfg.AdminUsername, adminPasswordHash); err != nil {
+			cancelStartup()
+			return err
+		}
+		closedWebSockets, err := repository.CloseStaleWebSockets(startupCtx)
+		if err != nil {
+			cancelStartup()
+			return err
+		}
+		deletedSessions, err := repository.DeleteExpiredSessions(startupCtx, cfg.SessionIdleTimeout)
+		deletedTemporaryUsers, temporaryCleanupErr := repository.DeleteExpiredTemporaryUsers(startupCtx)
+		recoveredLoraJobs, loraRecoveryErr := repository.RecoverLoraTrainingJobs(startupCtx)
 		cancelStartup()
-		return err
+		if err != nil {
+			return err
+		}
+		if temporaryCleanupErr != nil {
+			return temporaryCleanupErr
+		}
+		if loraRecoveryErr != nil {
+			return loraRecoveryErr
+		}
+		if closedWebSockets > 0 {
+			log.Printf("closed %d stale websocket sessions", closedWebSockets)
+		}
+		if deletedSessions > 0 {
+			log.Printf("deleted %d expired sessions", deletedSessions)
+		}
+		if deletedTemporaryUsers > 0 {
+			log.Printf("deleted %d expired temporary users", deletedTemporaryUsers)
+		}
+		if recoveredLoraJobs > 0 {
+			log.Printf("requeued %d interrupted LoRA training jobs", recoveredLoraJobs)
+		}
 	}
-	if err := repository.EnsureBootstrapAdmin(startupCtx, cfg.AdminUsername, adminPasswordHash); err != nil {
-		cancelStartup()
-		return err
-	}
-	closedWebSockets, err := repository.CloseStaleWebSockets(startupCtx)
-	if err != nil {
-		cancelStartup()
-		return err
-	}
-	deletedSessions, err := repository.DeleteExpiredSessions(startupCtx, cfg.SessionIdleTimeout)
-	deletedTemporaryUsers, temporaryCleanupErr := repository.DeleteExpiredTemporaryUsers(startupCtx)
-	recoveredLoraJobs, loraRecoveryErr := repository.RecoverLoraTrainingJobs(startupCtx)
 	cancelStartup()
-	if err != nil {
-		return err
-	}
-	if temporaryCleanupErr != nil {
-		return temporaryCleanupErr
-	}
-	if loraRecoveryErr != nil {
-		return loraRecoveryErr
-	}
-	if closedWebSockets > 0 {
-		log.Printf("closed %d stale websocket sessions", closedWebSockets)
-	}
-	if deletedSessions > 0 {
-		log.Printf("deleted %d expired sessions", deletedSessions)
-	}
-	if deletedTemporaryUsers > 0 {
-		log.Printf("deleted %d expired temporary users", deletedTemporaryUsers)
-	}
-	if recoveredLoraJobs > 0 {
-		log.Printf("requeued %d interrupted LoRA training jobs", recoveredLoraJobs)
-	}
 
 	tpl, err := ParseTemplates()
 	if err != nil {
@@ -177,7 +268,8 @@ func Run() error {
 			ImageNumPredict: cfg.PromptAssistantImageNumPredict, ImageThinkNumPredict: cfg.PromptAssistantImageThinkNumPredict,
 			VideoNumPredict: cfg.PromptAssistantVideoNumPredict, VideoThinkNumPredict: cfg.PromptAssistantVideoThinkNumPredict,
 			ImageTimeout: cfg.PromptAssistantImageTimeout, VideoTimeout: cfg.PromptAssistantVideoTimeout,
-			KeepAlive: cfg.PromptAssistantKeepAlive,
+			ReasoningTimeout: cfg.PromptAssistantReasoningTimeout,
+			KeepAlive:        cfg.PromptAssistantKeepAlive,
 		}).WithVisionModel(cfg.PromptAssistantVisionModel, cfg.PromptAssistantVisionTimeout, cfg.PromptAssistantVisionKeepAlive),
 		contentModerator:     moderation.NewClient(cfg.ContentModeratorUpstream),
 		updates:              updates.NewClient(cfg.UpdateAgentURL, cfg.UpdateAgentToken),
@@ -203,20 +295,12 @@ func Run() error {
 		proxyCounts:          map[string]int64{},
 	}
 
-	publicSrv := newHTTPServer(cfg.PublicAddr, app.securityHeaders(app.publicMux()))
-	adminSrv := newHTTPServer(cfg.AdminAddr, app.securityHeaders(app.adminMux()))
+	app.gpuCoordinator = &gpuCoordinator{app: app}
+	publicSrv := newHTTPServer(cfg.PublicAddr, app.securityHeaders(releaseValidationHTTP(cfg, db, app.publicMux())))
+	adminSrv := newHTTPServer(cfg.AdminAddr, app.securityHeaders(releaseValidationHTTP(cfg, db, app.adminMux())))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	go func() {
-		defer close(app.maintenanceDone)
-		app.runMaintenance(ctx)
-	}()
-	go func() {
-		classificationCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-		app.classifyPendingSensitiveContent(classificationCtx)
-	}()
-	app.queueSensitiveMediaClassification()
+	app.startBackgroundWork(ctx)
 
 	errs := make(chan error, 2)
 	go func() {
@@ -236,6 +320,7 @@ func Run() error {
 	case <-ctx.Done():
 	}
 	stop()
+	app.liveUpdates().close()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = publicSrv.Shutdown(shutdownCtx)
@@ -261,28 +346,34 @@ func newHTTPServer(addr string, handler http.Handler) *http.Server {
 
 func ParseTemplates() (*Templates, error) {
 	tpl, err := template.New("views").Funcs(template.FuncMap{
-		"formatTime":           formatTime,
-		"formatBytes":          formatBytes,
-		"formatNumber":         formatNumber,
-		"formatDuration":       formatDuration,
-		"formatDurationLong":   formatDurationLong,
-		"formatAgeSeconds":     formatAgeSeconds,
-		"formatSignedBytes":    formatSignedBytes,
-		"accountLifetimeLabel": accountLifetimeLabel,
-		"fileLabel":            russianFileLabel,
-		"pct":                  pct,
-		"divFloat":             divFloat,
-		"roleLabel":            roleLabel,
-		"inviteStatusLabel":    inviteStatusLabel,
-		"auditActionLabel":     auditActionLabel,
-		"auditTargetLabel":     auditTargetLabel,
-		"auditMetadataLabel":   auditMetadataLabel,
-		"generationStateLabel": generationJobStateLabel,
-		"observationOutcome":   serviceObservationOutcomeLabel,
-		"componentLabel":       observabilityComponentLabel,
-		"operationLabel":       observabilityOperationLabel,
-		"hasString":            hasString,
-		"workspaceShell":       workspaceShell,
+		"formatTime":             formatTime,
+		"inviteForm":             inviteForm,
+		"userAccessForm":         userAccessForm,
+		"adminProfileTabs":       adminProfileTabs,
+		"adminProfileTaskStates": adminProfileTaskStates,
+		"inviteDefaultsJSON":     inviteDefaultsJSON,
+		"accessSummary":          accessSummary,
+		"formatBytes":            formatBytes,
+		"formatNumber":           formatNumber,
+		"formatDuration":         formatDuration,
+		"formatDurationLong":     formatDurationLong,
+		"formatAgeSeconds":       formatAgeSeconds,
+		"formatSignedBytes":      formatSignedBytes,
+		"accountLifetimeLabel":   accountLifetimeLabel,
+		"fileLabel":              russianFileLabel,
+		"pct":                    pct,
+		"divFloat":               divFloat,
+		"roleLabel":              roleLabel,
+		"inviteStatusLabel":      inviteStatusLabel,
+		"auditActionLabel":       auditActionLabel,
+		"auditTargetLabel":       auditTargetLabel,
+		"auditMetadataLabel":     auditMetadataLabel,
+		"generationStateLabel":   generationJobStateLabel,
+		"observationOutcome":     serviceObservationOutcomeLabel,
+		"componentLabel":         observabilityComponentLabel,
+		"operationLabel":         observabilityOperationLabel,
+		"hasString":              hasString,
+		"workspaceShell":         workspaceShell,
 	}).ParseFS(embeddedFS, "templates/*.html")
 	if err != nil {
 		return nil, err
@@ -322,6 +413,7 @@ func (a *App) publicMux() http.Handler {
 	mux.Handle("/suggestions", a.requireAuth(a.featureSuggestionsOnly(http.HandlerFunc(a.handleSuggestions))))
 	mux.Handle("/suggestions/", a.requireAuth(a.featureSuggestionsOnly(http.HandlerFunc(a.handleSuggestions))))
 	mux.Handle("/account/profile", a.requireAuth(http.HandlerFunc(a.handleAccountProfile)))
+	mux.Handle("/account/theme", a.requireAuth(http.HandlerFunc(a.handleAccountTheme)))
 	mux.Handle("/account/password", a.requireAuth(http.HandlerFunc(a.handleAccountPassword)))
 	mux.Handle("/account/quick-generation-priority", a.requireAuth(http.HandlerFunc(a.handleAccountQuickGenerationPriority)))
 	mux.Handle("/account/generation-mining", a.requireAuth(http.HandlerFunc(a.handleAccountGenerationMining)))
@@ -331,32 +423,39 @@ func (a *App) publicMux() http.Handler {
 	a.registerNotificationRoutes(mux)
 	a.registerGenerationRoutes(mux)
 	a.registerLoraTrainingRoutes(mux)
+	a.registerModelLibraryRoutes(mux)
+	mux.Handle("/api/tasks", a.requireAuth(http.HandlerFunc(a.handleTasks)))
+	mux.HandleFunc("/api/tasks/thumbnail", a.handleTaskThumbnail)
+	mux.Handle("/api/tasks/detail", a.requireAuth(http.HandlerFunc(a.handleTaskDetail)))
+	mux.Handle("/api/tasks/gpu", a.requireAuth(http.HandlerFunc(a.handleTaskGPU)))
+	// The JSON handler authenticates itself and keeps 401 responses private/no-store.
+	mux.HandleFunc("/api/tasks/gpu-snapshots", a.handleTaskGPUSnapshots)
+	mux.Handle("/api/tasks/events", a.requireAuth(http.HandlerFunc(a.handleTaskEvents)))
+	mux.Handle("/tasks", a.requireAuth(http.HandlerFunc(a.handleTasksPage)))
 	a.registerServiceRoutes(mux)
 	return mux
 }
 
 func (a *App) registerServiceRoutes(mux *http.ServeMux) {
-	comfyUI := a.requireServiceAccess("comfyui", a.proxyRootHandler("comfyui", a.cfg.ComfyUIUpstream, a.cfg.ComfyUIUpstreamAuthHeader))
-	openWebUI := a.requireServiceAccess("openwebui", a.proxyRootHandler("openwebui", a.cfg.OpenWebUIUpstream, a.cfg.OpenWebUIUpstreamAuth))
-	services := a.requireAuth(a.serviceCompatibilityRouter(comfyUI, openWebUI))
-
-	comfySelector := a.requireAuth(a.requireServiceAccess("comfyui", a.serviceSelector("comfyui")))
-	openSelector := a.requireAuth(a.requireServiceAccess("openwebui", a.serviceSelector("openwebui")))
-	mux.Handle("/comfyui", comfySelector)
-	mux.Handle("/comfyui/", comfySelector)
-	mux.Handle("/openwebui", openSelector)
-	mux.Handle("/openwebui/", openSelector)
-	mux.Handle("/", a.rootOrServices(services))
+	a.registerHarnessRoutes(mux)
+	// Generation and Harness own their API routes; legacy browser service
+	// selectors and root-relative upstream APIs must no longer be reachable.
+	mux.HandleFunc("/", a.handleRoot)
 }
 
 func (a *App) adminMux() http.Handler {
 	mux := http.NewServeMux()
+	a.registerHarnessRoutes(mux)
+	mux.Handle("/internal/gpu/harness/permit", a.adminLANOnly(http.HandlerFunc(a.handleHarnessGPUPermit)))
+	mux.Handle("/internal/gpu/comfy/permit", a.adminLANOnly(http.HandlerFunc(a.handleComfyGPUPermit)))
+	mux.Handle("/internal/gpu/ollama/permit", a.adminLANOnly(http.HandlerFunc(a.handleOllamaGPUPermit)))
 	a.registerStaticRoutes(mux)
 	mux.HandleFunc("/healthz", a.handleHealthz)
 	mux.HandleFunc("/readyz", a.handleReadyz)
 	mux.HandleFunc("/login", a.handleLogin)
 	mux.HandleFunc("/logout", a.handleLogout)
 	mux.Handle("/account/profile", a.requireAuth(http.HandlerFunc(a.handleAccountProfile)))
+	mux.Handle("/account/theme", a.requireAuth(http.HandlerFunc(a.handleAccountTheme)))
 	mux.Handle("/account/quick-generation-priority", a.requireAuth(http.HandlerFunc(a.handleAccountQuickGenerationPriority)))
 	mux.Handle("/account/generation-mining", a.requireAuth(http.HandlerFunc(a.handleAccountGenerationMining)))
 	mux.Handle("/account/password", a.requireAuth(http.HandlerFunc(a.handleAccountPassword)))
@@ -366,9 +465,14 @@ func (a *App) adminMux() http.Handler {
 	a.registerNotificationRoutes(mux)
 	mux.Handle("/metrics", a.adminLANOnly(http.HandlerFunc(a.handlePrometheusMetrics)))
 	a.registerPprofRoutes(mux)
+	a.registerModelLibraryRoutes(mux)
 	mux.Handle("/admin", a.requireLANAdmin(http.HandlerFunc(a.handleAdminDashboard)))
 	mux.Handle("/admin/", a.requireLANAdmin(http.HandlerFunc(a.handleAdminRoutes)))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			a.notFoundPage(w, r)
+			return
+		}
 		http.Redirect(w, r, "/admin", http.StatusFound)
 	})
 	return withAdminWorkspace(mux)
@@ -552,7 +656,7 @@ func readinessStatus(databaseErr error, dependencies []DependencyStatus) (int, b
 
 func (a *App) handleRoot(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
-		http.NotFound(w, r)
+		a.notFoundPage(w, r)
 		return
 	}
 	if a.currentUser(r) != nil {
@@ -587,12 +691,15 @@ func (a *App) renderStatus(w http.ResponseWriter, r *http.Request, status int, n
 	data["AssetVersion"] = a.tpl.AssetVersion
 	data["ThemePreference"] = ThemePreference(r)
 	data["NavigationPath"] = r.URL.Path
+	if name == "admin_release" {
+		data["NavigationPath"] = "/admin/updates"
+	}
 	data["AdminWorkspace"], _ = r.Context().Value(adminWorkspaceKey).(bool)
 	data["FeatureSuggestionsEnabled"] = a.cfg.FeatureSuggestionsEnabled
 	data["Retention"] = newRetentionPolicyView(a.retentionPolicy())
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' blob: data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'")
 	if status != http.StatusOK {
 		w.WriteHeader(status)
 	}

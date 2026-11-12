@@ -18,6 +18,19 @@
   );
   // ComfyUI's Python nodes use ties-to-even, unlike Math.round in JavaScript.
   const roundEven = value => value % 1 === 0.5 ? 2 * Math.round(value / 2) : Math.round(value);
+  const qwen21EditSize = (frame, megapixels = 1) => {
+    if (!frame || !(frame.width > 0 && frame.height > 0)) return null;
+    const target = number(megapixels, 1) > 4.27 ? 1 : number(megapixels, 1);
+    let resolution = Math.min(4096, roundEven(Math.sqrt(target * 1024 * 1024) / 32) * 32);
+    for (; resolution >= 256; resolution -= 32) {
+      const width = roundEven(Math.sqrt(resolution * resolution * frame.width / frame.height) / 32) * 32;
+      const height = roundEven(Math.sqrt(resolution * resolution * frame.height / frame.width) / 32) * 32;
+      if (width >= 256 && height >= 256 && width <= 4096 && height <= 4096 && width * height <= 4477419) {
+        return { width, height, resolution };
+      }
+    }
+    return null;
+  };
   const multiplySize = (frame, scale, truncate = false) => frame && size(...[frame.width, frame.height].map(value => {
     const scaled = truncate ? Math.trunc(value * scale) : value * scale;
     return Math.max(8, roundEven(scaled / 8) * 8);
@@ -102,14 +115,49 @@
       final = base;
       result.fps = 24;
       result.duration = number(v.video_duration_seconds, 5);
-      if (checked(v.video_rife_enabled)) {
+      if (checked(v.video_long_enabled) && v.generation_workflow !== "aihub-minimax-h3") {
+        result.duration = Math.min(20, Math.max(2, number(v.video_long_parts, 2))) * 15;
+      }
+      if (v.generation_workflow === "aihub-minimax-h3") {
+        if (v.aihub_mode === "video" && checked(v.aihub_match_duration)) {
+          const seconds = number(v.aihub_reference_duration, 0);
+          result.duration = seconds > 0 ? Math.round(seconds * 24) / 24 : null;
+          result.referenceDuration = true;
+        }
+        if (v.aihub_mode === "carousel") {
+          if (v.aihub_carousel_pipeline === "v2") {
+            const scale = base ? Math.min(1, 2048 / Math.max(base.width, base.height)) : 1;
+            final = base && size(Math.floor(base.width * scale / 16) * 16, Math.floor(base.height * scale / 16) * 16);
+            result.photoCountUpperBound = number(v.aihub_photo_count, 12);
+            result.processing.push(v.aihub_carousel_refiner === "qwen21" ? "Qwen 2.1" : "FLUX.2");
+          } else {
+          const scale = number(v.aihub_latent_scale, 2);
+          final = base && size(...[base.width, base.height].map(value => Math.max(32, roundEven(value * scale / 32) * 32)));
+          const frames = number(v.aihub_photo_frames, 50);
+          result.photoCountUpperBound = Math.max(0, Math.ceil((frames - number(v.aihub_photo_skip, 5)) / number(v.aihub_photo_stride, 8)));
+          result.processing.push("H3 latent " + scale + "×");
+          }
+        } else if (checked(v.aihub_half_resolution)) {
+          base = base && size(...[base.width, base.height].map(value => Math.max(32, roundEven(value / 64) * 32)));
+          final = base;
+        }
+      }
+      if (checked(v.video_rife_enabled) && v.generation_workflow !== "aihub-minimax-h3") {
         result.fps *= number(v.video_rife_multiplier, 2);
         result.processing.push("RIFE");
       }
+      if (v.generation_workflow === "aihub-minimax-h3" && v.aihub_mode !== "carousel" && checked(v.aihub_fg_enabled)) {
+        result.fps *= number(v.aihub_fg_multiplier, 2);
+        result.processing.push("DLSS FG");
+      }
       if (checked(v.video_rtx_enabled)) {
         const scale = number(v.video_rtx_scale, 2);
-        final = multiplySize(base, scale, true);
+        final = multiplySize(final, scale, true);
         result.processing.push(`RTX ${scale.toLocaleString("ru-RU")}×`);
+      }
+    } else if (templateID === "image-to-image" && family === "qwen21") {
+      if (sourceSize && checked(v.preserve_original_size)) {
+        base = final = qwen21EditSize(sourceSize, v.output_megapixels);
       }
     } else if (templateID === "image-to-image" && (family === "krea2" || family === "flux2")) {
       let preserve = checked(v.preserve_original_size);
@@ -139,8 +187,45 @@
         }
       }
     } else if (family === "krea2") {
-      base = baseResolution(final, number(v.base_megapixels, 1));
-      result.processing.push("Апскейл Krea2");
+      if (v.generation_workflow === "krea2-pro") {
+        let settings = {}; try { settings = JSON.parse(v.krea_pro_settings || '{}'); } catch (_) {}
+        if (v.krea_pro_mode === "outpaint" && base) {
+          const pad = settings.nodes?.['3870'] || {};
+          const w=base.width,h=base.height,a=number(pad.angle)*Math.PI/180,c=Math.abs(Math.cos(a)),s=Math.abs(Math.sin(a));
+          let bw=w*c+h*s,bh=w*s+h*c;
+          if(pad.fit==='crop') { const k=Math.min(w/bw,h/bh),m=Math.abs(number(pad.angle)/90-roundEven(number(pad.angle)/90))<1e-9?0:2;bw=Math.max(1,w*k-m);bh=Math.max(1,h*k-m); }
+          let ow=Math.max(16,bw+(number(pad.left,10)+number(pad.right,10))*w/100),oh=Math.max(16,bh+(number(pad.top)+number(pad.bottom))*h/100);
+          const ratio=pad.aspect==='original'?w/h:pad.aspect?.includes(':')?pad.aspect.split(':').map(Number).reduce((x,y)=>x/y):0;
+          if(ratio>0) { if(ow/oh>ratio) oh=ow/ratio;else ow=oh*ratio; }
+          const snap=Math.max(1,number(pad.snap_to,16));
+          base=size(Math.ceil(roundEven(ow)/snap)*snap,Math.ceil(roundEven(oh)/snap)*snap);
+          if (base && (base.width > 4096 || base.height > 4096 || base.width * base.height > 4477419)) result.error = "Уменьшите размер базы или расширение кадра";
+        }
+        const legacyScale = number(v.krea_pro_upscale,2);
+        const upscaler = v.krea_pro_upscaler || (legacyScale === 1 ? 'none' : settings.enabled?.['4150'] ? 'relay' : settings.enabled?.['4046'] === false ? 'none' : 'vosr');
+        const scale = upscaler === 'relay' ? number(v.krea_pro_relay_scale,2) : upscaler === 'none' ? 1 : legacyScale;
+        final = result.error ? null : base && size(roundEven(base.width*scale),roundEven(base.height*scale));
+        if (final && (final.width > 12288 || final.height > 12288 || final.width * final.height > 4477419 * 9)) {
+          result.error = "Уменьшите размер базы или масштаб апскейла";
+          final = null;
+        }
+        result.processing.push('Lonecat · полный');
+        if (scale > 1) result.processing.push(`${upscaler === 'relay' ? 'RelayVSR' : 'VOSR2'} ${scale}×`);
+        if (settings.enabled?.['3623']) result.approximate = true;
+      } else if (v.generation_workflow === "krea2-ultra") {
+        base = final;
+        result.processing.push("Lonecat · два прохода");
+        if (checked(v.krea_ultra_speed_boost)) result.processing.push("Speed Boost");
+      } else {
+        base = baseResolution(final, number(v.base_megapixels, 1));
+        result.processing.push("Апскейл Krea2");
+      }
+    } else if (family === "moss" && checked(v.moss_seedvr2) && base) {
+      const target = number(v.moss_upscale_resolution, 2560);
+      const scale = target / Math.max(base.width, base.height);
+      final = size(roundEven(base.width * scale), roundEven(base.height * scale));
+      result.processing.push("SeedVR2 Sharp");
+      result.approximate = true;
     } else if (family === "flux2") {
       base = final = floorSize(base, 16);
     }
@@ -153,19 +238,23 @@
     return distinct.length <= 1 ? distinct[0] : `${distinct[0]} → ${distinct.at(-1)}`;
   };
   const facts = (plans, { video = false, count = 1, variation = "" } = {}) => {
-    const final = rangeLabel(plans.map(item => `${item.approximate && item.final ? "≈ " : ""}${sizeLabel(item.final)}`));
+    const carousel = plans.some(item => item.photoCountUpperBound !== undefined);
+    const countLabel = carousel ? "до " + count * Math.max(...plans.map(item => item.photoCountUpperBound || 0)) : String(count);
+    const final = rangeLabel(plans.map(item => item.error || `${item.approximate && item.final ? "≈ " : ""}${sizeLabel(item.final)}`));
     const items = [
       { label: "Базовый размер", value: rangeLabel(plans.map(item => sizeLabel(item.base))) },
       { label: "Ожидаемый итог", value: final },
     ];
     if (video) {
-      items.push({ label: "Длительность (задано)", value: `${rangeLabel(plans.map(item => number(item.duration).toLocaleString("ru-RU")))} сек.` });
+      const unresolved = plans.some(item => item.referenceDuration && item.duration === null);
+      items.push({ label: "Длительность (задано)", value: unresolved ? "Как у видеореференса"
+        : `${rangeLabel(plans.map(item => number(item.duration).toLocaleString("ru-RU", { maximumFractionDigits: 3 })))} сек.` });
       items.push({ label: "Частота кадров", value: `${rangeLabel(plans.map(item => item.fps))} FPS` });
     }
-    items.push({ label: "Количество", value: `${count} ${video ? "видео" : "фото"}` });
+    items.push({ label: "Количество", value: `${countLabel} ${video ? "видео" : "фото"}` });
     if (plans.some(item => item.referenceMP !== null)) items.push({ label: "Анализ референсов", value: `${rangeLabel(plans.map(item => item.referenceMP?.toLocaleString("ru-RU")))} Мп` });
     if (variation) items.push({ label: "В серии меняется", value: variation });
-    return { facts: items, compact: `${count} ${video ? "видео" : "фото"} · ${final}` };
+    return { facts: items, compact: `${countLabel} ${video ? "видео" : "фото"} · ${final}` };
   };
-  return { imageResolution, baseResolution, plan, facts, roundEven };
+  return { imageResolution, baseResolution, qwen21EditSize, plan, facts, roundEven };
 });

@@ -1,0 +1,73 @@
+import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import test from 'node:test';
+import { Context } from '@deepseek-ai/cordis';
+import { AgentRegistry } from '@deepseek-ai/dsh-agent';
+import { AgentLoop } from '@deepseek-ai/dsh-agent-loop';
+import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local';
+import { LlmRuntime } from '@deepseek-ai/dsh-llm';
+import { SessionStore } from '@deepseek-ai/dsh-session';
+import { SessionProjectionRegistry } from '@deepseek-ai/dsh-session-projection';
+import { bindScopeParent, createScope, scopeOf } from '@deepseek-ai/dsh-scope';
+import { SystemPrompt } from '@deepseek-ai/dsh-system-prompt';
+import { PtcExecutor } from '@deepseek-ai/dsh-tool-executor-ptc';
+import { ToolRuntime, defineTool } from '@deepseek-ai/dsh-tools';
+import { UserQuestionService } from '@deepseek-ai/dsh-user-questions';
+import { WorkingDirectoryService } from '@deepseek-ai/dsh-working-directory';
+import { apply, inject } from './index.mjs';
+
+test('0.2.2 creates local agent with native executor without affecting another provider', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'gateway-sdk-'));
+  const original = Object.fromEntries(['DSH_HOME','HARNESS_TASK_RETENTION','HARNESS_MODEL_URL','HARNESS_MODEL_KEY','HARNESS_ULTRA_URL','HARNESS_PRIVATE_DIAGNOSTICS'].map(k => [k,process.env[k]]));
+  process.env.DSH_HOME = home;
+  process.env.HARNESS_TASK_RETENTION = 'true';
+  process.env.HARNESS_MODEL_URL = 'http://127.0.0.1:9/synthetic/v1';
+  process.env.HARNESS_MODEL_KEY = 'synthetic-key';
+  delete process.env.HARNESS_ULTRA_URL;
+  delete process.env.HARNESS_PRIVATE_DIAGNOSTICS;
+  t.after(async () => {
+    for (const [key,value] of Object.entries(original)) value === undefined ? delete process.env[key] : process.env[key] = value;
+    await rm(home, {recursive:true,force:true});
+  });
+  const ctx = new Context();
+  t.after(() => ctx.fiber.dispose());
+  new SystemPrompt(ctx, {});
+  new SessionStore(ctx);
+  await ctx.plugin(SessionProjectionRegistry);
+  await ctx.plugin(AgentRegistry);
+  new LlmRuntime(ctx);
+  const tools = new ToolRuntime(ctx);
+  const fallback = {describe:() => ({schemas:[]}), execute:async () => ({results:[],additionalContexts:[],concluded:false})};
+  tools.setExecutor(fallback);
+  new LocalFileSystem(ctx, {cwd:home, diffBasisMaxBytes:1024});
+  await ctx.plugin(WorkingDirectoryService, {defaultDirectory:home});
+  new UserQuestionService(ctx);
+  await ctx.plugin(AgentLoop, {agents:[]});
+  await ctx.plugin({inject,apply});
+  const local = await ctx.agents.create({sessionId:'synthetic-local',agentOptions:{provider:'ollama-local',model:'synthetic'}});
+  const other = await ctx.agents.create({sessionId:'synthetic-other',agentOptions:{provider:'other',model:'synthetic'}});
+  const child = await ctx.agents.create({sessionId:'synthetic-child',parentAgent:local.agent,agentOptions:{provider:'ollama-local',model:'synthetic'}});
+  const presetKey = {}, preset = createScope(ctx,presetKey);
+  const presetExecutor = new PtcExecutor(preset.ctx);
+  preset.ctx.tools.setExecutor(presetExecutor);
+  const setup = agentCtx => { bindScopeParent(scopeOf(agentCtx),presetKey); };
+  const localPreset = await ctx.agents.create({sessionId:'synthetic-local-preset',agentOptions:{provider:'ollama-local',model:'synthetic'},setup});
+  const otherPreset = await ctx.agents.create({sessionId:'synthetic-other-preset',agentOptions:{provider:'other',model:'synthetic'},setup});
+  t.after(async () => { await otherPreset.dispose(); await localPreset.dispose(); await preset.dispose(); await child.dispose(); await other.dispose(); await local.dispose(); });
+  assert.equal(tools.selectExecutor(local.agent).constructor.name, 'NativeToolExecutor');
+  assert.equal(tools.selectExecutor(child.agent).constructor.name, 'NativeToolExecutor');
+  assert.equal(tools.selectExecutor(other.agent), fallback);
+  assert.equal(tools.selectExecutor(localPreset.agent).constructor.name, 'NativeToolExecutor');
+  assert.equal(tools.selectExecutor(otherPreset.agent), presetExecutor);
+  await assert.rejects(ctx.agents.create({sessionId:'synthetic-conflicting-local',agentOptions:{provider:'ollama-local',model:'synthetic'},
+    setup:agentCtx => { agentCtx.tools.setExecutor(new PtcExecutor(agentCtx)); }}), /Only one tool executor/);
+  tools.register(defineTool({name:'synthetic_tool',description:'Synthetic',parameters:{},
+    output:{schema:{type:'object',additionalProperties:true},render:(_args,value) => [{type:'text',text:JSON.stringify(value)}]},
+    execute:async (_args,exec) => ({session:exec.agent.session.id})}));
+  const outcome = await tools.execute({agent:local.agent,signal:AbortSignal.timeout(1000),calls:[{type:'tool-call',id:'synthetic-call',name:'synthetic_tool',arguments:'{}'}]});
+  assert.equal(outcome.results.length,1);
+  assert.equal(outcome.results[0].result.isError,false);
+  assert.equal(JSON.parse(outcome.results[0].result.content[0].text).session,'synthetic-local');
+});

@@ -2,14 +2,13 @@ const path = require("node:path");
 const fs = require("node:fs");
 const { test, expect } = require("@playwright/test");
 const AxeBuilder = require("@axe-core/playwright").default;
-const { installPreviewClock, settlePage, assertNoViewportOverflow, expectFocusInside, openStudioOptions } = require("./helpers.cjs");
+const { installPreviewClock, settlePage, assertNoViewportOverflow, expectFocusInside, openStudioOptions, chooseWorkflow } = require("./helpers.cjs");
 const { installCaptionFixture } = require("./caption-fixture.cjs");
 
 const visualStyle = path.join(__dirname, "visual-stability.css");
 const componentVisualStyle = [visualStyle, path.join(__dirname, "component-visual-stability.css")];
 const responsiveRoutes = [
   { route: "/preview/generate", snapshot: "generation-step-1.png" },
-  { route: "/preview/gallery", snapshot: "gallery.png" },
   { route: "/preview/profile", snapshot: "profile.png" },
   { route: "/preview/invites", snapshot: "invitations.png" },
   { route: "/preview/invite", snapshot: "invite-registration.png" },
@@ -36,12 +35,23 @@ const desktopOnly = (testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1440", "interaction and axe checks run once in the canonical desktop project");
 };
 
-test("key surfaces fit every supported viewport", async ({ page }, testInfo) => {
-  for (const { route, snapshot } of responsiveRoutes) {
+for (const { route, snapshot } of responsiveRoutes) {
+  test(`key surfaces fit every supported viewport: ${route}`, async ({ page }, testInfo) => {
     await open(page, route);
     await assertNoViewportOverflow(page, `${testInfo.project.name} ${route}`);
     await expect(page).toHaveScreenshot(snapshot, { fullPage: true, stylePath: visualStyle });
+  });
+}
+
+test("results library fits every supported viewport", async ({ page }, testInfo) => {
+  await open(page, '/preview/gallery');
+  for (const media of await page.locator('[data-gallery-item]:not([data-sensitive="true"]) [data-gallery-preview-src]').all()) {
+    await media.scrollIntoViewIfNeeded();
+    await expect.poll(() => media.evaluate(item => item.tagName === 'VIDEO' ? item.readyState >= 2 : item.complete && item.naturalWidth > 0)).toBe(true);
   }
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await assertNoViewportOverflow(page, `${testInfo.project.name} results`);
+  await expect(page).toHaveScreenshot('gallery.png', { fullPage: true, stylePath: visualStyle });
 });
 
 test("LoRA training surfaces fit every supported viewport", async ({ page }, testInfo) => {
@@ -57,6 +67,7 @@ test("LoRA training surfaces fit every supported viewport", async ({ page }, tes
 });
 
 test("LoRA dataset composer keeps files and captions together", async ({ page }, testInfo) => {
+  const { captionAt } = require('./lora-workspace-helpers.cjs');
   desktopOnly(testInfo);
   await open(page, "/preview/lora-training");
   const pixel = fs.readFileSync(path.join(__dirname, "../../docs/frontend/prototype/assets/portrait.jpg"));
@@ -65,8 +76,8 @@ test("LoRA dataset composer keeps files and captions together", async ({ page },
   })));
   await expect(page.locator("[data-lora-dataset-grid] .lora-dataset-item")).toHaveCount(5);
   await expect(page.locator("[data-lora-image-count]")).toHaveText("5 изображений");
-  await page.locator('.lora-dataset-item textarea[name="caption"]').first().fill("front portrait, soft daylight");
-  await expect(page.locator('.lora-dataset-item textarea[name="caption"]').first()).toHaveValue("front portrait, soft daylight");
+  await (await captionAt(page)).fill("front portrait, soft daylight");
+  await expect(await captionAt(page)).toHaveValue("front portrait, soft daylight");
   await page.locator(".lora-dataset-item .lora-dataset-remove").last().click();
   await expect(page.locator("[data-lora-dataset-grid] .lora-dataset-item")).toHaveCount(4);
   await expect(page.locator("[data-lora-image-count]")).toHaveText("4 изображения");
@@ -84,10 +95,14 @@ test("LoRA caption editor queues every image by ID without uploading photos twic
     name: `assistant-${index + 1}.jpg`, mimeType: "image/jpeg", buffer: pixel,
   })));
   await page.locator('input[name="trigger_word"]').fill("subject_token");
+  await page.locator('[data-training-step="captions"]').click();
   await page.getByRole("button", { name: "Описать пустые" }).click();
 
   await expect(page.locator("[data-lora-caption-status]")).toContainText("Готово 5");
-  const captions = await page.locator('.lora-dataset-item textarea[name="caption"]').evaluateAll((nodes) => nodes.map((node) => node.value));
+  const datasetID = await page.locator('[data-dataset-select]').inputValue();
+  await expect(page.locator('[data-dataset-save-state]')).toHaveAttribute('data-state', 'saved');
+  const view = await (await page.request.get(`/api/lora-datasets/${datasetID}`)).json();
+  const captions = view.manifest.images.map(image => image.caption);
   expect(captions).toHaveLength(5);
   expect(captions.every((caption) => caption.startsWith("subject_token,"))).toBe(true);
   expect(queue.posts).toHaveLength(1);
@@ -102,25 +117,26 @@ test("suggestion intake and review expose one clear next action", async ({ page 
   desktopOnly(testInfo);
 
   await open(page, "/preview/suggestions");
-  await expect(page.locator('.suggestion-kind-picker input[name="kind"]')).toHaveCount(4);
+  await expect(page.locator('.sg-kind input[name="kind"]')).toHaveCount(4);
   await expect(page.getByRole("button", { name: "Сохранить черновик" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Отправить", exact: true })).toBeVisible();
+  await page.locator('.sg-attachments > summary').click();
   await page.locator('input[name="workflow_json"]').setInputFiles({
     name: "portrait-workflow.json",
     mimeType: "application/json",
     buffer: Buffer.from('{"version": 1}'),
   });
   await expect(page.locator("[data-suggestion-file-name]")).toHaveText("portrait-workflow.json");
-  await expect(page.locator(".suggestion-user-item")).toHaveCount(3);
-  await expect(page.locator(".suggestion-user-item").nth(2)).toContainText("Комментарий администратора");
+  await expect(page.locator(".sg-item")).toHaveCount(3);
+  await expect(page.locator(".sg-item").nth(2)).toContainText("Комментарий администратора");
 
   await open(page, "/preview/admin-suggestions");
-  await expect(page.locator(".admin-suggestion-item")).toHaveCount(3);
+  await expect(page.locator(".sg-item")).toHaveCount(3);
   await expect(page.getByRole("link", { name: "Скачать проверенный JSON" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Принять в работу" })).toHaveCount(1);
-  await expect(page.locator(".admin-suggestion-no-files")).toContainText("только описание");
-  await page.locator(".admin-suggestion-diagnostics").first().getByText("Диагностика VirusTotal").click();
-  await expect(page.locator(".admin-suggestion-diagnostics").first()).toHaveAttribute("open", "");
+  await expect(page.locator("[data-suggestion-no-files]")).toContainText("только описание");
+  await page.locator("[data-suggestion-diagnostics]").first().getByText("Диагностика VirusTotal").click();
+  await expect(page.locator("[data-suggestion-diagnostics]").first()).toHaveAttribute("open", "");
 });
 
 test("generation wizard covers Krea2, Flux2 and MiniMax", async ({ page }, testInfo) => {
@@ -133,14 +149,14 @@ test("generation wizard covers Krea2, Flux2 and MiniMax", async ({ page }, testI
   await expect(page.locator("#generation-summary")).toContainText("Текст в изображение");
 
   await open(page, "/preview/generate");
-  await page.getByRole("button", { name: /^Редактировать фото$/ }).click();
-  await page.getByRole("button", { name: /Flux2 Редактирование/ }).click();
+  await page.getByRole("button", { name: /^Правка фото$/ }).click();
+  await chooseWorkflow(page, "photoflow-flux2-edit");
   await expect(page.locator("#generation-model")).toHaveValue("flux2:test");
   const primaryGallery = page.locator('[data-image-slot="1"] [data-gallery-image-picker-open]');
   await primaryGallery.click();
   await page.getByRole("button", { name: "Выбрать AI-Gateway-Krea2-portrait.png" }).click();
   await expect(page.locator('[data-image-slot="1"] [data-image-name]')).toHaveText("AI-Gateway-Krea2-portrait.png");
-  await expect(page.locator("#generation-summary")).toContainText("Flux 2 / Klein 9B");
+  await expect(page.locator("#generation-summary")).toContainText("Klein 9B");
   await expect(page.locator("#generation-summary")).toContainText("1 фото (1 из галереи)");
   await settlePage(page);
   const promptBox = await page.locator("#positive-prompt").boundingBox();
@@ -311,36 +327,42 @@ test("controlled generation batches stay clear and usable at every viewport", as
 
   const group = page.locator('section.generation-batch-group[data-batch-id="batch-krea-steps"]');
   if (page.viewportSize().width < 900) await page.locator("#studio-result-tab").click();
+  await page.locator('[data-recent-key="batch:batch-krea-steps"]').click();
   await expect(group).toBeVisible();
+  await expect(page.locator("#generation-recent-inspector")).toHaveAttribute("role", "dialog");
+  await expect(page.locator("#generation-recent-title")).toHaveText("Результаты пакета");
   await expect(group.locator(".generation-job--batch")).toHaveCount(3);
   await expect(group.locator(".generation-batch-progress")).toContainText("2 из 3");
+  await page.locator("#generation-batch-viewer-more").click();
   await expect(group.getByRole("button", { name: "Новая ветка" })).toBeVisible();
+  await page.locator("#generation-batch-viewer-more").click();
   await settlePage(page);
-  await expect(group).toHaveScreenshot("generation-batch-group.png", { stylePath: componentVisualStyle });
+  await page.locator("#generation-recent-inspector").screenshot({ path: testInfo.outputPath("generation-batch-viewer-v3.png"), style: fs.readFileSync(path.join(__dirname, "component-visual-stability.css"), "utf8") });
   await assertNoViewportOverflow(page, `${testInfo.project.name} generation batch workbench`);
   await page.evaluate(() => {
     window.scrollTo(0, 0);
     document.getElementById("studio-editor").scrollTo(0, 0);
   });
   await settlePage(page);
-  await expect(page).toHaveScreenshot("generation-batch-workbench.png", { fullPage: true, stylePath: visualStyle });
+  await page.screenshot({ path: testInfo.outputPath("generation-batch-workbench-v3.png"), style: fs.readFileSync(visualStyle, "utf8") });
 
   const compareChecks = group.locator('.generation-batch-compare-toggle input[type="checkbox"]');
   await compareChecks.nth(0).check();
+  await group.getByRole("button", { name: "Следующий вариант" }).click();
   await compareChecks.nth(1).check();
-  await group.getByRole("button", { name: "Сравнить 2 варианта" }).click();
+  await group.locator('[data-result-action="compare"]').click();
   await expect(page.locator("#generation-batch-compare")).toBeVisible();
   await expect(page.locator(".generation-batch-comparison-item")).toHaveCount(2);
   await expect(page.locator(".generation-batch-differences")).toContainText("Вариант 1: 7");
   await assertNoViewportOverflow(page, `${testInfo.project.name} generation batches`);
-  await expect(page).toHaveScreenshot("generation-batches.png", { stylePath: visualStyle });
+  await page.screenshot({ path: testInfo.outputPath("generation-batch-comparison-v3.png"), style: fs.readFileSync(visualStyle, "utf8") });
   await page.locator("#generation-batch-compare-close").click();
   await expect(page.locator("#generation-batch-compare")).toBeHidden();
 });
 
 test("prompt assistant review stays readable at every viewport", async ({ page }, testInfo) => {
   await open(page, "/preview/generate?template=image-to-image&workflow=photoflow-flux2-edit&media=1&slot=1&role=identity");
-  await expect(page.locator('.generation-workflow-choice.is-selected[data-preset-id="photoflow-flux2-edit"]')).toBeVisible();
+  await expect(page.locator('.generation-workflow-choice.is-selected[data-preset-id="photoflow-flux2-edit"]')).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator('[data-image-slot="1"] [data-image-name]')).toHaveText("AI-Gateway-Krea2-portrait.png");
   await page.locator("#positive-prompt").fill("Сохранить внешность и композицию, заменить куртку на красную кожаную.");
   await page.locator("#prompt-assistant-open").click();
@@ -380,15 +402,17 @@ test("media library is shared by Krea2, Flux2 and MiniMax", async ({ page }, tes
 
   await page.locator("[data-gallery-use-open]").first().click();
   await expect(page.locator("#gallery-use-dialog")).toBeVisible();
-  await expect(page.locator('#gallery-use-dialog input[name="workflow"]')).toHaveCount(3);
-  await page.locator('#gallery-use-dialog input[value="photoflow-krea2-edit"]').check();
-  await expect(page.locator('#gallery-use-dialog select[name="slot"] option[value="3"]')).toHaveAttribute("disabled", "");
-  await page.locator('#gallery-use-dialog input[value="photoflow-flux2-edit"]').check();
+  await expect(page.locator('#gallery-use-dialog input[name="destination"]')).toHaveCount(5);
+  await page.locator('#gallery-use-dialog select[name="workflow"]').selectOption('photoflow-krea2-edit:krea2:test');
+  await expect(page.locator('#gallery-use-dialog select[name="slot"] option[value="3"]')).toHaveCount(0);
+  await page.locator('#gallery-use-dialog select[name="workflow"]').selectOption('photoflow-flux2-edit:flux2:test');
   await expect(page.locator('#gallery-use-dialog select[name="slot"] option[value="4"]')).toBeEnabled();
-  await page.locator('#gallery-use-dialog input[value="minimax-h3-video"]').check();
-  await expect(page.locator("[data-gallery-use-hint]")).toContainText("MiniMax H3");
+  await page.locator('#gallery-use-dialog input[value="last_frame"]').check();
+  await expect(page.locator('#gallery-use-dialog select[name="workflow"] option')).toHaveCount(1);
+  await expect(page.locator('#gallery-use-dialog select[name="slot"]')).toHaveValue('2');
   await page.locator("[data-gallery-use-close]").last().click();
 
+  await page.locator('.gallery-card-menu summary').first().click();
   await page.locator("[data-gallery-compare]").first().click();
   await expect(page.locator("[data-gallery-compare-grid] figure")).toHaveCount(2);
   await page.keyboard.press("Escape");
@@ -403,8 +427,8 @@ test("media library is shared by Krea2, Flux2 and MiniMax", async ({ page }, tes
     { workflow: "minimax-h3-video", template: "minimax-h3-video", slot: 3 },
   ]) {
     await open(page, `/preview/generate?template=${target.template}&workflow=${target.workflow}&media=1&slot=${target.slot}&role=style`);
-    await expect(page.locator(`.generation-workflow-choice.is-selected[data-preset-id="${target.workflow}"]`)).toBeVisible();
-    await expect(page.locator(`[data-image-slot="${target.slot}"] [data-image-name]`)).toHaveText("AI-Gateway-Krea2-portrait.png");
+    await expect(page.locator(`.generation-workflow-choice.is-selected[data-preset-id="${target.workflow}"]`)).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator(`[data-image-slot="${target.slot}"] [data-image-name]`)).toHaveText("result-1.jpg");
   }
 });
 
@@ -459,7 +483,7 @@ test("notification actions open the exact generation", async ({ page }, testInfo
 
 test("notification settings disable browser delivery with in-app notifications", async ({ page }, testInfo) => {
   desktopOnly(testInfo);
-  await open(page, "/preview/profile");
+  await open(page, "/account/profile?tab=notifications");
   const inApp = page.locator('[name="in_app_enabled"]');
   const browser = page.locator('[name="browser_enabled"]');
   await expect(inApp).toBeChecked();
@@ -475,23 +499,25 @@ test("AI content keeps one live card for the whole generation task", async ({ pa
   await open(page, "/preview/content");
   await expect(page.locator("[data-content-task-key]")).toHaveCount(4);
   await expect(page.getByText("Учётная запись удалена")).toBeVisible();
-  await expect(page.locator("[data-content-live-label]")).toContainText("задания обновляются сразу");
+  await expect(page.locator("[data-admin-content-page]")).toHaveAttribute("data-content-state", "ready");
 
-  const taskTrigger = page.locator('[data-content-task-key="job-preview-krea"] [data-content-task-open]');
+  const taskTrigger = page.locator('[data-content-task-key="job-preview-krea"] .content-gallery-preview');
   await taskTrigger.click();
   await expect(page.locator("#content-detail-dialog")).toBeVisible();
   await expectFocusInside(page, "#content-detail-dialog");
   await page.keyboard.press("Tab");
   await expectFocusInside(page, "#content-detail-dialog");
+  await page.getByRole("tab", { name: "Этапы", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Стадии задания" })).toBeVisible();
+  await page.getByRole("tab", { name: "Промпт", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Запрос пользователя" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Ответ ассистента" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Применённый итоговый промт" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Применённый итоговый промпт" })).toBeVisible();
   await expect(page).toHaveScreenshot("ai-content-task-detail.png", { stylePath: visualStyle });
   await page.keyboard.press("Escape");
   await expect(taskTrigger).toBeFocused();
 
-  await page.locator('[data-content-task-key="job-preview-error"] [data-content-task-open]').click();
+  await page.locator('[data-content-task-key="job-preview-error"] .content-gallery-preview').click();
   await expect(page.locator("#content-detail-dialog")).toContainText("Выбранная модель больше не доступна в ComfyUI");
 });
 
@@ -542,11 +568,13 @@ test("studio, image picker and lightbox work from the keyboard", async ({ page }
   desktopOnly(testInfo);
 
   await open(page, "/preview/generate");
-  const imageScenario = page.getByRole("button", { name: /^Редактировать фото$/ });
+  const imageScenario = page.getByRole("button", { name: /^Правка фото$/ });
   await imageScenario.focus();
   await page.keyboard.press("Enter");
   await expect(imageScenario).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#positive-prompt")).toBeVisible();
+  await page.locator("#studio-workflow-open").focus();
+  await page.keyboard.press("Enter");
   const fluxWorkflow = page.getByRole("button", { name: /Flux2 Редактирование/ });
   await fluxWorkflow.focus();
   await page.keyboard.press("Enter");
@@ -585,23 +613,24 @@ test("preview exposes loading, empty, error, sensitive, offline, queued and comp
   await expect(page.locator(".ui-empty-state, .empty-state")).toBeVisible();
 
   await open(page, "/preview/gallery");
-  await expect(page.locator("[data-sensitive-media]")).toHaveCount(1);
+  await expect(page.locator('[data-gallery-item][data-sensitive="true"]')).toHaveCount(1);
+  await expect(page.locator('[data-gallery-item][data-sensitive="true"] img')).not.toHaveAttribute('src', /.+/);
   await expect(page.getByText("Контент 18+")).toBeVisible();
 
   await open(page, "/preview/admin");
   await expect(page.locator(".dependency-state.offline").first()).toContainText("Нет связи");
 
   await open(page, "/preview/generate");
-  await expect(page.locator("#generation-variant-list")).toContainText("В очереди");
-  await expect(page.locator("#generation-variant-list")).toContainText("Готово");
-  await expect(page.locator("#generation-variant-list")).toContainText("Ошибка");
+  await expect(page.locator("#generation-recent-list")).toContainText("В очереди");
+  await expect(page.locator("#generation-recent-list")).toContainText("Готово");
+  await expect(page.locator("#generation-recent-list")).toContainText("Ошибка");
 });
 
 test("operations center puts live work and failures before analytics", async ({ page }, testInfo) => {
   desktopOnly(testInfo);
 
   await open(page, "/preview/admin");
-  await expect(page.getByRole("heading", { name: "Операционный центр" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Операции", exact: true })).toBeVisible();
   await expect(page.locator("[data-ops-attention] .operations-attention-row")).toHaveCount(5);
   await expect(page.locator("[data-active-job]")).toHaveCount(2);
   await expect(page.locator(".operations-queue")).toContainText("ComfyUI выполняет текущую задачу");

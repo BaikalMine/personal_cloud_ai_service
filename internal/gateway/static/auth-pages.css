@@ -1,0 +1,56 @@
+.entry-page { min-height: 100svh; display: grid; align-items: center; justify-items: center; padding: 96px 24px 48px; background: var(--canvas); }
+.entry-form-area { width: min(440px, 100%); min-width: 0; }
+.entry-brand { display: inline-flex; align-items: center; gap: 12px; margin-bottom: 24px; color: var(--text); font-size: 17px; font-weight: 800; text-decoration: none; }
+.entry-brand > span { display: grid; place-items: center; width: 38px; height: 38px; border: 1px solid var(--color-success-border); border-radius: 6px; color: var(--color-success); font-size: 14px; }
+.entry-page h1, .recovery-workspace h1 { margin: 0 0 18px; color: var(--text); font-size: 28px; line-height: 1.25; overflow-wrap: anywhere; }
+.entry-page :is(form, label, div, details, section), .recovery-content { min-width: 0; }
+.entry-form { display: grid; gap: 16px; }
+.entry-form .ui-field { margin: 0; }
+.entry-form > .ui-field + .ui-field { margin-top: 0; }
+.entry-form .ui-field-label { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+.entry-form :is(input, button), .entry-page .button, .recovery-actions :is(button, .button) { min-height: 44px; }
+.entry-form input { min-width: 0; width: 100%; }
+.entry-page :is(button, .button), .recovery-actions :is(button, .button) { white-space: normal; overflow-wrap: anywhere; }
+.entry-page svg, .recovery-workspace svg { width: 18px; height: 18px; flex-shrink: 0; }
+.entry-password { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; gap: 8px; }
+.entry-password .icon-button { width: 44px; padding: 0; }
+.entry-page [hidden], .recovery-workspace [hidden] { display: none; }
+.entry-note { color: var(--muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.entry-form-area > .entry-note { margin: 18px 0 0; }
+.entry-form .entry-note { margin: 0; }
+.entry-message { margin: 0 0 20px; padding: 2px 0 2px 12px; border-left: 3px solid var(--color-danger); color: var(--text); font-size: 14px; overflow-wrap: anywhere; }
+.entry-field-error { margin: -8px 0 0; font-size: 12px; color: var(--color-danger); overflow-wrap: anywhere; }
+.entry-field-error a { color: inherit; }
+.entry-form [aria-invalid=true] { border-color: var(--color-danger); }
+.entry-progress { margin: 0; color: var(--color-info); font-size: 13px; }
+.entry-progress:empty { display: none; }
+.entry-dates { margin: 0 0 16px; display: grid; gap: 10px; }
+.entry-dates div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 12px; }
+.entry-dates dt, .entry-limits dt { font-size: 12px; color: var(--muted); }
+.entry-dates dd, .entry-limits dd { margin: 0; font-size: 12px; color: var(--text); overflow-wrap: anywhere; }
+.entry-access { border-block: 1px solid var(--line); margin-bottom: 20px; }
+.entry-access > summary { min-height: 44px; padding: 10px 0; color: var(--text-soft); font-size: 13px; font-weight: 700; cursor: pointer; }
+.entry-access > div { padding: 6px 0 16px; }
+.entry-capabilities { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; list-style: none; margin: 0 0 16px; padding: 0; }
+.entry-capabilities li { display: flex; align-items: start; gap: 8px; font-size: 12px; color: var(--text-soft); overflow-wrap: anywhere; }
+.entry-capabilities svg { width: 15px; height: 15px; margin-top: 2px; color: var(--color-success); }
+.entry-limits { margin: 0; }
+.entry-limits > div { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0; border-top: 1px solid var(--line); }
+.entry-limits dd { text-align: right; }
+.entry-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; }
+.entry-footer .button { padding-inline: 0; border-color: transparent; background: transparent; font-size: 13px; }
+.recovery-content { width: min(640px, 100%); }
+.recovery-workspace { padding-top: 48px; }
+.recovery-code { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; color: var(--color-warning); font-size: 13px; font-weight: 700; }
+.recovery-content > p { margin: 0 0 24px; color: var(--text-soft); line-height: 1.7; font-size: 14px; overflow-wrap: anywhere; }
+.recovery-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+html:has(.entry-page) { scroll-padding-block: 16px 24px; }
+.entry-page :is(input, button, a, summary) { scroll-margin-block: 16px 24px; }
+@media (max-width: 520px) {
+  .entry-page { padding: 80px 16px 32px; }
+  .entry-brand { margin-bottom: 18px; }
+  .entry-page h1, .recovery-workspace h1 { font-size: 26px; }
+  .entry-form { gap: 14px; }
+  .entry-capabilities { grid-template-columns: 1fr; }
+  .recovery-workspace { padding-top: 28px; }
+}

@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createController } = require("../../static/lora-dataset-state.js");
+const { createController, editorTarget } = require("../../static/lora-dataset-state.js");
 
 const copy = (value) => JSON.parse(JSON.stringify(value));
 const defaults = { version: 1, settings: { name: "", trigger_word: "" }, images: [] };
@@ -110,4 +110,48 @@ test("new empty set resets settings without mutating a saved set", async () => {
   assert.deepEqual(c.state.manifest, defaults); assert.equal(c.state.dataset, null);
   c.touch(); await c.flush(); assert.notEqual(c.state.dataset.id, previous);
   assert.equal(f.sets.get(previous).manifest.settings.name, "saved");
+});
+
+test("editor links select one bounded dataset/frame or immutable version", () => {
+  assert.equal(editorTarget("?unrelated=1"), null);
+  assert.deepEqual(editorTarget("?dataset=ds-1"), { dataset: "ds-1" });
+  assert.deepEqual(editorTarget("?asset=asset-1&dataset=ds-1&image=frame_2"), { dataset: "ds-1", image: "frame_2", asset: "asset-1" });
+  assert.deepEqual(editorTarget("?version=source-v1"), { version: "source-v1" });
+  for (const query of ["dataset=", "dataset=a&dataset=b", "dataset=a&image=b", "image=b&asset=c", "dataset=a&asset=b", "version=a&dataset=b", "version=a&image=b&asset=c", "version=a&version=a", "dataset=../a", "dataset=a%2Fb", "asset=a&dataset=b&image=%00", `version=${"a".repeat(97)}`]) {
+    assert.deepEqual(editorTarget(`?${query}`), { invalid: true }, query);
+  }
+});
+
+test("an explicit missing dataset never falls back to the newest dataset", async () => {
+  const f = fixture(); const c = f.create(); await c.load(); c.touch(); await c.flush();
+  f.calls.length = 0;
+  assert.equal(await c.load("missing"), false);
+  assert.equal(c.state.ready, false);
+  assert.deepEqual(f.calls.map(call => call.path), ["/missing"]);
+});
+
+test("a late dataset reply cannot replace a newer selection or a new draft", async () => {
+  for (const choice of ["new", "other", "dispose", "restore"]) {
+    const f = fixture(); const waiting = deferred();
+    const source = { dataset: { id: "source", revision: 1 }, manifest: copy(defaults), assets: {} };
+    f.sets.set("other", { ...copy(source), dataset: { id: "other", revision: 2 } });
+    const c = f.create(async (...args) => args[0] === "/source" ? waiting.promise : f.server(...args));
+    const loading = c.load("source");
+    if (choice === "new") c.startNew();
+    if (choice === "other") await c.load("other");
+    if (choice === "dispose") c.dispose();
+    if (choice === "restore") c.apply(f.sets.get("other"));
+    const expected = copy(c.state);
+    waiting.resolve(source);
+    assert.equal(await loading, false);
+    assert.deepEqual(c.state, expected, choice);
+  }
+});
+
+test("a late failed load cannot replace the current editor state with an error", async () => {
+  const f = fixture(); const waiting = deferred();
+  const c = f.create(async () => { await waiting.promise; throw new Error("late offline"); });
+  const loading = c.load("source"); c.startNew();
+  waiting.resolve(); assert.equal(await loading, false);
+  assert.equal(c.state.status, "empty"); assert.equal(c.state.error, ""); assert.equal(c.state.ready, true);
 });

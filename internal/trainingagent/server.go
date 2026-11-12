@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"ai-access-gateway/internal/buildinfo"
 	"ai-access-gateway/internal/loratraining"
 )
 
@@ -35,7 +36,15 @@ func NewServer(token string, controller *Controller) (*Server, error) {
 func (server *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", server.handleHealth)
+	mux.Handle("/v1/build", server.authenticate(buildinfo.Handler(buildinfo.TrainingAgent)))
 	mux.Handle("/v1/profiles", server.authenticate(http.HandlerFunc(server.handleProfiles)))
+	mux.Handle("/v1/activity", server.authenticate(http.HandlerFunc(server.handleActivity)))
+	mux.Handle("/v1/storage", server.authenticate(http.HandlerFunc(server.handleStorage)))
+	mux.Handle("/v1/storage/preview", server.authenticate(http.HandlerFunc(server.handleStoragePreview)))
+	mux.Handle("/v1/storage/cleanup", server.authenticate(http.HandlerFunc(server.handleStorageCleanup)))
+	mux.Handle("/v1/storage/fence", server.authenticate(http.HandlerFunc(server.handleStorageFence)))
+	mux.Handle("/v1/storage/operations/", server.authenticate(http.HandlerFunc(server.handleStorageOperation)))
+	mux.Handle("/v1/generation/components/inspect", server.authenticate(http.HandlerFunc(server.handleGenerationComponents)))
 	mux.Handle("/v1/jobs", server.authenticate(http.HandlerFunc(server.handleJobs)))
 	mux.Handle("/v1/jobs/", server.authenticate(http.HandlerFunc(server.handleJob)))
 	mux.Handle("/v1/gateway-jobs", server.authenticate(http.HandlerFunc(server.handleGatewayJob)))
@@ -58,6 +67,15 @@ func (server *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
 	}
 	profiles := server.controller.Profiles()
 	writeJSON(w, http.StatusOK, loratraining.ProfilesResponse{Available: true, Profiles: profiles})
+}
+
+func (server *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, server.controller.Activity())
 }
 
 func (server *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
@@ -132,6 +150,10 @@ func (server *Server) handleJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := parts[0]
+	if len(parts) == 2 && parts[1] == "inspect" {
+		server.handleArtifactInspection(w, r, id)
+		return
+	}
 	if len(parts) == 1 {
 		switch r.Method {
 		case http.MethodGet:

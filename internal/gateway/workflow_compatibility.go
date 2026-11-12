@@ -66,6 +66,12 @@ func validateComfyPrompt(catalog comfySchemaCatalog, prompt map[string]any) []wo
 		for _, inputName := range sortedInputNames(schema.Required) {
 			inputSchema := schema.Required[inputName]
 			value, found := inputs[inputName]
+			if inputSchema.Type == "COMFY_AUTOGROW_V3" {
+				if countAutogrowInputs(inputs, inputName) < inputSchema.AutogrowMin {
+					issues = append(issues, missingInputIssue(nodeID, schema, inputName))
+				}
+				continue
+			}
 			if !found {
 				issues = append(issues, missingInputIssue(nodeID, schema, inputName))
 				continue
@@ -93,6 +99,10 @@ func validateComfyPrompt(catalog comfySchemaCatalog, prompt map[string]any) []wo
 			if _, known := schema.Optional[inputName]; known {
 				continue
 			}
+			if nested, ok := autogrowNestedSchema(schema, inputName); ok {
+				issues = append(issues, validateComfyInput(catalog, prompt, nodeID, schema, nested, inputName, value)...)
+				continue
+			}
 			if reference, ok := comfyPromptReference(value); ok {
 				issues = append(issues, validatePromptReference(catalog, prompt, nodeID, schema, inputName, comfyInputSchema{}, reference)...)
 			}
@@ -108,6 +118,43 @@ func validateComfyPrompt(catalog comfySchemaCatalog, prompt map[string]any) []wo
 		return issues[left].Code < issues[right].Code
 	})
 	return issues
+}
+
+func countAutogrowInputs(inputs map[string]any, name string) int {
+	count := 0
+	for inputName := range inputs {
+		if strings.HasPrefix(inputName, name+".") {
+			count++
+		}
+	}
+	return count
+}
+
+func autogrowNestedSchema(node comfyNodeSchema, inputName string) (comfyInputSchema, bool) {
+	for name, schema := range node.Required {
+		if nested, ok := autogrowNestedField(name, schema, inputName); ok {
+			return nested, true
+		}
+	}
+	for name, schema := range node.Optional {
+		if nested, ok := autogrowNestedField(name, schema, inputName); ok {
+			return nested, true
+		}
+	}
+	return comfyInputSchema{}, false
+}
+
+func autogrowNestedField(name string, schema comfyInputSchema, inputName string) (comfyInputSchema, bool) {
+	if schema.Type != "COMFY_AUTOGROW_V3" || !strings.HasPrefix(inputName, name+".") {
+		return comfyInputSchema{}, false
+	}
+	field := strings.TrimPrefix(inputName, name+".")
+	for templateName, nested := range schema.AutogrowRequired {
+		if strings.HasPrefix(field, templateName+"_") {
+			return nested, true
+		}
+	}
+	return comfyInputSchema{}, false
 }
 
 type promptReference struct {

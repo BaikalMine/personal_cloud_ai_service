@@ -2,7 +2,12 @@
   const page = document.querySelector("[data-lora-training-page]");
   if (!page) return;
   const historyList = page.querySelector("[data-lora-job-list]");
-  const historyCount = page.querySelector(".lora-history-heading > span");
+  const connection = page.querySelector('[data-training-connection]');
+  let selectedRun = new URLSearchParams(location.search).get('run') || '';
+  let pollTimer;
+  let requestEpoch = 0;
+  let inFlight = false;
+  let finished = false;
   const csrf = page.dataset.csrf || "";
   const terminalStates = new Set(["completed", "failed", "cancelled"]);
 
@@ -14,7 +19,7 @@
     }
     if (node) {
       if (node instanceof HTMLAnchorElement) node.href = job.download_url;
-      if (node instanceof HTMLFormElement) node.action = kind === "delete" ? job.delete_url : job.cancel_url;
+      if (node instanceof HTMLFormElement) node.action = job.cancel_url;
       return;
     }
     if (kind === "download") {
@@ -25,10 +30,9 @@
       node.textContent = "Скачать LoRA";
     } else {
       node = document.createElement("form");
-      if (kind === "delete") node.dataset.jobDelete = "";
-      else node.dataset.jobCancel = "";
+      node.dataset.jobCancel = "";
       node.method = "post";
-      node.action = kind === "delete" ? job.delete_url : job.cancel_url;
+      node.action = job.cancel_url;
       const token = document.createElement("input");
       token.type = "hidden";
       token.name = "csrf";
@@ -36,11 +40,12 @@
       const button = document.createElement("button");
       button.type = "submit";
       button.className = "danger";
-      button.dataset.confirm = kind === "delete"
-        ? `Удалить LoRA «${job.name}»? Файл будет удалён из ComfyUI без возможности восстановления.`
-        : "Остановить обучение LoRA?";
-      button.textContent = kind === "delete" ? "Удалить" : "Отменить";
+      button.dataset.confirm = "Остановить обучение LoRA?";
+      button.textContent = "Отменить";
       node.append(token, button);
+      const returnView = document.createElement('input');
+      returnView.type = 'hidden'; returnView.name = 'return_view'; returnView.value = 'workspace';
+      node.append(returnView);
     }
     container.append(node);
   };
@@ -65,11 +70,11 @@
       error.textContent = job.error || "";
       error.hidden = !job.error;
     }
+    card.querySelector('[data-job-retention]').hidden = job.state !== 'failed';
     const actions = card.querySelector("footer > div");
     if (actions) {
       setAction(actions, "[data-job-cancel]", job.can_cancel, "cancel", job);
       setAction(actions, "[data-job-download]", job.can_download, "download", job);
-      setAction(actions, "[data-job-delete]", job.can_delete, "delete", job);
     }
     const logWrap = card.querySelector("[data-job-log-wrap]");
     const log = card.querySelector("[data-job-log]");
@@ -77,6 +82,9 @@
       logWrap.hidden = false;
       log.textContent = job.log_tail.join("\n");
       log.scrollTop = log.scrollHeight;
+    } else if (logWrap && log && ["completed", "failed", "cancelled"].includes(job.state)) {
+      log.textContent = "";
+      logWrap.hidden = true;
     }
     if (previousState && previousState !== job.state) {
       card.classList.add("state-changed");
@@ -107,9 +115,12 @@
     const percent = document.createElement("b"); percent.dataset.jobProgressLabel = "";
     progressHead.append(stage, percent);
     const bar = document.createElement("progress"); bar.max = 100; bar.dataset.jobProgress = "";
+    bar.setAttribute('aria-label', 'Прогресс обучения');
     const message = document.createElement("p"); message.dataset.jobMessage = "";
     progress.append(progressHead, bar, message);
     const error = document.createElement("p"); error.className = "lora-job-error"; error.dataset.jobError = ""; error.hidden = true;
+    const retention = document.createElement('p'); retention.className = 'muted'; retention.dataset.jobRetention = '';
+    retention.textContent = 'Ошибочные записи очищаются спустя сутки после завершения.';
     const logWrap = document.createElement("details"); logWrap.className = "lora-job-log"; logWrap.dataset.jobLogWrap = ""; logWrap.hidden = true;
     const logSummary = document.createElement("summary"); logSummary.textContent = "Технический журнал";
     const log = document.createElement("pre"); log.dataset.jobLog = "";
@@ -118,67 +129,72 @@
     const created = document.createElement("span"); created.textContent = `Создано ${new Date(job.created_at).toLocaleString("ru-RU")}`;
     const actions = document.createElement("div");
     footer.append(created, actions);
-    card.append(header, facts, progress, error, logWrap, footer);
+    const library = document.createElement('a');
+    library.href = `/train-lora?job=${encodeURIComponent(job.id)}`;
+    library.textContent = 'Открыть LoRA';
+    actions.append(library);
+    if (job.dataset_snapshot_id) {
+      const source = document.createElement('a');
+      source.href = `/train-lora?version=${encodeURIComponent(job.dataset_snapshot_id)}`;
+      source.textContent = 'Исходная версия набора';
+      actions.append(source);
+    }
+    card.append(header, facts, progress, error, retention, logWrap, footer);
     updateCard(card, job);
     return card;
   };
-  const buildEmptyState = () => {
-    const empty = document.createElement("div");
-    empty.className = "ui-empty-state lora-history-empty";
-    const mark = document.createElement("span");
-    mark.setAttribute("aria-hidden", "true");
-    mark.textContent = "+";
-    const copy = document.createElement("div");
-    const title = document.createElement("h3");
-    title.textContent = "Обучений пока нет";
-    const message = document.createElement("p");
-    message.textContent = "После запуска здесь появятся этапы, журнал и готовый файл LoRA.";
-    copy.append(title, message);
-    empty.append(mark, copy);
-    return empty;
-  };
   const refreshJobs = async () => {
-    if (!historyList || document.hidden) return;
+    clearTimeout(pollTimer);
+    if (!historyList || document.hidden || !selectedRun || inFlight || finished) return;
+    const epoch = requestEpoch;
+    const run = selectedRun;
+    inFlight = true;
     try {
-      const response = await fetch("/api/lora-training/jobs", { headers: { Accept: "application/json" }, credentials: "same-origin", cache: "no-store" });
-      if (!response.ok) throw new Error("status");
-      const payload = await response.json();
-      const jobs = Array.isArray(payload.jobs) ? payload.jobs : [];
-      if (historyCount) historyCount.textContent = String(jobs.length);
-      if (jobs.length) historyList.querySelector(".lora-history-empty")?.remove();
-      const currentIDs = new Set(jobs.map((job) => job.id));
-      historyList.querySelectorAll("[data-lora-job]").forEach((card) => {
-        if (!currentIDs.has(card.dataset.jobId)) card.remove();
-      });
-      for (const summaryJob of jobs) {
-        let card = historyList.querySelector(`[data-job-id="${CSS.escape(summaryJob.id)}"]`);
-        if (!card) {
-          card = buildCard(summaryJob);
-          historyList.prepend(card);
-        }
-        let job = summaryJob;
-        if (!terminalStates.has(summaryJob.state) && summaryJob.state !== "queued") {
-          const detailResponse = await fetch(`/api/lora-training/jobs/${encodeURIComponent(summaryJob.id)}`, { headers: { Accept: "application/json" }, credentials: "same-origin", cache: "no-store" });
-          if (detailResponse.ok) job = await detailResponse.json();
-        }
-        updateCard(card, job);
+      const response = await fetch(`/api/lora-training/jobs/${encodeURIComponent(run)}`, { headers: { Accept: 'application/json' }, credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000) });
+      if (epoch !== requestEpoch) return;
+      if (response.status === 404) { finished = true; throw new Error('Обучение не найдено или недоступно. Выберите его в «Мои LoRA».'); }
+      if (!response.ok) throw new Error('Связь с сервером потеряна. Состояние обучения пока не обновлено.');
+      const job = await response.json();
+      if (epoch !== requestEpoch) return;
+      if (job.id !== run || !job.state) throw new Error('Сервер не подтвердил состояние выбранного обучения.');
+      let card = historyList.querySelector('[data-lora-job]');
+      if (!card || card.dataset.jobId !== run) { card = buildCard(job); historyList.replaceChildren(card); }
+      else updateCard(card, job);
+      finished = terminalStates.has(job.state);
+      connection.hidden = true;
+    } catch (error) {
+      if (epoch === requestEpoch) {
+        connection.hidden = false;
+        connection.textContent = error.name === 'TimeoutError' ? 'Сервер не ответил вовремя. Проверим состояние ещё раз.'
+          : ['TypeError', 'SyntaxError'].includes(error.name) ? 'Не удалось получить состояние обучения. Проверим связь ещё раз.'
+          : error.message || 'Не удалось обновить состояние обучения.';
       }
-      if (!jobs.length && !historyList.querySelector(".lora-history-empty")) historyList.append(buildEmptyState());
-      page.classList.remove("is-poll-stale");
-    } catch (_) {
-      page.classList.add("is-poll-stale");
+    } finally {
+      inFlight = false;
+      if (selectedRun && !finished && !document.hidden) pollTimer = setTimeout(refreshJobs, epoch === requestEpoch ? 3000 : 0);
     }
   };
 
   if (historyList) {
+    const emptyState = historyList.firstElementChild.cloneNode(true);
+    page.addEventListener('lora-workspace-reset', () => {
+      selectedRun = ''; requestEpoch += 1; finished = false;
+      clearTimeout(pollTimer); connection.hidden = true;
+      historyList.replaceChildren(emptyState.cloneNode(true));
+    });
     page.addEventListener("lora-training-created", (event) => {
-      historyList.querySelector(".lora-history-empty")?.remove();
-      if (!historyList.querySelector(`[data-job-id="${CSS.escape(event.detail.id)}"]`)) historyList.prepend(buildCard(event.detail));
+      selectedRun = event.detail.id;
+      requestEpoch += 1;
+      finished = false;
+      connection.hidden = true;
+      historyList.replaceChildren(buildCard(event.detail));
       void refreshJobs();
     });
-    refreshJobs();
-    const pollTimer = window.setInterval(refreshJobs, 3000);
-    document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshJobs(); });
-    window.addEventListener("beforeunload", () => window.clearInterval(pollTimer), { once: true });
+    if (selectedRun) { historyList.replaceChildren(); connection.hidden = false; connection.textContent = 'Загружаем выбранное обучение…'; }
+    void refreshJobs();
+    document.addEventListener('visibilitychange', () => { if (document.hidden) clearTimeout(pollTimer); else void refreshJobs(); });
+    window.addEventListener('online', () => void refreshJobs());
+    window.addEventListener('pagehide', () => { clearTimeout(pollTimer); requestEpoch += 1; });
+    window.addEventListener('pageshow', event => { if (event.persisted) { finished = false; void refreshJobs(); } });
   }
 })();

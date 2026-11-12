@@ -167,13 +167,28 @@ func (a *App) contentTaskView(group *contentTaskGroup, mediaByEvent map[int64][]
 		if event.row.Kind == "prompt_assistant" {
 			assistant := contentAssistantFromMetadata(event.metadata)
 			if assistant == nil {
-				assistant = &ContentAssistantView{OriginalPrompt: event.prompt, Suggestion: event.response}
+				assistant = &ContentAssistantView{}
+			}
+			if assistant.OriginalPrompt == "" {
+				assistant.OriginalPrompt = event.prompt
+			}
+			if assistant.Suggestion == "" {
+				assistant.Suggestion = event.response
 			}
 			assistant.Model = event.row.Model
 			if view.Assistant == nil {
 				view.Assistant = assistant
-			} else if view.Assistant.Model == "" {
-				view.Assistant.Model = assistant.Model
+			} else {
+				// Execution metadata omits these texts; the linked assistant event retains them.
+				if view.Assistant.OriginalPrompt == "" {
+					view.Assistant.OriginalPrompt = assistant.OriginalPrompt
+				}
+				if view.Assistant.Suggestion == "" {
+					view.Assistant.Suggestion = assistant.Suggestion
+				}
+				if view.Assistant.Model == "" {
+					view.Assistant.Model = assistant.Model
+				}
 			}
 		}
 	}

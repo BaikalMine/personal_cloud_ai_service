@@ -89,8 +89,8 @@ test("shared fields align wrapped labels and messages in both themes", async ({ 
 
 const workflows = [
   { id: "krea-text", scenario: /^Изображение$/ },
-  { id: "krea-edit", scenario: /^Редактировать фото$/, preset: /Krea 2: редактирование/, image: true },
-  { id: "flux-edit", scenario: /^Редактировать фото$/, preset: /Flux2 Редактирование/, image: true },
+  { id: "krea-edit", scenario: /^Правка фото$/, preset: /Krea 2: редактирование/, image: true },
+  { id: "flux-edit", scenario: /^Правка фото$/, preset: /Flux2 Редактирование/, image: true },
   { id: "minimax-frames", scenario: /^Видео$/ },
   { id: "minimax-references", scenario: /^Видео$/, references: true },
 ];
@@ -101,7 +101,10 @@ for (const workflow of workflows) {
     for (const theme of ["dark", "light"]) {
       await open(page, "/preview/generate", theme);
       await page.getByRole("button", { name: workflow.scenario }).click();
-      if (workflow.preset) await page.getByRole("button", { name: workflow.preset }).click();
+      if (workflow.preset) {
+        await page.locator("#studio-workflow-open").click();
+        await page.getByRole("button", { name: workflow.preset }).click();
+      }
       if (workflow.references) {
         await page.locator("#minimax-video-mode label").filter({ hasText: "По референсам" }).click();
       }

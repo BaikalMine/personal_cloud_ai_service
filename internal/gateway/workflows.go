@@ -22,7 +22,7 @@ var workflowFS embed.FS
 
 const (
 	maxGenerationLoraSlots        = 10
-	maxGenerationReferenceSlots   = 4
+	maxGenerationReferenceSlots   = 10
 	krea2EditMaxBaseMegapixels    = 4.7
 	krea2EditMaxLongestSidePixels = 4096
 )
@@ -58,6 +58,51 @@ type workflowView struct {
 }
 
 type generationForm struct {
+	MossSeedVR2           bool
+	MossUpscaleResolution int
+	AIHubMatchDuration    bool
+	// Derived from an owned video on the server, never parsed from form fields.
+	AIHubOutputFrames      int
+	AIHubMode              string
+	AIHubTask              string
+	AIHubAudioReference    bool
+	AIHubAudioSource       string
+	AIHubAudioPrompt       string
+	AIHubAudioNegative     string
+	AIHubAudioEnhance      bool
+	AIHubT8                bool
+	AIHubVoiceConversion   bool
+	AIHubMask              string
+	AIHubMaskPrompt        string
+	AIHubRemoveBackground  bool
+	AIHubHalfResolution    bool
+	AIHubDLSSEnabled       bool
+	AIHubDLSSStrength      float64
+	AIHubFGEnabled         bool
+	AIHubFGMultiplier      int
+	AIHubSteps             int
+	AIHubPhotoFrames       int
+	AIHubPhotoStride       int
+	AIHubPhotoSkip         int
+	AIHubLatentScale       float64
+	AIHubExtraImages       [5]string
+	AIHubLTXModel          string
+	AIHubGemma             string
+	AIHubAudioVAE          string
+	AIHubMaskModel         string
+	AIHubLatentModel       string
+	AIHubCarouselPipeline  string
+	AIHubCarouselSource    string
+	AIHubPhotoCount        int
+	AIHubPhotoRandomness   float64
+	AIHubFluxModel         string
+	AIHubFluxEncoder       string
+	AIHubFluxVAE           string
+	AIHubFluxEncoderGGUF   bool
+	AIHubCarouselRefiner   string
+	AIHubQwenModel         string
+	AIHubQwenEncoder       string
+	AIHubQwenVAE           string
 	TemplateID             string
 	PresetID               string
 	ModelID                string
@@ -87,6 +132,17 @@ type generationForm struct {
 	KreaSageMode           string
 	KreaSageAllowCompile   bool
 	KreaFP16Accumulation   bool
+	KreaUltraStepSwap      int
+	KreaUltraLowCFG        float64
+	KreaUltraDetailAmount  float64
+	KreaUltraSpeedBoost    bool
+	KreaUltraGrowStep      int
+	KreaProMode            string
+	KreaProUpscale         int
+	KreaProUpscaler        string
+	KreaProRelayScale      int
+	KreaProSettings        string
+	KreaProMatchSource     bool
 	DetailEnabled          bool
 	DetailSteps            int
 	DetailDenoise          float64
@@ -111,6 +167,7 @@ type generationForm struct {
 	ImageLevelWhite        float64
 	SourceMegapixels       float64
 	PreserveOriginalSize   bool
+	QwenResolution         int
 	FluxGuidance           float64
 	FluxDetailerSteps      int
 	FluxActiveScale        float64
@@ -156,6 +213,7 @@ type generationForm struct {
 	LUTEnabled             bool
 	InputImage             string
 	ReferenceImages        [3]string
+	QwenExtraImages        [6]string
 	ReferenceMetadata      [maxGenerationReferenceSlots]generationReferenceMetadata
 	InputAudio             string
 	InputVideo             string
@@ -180,6 +238,10 @@ type generationForm struct {
 	VideoPadColor          string
 	VideoQuality           int
 	VideoDurationSeconds   int
+	VideoLongEnabled       bool
+	VideoLongParts         int
+	VideoLongContext       int
+	VideoLongTransition    string
 	VideoReferenceSize     string
 	VideoReferenceStart    float64
 	VideoReferenceDuration int
@@ -248,6 +310,9 @@ type generationForm struct {
 }
 
 func (input generationForm) imageCount() int {
+	if input.isAIHub() {
+		return len(aiHubImages(input))
+	}
 	count := 0
 	if strings.TrimSpace(input.InputImage) != "" {
 		count++
@@ -257,10 +322,20 @@ func (input generationForm) imageCount() int {
 			count++
 		}
 	}
+	if input.PresetID == "qwen-image21-edit" {
+		for _, image := range input.QwenExtraImages {
+			if strings.TrimSpace(image) != "" {
+				count++
+			}
+		}
+	}
 	return count
 }
 
 func (input generationForm) images() []string {
+	if input.isAIHub() {
+		return aiHubImages(input)
+	}
 	images := make([]string, 0, 4)
 	if image := strings.TrimSpace(input.InputImage); image != "" {
 		images = append(images, image)
@@ -268,6 +343,13 @@ func (input generationForm) images() []string {
 	for _, image := range input.ReferenceImages {
 		if image = strings.TrimSpace(image); image != "" {
 			images = append(images, image)
+		}
+	}
+	if input.PresetID == "qwen-image21-edit" {
+		for _, image := range input.QwenExtraImages {
+			if image = strings.TrimSpace(image); image != "" {
+				images = append(images, image)
+			}
 		}
 	}
 	return images
@@ -337,6 +419,11 @@ func firstGenerationFormValue(values map[string][]string, name string) string {
 
 func (input generationForm) references() []generationReferenceMetadata {
 	paths := [maxGenerationReferenceSlots]string{input.InputImage, input.ReferenceImages[0], input.ReferenceImages[1], input.ReferenceImages[2]}
+	if input.isAIHub() {
+		copy(paths[4:], input.AIHubExtraImages[:])
+	} else if input.PresetID == "qwen-image21-edit" {
+		copy(paths[4:], input.QwenExtraImages[:])
+	}
 	references := make([]generationReferenceMetadata, 0, input.imageCount())
 	for index, path := range paths {
 		if strings.TrimSpace(path) == "" {
@@ -393,11 +480,32 @@ func findWorkflow(definitions []workflowDefinition, id string) (workflowDefiniti
 }
 
 func (definition workflowDefinition) buildPrompt(input generationForm) (map[string]any, error) {
+	if definition.Builder == "aihub_minimax" {
+		if err := normalizeAIHub(&input); err != nil {
+			return nil, err
+		}
+		return buildAIHubPrompt(input)
+	}
 	if err := definition.normalizeAndValidate(&input); err != nil {
 		return nil, err
 	}
 	if definition.Builder == "minimax_h3" {
+		if input.VideoLongEnabled {
+			return buildMiniMaxH3LongPrompt(input)
+		}
 		return buildMiniMaxH3Prompt(input)
+	}
+	if definition.Builder == "qwen21_edit" {
+		return buildQwen21EditPrompt(input), nil
+	}
+	if definition.Builder == "moss" {
+		return buildMossPrompt(input), nil
+	}
+	if definition.Builder == "krea2_ultra" {
+		return buildKreaUltraPrompt(input), nil
+	}
+	if definition.Builder == "krea2_pro" {
+		return buildKreaProPrompt(input)
 	}
 	cloned, err := cloneWorkflowNodes(definition.Nodes)
 	if err != nil {
@@ -415,6 +523,9 @@ func (definition workflowDefinition) buildPrompt(input generationForm) (map[stri
 	prompt := make(map[string]any, len(cloned))
 	for nodeID, node := range cloned {
 		prompt[nodeID] = node
+	}
+	if definition.ID == "text-to-image-qwen21" {
+		applyQwen21Loras(prompt, input)
 	}
 	return prompt, nil
 }
@@ -475,8 +586,8 @@ func applyWorkflowUpscale(workflowID string, nodes map[string]map[string]any, in
 				"seed":                []any{"1367", 17},
 				"steps":               4,
 				"cfg":                 []any{"1367", 19},
-				"sampler_name":        []any{"1367", 23},
-				"scheduler":           []any{"1367", 24},
+				"sampler_name":        input.Sampler,
+				"scheduler":           input.Scheduler,
 				"denoise":             0.15,
 				"mode_type":           "None",
 				"tile_width":          512,
@@ -720,7 +831,9 @@ func (definition workflowDefinition) normalizeAndValidate(input *generationForm)
 	if input.AspectRatio == "" {
 		input.AspectRatio = "custom"
 	}
-	if input.AspectRatio != "" && input.AspectRatio != "custom" {
+	// Photo settings may remain in the shared form after switching to video.
+	// MiniMax's canvas is resolved from its own quality and reference geometry.
+	if definition.Builder != "minimax_h3" && input.AspectRatio != "" && input.AspectRatio != "custom" {
 		var err error
 		input.Width, input.Height, err = generationDimensions(input.AspectRatio, input.OutputMegapixels, input.DimensionMultiple, input.MaxLongestSide)
 		if err != nil {
@@ -743,7 +856,11 @@ func (definition workflowDefinition) normalizeAndValidate(input *generationForm)
 	if definition.ID == "minimax-h3-video" {
 		promptMode = promptassistant.ModeTextToVideo
 	}
-	if utf8.RuneCountInString(input.Positive) > promptassistant.PromptCharacterLimit(promptMode) || utf8.RuneCountInString(input.Negative) > promptassistant.MaxImagePromptCharacters {
+	longParts := 0
+	if definition.ID == "minimax-h3-video" && input.VideoLongEnabled {
+		longParts = input.VideoLongParts
+	}
+	if utf8.RuneCountInString(input.Positive) > promptassistant.PromptCharacterLimitForVideo(promptMode, longParts) || utf8.RuneCountInString(input.Negative) > promptassistant.MaxImagePromptCharacters {
 		return errors.New("промт слишком длинный")
 	}
 	if input.AssistantRequested {
@@ -819,6 +936,36 @@ func (definition workflowDefinition) normalizeAndValidate(input *generationForm)
 
 func (definition workflowDefinition) normalizeAndValidateSpecific(input *generationForm) error {
 	switch definition.ID {
+	case "text-to-image-moss":
+		return normalizeMoss(input)
+	case kreaUltraDefinitionID:
+		return normalizeKreaUltra(input)
+	case kreaProDefinitionID:
+		return normalizeKreaPro(input)
+	case "text-to-image-qwen21", "image-to-image-qwen21":
+		if definition.ID == "image-to-image-qwen21" && input.QwenResolution == 0 {
+			width, height, resolution := qwen21ReferenceSize(input.Width, input.Height, input.OutputMegapixels)
+			if resolution == 0 {
+				return errors.New("Qwen Image 2.1: пропорции исходного фото слишком вытянуты")
+			}
+			input.QwenResolution = resolution
+			if input.PreserveOriginalSize {
+				input.Width, input.Height = width, height
+				input.OutputMegapixels = float64(width*height) / (1024 * 1024)
+			}
+		}
+		if input.Width > 4096 || input.Height > 4096 || input.Width*input.Height > qwen21MaxOutputPixels {
+			return errors.New("Qwen Image 2.1: размер результата не должен превышать 4096 пикселей по стороне и 4,27 Мп")
+		}
+		if input.Width%32 != 0 || input.Height%32 != 0 {
+			return errors.New("для Qwen Image 2.1 ширина и высота должны быть кратны 32")
+		}
+		if input.CFG == 1 && strings.TrimSpace(input.Negative) != "" {
+			return errors.New("негативный промт Qwen Image 2.1 работает только при CFG больше 1")
+		}
+		if definition.ID == "image-to-image-qwen21" && strings.TrimSpace(input.InputImage) == "" {
+			return errors.New("для редактирования Qwen добавьте первое фото")
+		}
 	case "minimax-h3-video":
 		return normalizeMiniMaxH3(input)
 	case "image-to-image-flux2":
@@ -1402,6 +1549,14 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 	if err != nil {
 		return generationForm{}, errors.New("некорректное качество MiniMax H3")
 	}
+	videoLongParts, err := parseInt("video_long_parts", 2)
+	if err != nil {
+		return generationForm{}, errors.New("некорректное число частей MiniMax H3")
+	}
+	videoLongContext, err := parseInt("video_long_context", 39)
+	if err != nil {
+		return generationForm{}, errors.New("некорректный контекст продолжения MiniMax H3")
+	}
 	videoReferenceDuration, err := parseInt("video_reference_duration", 5)
 	if err != nil {
 		return generationForm{}, errors.New("некорректная длительность видеореференса MiniMax H3")
@@ -1715,7 +1870,9 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 		VideoSharpenEnabled: r.Form.Get("video_sharpen_enabled") == "true", VideoSharpenMethod: strings.TrimSpace(r.Form.Get("video_sharpen_method")), VideoSharpenStrength: videoSharpenStrength,
 		VideoSharpenRadius: videoSharpenRadius, VideoSharpenThreshold: videoSharpenThreshold, VideoSharpenIterations: videoSharpenIterations,
 		VideoAudioStart: videoAudioStart, VideoOutputCRF: videoOutputCRF,
-		AssistantRequested: r.Form.Get("assistant_requested") == "true", AssistantApplied: r.Form.Get("assistant_applied") == "true", AssistantAction: strings.TrimSpace(r.Form.Get("assistant_action")),
+		VideoLongEnabled: r.Form.Get("video_long_enabled") == "true", VideoLongParts: videoLongParts, VideoLongContext: videoLongContext,
+		VideoLongTransition: r.Form.Get("video_long_transition"),
+		AssistantRequested:  r.Form.Get("assistant_requested") == "true", AssistantApplied: r.Form.Get("assistant_applied") == "true", AssistantAction: strings.TrimSpace(r.Form.Get("assistant_action")),
 		AssistantTemplate: strings.TrimSpace(r.Form.Get("assistant_template_used")), AssistantThink: r.Form.Get("assistant_think_used") == "true",
 		AssistantOriginal: strings.TrimSpace(r.Form.Get("assistant_original_prompt")), AssistantSuggestion: strings.TrimSpace(r.Form.Get("assistant_suggestion")),
 		AspectRatio: strings.TrimSpace(r.Form.Get("aspect_ratio")), OutputMegapixels: outputMegapixels,
@@ -1740,6 +1897,17 @@ func parseGenerationForm(r *http.Request) (generationForm, error) {
 			strings.TrimSpace(r.Form.Get("input_image_3")),
 			strings.TrimSpace(r.Form.Get("input_image_4")),
 		},
+	}
+	if input.PresetID == aiHubWorkflowID {
+		input.VideoMode = miniMaxH3ReferenceMode
+		for index := range input.AIHubExtraImages {
+			input.AIHubExtraImages[index] = strings.TrimSpace(r.Form.Get(fmt.Sprintf("input_image_%d", index+5)))
+		}
+	}
+	if input.PresetID == "qwen-image21-edit" {
+		for index := range input.QwenExtraImages {
+			input.QwenExtraImages[index] = strings.TrimSpace(r.Form.Get(fmt.Sprintf("input_image_%d", index+5)))
+		}
 	}
 	input.ReferenceMetadata = generationReferenceMetadataFromForm(r.Form, input)
 	if manifest, ok := workflowManifestForInput(input); ok {

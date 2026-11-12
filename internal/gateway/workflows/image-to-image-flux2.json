@@ -362,10 +362,7 @@
     "1350": {
       "class_type": "LCBasicScheduler",
       "inputs": {
-        "scheduler": [
-          "1367",
-          24
-        ],
+        "scheduler": "{{scheduler}}",
         "steps": [
           "1367",
           18
@@ -447,10 +444,7 @@
     "1363": {
       "class_type": "KSamplerSelect",
       "inputs": {
-        "sampler_name": [
-          "1367",
-          23
-        ]
+        "sampler_name": "{{sampler}}"
       }
     },
     "1365": {
@@ -607,7 +601,8 @@
         ],
         "lut_name": "{{lut_name}}",
         "strength": "{{lut_strength}}",
-        "log": true
+        "log": true,
+        "interpolation": "tetrahedral"
       }
     }
   }

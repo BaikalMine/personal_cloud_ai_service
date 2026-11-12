@@ -181,15 +181,16 @@ it and must be adjusted there.
 
 ## Backup
 
-Create and validate a consistent PostgreSQL dump and OpenWebUI data-volume
-archive:
+Build the Windows training-backup utility, then back up PostgreSQL, OpenWebUI
+and trained LoRA artifacts. Explicitly choose the saved-dataset policy:
 
 ```powershell
-.\scripts\backup.ps1
+go build -trimpath -o .\bin\training-backup.exe .\cmd\training-backup
+.\scripts\backup.ps1 -DatasetPolicy database
 ```
 
 The script briefly pauses only the OpenWebUI container while archiving its
-volume, always unpauses it in `finally`, validates both archives, and writes a
+volume, always unpauses it in `finally`, validates the archives, and writes a
 JSON manifest with sizes and SHA-256 hashes under `backups`. It does not include
 `.env`, Basic Auth files, or plaintext credentials. It keeps the three newest
 manifest-backed backup sets by default; use `-Keep` to choose another retention
@@ -197,6 +198,14 @@ count. Older manual dumps without a manifest are never removed. Every normal
 backup also runs an isolated restore drill before retention removes an older
 verified set. Use `-SkipRestoreDrill` only for an explicitly unverified emergency
 snapshot.
+
+The default training config is `%ProgramData%\AI-LoRA-Training-Agent\config.json`;
+override it with `-TrainingConfig`. Trained weights and completed agent records
+are archived with per-file hashes and owner/run/profile links. Saved datasets
+and captions remain in the database dump; caches and base model bytes are not
+copied. Base models are listed separately with hashes and recovery notes.
+`-SkipTrainingBackup` explicitly creates an incomplete training backup; a restore
+drill rejects it when the database contains completed LoRA jobs.
 
 To verify the latest backup without touching production containers or volumes:
 
@@ -206,7 +215,8 @@ To verify the latest backup without touching production containers or volumes:
 
 The drill restores PostgreSQL and OpenWebUI into a unique disposable Compose
 project, migrates the database with the current Gateway image, checks inventory
-and HTTP readiness, writes `restore-drill-*.json`, and removes the temporary
+and HTTP readiness, verifies training files against completed jobs in that dump,
+writes `restore-drill-*.json`, and removes the temporary
 environment. The recovery procedure and RPO/RTO contract are documented in
 `docs/RESTORE_RUNBOOK.md`.
 

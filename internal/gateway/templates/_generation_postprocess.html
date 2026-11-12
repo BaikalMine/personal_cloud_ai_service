@@ -1,0 +1,53 @@
+{{define "generation_postprocess_assets"}}
+<link rel="stylesheet" href="/static/generation-postprocess.css?v={{.AssetVersion}}">
+<script src="/static/generation-postprocess-state.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/generation-postprocess.js?v={{.AssetVersion}}" defer></script>
+{{end}}
+{{define "generation_postprocess_dialog"}}
+<dialog id="generation-postprocess" class="ui-dialog generation-postprocess" data-owner="{{.CurrentUser.ID}}" data-csrf="{{.CSRF}}" aria-labelledby="generation-postprocess-title">
+  <header class="postprocess-header"><h2 id="generation-postprocess-title" tabindex="-1">Улучшить результат</h2><button type="button" class="icon-button ghost" data-pp-close title="Закрыть постобработку" aria-label="Закрыть постобработку"><i data-lucide="x" aria-hidden="true"></i></button></header>
+  <div class="postprocess-body">
+    <p class="postprocess-message" data-pp-message role="status" tabindex="-1"></p>
+    <div class="postprocess-workspace">
+      <figure class="postprocess-source"><div class="postprocess-media" data-pp-media></div><figcaption><strong>Исходный файл</strong><span data-pp-filename></span><span data-pp-measured></span></figcaption></figure>
+      <div class="postprocess-editor">
+        <form data-pp-form hidden>
+          <fieldset data-pp-fields>
+            <section class="postprocess-operation" aria-labelledby="postprocess-size-title">
+              <h3 id="postprocess-size-title">Размер</h3>
+              <div class="ui-field-grid postprocess-size-fields">
+                <label class="ui-field"><span class="ui-field-label">Размер результата</span><select data-pp-size></select></label>
+                <label class="ui-field" data-pp-quality-field hidden><span class="ui-field-label">Качество увеличения</span><select data-pp-quality></select></label>
+              </div><p class="field-hint" data-pp-size-reason hidden></p>
+            </section>
+            <section class="postprocess-operation" aria-labelledby="postprocess-motion-title">
+              <h3 id="postprocess-motion-title">Плавность</h3>
+              <label class="ui-field"><span class="ui-field-label">Частота кадров результата</span><select data-pp-motion></select></label><p class="field-hint" data-pp-motion-reason hidden></p>
+            </section>
+            <section class="postprocess-operation" aria-labelledby="postprocess-color-title">
+              <h3 id="postprocess-color-title">Цвет</h3>
+              <label class="ui-choice ui-choice--row"><input type="checkbox" data-pp-color><span>Перенести цвет с эталона</span></label><p class="field-hint" data-pp-color-reason hidden></p>
+              <div data-pp-color-fields hidden>
+                <div class="ui-field-grid postprocess-color-settings"><label class="ui-field"><span class="ui-field-label">Перенос цвета</span><select data-pp-method></select></label><label class="ui-field"><span class="ui-field-label">Сила <output data-pp-strength-value>70%</output></span><input type="range" min="1" max="100" value="70" data-pp-strength></label></div>
+                <div class="postprocess-reference-search"><label class="ui-field"><span class="ui-field-label">Найти эталон</span><input type="search" maxlength="200" data-pp-reference-search></label><button type="button" class="icon-button ghost" data-pp-reference-find title="Найти эталон" aria-label="Найти эталон"><i data-lucide="search" aria-hidden="true"></i></button></div>
+                <label class="ui-field"><span class="ui-field-label">Эталон цвета</span><select data-pp-reference></select></label>
+                <p class="field-hint" data-pp-reference-status role="status"></p><button type="button" class="ghost" data-pp-reference-more hidden>Ещё эталоны</button>
+                <div class="postprocess-reference-preview" data-pp-reference-preview hidden></div><p class="field-hint postprocess-reference-name" data-pp-reference-name hidden></p>
+              </div>
+            </section>
+          </fieldset>
+        </form>
+        <section class="postprocess-quote" data-pp-quote hidden aria-labelledby="postprocess-quote-title"><h3 id="postprocess-quote-title">Новый результат</h3><dl data-pp-facts></dl><p data-pp-cost></p><p class="field-hint" data-pp-expiry></p><p class="field-hint">Исходный файл останется без изменений.</p></section>
+      </div>
+    </div>
+  </div>
+  <footer class="postprocess-actions">
+    <button type="button" class="button" data-pp-calculate hidden><i data-lucide="calculator" aria-hidden="true"></i>Рассчитать</button>
+    <button type="button" class="button" data-pp-confirm hidden><i data-lucide="check" aria-hidden="true"></i>Подтвердить обработку</button>
+    <button type="button" class="button" data-pp-recover hidden><i data-lucide="refresh-cw" aria-hidden="true"></i>Уточнить состояние</button>
+    <button type="button" class="ghost" data-pp-discard hidden>Отменить расчёт</button>
+    <button type="button" class="ghost" data-pp-reload hidden><i data-lucide="rotate-cw" aria-hidden="true"></i>Проверить операции</button>
+    <a class="button" data-pp-task hidden><i data-lucide="list-checks" aria-hidden="true"></i>Открыть задачу</a>
+  </footer>
+</dialog>
+{{end}}

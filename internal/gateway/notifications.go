@@ -3,7 +3,6 @@ package gateway
 import (
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,14 +11,11 @@ import (
 	"ai-access-gateway/internal/domain"
 )
 
-const (
-	notificationEventPollInterval      = 750 * time.Millisecond
-	notificationEventHeartbeatInterval = 15 * time.Second
-)
-
 type userNotificationView struct {
 	ID              int64     `json:"id"`
 	GenerationJobID string    `json:"generation_job_id"`
+	SourceKind      string    `json:"source_kind"`
+	SourceID        string    `json:"source_id"`
 	Kind            string    `json:"kind"`
 	Title           string    `json:"title"`
 	Message         string    `json:"message"`
@@ -48,6 +44,7 @@ func (a *App) registerNotificationRoutes(mux *http.ServeMux) {
 }
 
 func (a *App) handleUserNotifications(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "private, no-store")
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
@@ -55,20 +52,22 @@ func (a *App) handleUserNotifications(w http.ResponseWriter, r *http.Request) {
 	}
 	user := a.currentUser(r)
 	limit, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("limit")))
-	notifications, err := a.store.ListUserNotifications(r.Context(), user.ID, limit)
-	if err != nil {
-		writeGenerationError(w, http.StatusInternalServerError, "не удалось загрузить уведомления")
-		return
-	}
+	// Capture the revision before the list, never acknowledge a newer unseen list.
 	summary, err := a.store.UserNotificationSummary(r.Context(), user.ID)
 	if err != nil {
 		writeGenerationError(w, http.StatusInternalServerError, "не удалось загрузить состояние уведомлений")
+		return
+	}
+	notifications, err := a.store.ListUserNotifications(r.Context(), user.ID, limit)
+	if err != nil {
+		writeGenerationError(w, http.StatusInternalServerError, "не удалось загрузить уведомления")
 		return
 	}
 	items := make([]userNotificationView, 0, len(notifications))
 	for _, notification := range notifications {
 		items = append(items, userNotificationView{
 			ID: notification.ID, GenerationJobID: notification.GenerationJobPublicID,
+			SourceKind: notification.SourceKind, SourceID: notification.SourceID,
 			Kind: string(notification.Kind), Title: notification.Title, Message: notification.Message,
 			Href: a.publicNotificationHref(notification.Href), Read: notification.ReadAt != nil, CreatedAt: notification.CreatedAt,
 		})
@@ -121,67 +120,7 @@ func (a *App) handleUserNotificationRead(w http.ResponseWriter, r *http.Request)
 }
 
 func (a *App) handleUserNotificationEvents(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
-		return
-	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "потоковые обновления не поддерживаются", http.StatusInternalServerError)
-		return
-	}
-	user := a.currentUser(r)
-	lastRevision, _ := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("since")), 10, 64)
-	revision, err := a.store.UserNotificationRevision(r.Context(), user.ID)
-	if err != nil {
-		writeGenerationError(w, http.StatusInternalServerError, "не удалось открыть поток уведомлений")
-		return
-	}
-	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache, no-transform")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	_, _ = io.WriteString(w, "retry: 2000\n\n")
-	event := "ready"
-	if revision != lastRevision {
-		event = "notifications"
-	}
-	if err := writeUserNotificationRevisionEvent(w, event, revision); err != nil {
-		return
-	}
-	flusher.Flush()
-	lastRevision = revision
-
-	poll := time.NewTicker(notificationEventPollInterval)
-	heartbeat := time.NewTicker(notificationEventHeartbeatInterval)
-	defer poll.Stop()
-	defer heartbeat.Stop()
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-poll.C:
-			revision, err = a.store.UserNotificationRevision(r.Context(), user.ID)
-			if err != nil {
-				log.Printf("notification event stream: %v", err)
-				return
-			}
-			if revision == lastRevision {
-				continue
-			}
-			if err := writeUserNotificationRevisionEvent(w, "notifications", revision); err != nil {
-				return
-			}
-			flusher.Flush()
-			lastRevision = revision
-		case <-heartbeat.C:
-			if _, err := fmt.Fprintf(w, ": keepalive %d\n\n", time.Now().Unix()); err != nil {
-				return
-			}
-			flusher.Flush()
-		}
-	}
+	a.serveLiveEvents(w, r, "notifications", writeUserNotificationRevisionEvent)
 }
 
 func writeUserNotificationRevisionEvent(w io.Writer, event string, revision int64) error {

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"ai-access-gateway/internal/domain"
+	"ai-access-gateway/internal/gateway"
 )
 
 type datasetPreviewView struct {
@@ -35,6 +36,7 @@ type datasetPreviewSession struct {
 	data     map[string][]byte
 	jobs     []map[string]any
 	captions []captionPreviewJob
+	imports  map[string]domain.GalleryDatasetImportReceipt
 }
 type datasetPreview struct {
 	mu       sync.Mutex
@@ -117,6 +119,10 @@ func (p *datasetPreview) serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	write := func(status int, value any) { w.WriteHeader(status); json.NewEncoder(w).Encode(value) }
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/lora-datasets"), "/")[1:]
+	if len(parts) > 0 && parts[0] == "gallery-import" {
+		p.galleryImport(w, r, state, parts)
+		return
+	}
 	if len(parts) == 0 {
 		if r.Method == http.MethodGet {
 			rows := []domain.LoraDatasetRow{}
@@ -145,6 +151,27 @@ func (p *datasetPreview) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if parts[0] == "gallery" {
 		write(200, map[string]any{"images": []map[string]any{{"id": 1, "url": "/preview/dataset-media/portrait.jpg", "filename": "Портрет в дневном свете.jpg"}, {"id": 2, "url": "/preview/dataset-media/portrait-2.jpg", "filename": "Второй портрет.jpg"}, {"id": 3, "url": "/preview/dataset-media/interior.jpg", "filename": "Интерьер.jpg"}}})
+		return
+	}
+	if parts[0] == "assets" && len(parts) == 3 && parts[2] == "quality" && r.Method == http.MethodPost {
+		asset, ok := state.assets[parts[1]]
+		if !ok {
+			write(404, map[string]string{"error": "Файл недоступен"})
+			return
+		}
+		if int64(asset.Width)*int64(asset.Height) > 32_000_000 {
+			write(400, map[string]string{"error": "Изображение слишком большое"})
+			return
+		}
+		decoded, _, err := image.Decode(bytes.NewReader(state.data[asset.ID]))
+		if err != nil {
+			write(400, map[string]string{"error": "Повреждённое фото"})
+			return
+		}
+		quality := gateway.MeasureLoraDatasetQuality(decoded)
+		asset.Quality = &quality
+		state.assets[asset.ID] = asset
+		write(200, map[string]any{"asset_id": asset.ID, "sha256": asset.Hash, "quality": quality})
 		return
 	}
 	if parts[0] == "assets" && len(parts) == 2 {
@@ -176,7 +203,8 @@ func (p *datasetPreview) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if len(parts) == 2 {
-			write(200, map[string]any{"manifest": view.Manifest})
+			version := domain.LoraDatasetSnapshot{ID: parts[1], DatasetID: view.Dataset.ID, Name: view.Dataset.Name, Revision: view.Dataset.Revision, ImageCount: len(view.Manifest.Images), CreatedAt: p.now, ExpiresAt: view.Dataset.ExpiresAt}
+			write(200, map[string]any{"version": version, "manifest": view.Manifest})
 			return
 		}
 		switch parts[2] {
@@ -198,6 +226,9 @@ func (p *datasetPreview) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 1 {
+		for id := range view.Assets {
+			view.Assets[id] = state.assets[id]
+		}
 		write(200, view)
 		return
 	}

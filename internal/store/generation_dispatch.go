@@ -19,6 +19,14 @@ func (s *Store) QueueGenerationJobDispatch(ctx context.Context, jobID int64) (do
 		return domain.GenerationJob{}, err
 	}
 	defer tx.Rollback()
+	job, err := queueGenerationJobDispatch(ctx, tx, jobID)
+	if err != nil {
+		return job, err
+	}
+	return job, tx.Commit()
+}
+
+func queueGenerationJobDispatch(ctx context.Context, tx *sql.Tx, jobID int64) (domain.GenerationJob, error) {
 	job, err := scanGenerationJob(tx.QueryRowContext(ctx, `UPDATE generation_jobs
 		SET dispatch_queued_at=COALESCE(dispatch_queued_at,now()),updated_at=now()
 		WHERE id=$1 AND state='waiting_for_resources' AND batch_id IS NULL
@@ -34,7 +42,7 @@ func (s *Store) QueueGenerationJobDispatch(ctx context.Context, jobID int64) (do
 	if err = incrementGenerationJobRevision(ctx, tx); err != nil {
 		return job, err
 	}
-	return job, tx.Commit()
+	return job, nil
 }
 
 // All generation launches share this claim. A lease may be reclaimed only before
@@ -116,10 +124,35 @@ func (s *Store) ClaimNextGenerationDispatch(ctx context.Context, token string, m
 }
 
 func (s *Store) BeginGenerationJobSubmission(ctx context.Context, jobID int64, token string) error {
+	return s.beginGenerationJobSubmission(ctx, jobID, token, nil)
+}
+
+func (s *Store) beginGenerationJobSubmission(ctx context.Context, jobID int64, token string, execution *domain.GenerationExecutionRecord) error {
 	if token == "" {
 		return ErrGenerationJobStateConflict
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE generation_jobs SET submission_started_at=clock_timestamp(),updated_at=now()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var owner sql.NullInt64
+	var template string
+	if err := tx.QueryRowContext(ctx, `SELECT user_id,template_id FROM generation_jobs WHERE id=$1 FOR UPDATE`, jobID).Scan(&owner, &template); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrGenerationJobStateConflict
+		}
+		return err
+	}
+	if template == domain.PostprocessImageTemplate || template == domain.PostprocessVideoTemplate {
+		if !owner.Valid || execution == nil {
+			return ErrGenerationJobStateConflict
+		}
+		if _, err := lockPostprocessDispatch(ctx, tx, owner.Int64, jobID, token); err != nil {
+			return err
+		}
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE generation_jobs SET submission_started_at=clock_timestamp(),updated_at=now()
 		WHERE id=$1 AND dispatch_token=$2 AND dispatch_until>clock_timestamp()
 		AND state='waiting_for_resources' AND prompt_id IS NULL AND submission_started_at IS NULL
 		AND cancellation_requested_at IS NULL AND dispatch_closed_at IS NULL AND resources_released_at IS NULL`, jobID, token)
@@ -130,14 +163,26 @@ func (s *Store) BeginGenerationJobSubmission(ctx context.Context, jobID int64, t
 	if err == nil && n != 1 {
 		err = ErrGenerationJobStateConflict
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	if execution != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO generation_job_executions(job_id,payload_cipher,payload_sha256) VALUES($1,$2,$3)`,
+			jobID, execution.PayloadCipher, execution.PayloadSHA256); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
-func (s *Store) PostponeGenerationDispatch(ctx context.Context, jobID int64, token string) error {
+func (s *Store) PostponeGenerationDispatch(ctx context.Context, jobID int64, token, message string) error {
+	if !gpuTextValid(message, 1000) {
+		return ErrGenerationJobStateConflict
+	}
 	result, err := s.db.ExecContext(ctx, `UPDATE generation_jobs SET dispatch_token='',
-		dispatch_until=clock_timestamp()+interval '5 seconds',status_message='Ожидаем свободное место в очереди ComfyUI',updated_at=now()
+		dispatch_until=clock_timestamp()+interval '5 seconds',status_message=$3,updated_at=now()
 		WHERE id=$1 AND dispatch_token=$2 AND submission_started_at IS NULL AND prompt_id IS NULL
-		AND state='waiting_for_resources' AND cancellation_requested_at IS NULL AND dispatch_closed_at IS NULL AND resources_released_at IS NULL`, jobID, token)
+		AND state='waiting_for_resources' AND cancellation_requested_at IS NULL AND dispatch_closed_at IS NULL AND resources_released_at IS NULL`, jobID, token, message)
 	if err != nil {
 		return err
 	}

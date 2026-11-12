@@ -5,6 +5,107 @@ const video = require("../../static/generation-video.js");
 const batch = require("../../static/generation-batch.js");
 const fixtures = require("../generation_dimensions.json");
 
+test("Full Ultra reports VOSR2 size and percentage outpaint accurately",()=>{
+  const values={generation_workflow:'krea2-pro',aspect_ratio:'custom',width:880,height:1168,krea_pro_upscale:2,krea_pro_mode:'text'};
+  let result=output.plan({family:'krea2',templateID:'text-to-image',values});
+  assert.deepEqual(result.final,{width:1760,height:2336});
+  result=output.plan({family:'krea2',templateID:'text-to-image',values:{...values,krea_pro_mode:'outpaint'}});
+  assert.deepEqual(result.base,{width:1056,height:1168});
+  assert.deepEqual(result.final,{width:2112,height:2336});
+  result=output.plan({family:'krea2',templateID:'text-to-image',values:{...values,krea_pro_settings:'{"enabled":{"4046":false}}'}});
+  assert.deepEqual(result.final,{width:880,height:1168});
+});
+
+test("V29 final size follows the exclusive upscaler and Relay scale", () => {
+  const values = {generation_workflow:'krea2-pro',aspect_ratio:'custom',width:1216,height:1616,krea_pro_upscale:3,krea_pro_settings:'{"enabled":{"4046":true,"4150":true}}'};
+  for (const [upscaler,relayScale,scale] of [['none',4,1],['vosr',4,3],['relay',2,2],['relay',4,4]]) {
+    const result = output.plan({family:'krea2',templateID:'text-to-image',values:{...values,krea_pro_upscaler:upscaler,krea_pro_relay_scale:relayScale}});
+    assert.deepEqual(result.final,{width:1216*scale,height:1616*scale});
+    assert.match(output.facts([result]).compact,new RegExp(`${1216*scale} × ${1616*scale}`));
+    assert.ok(!result.processing.includes('VOSR2 3×') || upscaler==='vosr');
+  }
+});
+
+test("V29 outpaint is expanded before Relay and oversized frames have no expected output", () => {
+  const values={generation_workflow:'krea2-pro',aspect_ratio:'custom',width:880,height:1168,krea_pro_mode:'outpaint',krea_pro_upscaler:'relay',krea_pro_relay_scale:4};
+  const result=output.plan({family:'krea2',templateID:'text-to-image',values});
+  assert.deepEqual(result.base,{width:1056,height:1168});
+  assert.deepEqual(result.final,{width:4224,height:4672});
+  const oversized=output.plan({family:'krea2',templateID:'text-to-image',values:{...values,krea_pro_settings:'{"nodes":{"3870":{"left":400,"right":400}}}'}});
+  assert.equal(oversized.final,null);
+  assert.ok(oversized.error);
+  assert.ok(output.facts([oversized]).compact.includes(oversized.error));
+});
+
+test("V29 summary enforces Python's 12288-side and 38.43 MP final-output profile", () => {
+  for (const [width,height,mode,valid] of [[3072,256,'text',true],[3088,256,'text',false],[1584,1584,'text',true],[1600,1584,'text',false],[1312,1584,'outpaint',true],[1328,1584,'outpaint',false]]) {
+    const values={generation_workflow:'krea2-pro',aspect_ratio:'custom',width,height,krea_pro_mode:mode,krea_pro_upscaler:'relay',krea_pro_relay_scale:4};
+    const result=output.plan({family:'krea2',templateID:'text-to-image',values});
+    assert.equal(Boolean(result.final),valid,`${width}x${height} ${mode}`);
+    if (!valid) assert.ok(output.facts([result]).compact.includes(result.error));
+  }
+});
+
+test("Krea2 Ultra reports native resolution without the PhotoFlow upscale", () => {
+  const result = output.plan({ family: "krea2", templateID: "text-to-image", values: {
+    generation_workflow: "krea2-ultra", width: 1296, height: 1728, base_megapixels: 1,
+    krea_ultra_speed_boost: true,
+  } });
+  assert.deepEqual(result.base, result.final);
+  assert.ok(result.processing.includes("Speed Boost"));
+  assert.ok(!result.processing.includes("Апскейл Krea2"));
+});
+
+test("DLSS FG increases only AIHUB video FPS and retains duration and geometry", () => {
+  for (const mode of ["photo", "video", "carousel"]) {
+    for (const multiplier of [2, 3, 4]) {
+      const input = { family: "minimax_h3", videoSize: { width: 512, height: 768 }, values: {
+        generation_workflow: "aihub-minimax-h3", aihub_mode: mode, aihub_fg_multiplier: multiplier,
+        aihub_match_duration: true, aihub_reference_duration: 10, video_duration_seconds: 10,
+      } };
+      const before = output.plan(input);
+      input.values.aihub_fg_enabled = true;
+      const after = output.plan(input);
+      assert.equal(after.fps, mode === "carousel" ? 24 : 24 * multiplier);
+      assert.equal(after.duration, before.duration);
+      assert.deepEqual(after.final, before.final);
+      input.values.generation_workflow = "minimax-h3-video";
+      assert.equal(output.plan(input).fps, 24);
+    }
+  }
+});
+
+test("AIHUB reference length reports frame-accurate or unresolved duration", () => {
+  for (const [duration, expected] of [[7.608667, 7.625], [11.666667, 280 / 24], [null, null]]) {
+    const result = output.plan({ family: "minimax_h3", values: {
+      generation_workflow: "aihub-minimax-h3", aihub_mode: "video", aihub_match_duration: true,
+      aihub_reference_duration: duration, video_duration_seconds: 5,
+    } });
+    assert.equal(result.duration, expected);
+    if (duration === null) assert.equal(output.facts([result], { video: true }).facts[2].value, "Как у видеореференса");
+  }
+});
+
+test("AIHUB carousel counts selected frames and both upscale stages", () => {
+  const result = output.plan({ family: "minimax_h3", videoSize: { width: 352, height: 640 }, values: {
+    generation_workflow: "aihub-minimax-h3", aihub_mode: "carousel", aihub_photo_frames: 50,
+    aihub_photo_stride: 8, aihub_photo_skip: 5, aihub_latent_scale: 2, video_rtx_enabled: true, video_rtx_scale: 2,
+  } });
+  assert.deepEqual(result.final, { width: 1408, height: 2560 });
+  assert.equal(result.photoCountUpperBound, 6);
+  assert.equal(output.facts([result]).compact, "до 6 фото · 1408 × 2560");
+});
+
+test("AIHUB video half resolution matches ties-to-even server alignment", () => {
+  const result = output.plan({ family: "minimax_h3", videoSize: { width: 736, height: 1280 }, values: {
+    generation_workflow: "aihub-minimax-h3", aihub_mode: "video", aihub_half_resolution: true,
+    video_rtx_enabled: true, video_rtx_scale: 2, video_rife_enabled: true,
+  } });
+  assert.deepEqual(result.base, { width: 384, height: 640 });
+  assert.deepEqual(result.final, { width: 768, height: 1280 });
+  assert.equal(result.fps, 24);
+});
+
 test("launch dimensions share golden fixtures with the Go workflow builder", () => {
   for (const f of fixtures) {
     const actual = f.kind === "video"
@@ -86,4 +187,16 @@ test("batch facts report count, varying duration and FPS", () => {
   assert.equal(result.compact, "3 видео · 320 × 480");
   assert.equal(result.facts.find(f => f.label === "Длительность (задано)").value, "5 → 15 сек.");
   assert.equal(result.facts.find(f => f.label === "Частота кадров").value, "24 FPS");
+});
+
+test("AIHUB V2 keeps identical dimensions with either refiner", () => {
+  for (const refiner of ['flux', 'qwen21']) {
+    const result = output.plan({ family: 'minimax_h3', videoSize: { width: 352, height: 480 }, values: {
+      generation_workflow: 'aihub-minimax-h3', aihub_mode: 'carousel', aihub_carousel_pipeline: 'v2',
+      aihub_carousel_refiner: refiner, aihub_photo_count: 2,
+    } });
+    assert.deepEqual(result.final, { width: 352, height: 480 });
+    assert.equal(result.photoCountUpperBound, 2);
+    assert.deepEqual(result.processing, [refiner === 'qwen21' ? 'Qwen 2.1' : 'FLUX.2']);
+  }
 });

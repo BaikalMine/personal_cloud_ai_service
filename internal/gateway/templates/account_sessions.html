@@ -1,35 +1,15 @@
 {{define "account_sessions"}}
-{{template "head" .}}
-{{template "nav" .}}
-<main class="page" id="main-content">
-  <section class="hero">
-    <div><p class="eyebrow">Безопасность аккаунта</p><h1>Активные сессии</h1></div>
-    <form method="post" action="/account/sessions">
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <input type="hidden" name="action" value="revoke_others">
-      <button class="ghost" type="submit" data-confirm="Завершить все остальные активные сессии?">Завершить остальные</button>
-    </form>
-  </section>
-  {{if .Message}}<p class="success-box">{{.Message}}</p>{{end}}
-  <section class="panel">
-    <div class="panel-heading"><div><p class="section-kicker">Устройства и подключения</p><h2>Ваши сессии</h2></div></div>
-    <div class="table-scroll"><table>
-      <thead><tr><th>Сессия</th><th>IP</th><th>Создана</th><th>Последняя активность</th><th>Истекает</th><th>Устройство</th><th></th></tr></thead>
-      <tbody>
-      {{range .Sessions}}
-        <tr>
-          <td data-label="Сессия">{{if .Current}}<span class="badge ok">текущая</span>{{else}}#{{.ID}}{{end}}</td>
-          <td data-label="IP"><code>{{.IP}}</code></td>
-          <td data-label="Создана">{{formatTime .CreatedAt}}</td>
-          <td data-label="Активность">{{formatTime .LastSeenAt}}</td>
-          <td data-label="Истекает">{{formatTime .ExpiresAt}}</td>
-          <td data-label="Устройство" class="path">{{.UserAgent}}</td>
-          <td data-label="Действия">{{if not .Current}}<div class="table-actions"><form method="post" action="/account/sessions"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="action" value="revoke"><input type="hidden" name="session_id" value="{{.ID}}"><button class="action-button danger" type="submit" data-confirm="Завершить эту сессию?"><span class="action-icon" aria-hidden="true">&#215;</span>Завершить</button></form></div>{{end}}</td>
-        </tr>
-      {{else}}<tr><td colspan="7" class="muted">Активных сессий нет.</td></tr>{{end}}
-      </tbody>
-    </table></div>
-  </section>
+{{template "account_head" .}}
+<main class="page account-workspace" id="main-content" data-account-page="sessions" data-account-refresh="{{.AccountRefreshURL}}">
+  {{template "account_heading" .}}{{template "account_messages" .}}
+  <form method="get" action="/account/sessions" class="account-session-filters"><label class="ui-field"><span class="ui-field-label">IP или устройство</span><input name="q" value="{{.Filter.Search}}" type="search" maxlength="120"></label><label class="ui-field"><span class="ui-field-label">Сессии</span><select name="result"><option value="">Все активные</option><option value="current" {{if eq .Filter.Result "current"}}selected{{end}}>Текущая</option><option value="others" {{if eq .Filter.Result "others"}}selected{{end}}>Остальные</option></select></label><label class="ui-field"><span class="ui-field-label">Активность</span><select name="sort"><option value="newest" {{if eq .Filter.Sort "newest"}}selected{{end}}>Сначала новые</option><option value="oldest" {{if eq .Filter.Sort "oldest"}}selected{{end}}>Сначала старые</option></select></label><button type="submit" class="ghost"><i data-lucide="filter" aria-hidden="true"></i>Применить</button></form>
+  {{if .SessionLoadError}}<div class="account-message" role="alert"><p>Не удалось загрузить сессии. Их состояние пока неизвестно.</p><a href="{{.AccountRefreshURL}}">Повторить загрузку</a></div>{{else}}
+  <section id="session-results" class="account-session-results"><div class="account-list-heading"><div><h2>Устройства и подключения</h2><p>{{.Pagination.Total}} активных по фильтру · {{.SnapshotAt.UTC.Format "02.01.2006 15:04:05"}} UTC</p></div><form method="post" action="{{.Pagination.CurrentURL}}" data-account-form data-account-confirm autocomplete="off"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="action" value="revoke_others"><label class="account-confirm"><input type="checkbox" name="confirm_revoke" value="1" required {{if .WriteUncertain}}disabled{{end}}>Подтверждаю завершение всех остальных сессий</label><button class="ghost" type="submit" data-confirm="Завершить все остальные сессии, включая скрытые фильтром? Этот браузер останется подключённым." {{if .WriteUncertain}}disabled{{end}}><i data-lucide="log-out" aria-hidden="true"></i>Завершить остальные</button><p data-account-progress role="status"></p></form></div>
+    {{if .Sessions}}<div class="account-table-wrap" role="region" aria-label="Список сессий" tabindex="0"><table class="compact-table account-session-table"><thead><tr><th>Сессия / устройство</th><th>IP</th><th>Активность, UTC</th><th>Действует до, UTC</th><th>Действия</th></tr></thead><tbody>
+    {{range .Sessions}}<tr><td data-label="Сессия"><strong>{{if .Current}}Этот браузер{{else}}Сессия #{{.ID}}{{end}}</strong><details class="account-details"><summary>Устройство и сроки</summary><dl class="account-facts"><div><dt>Устройство</dt><dd>{{if .UserAgent}}{{.UserAgent}}{{else}}Не указано{{end}}</dd></div><div><dt>Создана, UTC</dt><dd>{{.CreatedAt.UTC.Format "02.01.2006 15:04:05"}}</dd></div><div><dt>Срок сессии, UTC</dt><dd>{{.ExpiresAt.UTC.Format "02.01.2006 15:04:05"}}</dd></div><div><dt>Бездействие до, UTC</dt><dd>{{.IdleExpiresAt.UTC.Format "02.01.2006 15:04:05"}}</dd></div></dl></details></td><td data-label="IP"><code>{{if .IP}}{{.IP}}{{else}}Не указан{{end}}</code></td><td data-label="Активность, UTC"><time>{{.LastSeenAt.UTC.Format "02.01.2006 15:04:05"}}</time></td><td data-label="Действует до, UTC"><time>{{.EffectiveExpiresAt.UTC.Format "02.01.2006 15:04:05"}}</time></td><td data-label="Действия">{{if not .Current}}<form method="post" action="{{$.Pagination.CurrentURL}}" data-account-form data-account-confirm autocomplete="off"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="action" value="revoke"><input type="hidden" name="session_id" value="{{.ID}}"><label class="account-confirm"><input type="checkbox" name="confirm_revoke" value="1" required {{if $.WriteUncertain}}disabled{{end}}>Подтверждаю</label><button type="submit" class="danger icon-button" aria-label="Завершить сессию #{{.ID}}" title="Завершить сессию #{{.ID}}" data-confirm="Завершить сессию #{{.ID}}? На этом устройстве потребуется войти заново." {{if $.WriteUncertain}}disabled{{end}}><i data-lucide="log-out" aria-hidden="true"></i></button><p data-account-progress role="status"></p></form>{{end}}</td></tr>{{end}}
+    </tbody></table></div>{{else}}<div class="account-empty"><h3>Подходящих сессий нет</h3><a class="button ghost" href="/account/sessions"><i data-lucide="filter-x" aria-hidden="true"></i>Сбросить фильтры</a></div>{{end}}
+    <nav class="account-pagination" aria-label="Страницы сессий"><span>{{.Pagination.First}}–{{.Pagination.Last}} из {{.Pagination.Total}}</span><div>{{if .Pagination.PreviousURL}}<a class="button ghost" href="{{.Pagination.PreviousURL}}" aria-label="Предыдущая страница"><i data-lucide="chevron-left" aria-hidden="true"></i>Назад</a>{{end}}{{if .Pagination.NextURL}}<a class="button ghost" href="{{.Pagination.NextURL}}">Далее<i data-lucide="chevron-right" aria-hidden="true"></i></a>{{end}}</div></nav>
+  </section>{{end}}
 </main>
 </body></html>
 {{end}}

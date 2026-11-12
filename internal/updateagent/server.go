@@ -6,10 +6,13 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 
+	"ai-access-gateway/internal/buildinfo"
 	"ai-access-gateway/internal/updates"
 )
 
@@ -22,9 +25,11 @@ type Controller interface {
 }
 
 type Server struct {
-	tokenHash   [32]byte
-	controller  Controller
-	comfyTarget ComfyTarget
+	tokenHash     [32]byte
+	controller    Controller
+	comfyTarget   ComfyTarget
+	storage       *ComfyStorageExecutor
+	modelVerifyMu sync.Mutex
 }
 
 func NewServer(token string, controller Controller, comfyTarget ...ComfyTarget) (*Server, error) {
@@ -37,6 +42,13 @@ func NewServer(token string, controller Controller, comfyTarget ...ComfyTarget) 
 	server := &Server{tokenHash: sha256.Sum256([]byte(strings.TrimSpace(token))), controller: controller}
 	if len(comfyTarget) > 0 {
 		server.comfyTarget = comfyTarget[0]
+		if server.comfyTarget.Storage != nil {
+			var err error
+			server.storage, err = NewComfyStorageExecutor(server.comfyTarget)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 	return server, nil
 }
@@ -44,11 +56,21 @@ func NewServer(token string, controller Controller, comfyTarget ...ComfyTarget) 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
+	mux.Handle("/v1/build", s.authenticate(buildinfo.Handler(buildinfo.UpdateAgent)))
 	mux.Handle("/v1/status", s.authenticate(http.HandlerFunc(s.handleStatus)))
+	mux.Handle("/v1/comfy-runtime", s.authenticate(http.HandlerFunc(s.handleComfyRuntime)))
+	mux.Handle("/v1/model-capacity", s.authenticate(http.HandlerFunc(s.handleModelCapacity)))
+	mux.Handle("/v1/model-verify", s.authenticate(http.HandlerFunc(s.handleModelVerify)))
 	mux.Handle("/v1/check", s.authenticate(http.HandlerFunc(s.handleCheck)))
 	mux.Handle("/v1/install", s.authenticate(http.HandlerFunc(s.handleInstall)))
 	mux.Handle("/v1/comfy-output/delete", s.authenticate(http.HandlerFunc(s.handleDeleteComfyOutput)))
 	mux.Handle("/v1/comfy-asset/delete", s.authenticate(http.HandlerFunc(s.handleDeleteComfyAsset)))
+	mux.Handle("/v1/comfy-asset/inspect", s.authenticate(http.HandlerFunc(s.handleInspectComfyAsset)))
+	mux.Handle("/v1/comfy-asset/inventory", s.authenticate(http.HandlerFunc(s.handleComfyFileInventory)))
+	mux.Handle("/v1/comfy-storage", s.authenticate(http.HandlerFunc(s.handleComfyStorageStatus)))
+	mux.Handle("/v1/comfy-storage/execute", s.authenticate(http.HandlerFunc(s.handleComfyStorageExecute)))
+	mux.Handle("/v1/comfy-storage/fence", s.authenticate(http.HandlerFunc(s.handleComfyStorageFence)))
+	mux.Handle("/v1/comfy-storage/operations/{id}", s.authenticate(http.HandlerFunc(s.handleComfyStorageResult)))
 	return securityHeaders(mux)
 }
 
@@ -79,12 +101,16 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
-	s.handleCommand(w, r, s.controller.Install)
+	s.handleCommand(w, r, s.installWithStorageGuard)
 }
 
 func (s *Server) handleDeleteComfyOutput(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	if s.storage != nil {
+		writeComfyStorageError(w, http.StatusConflict, "storage_operation_required")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBytes)
@@ -110,6 +136,10 @@ func (s *Server) handleDeleteComfyAsset(w http.ResponseWriter, r *http.Request) 
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
+	if s.storage != nil {
+		writeComfyStorageError(w, http.StatusConflict, "storage_operation_required")
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBytes)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
@@ -125,6 +155,31 @@ func (s *Server) handleDeleteComfyAsset(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	log.Printf("processed %d expired ComfyUI assets: deleted=%d missing=%d mismatched=%d rejected=%d", len(request.Files), result.Deleted, result.Missing, result.Mismatched, result.Rejected)
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleInspectComfyAsset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBytes)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var request updates.ComfyAssetDeleteRequest
+	if err := decoder.Decode(&request); err != nil || len(request.Files) == 0 || len(request.Files) > 50 {
+		writeJSON(w, http.StatusBadRequest, updates.ComfyAssetInspectResult{Protocol: 1})
+		return
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		writeJSON(w, http.StatusBadRequest, updates.ComfyAssetInspectResult{Protocol: 1})
+		return
+	}
+	result, err := InspectComfyAssetFiles(r.Context(), s.comfyTarget, request.Files)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, result)
+		return
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 

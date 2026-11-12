@@ -39,7 +39,7 @@
   const sourceFrom = (device, gallery) => deviceSource(device) || gallerySource(gallery);
 
   const referenceRole = ({ templateID = "", videoMode = "frames", slot = 1, role = "" } = {}) => {
-    const index = Math.max(1, Math.min(4, Number(slot) || 1));
+    const index = Math.max(1, Math.min(9, Math.trunc(Number(slot)) || 1));
     if (templateID === "minimax-h3-video" && videoMode !== "references") {
       return index === 1 ? "first_frame" : "last_frame";
     }
@@ -49,7 +49,7 @@
 
   const referenceMetadata = ({ templateID = "", videoMode = "frames", slot = 1, source = null, role = "", uploaded = "" } = {}) => {
     if (!source && !uploaded) return null;
-    const index = Math.max(1, Math.min(4, Number(slot) || 1));
+    const index = Math.max(1, Math.min(9, Math.trunc(Number(slot)) || 1));
     const normalized = normalizeSource(source);
     const sourceKind = normalized?.kind || (uploaded ? SOURCE_RESTORED : "unknown");
     return {
@@ -94,14 +94,19 @@
     }
   };
 
-  const uploadImageSource = async (source, options = {}) => {
+  /** Upload a device or gallery source; AV keeps the server's multipart `image` field. */
+  const uploadSource = async (source, options = {}) => {
     const normalized = normalizeSource(source);
-    if (!normalized) throw new Error("Image source is required");
+    const kind = options.kind || "image";
+    if (!["image", "audio", "video"].includes(kind)) throw new Error("Unsupported media kind");
+    if (!normalized) throw new Error("Media source is required");
+    if (normalized.kind === SOURCE_RESTORED) throw new Error("Restored media cannot be uploaded");
     const fetcher = options.fetcher || (typeof fetch === "function" ? fetch : null);
     if (!fetcher) throw new Error("Fetch is unavailable");
 
     let response;
     if (normalized.kind === SOURCE_GALLERY) {
+      if (kind !== "image") throw new Error("Gallery reuse is only available for images");
       if (!normalized.id) throw new Error("Gallery media id is required");
       const makeSearchParams = options.searchParamsFactory || ((values) => new URLSearchParams(values));
       const body = makeSearchParams({ csrf: String(options.csrf || ""), media_id: normalized.id });
@@ -112,25 +117,107 @@
         credentials: "same-origin",
       });
     } else {
+      if (!normalized.file) throw new Error("Device file is required");
       const makeFormData = options.formDataFactory || (() => new FormData());
       const body = makeFormData();
       body.append("image", normalized.file, normalized.name);
       body.append("type", "input");
       body.append("overwrite", "true");
-      response = await fetcher(options.deviceURL || "/generate/upload/image", {
+      response = await fetcher(options.deviceURL || `/generate/upload/${kind}`, {
         method: "POST",
+        headers: Number.isSafeInteger(normalized.file.size) && normalized.file.size > 0
+          ? { "X-Upload-File-Size": String(normalized.file.size) } : {},
         body,
         credentials: "same-origin",
       });
     }
 
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload.name) throw new Error(payload.error || "Image upload failed");
+    if (!response.ok && [502, 503, 504].includes(response.status) && !payload?.error) {
+      throw new Error("ComfyUI временно недоступен. Повторите загрузку после восстановления сервиса.");
+    }
+    if (!response.ok || !payload?.name) throw new Error(payload?.error || options.errorMessage || "Media upload failed");
     return {
       ...payload,
       value: [payload.subfolder, payload.name].filter(Boolean).join("/"),
       source: normalized,
     };
+  };
+
+  const uploadImageSource = (source, options = {}) => uploadSource(source, { ...options, kind: "image" });
+
+  /**
+   * @typedef {Object} UploadRequest
+   * @property {string} field Stable draft field name, independent of source identity.
+   * @property {() => Object|null|undefined} readSource Returns the same object while selection is unchanged.
+   * @property {(source: Object) => Promise<Object>} transfer Uploads the captured source.
+   * @property {(payload: Object) => *} commit Synchronously publishes a current result and returns its public value.
+   * @property {string} [changedMessage]
+   */
+  /**
+   * @typedef {Object} PrepareRequest
+   * @property {() => string} selection Stable key for the current workflow, model and mode.
+   * @property {() => void} validate Throws for missing or unavailable required sources.
+   * @property {() => Array<{upload: () => Promise<*>}>} pending Fresh list, excluding committed uploads.
+   * @property {(entry: Object, state: string, error?: Error) => void} [progress]
+   * @property {() => void} [ready]
+   * @property {string} [changedMessage]
+   */
+  /**
+   * Owns in-flight uploads shared by autosave and submit, without owning the DOM.
+   * upload({field, readSource, transfer, commit, changedMessage}) captures a source
+   * by identity; only the latest request for that field may commit its result.
+   * prepare({selection, validate, pending, progress, ready, changedMessage})
+   * serially uploads pending entries and rechecks the selection before ready.
+   * transfer and entry.upload return promises. Other callbacks are synchronous.
+   * @param {{settled?: () => void}} options
+   * @returns {{upload: (request: UploadRequest) => Promise<*>, prepare: (request: PrepareRequest) => Promise<void>, readonly pendingCount: number}}
+   */
+  const createUploadController = ({ settled = () => {} } = {}) => {
+    const latest = new Map();
+    const active = new Set();
+    let preparing = null;
+    const upload = ({ field, readSource, transfer, commit, changedMessage = "Media source changed" }) => {
+      const source = readSource();
+      if (!source) return Promise.reject(new Error("Файл не выбран"));
+      const existing = latest.get(field);
+      if (existing?.source === source) return existing.promise;
+      const entry = { source, promise: null };
+      const assertCurrent = () => {
+        if (readSource() !== source || latest.get(field) !== entry) throw new Error(changedMessage);
+      };
+      entry.promise = Promise.resolve().then(() => {
+        assertCurrent();
+        return transfer(source);
+      }).then((payload) => {
+        assertCurrent();
+        return commit(payload);
+      }).finally(() => {
+        if (latest.get(field) === entry) latest.delete(field);
+        active.delete(entry);
+        settled();
+      });
+      latest.set(field, entry);
+      active.add(entry);
+      return entry.promise;
+    };
+    const prepare = ({ selection, validate, pending, progress = () => {}, ready = () => {}, changedMessage = "Media selection changed" }) => {
+      if (preparing) return preparing;
+      const expected = selection();
+      preparing = Promise.resolve().then(async () => {
+        validate();
+        for (const entry of pending()) {
+          progress(entry, "loading");
+          try { await entry.upload(); }
+          catch (error) { progress(entry, "error", error); throw error; }
+        }
+        if (selection() !== expected || pending().length) throw new Error(changedMessage);
+        validate();
+        ready();
+      }).finally(() => { preparing = null; settled(); });
+      return preparing;
+    };
+    return { upload, prepare, get pendingCount() { return active.size; } };
   };
 
   return {
@@ -146,5 +233,7 @@
     referenceRole,
     referenceMetadata,
     uploadImageSource,
+    uploadSource,
+    createUploadController,
   };
 });

@@ -12,6 +12,42 @@ import (
 	"ai-access-gateway/internal/mining"
 )
 
+func TestInferenceDependencyOnlyForEnabledDurableAssistants(t *testing.T) {
+	app := &App{}
+	find := func() *dependencySpec {
+		for _, spec := range app.dependencySpecs() {
+			if spec.Key == dependencyInferenceWorker {
+				return &spec
+			}
+		}
+		return nil
+	}
+	if find() != nil {
+		t.Fatal("disabled executor is shown")
+	}
+	app.cfg.PromptAssistantDurableJobs = true
+	if spec := find(); spec == nil || spec.Configured {
+		t.Fatal("missing configuration not shown")
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"service":"inference-worker","protocol":2,"ready":true}`))
+	}))
+	defer server.Close()
+	app.cfg.InferenceWorkerURL, _ = url.Parse(server.URL)
+	spec := find()
+	if !spec.Configured {
+		t.Fatal("configured executor missing")
+	}
+	if _, _, _, err := spec.Probe(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	app.cfg.PromptAssistantDurableJobs = false
+	app.cfg.LoraCaptionDurableInference = true
+	if find() == nil {
+		t.Fatal("caption-only executor missing")
+	}
+}
+
 func TestDependencyFreshnessBoundariesUseControlledTime(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
 	monitor := newDependencyMonitor(10*time.Second, 30*time.Second, 90*time.Second, func() time.Time { return now })

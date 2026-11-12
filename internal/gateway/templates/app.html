@@ -1,49 +1,32 @@
 {{define "app"}}
 {{template "head" .}}
 {{template "nav" .}}
-<main class="page" id="main-content">
+<main class="page overview-page" id="main-content">
   <section class="hero">
     <div>
-      <p class="eyebrow">Рабочее пространство</p>
-      <h1>Здравствуйте, {{.CurrentUser.Username}}</h1>
+      <h1>Рабочее пространство</h1>
     </div>
     <div class="hero-actions"><a class="button ghost" href="/account/profile">Профиль</a><a class="button ghost" href="/account/sessions">Мои сессии</a><a class="button ghost" href="/account/password">Безопасность</a></div>
   </section>
 
-  <section class="grid two service-grid" aria-label="Доступные сервисы">
-    {{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseComfyUI}}<a class="service-card" href="/comfyui/" target="_blank" rel="noopener">
-      <div class="service-card-heading"><span class="service-symbol comfyui">CU</span><span class="badge ok">Доступ разрешён</span></div>
-      <h2>ComfyUI</h2><span class="service-open">Открыть рабочую область</span>
-      {{with index .Services 0}}<p class="service-state {{if .Online}}online{{else}}offline{{end}}"><i></i>{{.Detail}} · {{.Latency}}</p>{{end}}
-    </a>{{else}}<article class="service-card disabled"><div class="service-card-heading"><span class="service-symbol comfyui">CU</span><span class="badge danger">Нет доступа</span></div><h2>ComfyUI</h2><span class="service-open">Доступ не назначен</span></article>{{end}}
-    {{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseOpenWebUI}}<a class="service-card" href="/openwebui/" target="_blank" rel="noopener">
-      <div class="service-card-heading"><span class="service-symbol openwebui">OW</span><span class="badge ok">Доступ разрешён</span></div>
-      <h2>OpenWebUI</h2><span class="service-open">Открыть рабочую область</span>
-      {{with index .Services 1}}<p class="service-state {{if .Online}}online{{else}}offline{{end}}"><i></i>{{.Detail}} · {{.Latency}}</p>{{end}}
-    </a>{{else}}<article class="service-card disabled"><div class="service-card-heading"><span class="service-symbol openwebui">OW</span><span class="badge danger">Нет доступа</span></div><h2>OpenWebUI</h2><span class="service-open">Доступ не назначен</span></article>{{end}}
-  </section>
-
-  {{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseQuickGeneration}}<section class="generation-launch panel">
-    <div><p class="section-kicker">Для телефона</p><h2>Быстрая генерация</h2><p class="panel-intro">Готовые workflow, загрузка фото и промты в несколько шагов, без доступа к рабочему интерфейсу ComfyUI.</p></div>
-    <a class="button" href="/generate">Начать генерацию</a>
-  </section>{{end}}
-
-  {{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanTrainImageLora}}<section class="generation-launch panel lora-launch">
-    <div><p class="section-kicker">Обучение изображений</p><h2>Создать LoRA</h2><p class="panel-intro">Загрузите 5–100 подписанных изображений, выберите Krea2 или Flux.2 Klein и следите за обучением в реальном времени.</p></div>
-    <a class="button" href="/train-lora">Открыть обучение</a>
-  </section>{{end}}
+  {{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseQuickGeneration .CurrentUser.CanTrainImageLora}}<nav class="overview-actions" aria-label="Основные действия">
+    {{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanUseQuickGeneration}}<a class="button" href="/generate"><i data-lucide="plus" aria-hidden="true"></i>Создать изображение или видео</a>{{end}}
+    {{if or (eq .CurrentUser.Role "admin") .CurrentUser.CanTrainImageLora}}<a class="button ghost" href="/train-lora"><i data-lucide="layers" aria-hidden="true"></i>Обучить LoRA</a>{{end}}
+  </nav>{{end}}
 
   {{if .CanAccessMining}}<section class="panel mining-control {{if .Mining.Running}}is-running{{end}}" aria-labelledby="mining-title">
     <div class="panel-heading mining-heading">
       <div><p class="section-kicker">Вычислительные ресурсы</p><h2 id="mining-title">Майнинг</h2></div>
       <span class="mining-status {{if .Mining.Running}}running{{else if .Mining.Available}}stopped{{else}}unavailable{{end}}"><i></i>{{if .Mining.Running}}Работает{{else if .Mining.Available}}Остановлен{{else}}Недоступен{{end}}</span>
     </div>
-    {{if eq .MiningStatus "started"}}<p class="success-box">Майнинг запущен.</p>{{else if eq .MiningStatus "stopped"}}<p class="success-box">Майнинг остановлен, ресурсы освобождены.</p>{{else if eq .MiningStatus "priority_busy"}}<p class="alert">Майнинг временно зарезервирован для приоритетной быстрой генерации. Он будет доступен после её завершения.</p>{{else if eq .MiningStatus "error"}}<p class="alert">Не удалось изменить состояние майнинга.</p>{{else if eq .MiningStatus "unavailable"}}<p class="alert">Windows-agent управления майнингом недоступен.</p>{{end}}
+    {{if and (eq .MiningStatus "started") .Mining.Running}}<p class="success-box">Майнинг запущен.</p>{{else if and (eq .MiningStatus "stopped") (not .Mining.Running)}}<p class="success-box">Майнинг остановлен, ресурсы освобождены.</p>{{else if and (eq .MiningStatus "priority_busy") (not .Mining.Running)}}<p class="alert">Не удалось запустить майнинг: в момент запроса GPU была зарезервирована для задачи. Повторите попытку после её завершения.</p>{{else if eq .MiningStatus "error"}}<p class="alert">Не удалось изменить состояние майнинга.</p>{{else if eq .MiningStatus "unavailable"}}<p class="alert">Windows-agent управления майнингом недоступен.</p>{{end}}
     <div class="mining-control-body">
       <div class="miner-identity">
         {{if .Mining.Active}}
           {{if .Mining.Active.IconMIME}}<img class="miner-icon" src="/mining/icon/{{.Mining.Active.ID}}" alt="">{{else}}<span class="miner-icon-fallback">MN</span>{{end}}
           <span><b>{{.Mining.Active.Name}}</b><small>{{.Mining.Active.ProcessName}}{{with .Mining.Active.State.PIDs}} · PID {{index . 0}}{{end}}</small></span>
+        {{else if .Mining.Running}}
+          <span class="miner-icon-fallback">MN</span><span><b>Внешний запуск или несколько майнеров</b><small>{{range .Mining.External}}{{.ProcessName}} {{end}}</small></span>
         {{else if .Mining.Default}}
           {{if .Mining.Default.IconMIME}}<img class="miner-icon" src="/mining/icon/{{.Mining.Default.ID}}" alt="">{{else}}<span class="miner-icon-fallback">MN</span>{{end}}
           <span><b>{{.Mining.Default.Name}}</b><small>Профиль по умолчанию</small></span>
@@ -53,9 +36,10 @@
       </div>
       <div class="mining-action">
         <p>{{.Mining.Message}}</p>
+        {{if .MiningResumePending}}<p role="status">Автовозобновление ожидает свободный GPU. Проверка каждые 10 минут.</p>{{end}}
         <form method="post" action="/mining/toggle">
           <input type="hidden" name="csrf" value="{{.CSRF}}">
-          <button type="submit" {{if not .Mining.Available}}disabled{{end}} class="{{if .Mining.Running}}danger{{end}}" data-confirm="{{if .Mining.Running}}Остановить майнинг и освободить ресурсы?{{else}}Запустить майнинг? Он займёт вычислительные ресурсы этого компьютера.{{end}}">{{if .Mining.Running}}Остановить майнинг{{else}}Запустить майнинг{{end}}</button>
+          <button type="submit" {{if or (not .Mining.Available) .Mining.Uncontrolled}}disabled{{end}} class="{{if .Mining.Running}}danger{{end}}" data-confirm="{{if .Mining.Running}}Остановить майнинг и освободить ресурсы?{{if .MiningAutoResume}} Через 10 минут начнутся проверки для автовозобновления.{{end}}{{else}}Запустить майнинг? Он займёт вычислительные ресурсы этого компьютера.{{end}}">{{if .Mining.Running}}Остановить майнинг{{else}}Запустить майнинг{{end}}</button>
         </form>
       </div>
       {{if .CanViewMiningDetails}}<div class="miner-script-used">
@@ -79,13 +63,13 @@
     <article class="metric-card tone-indigo"><span>Последний сервис</span><strong>{{if .Stats.LastService}}{{.Stats.LastService}}{{else}}Нет данных{{end}}</strong><small>последняя активность</small></article>
   </section>
 
-  <section class="panel">
-    <div class="panel-heading"><div><p class="section-kicker">Последние 7 дней</p><h2>Динамика использования</h2></div></div>
+  <section class="panel overview-section">
+    <div class="panel-heading"><div><h2>Динамика использования</h2><p class="overview-caption">Последние 7 дней</p></div></div>
     {{template "chart" .Stats.Chart}}
   </section>
 
-  <section class="panel">
-    <div class="panel-heading"><div><p class="section-kicker">Только важные действия</p><h2>Последняя активность</h2><p class="panel-intro">Здесь показаны ваши действия в сервисах без служебных запросов интерфейса.</p></div></div>
+  <section class="panel overview-section">
+    <div class="panel-heading"><div><h2>Последняя активность</h2></div></div>
     {{template "activity_table" .Activities}}
   </section>
 </main>

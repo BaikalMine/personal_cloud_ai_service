@@ -59,6 +59,9 @@ func TestLoraTrainingHandoffIntegration(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resetGatewayIntegrationDatabase(t, db)
+			if _, err := db.ExecContext(ctx, `TRUNCATE gpu_resources CASCADE`); err != nil {
+				t.Fatal(err)
+			}
 			repository := store.New(db)
 			var userID, minerID int64
 			if err := db.QueryRowContext(ctx, `INSERT INTO users(username,password_hash,role) VALUES('handoff-owner','disabled','admin') RETURNING id`).Scan(&userID); err != nil {
@@ -91,6 +94,10 @@ func TestLoraTrainingHandoffIntegration(t *testing.T) {
 			}
 			var submissions atomic.Int32
 			agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v1/activity" {
+					_ = json.NewEncoder(w).Encode(loratraining.Activity{ProtocolVersion: 1, State: "idle"})
+					return
+				}
 				if r.URL.Path == "/v1/jobs" {
 					submissions.Add(1)
 					_, _ = io.Copy(io.Discard, r.Body)
@@ -128,15 +135,20 @@ func TestLoraTrainingHandoffIntegration(t *testing.T) {
 			defer agent.Close()
 			endpoint, _ := url.Parse(agent.URL)
 			app := &App{store: repository, cfg: Config{MediaSpoolDir: spool}, loraTraining: loratraining.NewClient(endpoint, "handoff-test-token-with-32-characters")}
+			app.gpuCoordinator = &gpuCoordinator{app: app}
 			if tc.submit {
 				if _, err := app.refreshLoraTrainingJobs(ctx); err == nil {
 					t.Fatal("lost response was not reported")
 				}
+				work, err := repository.ActiveGPUWork(ctx, domain.GPUPrimaryResource)
+				if err != nil || work.Kind != domain.GPUWorkTraining || work.JobKey != job.PublicID {
+					t.Fatalf("lost training receipt did not retain GPU: %+v %v", work, err)
+				}
 			} else {
-				if _, err := repository.ClaimNextLoraTrainingJob(ctx); err != nil {
+				if _, err := repository.ClaimNextLoraTrainingJob(ctx, "test-claim"); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := repository.BeginLoraTrainingSubmission(ctx, job.ID); err != nil {
+				if _, err := repository.BeginLoraTrainingSubmission(ctx, job.ID, "test-claim"); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -150,7 +162,7 @@ func TestLoraTrainingHandoffIntegration(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err := repository.RequeueLoraTrainingJob(ctx, job.ID, "unsafe retry"); !errors.Is(err, sql.ErrNoRows) {
+			if _, err := repository.RequeueLoraTrainingJob(ctx, job.ID, "test-claim", "unsafe retry"); !errors.Is(err, sql.ErrNoRows) {
 				t.Fatalf("uncertain handoff was requeued: %v", err)
 			}
 			if n, err := repository.RecoverLoraTrainingJobs(ctx); err != nil || n != 0 {

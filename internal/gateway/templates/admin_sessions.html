@@ -1,14 +1,38 @@
 {{define "admin_sessions"}}
 {{template "head" .}}
 {{template "admin_nav" .}}
-<main class="page" id="main-content">
-  <section class="hero"><div><p class="eyebrow">Контроль доступа</p><h1>Активные сессии</h1></div><span class="live-badge"><i></i>Текущие подключения</span></section>
-  <section class="panel">
-    <div class="panel-heading"><div><p class="section-kicker">Сначала свежие</p><h2>Сессии пользователей</h2></div></div>
-    <div class="table-scroll"><table><thead><tr><th>Пользователь</th><th>IP</th><th>Создана</th><th>Последняя активность</th><th>Истекает</th><th>Устройство</th><th></th></tr></thead><tbody>
-    {{range .Sessions}}<tr><td data-label="Пользователь"><span class="user-link"><span class="account-indicator"></span>{{.Username}}</span></td><td data-label="IP"><code>{{.IP}}</code></td><td data-label="Создана">{{formatTime .CreatedAt}}</td><td data-label="Активность">{{formatTime .LastSeenAt}}</td><td data-label="Истекает">{{formatTime .ExpiresAt}}</td><td data-label="Устройство" class="path">{{.UserAgent}}</td><td data-label="Действия"><div class="table-actions"><form method="post" action="/admin/sessions/{{.ID}}/revoke"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="action-button danger" type="submit" data-confirm="Завершить эту сессию?"><span class="action-icon" aria-hidden="true">&#215;</span>Завершить</button></form></div></td></tr>{{else}}<tr><td colspan="7" class="muted">Активных сессий нет.</td></tr>{{end}}
-    </tbody></table></div>
+<link rel="stylesheet" href="/static/admin-security.css?v={{.AssetVersion}}">
+<script src="/static/admin-security.js?v={{.AssetVersion}}" defer></script>
+<main class="page security-page" id="main-content" data-session-list data-current-url="{{.SessionList.CurrentURL}}">
+  {{$error := .SecurityError}}{{$uncertain := .SecurityUncertain}}
+  {{with .SessionList}}
+  <header class="security-heading"><h1>Сессии</h1><div class="security-actions"><a class="button ghost" href="/admin/users"><i data-lucide="users" aria-hidden="true"></i>Пользователи</a><a class="button ghost icon-button" href="{{.RefreshURL}}" aria-label="Обновить сессии" title="Обновить сессии"><i data-lucide="refresh-cw" aria-hidden="true"></i></a></div></header>
+  <form method="get" action="/admin/sessions" class="security-filters security-filters-session" aria-label="Фильтры сессий">
+    <label class="ui-field security-search"><span class="ui-field-label" id="session-search-label">Пользователь, IP или устройство</span><input type="search" name="q" value="{{.Filter.Search}}" maxlength="120" aria-labelledby="session-search-label"></label>
+    <label class="ui-field"><span class="ui-field-label" id="session-state-label">Состояние</span><select name="state" aria-labelledby="session-state-label"><option value="valid" {{if eq .Filter.State "valid"}}selected{{end}}>Действующие</option><option value="inactive" {{if eq .Filter.State "inactive"}}selected{{end}}>Недействующие</option><option value="all" {{if eq .Filter.State "all"}}selected{{end}}>Все сохранённые</option></select></label>
+    <label class="ui-field"><span class="ui-field-label" id="session-sort-label">Активность</span><select name="sort" aria-labelledby="session-sort-label"><option value="newest" {{if eq .Filter.Sort "newest"}}selected{{end}}>Сначала свежие</option><option value="oldest" {{if eq .Filter.Sort "oldest"}}selected{{end}}>Сначала давние</option></select></label>
+    <div class="security-filter-actions"><button type="submit" class="secondary"><i data-lucide="filter" aria-hidden="true"></i>Применить</button><a class="button ghost icon-button" href="{{.ResetURL}}" title="Сбросить фильтры" aria-label="Сбросить фильтры"><i data-lucide="filter-x" aria-hidden="true"></i></a></div>
+  </form>
+  {{if not .At.IsZero}}<p class="security-note">На {{.At.UTC.Format "02.01.2006 15:04:05"}} UTC. Допустимое бездействие: {{formatDurationLong .IdleTimeout}}</p>{{end}}
+  {{if $.SecurityMessage}}<p class="security-message {{if or $.SecurityValidation $uncertain}}is-warning{{end}}" role="status">{{$.SecurityMessage}}</p>{{end}}
+  <p class="security-message security-progress" data-security-progress role="status" aria-live="polite"></p>
+  {{if $uncertain}}<a class="button secondary" href="{{.RefreshURL}}"><i data-lucide="refresh-cw" aria-hidden="true"></i>Проверить состояние</a>{{end}}
+  {{if $error}}
+  <section class="security-error" role="alert"><h2>Сессии не загружены</h2><p>{{$error}}</p><a class="button secondary" href="{{.CurrentURL}}"><i data-lucide="refresh-cw" aria-hidden="true"></i>Повторить</a></section>
+  {{else}}
+  <section id="security-results" aria-labelledby="security-results-title">
+    <div class="security-result-heading"><h2 id="security-results-title">Сессии пользователей</h2><span>{{if .Total}}{{.First}}–{{.Last}} из {{.Total}}{{else}}0 сессий{{end}}</span></div>
+    {{if .Items}}<table class="security-table security-session-table"><thead><tr><th scope="col">Пользователь</th><th scope="col">IP / устройство</th><th scope="col">Активность, UTC</th><th scope="col">Действия</th></tr></thead><tbody>
+      {{range .Items}}<tr data-session-id="{{.ID}}">
+        <td data-label="Пользователь"><strong><a href="/admin/users/{{.UserID}}">{{.Username}}</a></strong><span class="security-secondary">Сессия #{{.ID}}</span>{{if .Current}}<span class="security-current">Текущая сессия</span>{{end}}<span class="security-state" data-state="{{.State}}">{{.StateLabel}}</span></td>
+        <td data-label="IP / устройство"><code>{{if .IP}}{{.IP}}{{else}}Не указан{{end}}</code><details class="security-details"><summary>Устройство и сроки</summary><dl><div><dt>Устройство</dt><dd>{{if .UserAgent}}{{.UserAgent}}{{else}}Не указано{{end}}</dd></div><div><dt>Создана, UTC</dt><dd>{{.CreatedAt.UTC.Format "02.01.2006 15:04:05"}}</dd></div><div><dt>Срок сессии, UTC</dt><dd>{{.ExpiresAt.UTC.Format "02.01.2006 15:04:05"}}</dd></div><div><dt>Бездействие до, UTC</dt><dd>{{.IdleExpiresAt.UTC.Format "02.01.2006 15:04:05"}}</dd></div></dl></details></td>
+        <td data-label="Активность, UTC"><time>{{.LastSeenAt.UTC.Format "02.01.2006 15:04:05"}}</time></td>
+        <td data-label="Действия"><form method="post" action="{{.RevokeURL}}" class="security-revoke" data-revoke-session="{{.ID}}" autocomplete="off"><input type="hidden" name="csrf" value="{{$.CSRF}}"><label><input type="checkbox" name="confirm_revoke" value="1" required {{if $uncertain}}disabled{{end}}>Подтверждаю завершение сессии #{{.ID}}{{if .Current}} и повторный вход{{end}}</label><button type="submit" class="danger" data-confirm="{{.Confirmation}}" {{if $uncertain}}disabled{{end}}><i data-lucide="log-out" aria-hidden="true"></i>{{if .Current}}Завершить текущую{{else}}Завершить{{end}}</button></form></td>
+      </tr>{{end}}
+    </tbody></table>{{else}}<div class="security-empty"><h2>Сессий не найдено</h2><p>Измените поиск или выберите другое состояние.</p><a class="button ghost" href="{{.ResetURL}}"><i data-lucide="filter-x" aria-hidden="true"></i>Сбросить фильтры</a></div>{{end}}
+    {{template "security_pagination" .}}
   </section>
+  {{end}}{{end}}
 </main>
 </body></html>
 {{end}}

@@ -75,7 +75,7 @@ func (a *App) handleAdminStorage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.render(w, r, "admin_storage", map[string]any{
-		"Title":   "Хранилище базы данных",
+		"Title":   "Хранилище",
 		"Storage": view,
 	})
 }
@@ -192,6 +192,7 @@ func databaseTablePolicies() map[string]databaseTablePolicy {
 		"generation_jobs":                  {Label: "Задания генераций", Owner: "Job Center", Retention: duration(func(p config.RetentionPolicy) time.Duration { return p.GenerationRequests }), Configuration: "GENERATION_REQUEST_RETENTION", Managed: true},
 		"generation_batches":               {Label: "Пакеты вариантов", Owner: "Job Center", Retention: duration(func(p config.RetentionPolicy) time.Duration { return p.GenerationRequests }), Configuration: "GENERATION_REQUEST_RETENTION", Managed: true},
 		"generation_job_transitions":       {Label: "Этапы заданий", Owner: "Job Center", Retention: fixed("Вместе с заданием"), Managed: true},
+		"generation_input_references":      {Label: "Исходные файлы заданий", Owner: "Job Center", Retention: fixed("Вместе с заданием"), Managed: true},
 		"generation_job_revision":          {Label: "Ревизия Job Center", Owner: "Система", Retention: fixed("Одна служебная запись")},
 		"user_notifications":               {Label: "Уведомления о генерациях", Owner: "Центр уведомлений", Retention: fixed("Вместе с заданием")},
 		"user_notification_preferences":    {Label: "Настройки уведомлений", Owner: "Профиль пользователя", Retention: fixed("До удаления аккаунта")},
@@ -222,6 +223,10 @@ func databaseTablePolicies() map[string]databaseTablePolicy {
 		"feature_suggestions":              {Label: "Предложения пользователей", Owner: "Администратор", Retention: fixed("До ручного решения")},
 		"feature_suggestion_scans":         {Label: "Проверки предложений", Owner: "VirusTotal", Retention: fixed("Вместе с предложением")},
 		"comfy_output_cleanup_tombstones":  {Label: "Очередь удаления результатов", Owner: "Очистка файлов", Retention: fixed("До подтверждения агента")},
+		"comfy_output_cleanup_receipts":    {Label: "Подтверждения удаления файлов", Owner: "Очистка файлов", Retention: fixed("90 дней"), Managed: true},
+		"comfy_input_cleanup_receipts":     {Label: "Подтверждения удаления входов", Owner: "Очистка файлов", Retention: fixed("90 дней"), Managed: true},
+		"training_storage_operations":      {Label: "Операции очистки обучения", Owner: "Хранилище обучения", Retention: fixed("Детали 90 дней; закрытые ID сохраняются"), Managed: false},
+		"comfy_storage_operations":         {Label: "Операции очистки ComfyUI", Owner: "Очистка файлов", Retention: fixed("Детали 90 дней; закрытые ID сохраняются"), Managed: false},
 		"content_change_revision":          {Label: "Ревизия AI-контента", Owner: "Система", Retention: fixed("Одна служебная запись")},
 		"database_cleanup_state":           {Label: "Состояние очистки БД", Owner: "Система", Retention: fixed("Одна служебная запись")},
 		"schema_migrations":                {Label: "История схемы", Owner: "Система", Retention: fixed("Постоянно")},
@@ -229,9 +234,7 @@ func databaseTablePolicies() map[string]databaseTablePolicy {
 }
 
 func (a *App) handleAdminAuditExport(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+	if !a.adminSecurityRead(w, r) {
 		return
 	}
 	before := time.Now().UTC()

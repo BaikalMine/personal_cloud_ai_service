@@ -1,77 +1,72 @@
 {{define "admin_mining"}}
-{{template "head" .}}
-{{template "admin_nav" .}}
-<main class="page" id="main-content">
-  <section class="hero admin-hero">
-    <div><p class="eyebrow">Управление ресурсами</p><h1>Майнинг</h1></div>
-    <span class="mining-status {{if .Mining.Running}}running{{else if .Mining.Available}}stopped{{else}}{{.Mining.Agent.State}}{{end}}"><i></i>{{if .Mining.Running}}Работает{{else if .Mining.Available}}Остановлен{{else}}{{.Mining.Agent.StateLabel}}{{end}}</span>
-  </section>
-
-  {{if .Error}}<p class="alert">{{.Error}}</p>{{end}}
-  {{if eq .Status "created"}}<p class="success-box">Профиль майнинга добавлен.</p>{{else if eq .Status "started"}}<p class="success-box">Майнинг запущен.</p>{{else if eq .Status "stopped"}}<p class="success-box">Майнинг остановлен.</p>{{else if eq .Status "updated"}}<p class="success-box">Настройки майнинга обновлены.</p>{{else if eq .Status "miner-updated"}}<p class="success-box">Майнер обновлён. BAT-файлы сохранены.</p>{{end}}
-
-  <section class="panel">
-    <div class="panel-heading"><div><p class="section-kicker">Общее состояние</p><h2>Профили запуска</h2></div><span class="muted">{{len .Mining.Miners}} настроено</span></div>
-    <p class="panel-intro">{{.Mining.Message}}</p>
-    <details class="miner-script-details admin-script-details">
-      <summary>Содержимое активного скрипта</summary>
-      {{if .Mining.Script.Content}}
-      <div class="script-fingerprint"><span>SHA-256</span><code>{{.Mining.Script.SHA256}}</code></div>
-      <pre>{{.Mining.Script.Content}}</pre>
-      {{else}}<p class="muted">{{if .Mining.Script.Message}}{{.Mining.Script.Message}}{{else}}Содержимое скрипта недоступно.{{end}}</p>{{end}}
-    </details>
-    <div class="miner-list">
-      {{range .Mining.Miners}}
-      <article class="miner-row {{if .State.Running}}is-running{{end}} {{if not .Enabled}}is-disabled{{end}}">
-        <div class="miner-identity">
-          {{if .IconMIME}}<img class="miner-icon" src="/mining/icon/{{.ID}}" alt="">{{else}}<span class="miner-icon-fallback">MN</span>{{end}}
-          <span><b>{{.Name}}</b><small>{{.ProcessName}}{{if .Default}} · профиль по умолчанию{{end}}</small></span>
-        </div>
-        <div class="miner-path"><span>Скрипт запуска</span><code>{{.ScriptPath}}</code></div>
-        <div class="miner-row-status">
-          <span class="mining-status {{if .State.Running}}running{{else if $.Mining.Available}}stopped{{else}}unavailable{{end}}"><i></i>{{if .State.Running}}Работает{{else if $.Mining.Available}}Остановлен{{else}}Нет связи{{end}}</span>
-          {{with .State.PIDs}}<small>PID {{index . 0}}</small>{{end}}
-        </div>
-        <form method="post" class="miner-actions">
-          <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}">
-          {{if .State.Running}}<button name="action" value="stop" class="danger">Остановить</button>{{else}}<button name="action" value="start" {{if or (not .Enabled) (not $.Mining.Available)}}disabled{{end}}>Запустить</button>{{end}}
-          {{if not .Default}}<button name="action" value="default" class="ghost" {{if not .Enabled}}disabled{{end}}>Сделать основным</button>{{end}}
-          {{if .Enabled}}{{if not .Default}}<button name="action" value="disable" class="ghost">Отключить</button>{{end}}{{else}}<button name="action" value="enable" class="ghost">Включить</button>{{end}}
-          {{if not .Default}}<button name="action" value="delete" class="ghost danger-text" data-confirm="Удалить профиль {{.Name}}?">Удалить</button>{{end}}
+{{template "head" .}}{{template "admin_nav" .}}{{template "admin_resource_assets" .}}
+<main class="page resource-page" id="main-content" data-resource-page data-service="mining" data-profile-version="{{.Resource.ProfileVersion}}" data-resource-endpoint="{{.ResourceEndpoint}}">
+  <header class="resource-head"><h1>Майнинг</h1><div class="mining-script-actions"><a class="button ghost" href="#mining-files"><i data-lucide="folder-open" aria-hidden="true"></i>BAT-файлы</a><a class="button ghost" href="#new-miner"><i data-lucide="plus" aria-hidden="true"></i>Добавить профиль</a></div></header>
+  <nav class="resource-tabs" aria-label="Сервисы"><a href="/admin/services/comfyui">ComfyUI</a><a href="/admin/mining" aria-current="page">Майнинг</a></nav>
+  {{if .Error}}<p class="alert" role="alert">{{.Error}}</p>{{end}}
+  {{if eq .Status "created"}}<p class="success-box" role="status">Профиль майнинга добавлен.</p>{{else if eq .Status "started"}}<p class="success-box" role="status">Майнинг запущен.</p>{{else if eq .Status "restarted"}}<p class="success-box" role="status">Майнинг перезапущен.</p>{{else if eq .Status "stopped"}}<p class="success-box" role="status">Майнинг остановлен.</p>{{else if eq .Status "updated"}}<p class="success-box" role="status">Настройки майнинга обновлены.</p>{{else if eq .Status "miner-updated"}}<p class="success-box" role="status">Майнер обновлён. BAT-файлы сохранены.</p>{{end}}
+  {{template "admin_resource_controls" .}}
+  {{if .MiningResumePending}}<p role="status">Автовозобновление ожидает свободный GPU. Проверка каждые 10 минут.</p>{{end}}
+  <div data-resource-private>
+  {{template "admin_resource_snapshot" .Resource}}
+  <section class="resource-miners" aria-labelledby="resource-miners-title"><header class="resource-section-head"><h2 id="resource-miners-title">Профили запуска</h2><span>{{len .Mining.Miners}} настроено</span></header>
+    {{range .Mining.Miners}}{{$state := index $.Resource.Profiles .ID}}
+    <article class="resource-miner" id="miner-{{.ID}}" data-miner="{{.ID}}"><div class="resource-miner-identity">{{if .IconMIME}}<img src="/mining/icon/{{.ID}}" alt="" width="40" height="40">{{else}}<i data-lucide="cpu" aria-hidden="true"></i>{{end}}<div><h3>{{.Name}}</h3><span>{{.ProcessName}}</span>{{if .Default}}<small>По умолчанию</small>{{end}}</div></div>
+      {{template "admin_miner_state" $state}}
+      <form method="post" action="/admin/mining" class="resource-miner-actions"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}">
+        <button name="action" value="start" data-miner-action="start" {{if $state.Running}}hidden{{end}} {{if not $state.CanStart}}disabled{{end}}><i data-lucide="play" aria-hidden="true"></i>Запустить</button>
+        <button name="action" value="stop" data-miner-action="stop" class="danger" {{if not $state.Running}}hidden{{end}} {{if not $state.CanStop}}disabled{{end}} data-confirm="Остановить майнинг профиля «{{.Name}}»?{{if $.MiningAutoResume}} Через 10 минут начнутся проверки для автовозобновления.{{end}}"><i data-lucide="square" aria-hidden="true"></i>Остановить</button>
+        <button name="action" value="restart" data-miner-action="restart" class="ghost icon-button" {{if not $state.Running}}hidden{{end}} {{if not $state.CanRestart}}disabled{{end}} data-confirm="Перезапустить профиль «{{.Name}}»? Майнер будет остановлен и запущен с этим же BAT только после подтверждения остановки." title="Перезапустить" aria-label="Перезапустить {{.Name}}"><i data-lucide="rotate-cw" aria-hidden="true"></i></button>
+        {{if not .Default}}<button name="action" value="default" data-miner-action="default" class="ghost" {{if not .Enabled}}disabled data-config-disabled{{end}}><i data-lucide="star" aria-hidden="true"></i>Основной</button>{{end}}
+        {{if .Enabled}}{{if not .Default}}<button name="action" value="disable" data-miner-action="change" class="ghost" {{if not $state.CanChange}}disabled{{end}}><i data-lucide="pause" aria-hidden="true"></i>Отключить</button>{{end}}{{else}}<button name="action" value="enable" data-miner-action="enable" class="ghost"><i data-lucide="check" aria-hidden="true"></i>Включить</button>{{end}}
+        {{if not .Default}}<button name="action" value="delete" data-miner-action="change" class="ghost danger-text icon-button" {{if not $state.CanChange}}disabled{{end}} data-confirm="Удалить профиль {{.Name}}?" aria-label="Удалить профиль {{.Name}}" title="Удалить профиль"><i data-lucide="trash-2" aria-hidden="true"></i></button>{{end}}
+      </form>
+      <details class="resource-miner-details" {{with $.MiningForm}}{{if eq (.Get "id") (printf "%d" $state.ID)}}open{{end}}{{end}}><summary>Скрипт и обновление</summary><dl><div><dt>Скрипт запуска</dt><dd><code>{{.ScriptPath}}</code></dd></div></dl>
+        {{if .CanEditScript}}<a class="button ghost" href="/admin/mining/script?id={{.ID}}"><i data-lucide="file-pen-line" aria-hidden="true"></i>Редактировать BAT</a>{{end}}
+        <form method="post" action="/admin/mining" class="resource-update-form"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="action" value="update">
+          <label class="ui-field"><span class="ui-field-label">Ссылка на ZIP-релиз</span><input name="archive_url" value="{{with $.MiningForm}}{{if eq (.Get "id") (printf "%d" $state.ID)}}{{.Get "archive_url"}}{{end}}{{end}}" type="url" inputmode="url" maxlength="2048" placeholder="https://github.com/.../release.zip" pattern="https://.+" required></label>
+          <label class="ui-field"><span class="ui-field-label">SHA-256 ZIP-архива</span><input name="archive_sha256" value="{{with $.MiningForm}}{{if eq (.Get "id") (printf "%d" $state.ID)}}{{.Get "archive_sha256"}}{{end}}{{end}}" type="text" maxlength="512" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="SHA-256 или строка из checksums.txt" required></label>
+          <p>BAT-файлы сохраняются. Работающий майнер будет перезапущен; при ошибке запуска агент выполнит откат.</p>
+          <button type="submit" class="ghost" data-miner-action="update" {{if not $state.CanUpdate}}disabled{{end}} data-confirm="Обновить {{.Name}} из указанного ZIP-архива? Если майнер запущен, он будет перезапущен после проверки новой версии."><i data-lucide="download" aria-hidden="true"></i>Обновить майнер</button>
         </form>
-        <details class="miner-update-details">
-          <summary>Обновить майнер из ZIP</summary>
-          <form method="post" class="miner-update-form">
-            <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="action" value="update">
-            <label class="ui-field"><span class="ui-field-label">Ссылка на ZIP-релиз</span><input name="archive_url" type="url" inputmode="url" maxlength="2048" placeholder="https://github.com/.../SRBMiner-Multi-3-5-0-win64.zip" pattern="https://.+" required></label>
-            <label class="ui-field"><span class="ui-field-label">SHA-256 ZIP-архива</span><input name="archive_sha256" type="text" inputmode="text" maxlength="512" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="SHA-256 или строка из checksums.txt" required></label>
-            <p class="miner-update-note">Можно вставить чистый SHA-256 или всю строку с контрольной суммой. Проверю архив и наличие {{.ProcessName}}, сохраню ваши .bat и выполню откат при ошибке запуска.</p>
-            <button type="submit" class="ghost" data-confirm="Обновить {{.Name}} из указанного ZIP-архива? Если майнер запущен, он будет перезапущен после проверки новой версии.">Обновить майнер</button>
-          </form>
-        </details>
-      </article>
-      {{else}}
-      <p class="empty-state">Профили майнинга ещё не добавлены.</p>
-      {{end}}
-    </div>
+      </details>
+    </article>{{else}}<p class="empty-state">Профили майнинга ещё не добавлены.</p>{{end}}
   </section>
-
-  <section class="panel">
-    <div class="panel-heading"><div><p class="section-kicker">Новый профиль</p><h2>Добавить майнер</h2></div></div>
-    <form method="post" enctype="multipart/form-data" class="miner-create-form">
-      <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="action" value="create">
-      <div class="ui-field-grid invite-fields">
-        <label class="ui-field"><span class="ui-field-label">Название</span><input name="name" maxlength="80" placeholder="Например, SRBMiner Pearl" required></label>
-        <label class="ui-field"><span class="ui-field-label">Имя процесса</span><input name="process_name" maxlength="128" placeholder="SRBMiner-MULTI.exe" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,126}\.exe" required></label>
-      </div>
-      <label class="ui-field"><span class="ui-field-label">Полный путь к скрипту запуска</span><input name="script_path" maxlength="1024" placeholder="Путь к .bat-файлу запуска" required></label>
-      <div class="miner-create-footer">
-        <label class="file-field"><span>Иконка профиля</span><input name="icon" type="file" accept="image/png,image/jpeg,image/webp,image/x-icon,.ico"><small>PNG, JPEG, WebP или ICO, до 256 КБ</small></label>
-        <label class="checkline"><input name="is_default" type="checkbox"><span>Сделать профилем по умолчанию</span></label>
-        <button type="submit">Добавить профиль</button>
-      </div>
+  {{template "admin_resource_gpu" .Resource}}
+  <section class="resource-create mining-file-browser" id="mining-files" data-mining-browser aria-labelledby="mining-files-title">
+    <header class="resource-section-head"><h2 id="mining-files-title">BAT-файлы</h2><span data-mining-file-count></span></header>
+    {{if .MiningBrowser.Message}}<p class="alert" role="status">{{.MiningBrowser.Message}}</p>{{end}}
+    <p class="mining-script-path"><code>{{.MiningBrowser.Root}}</code></p>
+    <form method="get" action="/admin/mining#mining-files" class="mining-file-filters" data-mining-filters>
+      <label class="ui-field"><span class="ui-field-label">Папка майнера</span><select name="folder" data-mining-folder>{{range .MiningBrowser.Folders}}<option value="{{.Name}}" {{if eq .Name $.MiningBrowser.SelectedFolder}}selected{{end}}>{{.Name}} ({{.Count}})</option>{{end}}</select></label>
+      <label class="checkline"><input type="checkbox" name="favorites" value="1" data-mining-favorites-only {{if .MiningBrowser.FavoriteOnly}}checked{{end}}><span>Избранное <span data-mining-favorite-count>{{.MiningBrowser.FavoriteCount}}</span></span></label>
+      <button type="submit" class="ghost icon-button" title="Обновить список BAT" aria-label="Обновить список BAT"><i data-lucide="refresh-cw" aria-hidden="true"></i></button>
+    </form>
+    <label class="ui-field mining-file-search"><span class="ui-field-label">Найти BAT</span><input type="search" data-mining-search autocomplete="off" placeholder="Имя файла или папки"></label>
+    <p class="alert" role="alert" data-mining-file-error hidden></p>
+    <div class="mining-file-list">
+      {{range .MiningBrowser.Scripts}}<article class="mining-file-row" data-mining-file data-folder="{{.Folder}}" data-favorite="{{.Favorite}}" {{if not .Visible}}hidden{{end}}>
+        <div class="mining-file-identity"><strong>{{.Name}}</strong><small>{{.Folder}}</small>{{if .Missing}}<span>Файл недоступен</span>{{else}}<code>{{.Path}}</code>{{end}}</div>
+        <div class="mining-file-tools">
+          <form method="post" action="/admin/mining/favorite" data-mining-favorite-form><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="path" value="{{.Path}}"><input type="hidden" name="enabled" value="{{if .Favorite}}false{{else}}true{{end}}"><input type="hidden" name="folder" value="{{$.MiningBrowser.SelectedFolder}}"><input type="hidden" name="favorites" value="{{if $.MiningBrowser.FavoriteOnly}}1{{end}}"><button type="submit" class="ghost icon-button mining-file-star" aria-pressed="{{.Favorite}}" title="{{if .Favorite}}Убрать из избранного{{else}}Добавить в избранное{{end}}" aria-label="{{if .Favorite}}Убрать из избранного{{else}}Добавить в избранное{{end}}: {{.Name}}"><i data-lucide="star" aria-hidden="true"></i></button></form>
+          {{if not .Missing}}<a class="button ghost icon-button" href="{{.EditorURL}}" title="Редактировать BAT" aria-label="Редактировать {{.Name}}"><i data-lucide="file-pen-line" aria-hidden="true"></i></a><button type="button" class="ghost" data-mining-pick="{{.Path}}" data-process="{{.ProcessName}}" data-name="{{.Name}}" title="Заполнить новый профиль"><i data-lucide="plus" aria-hidden="true"></i>В профиль</button>{{end}}
+        </div>
+      </article>{{end}}
+    </div>
+    <p class="empty-state" data-mining-files-empty {{if .MiningBrowser.Scripts}}hidden{{end}}>Нет подходящих BAT-файлов.</p>
+  </section>
+  <section class="resource-create" id="new-miner" aria-labelledby="new-miner-title"><header class="resource-section-head"><h2 id="new-miner-title">Добавить профиль</h2><form method="get" action="/admin/mining#new-miner"><button class="ghost icon-button" type="submit" title="Обновить список BAT" aria-label="Обновить список BAT"><i data-lucide="refresh-cw" aria-hidden="true"></i></button></form></header>
+    <form method="post" action="/admin/mining" enctype="multipart/form-data" class="resource-create-form" data-mining-profile-form><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="action" value="create">
+      {{if .MiningFiles.Message}}<p class="alert resource-span" role="status">{{.MiningFiles.Message}}</p>{{end}}
+      {{if .MiningFiles.Root}}<p class="mining-script-path resource-span">Папка майнинга: <code>{{.MiningFiles.Root}}</code></p>{{end}}
+      <label class="ui-field"><span class="ui-field-label">Название</span><input name="name" value="{{with $.MiningForm}}{{.Get "name"}}{{end}}" maxlength="80" placeholder="Например, SRBMiner Pearl" required></label>
+      <label class="ui-field"><span class="ui-field-label">Имя процесса</span><input name="process_name" list="mining-executables" value="{{with $.MiningForm}}{{.Get "process_name"}}{{end}}" maxlength="128" placeholder="SRBMiner-MULTI.exe" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,126}\.exe" required><datalist id="mining-executables">{{range .MiningFiles.Files}}{{if eq .Kind "executable"}}<option value="{{.Name}}" data-folder="{{.Folder}}">{{.Folder}}</option>{{end}}{{end}}</datalist></label>
+      <label class="ui-field resource-span"><span class="ui-field-label">Полный путь к скрипту запуска</span><input name="script_path" value="{{with $.MiningForm}}{{.Get "script_path"}}{{end}}" maxlength="1024" placeholder="Путь к .bat-файлу запуска" required></label>
+      <label class="ui-field"><span class="ui-field-label">Иконка профиля</span><input name="icon" type="file" accept="image/png,image/jpeg,image/webp,image/x-icon,.ico" aria-describedby="miner-icon-help"><small id="miner-icon-help">PNG, JPEG, WebP или ICO, до 256 КБ</small></label>
+      <label class="checkline"><input name="is_default" type="checkbox" {{with $.MiningForm}}{{if .Get "is_default"}}checked{{end}}{{end}}><span>Сделать профилем по умолчанию</span></label><div class="resource-span"><button type="submit"><i data-lucide="plus" aria-hidden="true"></i>Добавить профиль</button></div>
     </form>
   </section>
-</main>
-</body></html>
+  <section class="resource-script"><details><summary>Скрипт при открытии страницы</summary><small>Получен: {{formatTime .Resource.At}}</small>{{if .Mining.Script.Content}}<dl><div><dt>SHA-256</dt><dd><code>{{.Mining.Script.SHA256}}</code></dd></div></dl><pre>{{.Mining.Script.Content}}</pre>{{else}}<p>{{if .Mining.Script.Message}}{{.Mining.Script.Message}}{{else}}Содержимое скрипта недоступно.{{end}}</p>{{end}}</details></section>
+  </div>
+</main></body></html>
 {{end}}

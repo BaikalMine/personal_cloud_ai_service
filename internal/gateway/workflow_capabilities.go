@@ -11,16 +11,24 @@ func (a *App) handleGenerationCapabilities(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
-	user := a.currentUser(r)
-	allManifests := workflowManifests()
-	if err := validateWorkflowManifests(allManifests); err != nil {
+	catalog, err := GenerationCapabilitiesForUser(a.currentUser(r))
+	if err != nil {
 		http.Error(w, "контракт workflow недоступен", http.StatusInternalServerError)
 		return
 	}
-	manifests := workflowManifestsForUser(allManifests, user)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "private, max-age=60")
-	_ = json.NewEncoder(w).Encode(workflowManifestCatalog{SchemaVersion: workflowManifestSchemaVersion, Workflows: sortedWorkflowManifests(manifests)})
+	_ = json.NewEncoder(w).Encode(catalog)
+}
+
+// GenerationCapabilitiesForUser shares the real manifest with the isolated UI preview.
+func GenerationCapabilitiesForUser(user *User) (workflowManifestCatalog, error) {
+	allManifests := workflowManifests()
+	if err := validateWorkflowManifests(allManifests); err != nil {
+		return workflowManifestCatalog{}, err
+	}
+	manifests := workflowManifestsForUser(allManifests, user)
+	return workflowManifestCatalog{SchemaVersion: workflowManifestSchemaVersion, Workflows: sortedWorkflowManifests(manifests)}, nil
 }
 
 func workflowManifestsForUser(manifests []workflowManifest, user *User) []workflowManifest {

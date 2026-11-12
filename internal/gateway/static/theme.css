@@ -34,6 +34,8 @@
   --color-media-bg: #101215;
   --color-media-text: #ffffff;
   --color-media-border: #737983;
+  --color-media-accent: #63d8b9;
+  --color-media-label: rgb(16 18 21 / .8);
   --color-switch-off: light-dark(#788390, #727d8d);
   --color-switch-on: #087f73;
   --color-switch-thumb: #ffffff;

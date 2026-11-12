@@ -31,7 +31,8 @@ const generationBatchColumns = `
 	COUNT(job.id) FILTER (WHERE job.state='completed'),
 	COUNT(job.id) FILTER (WHERE job.state='failed'),
 	COUNT(job.id) FILTER (WHERE job.state='cancelled'),
-	COUNT(job.id) FILTER (WHERE job.state='expired')`
+	COUNT(job.id) FILTER (WHERE job.state='expired'),
+	CASE WHEN b.experiment_mode='lora_verification' THEN GREATEST(0,b.total_count-COUNT(job.id)) ELSE 0 END`
 
 const generationBatchJoins = `
 	LEFT JOIN generation_batches parent ON parent.id=b.parent_batch_id
@@ -59,7 +60,7 @@ func scanGenerationBatch(scanner generationBatchScanner) (domain.GenerationBatch
 		&mode, &batch.ParameterName, &parameterValues, &batch.SeedLocked, &batch.TotalCount, &batch.MaxParallel,
 		&cancellationRequestedAt, &batch.CreatedAt, &batch.UpdatedAt,
 		&batch.DraftCount, &batch.ActiveCount, &batch.CompletedCount, &batch.FailedCount,
-		&batch.CancelledCount, &batch.ExpiredCount,
+		&batch.CancelledCount, &batch.ExpiredCount, &batch.MissingCount,
 	)
 	if err != nil {
 		return domain.GenerationBatch{}, err
@@ -95,6 +96,9 @@ func scanGenerationBatch(scanner generationBatchScanner) (domain.GenerationBatch
 }
 
 func validateGenerationBatchParams(params domain.CreateGenerationBatchParams) error {
+	if err := validateLoraVerificationBatch(params); err != nil {
+		return err
+	}
 	params.PublicID = strings.TrimSpace(params.PublicID)
 	params.RequestID = strings.TrimSpace(params.RequestID)
 	if params.UserID <= 0 || params.PublicID == "" || params.RequestID == "" {
@@ -147,9 +151,24 @@ func (s *Store) CreateGenerationBatch(ctx context.Context, params domain.CreateG
 	}
 	defer tx.Rollback()
 
+	receipt, err := lockGenerationSubmission(ctx, tx, params.UserID, "batch", strings.TrimSpace(params.RequestID))
+	if err != nil {
+		return domain.GenerationBatch{}, false, err
+	}
+	if receipt.Closed {
+		return domain.GenerationBatch{}, false, ErrGenerationSubmissionClosed
+	}
 	var existingID int64
-	err = tx.QueryRowContext(ctx, `SELECT id FROM generation_batches WHERE user_id=$1 AND request_id=$2 FOR UPDATE`, params.UserID, strings.TrimSpace(params.RequestID)).Scan(&existingID)
+	var existingPublicID string
+	var existingMode domain.GenerationBatchMode
+	err = tx.QueryRowContext(ctx, `SELECT id,public_id,experiment_mode FROM generation_batches WHERE user_id=$1 AND request_id=$2 FOR UPDATE`, params.UserID, strings.TrimSpace(params.RequestID)).Scan(&existingID, &existingPublicID, &existingMode)
 	if err == nil {
+		if err := bindGenerationSubmission(ctx, tx, receipt, existingPublicID); err != nil {
+			return domain.GenerationBatch{}, false, err
+		}
+		if err := verifyExistingLoraBatch(ctx, tx, existingMode, existingID, params); err != nil {
+			return domain.GenerationBatch{}, false, err
+		}
 		if err := tx.Commit(); err != nil {
 			return domain.GenerationBatch{}, false, err
 		}
@@ -158,6 +177,9 @@ func (s *Store) CreateGenerationBatch(ctx context.Context, params domain.CreateG
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return domain.GenerationBatch{}, false, err
+	}
+	if receipt.PublicID != "" {
+		return domain.GenerationBatch{}, false, ErrGenerationSubmissionExpired
 	}
 	if params.ParentBatchID != nil {
 		var owned bool
@@ -179,12 +201,15 @@ func (s *Store) CreateGenerationBatch(ctx context.Context, params domain.CreateG
 	}
 
 	var allowed bool
+	var disabled, expired, trainAllowed, advancedAllowed, textAllowed, editAllowed bool
+	var role string
 	var imageDailyLimit, videoDailyLimit int
 	var imageTotalLimit, imageTotalUsed, videoTotalLimit, videoTotalUsed int64
-	if err := tx.QueryRowContext(ctx, `SELECT can_use_quick_generation,
+	if err := tx.QueryRowContext(ctx, `SELECT can_use_quick_generation,disabled,COALESCE(account_expires_at<=now(),false),
+		role,can_train_image_lora,can_use_advanced_generation_settings,can_generate_text_to_image,can_generate_image_to_image,
 		generation_daily_limit,generation_total_limit,generation_total_used,
 		video_generation_daily_limit,video_generation_total_limit,video_generation_total_used
-		FROM users WHERE id=$1 FOR UPDATE`, params.UserID).Scan(&allowed,
+		FROM users WHERE id=$1 FOR UPDATE`, params.UserID).Scan(&allowed, &disabled, &expired, &role, &trainAllowed, &advancedAllowed, &textAllowed, &editAllowed,
 		&imageDailyLimit, &imageTotalLimit, &imageTotalUsed,
 		&videoDailyLimit, &videoTotalLimit, &videoTotalUsed); err != nil {
 		return domain.GenerationBatch{}, false, err
@@ -196,6 +221,16 @@ func (s *Store) CreateGenerationBatch(ctx context.Context, params domain.CreateG
 	}
 	if !allowed {
 		return domain.GenerationBatch{}, false, ErrQuickGenerationForbidden
+	}
+	var verificationSource domain.LoraTrainingJob
+	if params.LoraVerification != nil {
+		if disabled || expired || role != "admin" && (!trainAllowed || !advancedAllowed || params.TemplateID == "text-to-image" && !textAllowed || params.TemplateID == "image-to-image" && !editAllowed) {
+			return domain.GenerationBatch{}, false, ErrQuickGenerationForbidden
+		}
+		verificationSource, err = reserveLoraVerificationSource(ctx, tx, params)
+		if err != nil {
+			return domain.GenerationBatch{}, false, err
+		}
 	}
 	count := len(params.Jobs)
 	if totalLimit > 0 && (int64(count) > totalLimit-totalUsed) {
@@ -229,7 +264,15 @@ func (s *Store) CreateGenerationBatch(ctx context.Context, params domain.CreateG
 	).Scan(&batchID); err != nil {
 		return domain.GenerationBatch{}, false, err
 	}
-	for _, child := range params.Jobs {
+	if err := bindGenerationSubmission(ctx, tx, receipt, strings.TrimSpace(params.PublicID)); err != nil {
+		return domain.GenerationBatch{}, false, err
+	}
+	if params.LoraVerification != nil {
+		if err := insertLoraVerification(ctx, tx, batchID, params, verificationSource); err != nil {
+			return domain.GenerationBatch{}, false, err
+		}
+	}
+	for index, child := range params.Jobs {
 		dependencies, marshalErr := json.Marshal(uniqueStrings(child.Prepared.Dependencies))
 		if marshalErr != nil {
 			return domain.GenerationBatch{}, false, marshalErr
@@ -244,6 +287,17 @@ func (s *Store) CreateGenerationBatch(ctx context.Context, params domain.CreateG
 			strings.TrimSpace(child.ExperimentValue), child.Prepared.TemplateID, child.Prepared.WorkflowID, child.Prepared.ModelName,
 			child.Prepared.Seed, child.Prepared.PayloadCipher, dependencies, child.Prepared.InputCount, usageDate).Scan(&jobID); err != nil {
 			return domain.GenerationBatch{}, false, err
+		}
+		if err := bindGenerationCollectionJob(ctx, tx, params.UserID, params.CollectionID, jobID); err != nil {
+			return domain.GenerationBatch{}, false, err
+		}
+		if err := bindGenerationInputReferences(ctx, tx, jobID, params.UserID, child.Prepared.InputNames); err != nil {
+			return domain.GenerationBatch{}, false, err
+		}
+		if params.LoraVerification != nil {
+			if err := insertLoraVerificationMember(ctx, tx, batchID, jobID, child.PublicID, params.LoraVerification.Members[index]); err != nil {
+				return domain.GenerationBatch{}, false, err
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO generation_job_transitions(job_id,correlation_id,from_state,to_state,message,attempt)
 			VALUES($1,$2,'','draft','Ожидает запуска в пакете',1)`, jobID, strings.TrimSpace(child.CorrelationID)); err != nil {

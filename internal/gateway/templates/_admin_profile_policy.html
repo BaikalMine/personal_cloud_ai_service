@@ -1,0 +1,30 @@
+{{define "admin_profile_policy"}}
+{{if ne .Profile.Role "admin"}}
+<section class="profile-band generation-policy-panel">
+  <details class="ui-disclosure profile-policy" {{if .PolicyStatus}}open{{end}}><summary>Workflow, модели и LoRA</summary>
+    <p class="muted">Без отметок: все варианты группы.</p>
+    {{if eq .PolicyStatus "changed"}}<p class="ui-status-banner is-success" role="status">Индивидуальные правила быстрой генерации сохранены.</p>{{end}}
+    <form method="post" class="generation-policy-form">
+      <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="action" value="update_generation_policy">
+      <fieldset><legend>Workflow</legend><div class="policy-check-grid">
+        {{range .GenerationPresets}}<label><input type="checkbox" name="preset_id" value="{{.ID}}" {{if hasString $.GenerationPolicy.PresetIDs .ID}}checked{{end}}><span><b>{{.Name}}</b><small>{{.Description}}</small></span></label>{{else}}<p class="muted">Нет данных каталога.</p>{{end}}
+        {{range .MissingPresetIDs}}<label><input type="checkbox" name="preset_id" value="{{.}}" checked><span><b>{{.}}</b><small>Сохранённое ограничение; сейчас нет в каталоге.</small></span></label>{{end}}
+      </div></fieldset>
+      <fieldset><legend>Диффузионные модели</legend><div class="policy-check-grid">
+        {{range .QuickModels}}<label><input type="checkbox" name="model_id" value="{{.ID}}" {{if hasString $.GenerationPolicy.ModelIDs .ID}}checked{{end}}><span><b>{{.DisplayName}}</b><small>{{.Family}}</small></span></label>{{else}}<p class="muted">Нет данных каталога.</p>{{end}}
+        {{range .MissingModelIDs}}<label><input type="checkbox" name="model_id" value="{{.}}" checked><span><b>{{.}}</b><small>Сохранённое ограничение; сейчас нет в каталоге.</small></span></label>{{end}}
+      </div></fieldset>
+      <fieldset><legend>Группы LoRA для Krea2</legend><div class="policy-check-grid">
+        {{range .LoraGroups}}<label><input type="checkbox" name="krea_lora_group" value="{{.Name}}" {{if hasString $.GenerationPolicy.KreaLoraGroups .Name}}checked{{end}}><span><b>{{.Name}}</b><small>{{len .Loras}} адаптеров</small></span></label>{{else}}<p class="muted">Нет данных каталога.</p>{{end}}
+        {{range .MissingKreaGroups}}<label><input type="checkbox" name="krea_lora_group" value="{{.}}" checked><span><b>{{.}}</b><small>Сохранённое ограничение; сейчас нет в каталоге.</small></span></label>{{end}}
+      </div></fieldset>
+      <fieldset><legend>Группы LoRA для Flux2</legend><div class="policy-check-grid">
+        {{range .FluxLoraGroups}}<label><input type="checkbox" name="flux_lora_group" value="{{.Name}}" {{if hasString $.GenerationPolicy.FluxLoraGroups .Name}}checked{{end}}><span><b>{{.Name}}</b><small>{{len .Loras}} адаптеров</small></span></label>{{else}}<p class="muted">Нет данных каталога.</p>{{end}}
+        {{range .MissingFluxGroups}}<label><input type="checkbox" name="flux_lora_group" value="{{.}}" checked><span><b>{{.}}</b><small>Сохранённое ограничение; сейчас нет в каталоге.</small></span></label>{{end}}
+      </div></fieldset>
+      <button type="submit"><i data-lucide="save" aria-hidden="true"></i>Сохранить правила генерации</button>
+    </form>
+  </details>
+</section>
+{{end}}
+{{end}}

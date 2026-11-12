@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"ai-access-gateway/internal/domain"
-
-	"github.com/lib/pq"
 )
 
 const comfyInputQuotaLockID int64 = 743629834
@@ -34,6 +32,13 @@ func (s *Store) ReserveComfyInputAsset(ctx context.Context, userID int64, id, fi
 		return err
 	}
 	defer tx.Rollback()
+	if err := reserveComfyInputAsset(ctx, tx, userID, id, filename, subfolder, sizeBytes, contentHash, quota); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func reserveComfyInputAsset(ctx context.Context, tx *sql.Tx, userID int64, id, filename, subfolder string, sizeBytes int64, contentHash string, quota ComfyInputQuota) error {
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, comfyInputQuotaLockID); err != nil {
 		return err
 	}
@@ -61,14 +66,15 @@ func (s *Store) ReserveComfyInputAsset(ctx context.Context, userID int64, id, fi
 	`, id, userID, filename, subfolder, sizeBytes, contentHash); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (s *Store) FinalizeComfyInputAsset(ctx context.Context, id, filename, subfolder string, sizeBytes int64, contentHash string, retention time.Duration) (bool, error) {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE comfy_input_assets
 		SET filename=$2,subfolder=$3,size_bytes=$4,content_hash=$5,state='stored',updated_at=now(),
-		    expires_at=now() + ($6::bigint * interval '1 second'),cleanup_retry_at=now(),cleanup_attempts=0
+		    expires_at=now() + ($6::bigint * interval '1 second'),cleanup_retry_at=now(),cleanup_attempts=0,
+		    cleanup_last_outcome='pending',cleanup_last_attempt_at=NULL
 		WHERE id=$1 AND state='reserved'
 	`, id, filename, subfolder, sizeBytes, contentHash, int64(retention.Seconds()))
 	if err != nil {
@@ -85,10 +91,28 @@ func (s *Store) ReleaseComfyInputReservation(ctx context.Context, id string) err
 
 func (s *Store) ExpiredComfyInputAssets(ctx context.Context, limit int) ([]domain.ExpiredComfyInputAsset, error) {
 	limit = boundedLimit(limit, 1, 100)
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id,filename,subfolder,storage_type,size_bytes,content_hash,state
-		FROM comfy_input_assets
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	// Take a fresh snapshot after every in-flight manifest has committed. A
+	// request cannot newly reference a file once it is eligible for this scan.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, generationInputReferenceLockID); err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT a.id,a.filename,a.subfolder,a.storage_type,a.size_bytes,a.content_hash,a.state
+		FROM comfy_input_assets a
 		WHERE expires_at <= now() AND cleanup_retry_at <= now()
+		AND NOT `+comfyStorageClaimedSQL("'input:'||a.id")+`
+		AND NOT `+generationInputProtectedSQL+`
+		AND NOT EXISTS (
+		 SELECT 1 FROM generation_postprocess_inputs p LEFT JOIN generation_jobs j ON j.id=p.job_id
+		 WHERE p.input_id=a.id AND (p.cleanup_blocked
+		 OR j.state NOT IN ('completed','failed','cancelled','expired')
+		 OR (j.prompt_id IS NULL AND j.submission_started_at IS NOT NULL AND j.submission_rejected_at IS NULL))
+		)
 		ORDER BY cleanup_retry_at,expires_at,id
 		LIMIT $1
 	`, limit)
@@ -104,31 +128,11 @@ func (s *Store) ExpiredComfyInputAssets(ctx context.Context, limit int) ([]domai
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
-}
-
-func (s *Store) DeferComfyInputCleanup(ctx context.Context, ids []string, delay time.Duration) (int64, error) {
-	if len(ids) == 0 {
-		return 0, nil
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
-	result, err := s.db.ExecContext(ctx, `
-		UPDATE comfy_input_assets
-		SET cleanup_retry_at=now() + ($2::bigint * interval '1 second'),cleanup_attempts=cleanup_attempts+1,updated_at=now()
-		WHERE id = ANY($1)
-	`, pq.Array(ids), int64(delay.Seconds()))
-	if err != nil {
-		return 0, err
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
-	return result.RowsAffected()
-}
-
-func (s *Store) DeleteComfyInputAssetsByIDs(ctx context.Context, ids []string) (int64, error) {
-	if len(ids) == 0 {
-		return 0, nil
-	}
-	result, err := s.db.ExecContext(ctx, `DELETE FROM comfy_input_assets WHERE id = ANY($1)`, pq.Array(ids))
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
+	return items, tx.Commit()
 }

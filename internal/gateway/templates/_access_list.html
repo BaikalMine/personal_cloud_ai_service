@@ -1,0 +1,52 @@
+{{define "access_list_filters"}}
+<form class="access-list-filters" method="get" action="{{.Action}}#access-results" aria-label="Фильтры списка">
+  <label class="ui-field access-list-search"><span class="ui-field-label">Поиск</span><input name="q" value="{{.Filter.Search}}" maxlength="120" placeholder="{{if .Invitations}}ID или автор{{else}}Логин, e-mail или ID{{end}}"></label>
+  <details class="access-list-filter-options" {{if or .Filter.AccountType .Filter.State .Filter.Access .Filter.ExpiringSoon (ne .Filter.Sort "newest")}}open{{end}}><summary>Фильтры и сортировка</summary><div class="access-list-option-grid">
+  <label class="ui-field"><span class="ui-field-label">Аккаунт</span><select name="account"><option value="">Любой</option><option value="temporary" {{if eq .Filter.AccountType "temporary"}}selected{{end}}>Временный</option><option value="permanent" {{if eq .Filter.AccountType "permanent"}}selected{{end}}>Постоянный</option></select></label>
+  <label class="ui-field"><span class="ui-field-label">Состояние</span><select name="state"><option value="">Любое</option><option value="active" {{if eq .Filter.State "active"}}selected{{end}}>Активные</option><option value="expired" {{if eq .Filter.State "expired"}}selected{{end}}>Срок истёк</option>{{if .Invitations}}<option value="revoked" {{if eq .Filter.State "revoked"}}selected{{end}}>Отозванные</option><option value="used" {{if eq .Filter.State "used"}}selected{{end}}>Использованные</option>{{else}}<option value="disabled" {{if eq .Filter.State "disabled"}}selected{{end}}>Отключённые</option><option value="locked" {{if eq .Filter.State "locked"}}selected{{end}}>Вход заблокирован</option>{{end}}</select></label>
+  <label class="ui-field"><span class="ui-field-label">{{if .Invitations}}Выдаваемый доступ{{else}}Действующий доступ{{end}}</span><select name="access"><option value="">Любой</option><option value="photo" {{if eq .Filter.Access "photo"}}selected{{end}}>Фото</option><option value="video" {{if eq .Filter.Access "video"}}selected{{end}}>Видео</option><option value="training" {{if eq .Filter.Access "training"}}selected{{end}}>Обучение LoRA</option><option value="none" {{if eq .Filter.Access "none"}}selected{{end}}>Нет доступа</option></select></label>
+  <label class="ui-field"><span class="ui-field-label">Сортировка</span><select name="sort"><option value="newest" {{if eq .Filter.Sort "newest"}}selected{{end}}>Сначала новые</option><option value="oldest" {{if eq .Filter.Sort "oldest"}}selected{{end}}>Сначала старые</option><option value="expires" {{if eq .Filter.Sort "expires"}}selected{{end}}>По сроку</option>{{if .Invitations}}<option value="creator" {{if eq .Filter.Sort "creator"}}selected{{end}}>По автору</option><option value="uses" {{if eq .Filter.Sort "uses"}}selected{{end}}>По активациям</option>{{else}}<option value="name" {{if eq .Filter.Sort "name"}}selected{{end}}>По логину</option><option value="login" {{if eq .Filter.Sort "login"}}selected{{end}}>По последнему входу</option>{{end}}</select></label>
+  <label class="ui-choice ui-choice--row ui-choice--compact access-list-soon"><input type="checkbox" name="soon" value="1" {{if .Filter.ExpiringSoon}}checked{{end}}><span>{{if .Invitations}}Ссылка{{else}}Аккаунт{{end}} истекает в течение 7 дней</span></label>
+  </div></details>
+  <div class="access-list-filter-actions"><button type="submit"><i data-lucide="search" aria-hidden="true"></i>Найти</button><a class="button ghost" href="{{.ResetURL}}">Сбросить</a></div>
+</form>
+{{end}}
+
+{{define "access_list_pagination"}}
+<nav class="access-list-pagination" aria-label="Страницы списка">
+  <span data-access-count>{{if .Total}}{{.First}}–{{.Last}} из {{.Total}}{{else}}0 результатов{{end}}</span>
+  <div>
+    {{if .PreviousURL}}<a class="button ghost icon-button" href="{{.PreviousURL}}" aria-label="Предыдущая страница" title="Предыдущая страница"><i data-lucide="chevron-left" aria-hidden="true"></i><span class="access-icon-fallback" aria-hidden="true">&#8592;</span></a>
+    {{else}}<span class="button ghost icon-button" aria-disabled="true"><i data-lucide="chevron-left" aria-hidden="true"></i><span class="access-icon-fallback" aria-hidden="true">&#8592;</span><span class="sr-only">Предыдущая страница</span></span>{{end}}
+    {{if .NextURL}}<a class="button ghost icon-button" href="{{.NextURL}}" aria-label="Следующая страница" title="Следующая страница"><i data-lucide="chevron-right" aria-hidden="true"></i><span class="access-icon-fallback" aria-hidden="true">&#8594;</span></a>
+    {{else}}<span class="button ghost icon-button" aria-disabled="true"><i data-lucide="chevron-right" aria-hidden="true"></i><span class="access-icon-fallback" aria-hidden="true">&#8594;</span><span class="sr-only">Следующая страница</span></span>{{end}}
+  </div>
+</nav>
+{{end}}
+
+{{define "access_list_quotas"}}{{range .}}<div class="access-list-quota"><strong>{{.Family}}</strong><span>{{.Daily}}</span><span>{{.Total}}</span></div>{{else}}<span class="muted">Нет доступа к генерации</span>{{end}}{{end}}
+
+{{define "access_invitation_list"}}
+<section class="access-list invite-history-panel" id="access-results" aria-labelledby="invite-history-heading">
+  <div class="panel-heading"><h2 id="invite-history-heading">Созданные приглашения</h2><a href="#invite-create-heading" class="button ghost"><i data-lucide="plus" aria-hidden="true"></i>Новое приглашение</a></div>
+  {{template "access_list_filters" .AccessList}}
+  {{if .ListError}}<p class="ui-status-banner is-error" role="alert">{{.ListError}} <a href="{{.AccessList.CurrentURL}}#access-results">Обновить список</a></p>{{else}}
+  {{template "access_list_pagination" .AccessList}}
+  <div class="table-scroll"><table class="access-list-table compact-table" data-access-invites>
+    <thead><tr><th>Приглашение</th><th>Выдаваемый доступ</th><th>Лимиты</th><th>Аккаунт</th><th>Срок ссылки и активации</th><th>Действия</th></tr></thead>
+    <tbody>{{range .AccessList.Invites}}<tr data-access-row="{{.ID}}">
+      <td data-label="Приглашение"><strong>#{{.ID}}</strong><small>{{if .CreatedBy}}{{.CreatedBy}}{{else}}Автор удалён{{end}}</small><span class="access-state is-{{.Status}}">{{inviteStatusLabel .Status}}</span></td>
+      <td data-label="Выдаваемый доступ"><details class="access-row-details"><summary>{{.AccessLabel}}</summary><div class="access-row-facts" tabindex="0" aria-label="Права и лимиты приглашения {{.ID}}">{{template "access_summary" .Settings}}</div></details>{{if .Settings.QueuePriority}}<small>Приоритетная очередь</small>{{end}}{{if .Settings.Video}}<small>База видео до {{.Settings.MaxVideoQuality}}p</small>{{end}}</td>
+      <td data-label="Лимиты">{{template "access_list_quotas" .Quotas}}</td>
+      <td data-label="Аккаунт">{{if gt .AccountLifetimeSeconds 0}}Временный<small>{{accountLifetimeLabel .AccountLifetimeSeconds}} после регистрации</small>{{else}}Постоянный{{end}}</td>
+      <td data-label="Срок ссылки и активации"><time datetime="{{.ExpiresAt.Format "2006-01-02T15:04:05Z07:00"}}">{{formatTime .ExpiresAt}}</time><small>Активации: {{.UsedCount}} из {{.MaxUses}}</small></td>
+      <td data-label="Действия"><div class="access-list-row-actions">
+        <form method="post" action="{{.RevokeURL}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="ghost" type="submit" data-confirm="{{if .Revoked}}Снять отзыв приглашения? Истёкший срок и число активаций не изменятся.{{else}}Отозвать это приглашение?{{end}}"><i data-lucide="{{if .Revoked}}rotate-ccw{{else}}ban{{end}}" aria-hidden="true"></i>{{if .Revoked}}{{.RestoreLabel}}{{else}}Отозвать{{end}}</button></form>
+        <form method="post" action="{{.DeleteURL}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="ghost danger icon-button" type="submit" aria-label="Удалить приглашение {{.ID}}" title="Удалить приглашение" data-confirm="Удалить приглашение навсегда? Ссылка больше не будет работать."><i data-lucide="trash-2" aria-hidden="true"></i><span class="access-icon-fallback" aria-hidden="true">&#215;</span></button></form>
+      </div></td>
+    </tr>{{else}}<tr><td colspan="6" class="access-list-empty">Приглашения не найдены. <a href="{{.AccessList.ResetURL}}">Сбросить фильтры</a></td></tr>{{end}}</tbody>
+  </table></div>
+  {{if gt .AccessList.Total 50}}{{template "access_list_pagination" .AccessList}}{{end}}
+  {{end}}
+</section>
+{{end}}

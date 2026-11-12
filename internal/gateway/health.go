@@ -11,7 +11,6 @@ import (
 )
 
 func (a *App) serviceStatuses(ctx context.Context) []ServiceStatus {
-	statuses := make([]ServiceStatus, 2)
 	checks := []struct {
 		key  string
 		name string
@@ -19,8 +18,8 @@ func (a *App) serviceStatuses(ctx context.Context) []ServiceStatus {
 		auth string
 	}{
 		{key: dependencyComfyUI, name: "ComfyUI", url: a.cfg.ComfyUIUpstream, auth: a.cfg.ComfyUIUpstreamAuthHeader},
-		{key: dependencyOpenWebUI, name: "OpenWebUI", url: a.cfg.OpenWebUIUpstream, auth: a.cfg.OpenWebUIUpstreamAuth},
 	}
+	statuses := make([]ServiceStatus, len(checks))
 	var wg sync.WaitGroup
 	for index := range checks {
 		wg.Add(1)

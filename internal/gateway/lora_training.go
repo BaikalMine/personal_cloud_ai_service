@@ -15,6 +15,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -78,6 +79,7 @@ type loraTrainingJobView struct {
 }
 
 type loraTrainingJobJSON struct {
+	PassportURL         string   `json:"passport_url"`
 	ID                  string   `json:"id"`
 	Name                string   `json:"name"`
 	OutputName          string   `json:"output_name"`
@@ -90,6 +92,8 @@ type loraTrainingJobJSON struct {
 	StateClass          string   `json:"state_class"`
 	Stage               string   `json:"stage"`
 	Progress            int      `json:"progress"`
+	TrainingStep        *int     `json:"training_step,omitempty"`
+	TrainingTotalSteps  *int     `json:"training_total_steps,omitempty"`
 	Message             string   `json:"message"`
 	Error               string   `json:"error,omitempty"`
 	LogTail             []string `json:"log_tail,omitempty"`
@@ -122,6 +126,14 @@ type uploadedTrainingImage struct {
 }
 
 func (a *App) registerLoraTrainingRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/api/lora-training/repeats", a.handleLoraTrainingRepeat)
+	mux.HandleFunc("/api/lora-training/repeats/", a.handleLoraTrainingRepeat)
+	mux.HandleFunc("/api/lora-training/passports/", a.handleLoraTrainingPassport)
+	mux.HandleFunc("/api/lora-training/usage/", a.handleLoraUsage)
+	mux.HandleFunc("/api/lora-training/source/", a.handleLoraUsage)
+	mux.HandleFunc("/api/lora-training/verifications", a.handleLoraVerificationRead)
+	mux.HandleFunc("/api/lora-training/verifications/quote", a.handleLoraVerificationWrite)
+	mux.HandleFunc("/api/lora-training/verifications/enqueue", a.handleLoraVerificationWrite)
 	access := func(next http.Handler) http.Handler {
 		return a.requireAuth(a.requireLoraTrainingAccess(next))
 	}
@@ -139,9 +151,7 @@ func (a *App) requireLoraTrainingAccess(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := a.currentUser(r)
 		if user == nil || (user.Role != "admin" && !user.CanTrainImageLora) {
-			a.renderStatus(w, r, http.StatusForbidden, "service_forbidden", map[string]any{
-				"Title": "Доступ закрыт", "Service": "обучению LoRA для изображений",
-			})
+			a.forbiddenPage(w, r, "Вашему аккаунту не разрешён доступ к обучению LoRA для изображений.")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -155,6 +165,10 @@ func (a *App) handleLoraTraining(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
+		if !loraTrainingEditorRequested(r) {
+			a.render(w, r, "lora_library", map[string]any{"Title": "Мои LoRA", "Message": loraTrainingPageMessage(r)})
+			return
+		}
 		a.renderLoraTrainingPage(w, r, http.StatusOK, defaultLoraTrainingForm(), "", loraTrainingPageMessage(r))
 	case http.MethodPost:
 		a.createLoraTrainingJob(w, r)
@@ -164,45 +178,9 @@ func (a *App) handleLoraTraining(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (a *App) handleAdminLoraTraining(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
-		return
-	}
-	profiles, agentMessage := a.loraTrainingProfiles(r.Context())
-	jobs, err := a.store.ListLoraTrainingJobs(r.Context(), 200)
-	if err != nil {
-		http.Error(w, "не удалось загрузить задания обучения", http.StatusInternalServerError)
-		return
-	}
-	readyProfiles := 0
-	activeJobs := 0
-	completedJobs := 0
-	failedJobs := 0
-	for _, profile := range profiles {
-		if profile.Ready {
-			readyProfiles++
-		}
-	}
-	views := make([]loraTrainingJobView, 0, len(jobs))
-	for _, job := range jobs {
-		views = append(views, newLoraTrainingJobView(job))
-		switch {
-		case !job.State.Terminal():
-			activeJobs++
-		case job.State == domain.LoraTrainingCompleted:
-			completedJobs++
-		case job.State == domain.LoraTrainingFailed:
-			failedJobs++
-		}
-	}
-	a.render(w, r, "admin_lora_training", map[string]any{
-		"Title": "Обучение LoRA", "Profiles": profiles, "ReadyProfiles": readyProfiles,
-		"AgentMessage": agentMessage, "Jobs": views, "ActiveJobs": activeJobs,
-		"CompletedJobs": completedJobs, "FailedJobs": failedJobs, "Cancelled": r.URL.Query().Get("cancelled") == "1",
-		"Deleted": r.URL.Query().Get("deleted") == "1",
-	})
+func loraTrainingEditorRequested(r *http.Request) bool {
+	query := r.URL.Query()
+	return query.Has("dataset") || query.Has("version") || query.Has("run") || query.Get("new") == "1"
 }
 
 func (a *App) handleAdminLoraTrainingAction(w http.ResponseWriter, r *http.Request, rawPath string) {
@@ -250,7 +228,7 @@ func (a *App) handleAdminLoraTrainingAction(w http.ResponseWriter, r *http.Reque
 			a.releaseMiningPauseForLoraTraining(r.Context(), job.ID)
 		}
 		a.audit(r.Context(), &admin.ID, "lora_training_cancel_requested", "lora_training_job", &job.ID, a.clientIP(r), r.UserAgent(), map[string]any{"public_id": job.PublicID, "owner": job.UsernameSnapshot})
-		http.Redirect(w, r, "/admin/lora-training?cancelled=1", http.StatusFound)
+		http.Redirect(w, r, adminTrainingRedirect(r, "cancelled"), http.StatusFound)
 	case "delete":
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
@@ -272,7 +250,7 @@ func (a *App) handleAdminLoraTrainingAction(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		a.audit(r.Context(), &admin.ID, "lora_training_deleted", "lora_training_job", &job.ID, a.clientIP(r), r.UserAgent(), map[string]any{"public_id": job.PublicID, "owner": job.UsernameSnapshot, "artifact": job.ArtifactName})
-		http.Redirect(w, r, "/admin/lora-training?deleted=1", http.StatusFound)
+		http.Redirect(w, r, adminTrainingRedirect(r, "deleted"), http.StatusFound)
 	default:
 		http.NotFound(w, r)
 	}
@@ -304,6 +282,10 @@ func (a *App) handleLoraTrainingAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		job, err = a.store.RequestLoraTrainingCancellation(r.Context(), job.PublicID, user.ID, admin)
+		if errors.Is(err, sql.ErrNoRows) && strings.Contains(r.Header.Get("Accept"), "application/json") {
+			writeGenerationError(w, http.StatusConflict, "Задача уже изменилась. Обновите её состояние.")
+			return
+		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			http.Error(w, "не удалось отменить обучение", http.StatusInternalServerError)
 			return
@@ -318,7 +300,15 @@ func (a *App) handleLoraTrainingAction(w http.ResponseWriter, r *http.Request) {
 			a.releaseMiningPauseForLoraTraining(r.Context(), job.ID)
 		}
 		a.audit(r.Context(), &user.ID, "lora_training_cancel_requested", "lora_training_job", &job.ID, a.clientIP(r), r.UserAgent(), map[string]any{"public_id": job.PublicID})
-		http.Redirect(w, r, "/train-lora?cancelled=1#training-history", http.StatusFound)
+		if strings.Contains(r.Header.Get("Accept"), "application/json") {
+			writeJSON(w, http.StatusAccepted, map[string]any{"cancel_requested": true})
+			return
+		}
+		returnKey := "job"
+		if r.FormValue("return_view") == "workspace" {
+			returnKey = "run"
+		}
+		http.Redirect(w, r, "/train-lora?cancelled=1&"+returnKey+"="+url.QueryEscape(job.PublicID), http.StatusFound)
 	case "download":
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", http.MethodGet)
@@ -346,34 +336,24 @@ func (a *App) handleLoraTrainingAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a.audit(r.Context(), &user.ID, "lora_training_deleted", "lora_training_job", &job.ID, a.clientIP(r), r.UserAgent(), map[string]any{"public_id": job.PublicID, "artifact": job.ArtifactName})
-		http.Redirect(w, r, "/train-lora?deleted=1#training-history", http.StatusFound)
+		http.Redirect(w, r, "/train-lora?deleted=1", http.StatusFound)
 	default:
 		http.NotFound(w, r)
 	}
 }
 
 func (a *App) renderLoraTrainingPage(w http.ResponseWriter, r *http.Request, status int, form loraTrainingForm, errorMessage, message string) {
-	user := a.currentUser(r)
 	profiles, agentMessage := a.loraTrainingProfiles(r.Context())
-	jobs, err := a.store.ListLoraTrainingJobsByUser(r.Context(), user.ID, 30)
-	if err != nil {
-		http.Error(w, "не удалось загрузить историю обучения", http.StatusInternalServerError)
-		return
-	}
 	readyProfiles := 0
 	for _, profile := range profiles {
 		if profile.Ready {
 			readyProfiles++
 		}
 	}
-	views := make([]loraTrainingJobView, 0, len(jobs))
-	for _, job := range jobs {
-		views = append(views, newLoraTrainingJobView(job))
-	}
 	a.renderStatus(w, r, status, "lora_training", map[string]any{
 		"Title": "Обучение LoRA", "Profiles": profiles, "ReadyProfiles": readyProfiles,
 		"AgentMessage": agentMessage, "Presets": loraTrainingPresets, "Form": form,
-		"Jobs": views, "Error": errorMessage, "Message": message,
+		"Error": errorMessage, "Message": message,
 	})
 }
 
@@ -465,7 +445,7 @@ func (a *App) createLoraTrainingJob(w http.ResponseWriter, r *http.Request) {
 	a.audit(r.Context(), &user.ID, "lora_training_created", "lora_training_job", &job.ID, a.clientIP(r), r.UserAgent(), map[string]any{
 		"profile_id": profile.ID, "family": profile.Family, "samples": len(images), "preset": preset.ID, "resolution": form.Resolution,
 	})
-	http.Redirect(w, r, "/train-lora?created=1#training-history", http.StatusFound)
+	http.Redirect(w, r, "/train-lora?created=1&job="+url.QueryEscape(job.PublicID), http.StatusFound)
 }
 
 func (a *App) readLoraTrainingSubmission(w http.ResponseWriter, r *http.Request, workspace string) (loraTrainingForm, map[string][]string, []uploadedTrainingImage, error) {
@@ -750,7 +730,7 @@ func (a *App) handleLoraTrainingJobAPI(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		status, statusErr := a.loraTraining.Status(ctx, job.AgentJobID)
 		cancel()
-		if statusErr == nil {
+		if statusErr == nil && status.ID == job.AgentJobID && status.GatewayJobID == job.PublicID {
 			agentStatus = &status
 		}
 	}
@@ -897,6 +877,7 @@ func (a *App) refreshLoraTrainingJobs(ctx context.Context) (int64, error) {
 			State: state, Stage: truncateLoraText(status.Stage, 120), Progress: clampLoraProgress(status.Progress),
 			Message: truncateLoraText(status.Message, 1000), ErrorMessage: truncateLoraText(status.Error, 2000),
 			ArtifactName: truncateLoraText(status.ArtifactName, 255), ArtifactBytes: status.ArtifactBytes,
+			Provenance: status.Provenance,
 		}); err != nil {
 			refreshErrors = append(refreshErrors, err)
 			continue
@@ -909,7 +890,7 @@ func (a *App) refreshLoraTrainingJobs(ctx context.Context) (int64, error) {
 		}
 	}
 
-	job, claimErr := a.store.ClaimNextLoraTrainingJob(ctx)
+	job, claimErr := a.store.ClaimNextLoraTrainingJob(ctx, newRequestID())
 	if errors.Is(claimErr, sql.ErrNoRows) {
 		return processed, errors.Join(refreshErrors...)
 	}
@@ -917,6 +898,21 @@ func (a *App) refreshLoraTrainingJobs(ctx context.Context) (int64, error) {
 		return processed, errors.Join(append(refreshErrors, claimErr)...)
 	}
 	processed++
+	var repeat *domain.LoraTrainingRepeatConstraint
+	receipt, repeatErr := a.store.LoraTrainingRepeatForJob(ctx, job.ID)
+	if repeatErr == nil {
+		profile, err := a.matchingLoraRepeatProfile(ctx, job)
+		if err != nil || profile.ProfileSHA256 != receipt.Constraint.ProfileSHA256 {
+			_ = a.store.UpdateLoraTrainingJob(ctx, job.ID, store.UpdateLoraTrainingJobParams{State: domain.LoraTrainingFailed, Stage: "Повтор недоступен", Progress: 100, Message: "Профиль точного повтора изменился или недоступен."})
+			a.removeLoraTrainingDataset(job)
+			_ = a.store.ClearLoraTrainingDatasetPath(ctx, job.ID)
+			return processed, errors.Join(refreshErrors...)
+		}
+		repeat = receipt.Constraint
+	} else if !errors.Is(repeatErr, sql.ErrNoRows) {
+		_, requeueErr := a.store.RequeueLoraTrainingJob(ctx, job.ID, job.DispatchToken, "Проверяем параметры повторного обучения.")
+		return processed, errors.Join(append(refreshErrors, repeatErr, requeueErr)...)
+	}
 	file, openErr := os.Open(job.DatasetPath)
 	if openErr != nil {
 		_ = a.store.UpdateLoraTrainingJob(ctx, job.ID, store.UpdateLoraTrainingJobParams{State: domain.LoraTrainingFailed, Stage: "Ошибка датасета", Progress: 100, Message: "Исходный датасет не найден.", ErrorMessage: openErr.Error()})
@@ -934,10 +930,23 @@ func (a *App) refreshLoraTrainingJobs(ctx context.Context) (int64, error) {
 		a.releaseMiningPauseForLoraTraining(ctx, job.ID)
 		return processed, errors.Join(refreshErrors...)
 	}
+	gpuWork, gpuErr := a.gpuCoordinator.admit(ctx, domain.GPUWorkTraining, job.PublicID, &user, job.DispatchToken, job.CreatedAt)
+	if gpuErr != nil {
+		file.Close()
+		requeued, requeueErr := a.store.RequeueLoraTrainingJob(ctx, job.ID, job.DispatchToken, gpuErr.Error())
+		if requeueErr == nil && requeued.State.Terminal() {
+			a.releaseMiningPauseForLoraTraining(ctx, job.ID)
+		}
+		var waiting *gpuAdmissionWait
+		if errors.As(gpuErr, &waiting) {
+			gpuErr = nil
+		}
+		return processed, errors.Join(append(refreshErrors, gpuErr, requeueErr)...)
+	}
 	_, miningWarning, pauseErr := a.pauseMiningForLoraTraining(ctx, &user, job.ID)
 	if pauseErr != nil {
 		file.Close()
-		requeued, requeueErr := a.store.RequeueLoraTrainingJob(ctx, job.ID, "Ждём освобождения GPU: "+pauseErr.Error())
+		requeued, requeueErr := a.store.RequeueLoraTrainingJob(ctx, job.ID, job.DispatchToken, "Ждём освобождения GPU: "+pauseErr.Error())
 		if requeueErr == nil && requeued.State.Terminal() {
 			a.removeLoraTrainingDataset(requeued)
 			_ = a.store.ClearLoraTrainingDatasetPath(ctx, requeued.ID)
@@ -946,23 +955,37 @@ func (a *App) refreshLoraTrainingJobs(ctx context.Context) (int64, error) {
 		if requeueErr != nil {
 			refreshErrors = append(refreshErrors, requeueErr)
 		}
+		if requeueErr == nil {
+			a.releaseMiningPauseForLoraTraining(ctx, job.ID)
+		}
 		return processed, errors.Join(append(refreshErrors, pauseErr)...)
 	}
-	submission, beginErr := a.store.BeginLoraTrainingSubmission(ctx, job.ID)
+	if gpuErr := a.gpuCoordinator.dispatch(ctx, gpuWork); gpuErr != nil {
+		file.Close()
+		_, requeueErr := a.store.RequeueLoraTrainingJob(ctx, job.ID, job.DispatchToken, "Повторяем получение GPU.")
+		if requeueErr == nil {
+			a.releaseMiningPauseForLoraTraining(ctx, job.ID)
+		}
+		return processed, errors.Join(append(refreshErrors, gpuErr, requeueErr)...)
+	}
+	submission, beginErr := a.store.BeginLoraTrainingSubmission(ctx, job.ID, job.DispatchToken)
 	if beginErr != nil {
 		file.Close()
 		recoveryCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		requeued, requeueErr := a.store.RequeueLoraTrainingJob(recoveryCtx, job.ID, "Повторяем подготовку передачи.")
+		requeued, requeueErr := a.store.RequeueLoraTrainingJob(recoveryCtx, job.ID, job.DispatchToken, "Повторяем подготовку передачи.")
 		if requeueErr == nil && requeued.State.Terminal() {
 			a.removeLoraTrainingDataset(requeued)
 			_ = a.store.ClearLoraTrainingDatasetPath(recoveryCtx, job.ID)
+		}
+		if requeueErr == nil {
 			a.releaseMiningPauseForLoraTraining(recoveryCtx, job.ID)
 		}
 		return processed, errors.Join(append(refreshErrors, beginErr, requeueErr)...)
 	}
 	job = submission
 	status, submitErr := a.loraTraining.Submit(ctx, loratraining.JobSpec{
+		Repeat:       repeat,
 		GatewayJobID: job.PublicID, ProfileID: job.ProfileID, Owner: job.UsernameSnapshot, Name: job.Name,
 		OutputName: job.OutputName, TriggerWord: job.TriggerWord, ConceptType: job.ConceptType,
 		Resolution: job.Resolution, MaxSteps: job.MaxTrainSteps, NetworkDim: job.NetworkDim,
@@ -1012,7 +1035,8 @@ func loraTrainingStateFromAgent(state string) domain.LoraTrainingState {
 func loraTrainingJSON(job domain.LoraTrainingJob, agent *loratraining.JobStatus, includeUsername bool) loraTrainingJobJSON {
 	view := newLoraTrainingJobView(job)
 	result := loraTrainingJobJSON{
-		ID: job.PublicID, Name: job.Name, OutputName: job.OutputName, ProfileID: job.ProfileID,
+		PassportURL: "/api/lora-training/passports/" + url.PathEscape(job.PublicID),
+		ID:          job.PublicID, Name: job.Name, OutputName: job.OutputName, ProfileID: job.ProfileID,
 		Family: job.Family, FamilyLabel: view.FamilyLabel, BaseModel: job.BaseModel,
 		State: string(job.State), StateLabel: view.StateLabel, StateClass: view.StateClass,
 		Stage: job.Stage, Progress: job.Progress, Message: job.Message, Error: job.ErrorMessage,

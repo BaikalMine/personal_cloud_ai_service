@@ -16,12 +16,14 @@
     const csrf = center.dataset.notificationCsrf || "";
     let revision = Number(center.dataset.notificationRevision) || 0;
     let knownIDs = new Set();
+    const shownIDs = new Set();
     let initialized = false;
     let loading = false;
     let pendingLoad = false;
     let preferences = { in_app_enabled: true, success_enabled: true, browser_enabled: false };
     let events = null;
     let pageActive = true;
+    let authRequired = false;
     let lifecycle = 0;
     let loadController = null;
     const focusTrap = window.AIGatewayDialogFocus?.createFocusTrap?.({ root: panel });
@@ -51,7 +53,9 @@
     };
 
     const browserNotificationWasShown = (id) => {
-      const key = `ai-gateway.notification-shown.${id}`;
+      if (shownIDs.has(String(id))) return true;
+      shownIDs.add(String(id));
+      const key = `ai-gateway.notification-shown.${center.dataset.notificationOwner || ""}.${id}`;
       try {
         if (window.localStorage.getItem(key)) return true;
         window.localStorage.setItem(key, String(Date.now()));
@@ -59,20 +63,26 @@
       return false;
     };
 
-    const showBrowserNotification = (item) => {
+    const showBrowserNotification = async (item) => {
       if (!preferences.browser_enabled
         || !("Notification" in window)
-        || window.Notification.permission !== "granted"
-        || browserNotificationWasShown(item.id)) return;
-      const notification = new window.Notification(item.title, {
-        body: item.message || "Откройте AI Gateway, чтобы посмотреть задачу.",
-        tag: `generation-${item.generation_job_id}`,
-      });
-      notification.addEventListener("click", () => {
-        window.focus();
-        window.location.assign(item.href);
-        notification.close();
-      });
+        || window.Notification.permission !== "granted") return;
+      const show = () => {
+        if (!pageActive || authRequired || !preferences.in_app_enabled || !preferences.browser_enabled || browserNotificationWasShown(item.id)) return;
+        const notification = new window.Notification(item.title, {
+          body: item.message || "Откройте AI Gateway, чтобы посмотреть задачу.",
+          tag: `ai-gateway-notification-${item.id}`,
+        });
+        notification.addEventListener("click", () => {
+          window.focus();
+          window.location.assign(item.href);
+          notification.close();
+        });
+      };
+      try {
+        if (window.navigator?.locks?.request) await window.navigator.locks.request(`ai-gateway-notification-${item.id}`, show);
+        else show();
+      } catch (_) {}
     };
 
     const render = (items, summary) => {
@@ -108,7 +118,7 @@
         const link = document.createElement("a");
         link.className = "notification-item";
         if (!item.read) link.classList.add("is-unread");
-        if (item.kind === "generation_failed") link.classList.add("is-failed");
+        if (["generation_failed", "lora_training_failed", "lora_caption_series_failed"].includes(item.kind)) link.classList.add("is-failed");
         link.href = item.href;
         link.dataset.notificationId = String(item.id);
         link.dataset.notificationRead = String(Boolean(item.read));
@@ -132,7 +142,7 @@
     };
 
     const load = async () => {
-      if (!pageActive) return;
+      if (!pageActive || authRequired) return;
       if (loading) {
         pendingLoad = true;
         return;
@@ -148,10 +158,23 @@
         });
         const payload = await response.json().catch(() => ({}));
         if (!pageActive || cycle !== lifecycle) return;
+        if (response.redirected || response.status === 401 || response.status === 403) {
+          authRequired = true; events?.close(); poll.stop();
+          knownIDs.clear(); render([], { active_count: 0, unread_count: 0 });
+          setConnection("Сеанс завершён", "offline");
+          if (list) {
+            const login = document.createElement("a");
+            login.className = "notification-empty";
+            login.textContent = "Войдите в аккаунт снова.";
+            login.href = "/login?next=" + encodeURIComponent(window.location.pathname + window.location.search);
+            list.replaceChildren(login);
+          }
+          return;
+        }
         if (!response.ok) throw new Error(payload.error || "Не удалось загрузить уведомления");
         const items = Array.isArray(payload.notifications) ? payload.notifications : [];
         preferences = payload.preferences || preferences;
-        revision = Math.max(revision, Number(payload.summary?.revision) || 0);
+        revision = Number(payload.summary?.revision) || 0;
         if (initialized) {
           items
             .filter((item) => !item.read && !knownIDs.has(String(item.id)))
@@ -247,44 +270,38 @@
     });
 
     const connect = () => {
-      if (!pageActive) return;
-      if (!("EventSource" in window)) {
-        setConnection("Обновляем периодически", "offline");
-        return;
-      }
-      events?.close();
-      events = new EventSource(`/notifications/events?since=${encodeURIComponent(revision)}`);
-      events.addEventListener("open", () => setConnection("Обновляются автоматически", "live"));
-      events.addEventListener("ready", () => {
-        setConnection("Обновляются автоматически", "live");
-        if (!initialized) load();
+      if (!pageActive || authRequired) return;
+      events ||= window.AIGatewayLiveEvents.create({
+        url: () => `/notifications/events?since=${encodeURIComponent(revision)}`,
+        events: { ready: load, notifications: load },
+        onState: state => setConnection(state === "live" ? "Обновляются автоматически" : "Переподключаем обновления", state === "live" ? "live" : "offline"),
+        onError: load,
       });
-      events.addEventListener("notifications", (event) => {
-        try {
-          revision = Math.max(revision, Number(JSON.parse(event.data).revision) || 0);
-        } catch (_) {}
-        setConnection("Обновляются автоматически", "live");
-        load();
-      });
-      events.addEventListener("error", () => setConnection("Переподключаем обновления", "offline"));
+      events.connect();
     };
 
+    const poll = window.AIGatewayLiveEvents.poll(load, 30000, 120000);
     load().finally(connect);
-    let poll = window.setInterval(load, 30000);
+    poll.start();
     window.addEventListener("pagehide", () => {
       pageActive = false;
       lifecycle++;
       pendingLoad = false;
-      window.clearInterval(poll);
+      poll.stop();
       events?.close();
-      events = null;
       loadController?.abort();
     });
     window.addEventListener("pageshow", event => {
       if (!event.persisted || pageActive) return;
       pageActive = true;
       load().finally(connect);
-      poll = window.setInterval(load, 30000);
+      poll.start();
+    });
+    document.addEventListener("visibilitychange", () => {
+      poll.stop();
+      if (!pageActive || authRequired) return;
+      poll.start();
+      if (!document.hidden) load();
     });
   }
 

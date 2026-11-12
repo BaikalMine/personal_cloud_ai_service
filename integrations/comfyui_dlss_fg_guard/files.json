@@ -1,0 +1,18 @@
+{
+  "upstream": "https://github.com/RH-RunningHub/ComfyUI-RH-DLSS5",
+  "commit": "bb044f99ff6b64e6eab3ed180d39708ef5dc0889",
+  "files": [
+    {
+      "path": "fg.py",
+      "sha256": "0B228855D988141485BF47589EFCAC70D0A2E60D1AEE918A3412D69E77EFBD24"
+    },
+    {
+      "path": "lifecycle.py",
+      "sha256": "3E9639352D5B2A7EEFAECDA152F358D26E66D4863E8EF87926B799B4237F9106"
+    },
+    {
+      "path": "test_fg_lifecycle.py",
+      "sha256": "CC41603C29612EFC58077B70A39D7BC7BAF925081A40A1C1C4006CD8BADA6674"
+    }
+  ]
+}

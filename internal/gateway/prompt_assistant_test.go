@@ -25,6 +25,21 @@ func TestPromptAssistantImageCorrectionIsScopedAndBounded(t *testing.T) {
 	}
 }
 
+func TestPromptAssistantMediaReservationIsScopedToImagePreparation(t *testing.T) {
+	r := httptest.NewRequest("POST", "/", nil)
+	r.Form = map[string][]string{"generation_workflow": {"qwen-image21-edit"}}
+	if got := promptAssistantMediaReservation(r, promptassistant.ModeImageToImage); got != promptAssistantMemoryReservation {
+		t.Fatalf("image-free reservation = %d", got)
+	}
+	r.Form.Set("input_image_10", "fixture.png")
+	if got := promptAssistantMediaReservation(r, promptassistant.ModeImageToImage); got != promptAssistantImageMemoryReservation {
+		t.Fatalf("reference preparation reservation = %d", got)
+	}
+	if got := promptAssistantMediaReservation(r, promptassistant.ModeTextToImage); got != promptAssistantMemoryReservation {
+		t.Fatalf("text-only reservation = %d", got)
+	}
+}
+
 func TestPromptAssistantImageReferencesAcceptsKnownRolesInOrder(t *testing.T) {
 	request := httptest.NewRequest("POST", "/generate/prompt-assistant", nil)
 	request.Form = map[string][]string{

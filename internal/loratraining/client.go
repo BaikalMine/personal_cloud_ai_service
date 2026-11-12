@@ -61,6 +61,18 @@ func (c *Client) Profiles(ctx context.Context) (ProfilesResponse, error) {
 	return response, err
 }
 
+func (c *Client) Activity(ctx context.Context) (Activity, error) {
+	var result Activity
+	err := c.doJSON(c.http, ctx, http.MethodGet, "/v1/activity", nil, "", &result)
+	if err != nil {
+		return result, err
+	}
+	if result.ProtocolVersion != 1 || result.ActiveJobs < 0 || result.PendingSubmissions < 0 || result.UnconfirmedJobs < 0 || (result.State != "idle" && result.State != "busy" && result.State != "uncertain") || (result.State == "idle" && (result.ActiveJobs+result.PendingSubmissions+result.UnconfirmedJobs != 0 || result.StorageCleanupActive)) {
+		return result, errors.New("training agent returned an invalid activity observation")
+	}
+	return result, nil
+}
+
 func (c *Client) Submit(ctx context.Context, spec JobSpec, dataset io.Reader, datasetBytes int64) (JobStatus, error) {
 	if !c.Configured() {
 		return JobStatus{}, ErrUnavailable

@@ -26,16 +26,23 @@ type GitTarget struct {
 }
 
 type ComfyTarget struct {
-	WorkingDirectory string   `json:"working_directory"`
-	InputDirectory   string   `json:"input_directory"`
-	OutputDirectory  string   `json:"output_directory"`
-	RemoteURL        string   `json:"remote_url"`
-	Branch           string   `json:"branch"`
-	PythonExecutable string   `json:"python_executable"`
-	LaunchArguments  []string `json:"launch_arguments"`
-	LaunchCommand    []string `json:"launch_command"`
-	StopCommand      []string `json:"stop_command"`
-	HealthURL        string   `json:"health_url"`
+	WorkingDirectory string              `json:"working_directory"`
+	InputDirectory   string              `json:"input_directory"`
+	OutputDirectory  string              `json:"output_directory"`
+	RemoteURL        string              `json:"remote_url"`
+	Branch           string              `json:"branch"`
+	PythonExecutable string              `json:"python_executable"`
+	LaunchArguments  []string            `json:"launch_arguments"`
+	LaunchCommand    []string            `json:"launch_command"`
+	StopCommand      []string            `json:"stop_command"`
+	HealthURL        string              `json:"health_url"`
+	Storage          *ComfyStorageConfig `json:"storage,omitempty"`
+}
+
+type ComfyStorageConfig struct {
+	JournalDirectory string `json:"journal_directory"`
+	GuardURL         string `json:"guard_url"`
+	GuardToken       string `json:"guard_token"`
 }
 
 type OpenWebUITarget struct {
@@ -131,6 +138,30 @@ func (t *ComfyTarget) normalize() error {
 	}
 	if _, err := url.ParseRequestURI(t.HealthURL); err != nil {
 		return fmt.Errorf("comfyui health_url: %w", err)
+	}
+	if t.Storage != nil {
+		if err := t.Storage.normalize(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *ComfyStorageConfig) normalize() error {
+	if c.JournalDirectory == "" || strings.TrimSpace(c.JournalDirectory) != c.JournalDirectory || !filepath.IsAbs(c.JournalDirectory) {
+		return fmt.Errorf("comfyui storage journal_directory must be absolute")
+	}
+	endpoint, err := url.Parse(c.GuardURL)
+	if err != nil || endpoint.Scheme != "http" && endpoint.Scheme != "https" || endpoint.Hostname() == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" || endpoint.RawPath != "" || endpoint.Path != "/ai-gateway/storage/window" || endpoint.ForceQuery {
+		return fmt.Errorf("comfyui storage guard_url must name the private storage window endpoint")
+	}
+	if len(c.GuardToken) < 32 || len(c.GuardToken) > 256 {
+		return fmt.Errorf("comfyui storage guard_token must contain 32-256 ASCII characters")
+	}
+	for _, ch := range c.GuardToken {
+		if ch < 33 || ch > 126 {
+			return fmt.Errorf("comfyui storage guard_token must contain 32-256 ASCII characters")
+		}
 	}
 	return nil
 }

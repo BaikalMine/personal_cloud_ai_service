@@ -1,0 +1,68 @@
+{{define "admin_profile_sessions"}}
+<section class="profile-band" aria-labelledby="profile-sessions-heading">
+  <div class="panel-heading"><h2 id="profile-sessions-heading">Активные сессии</h2>
+    <form method="post"><input type="hidden" name="csrf" value="{{.CSRF}}"><button name="action" value="revoke_sessions" class="ghost" data-confirm="Завершить все активные сессии пользователя?"><i data-lucide="log-out" aria-hidden="true"></i>Завершить все сессии</button></form>
+  </div>
+  {{if eq .SecurityStatus "unlocked"}}<p class="ui-status-banner is-success" role="status">Блокировка и счётчик неудачных попыток сброшены.</p>{{end}}
+  {{if eq .SecurityStatus "status_changed"}}<p class="ui-status-banner is-success" role="status">Состояние аккаунта обновлено.</p>{{end}}
+  {{if eq .SecurityStatus "sessions_revoked"}}<p class="ui-status-banner is-success" role="status">Все сессии завершены.</p>{{end}}
+  {{if eq .SecurityStatus "session_revoked"}}<p class="ui-status-banner is-success" role="status">Сессия завершена.</p>{{end}}
+  {{if eq .SecurityStatus "session_unavailable"}}<p class="ui-status-banner is-warning" role="status">Сессия уже недоступна или является вашей текущей сессией.</p>{{end}}
+  {{if eq .DeleteStatus "confirmation_required"}}<p class="ui-status-banner is-error" role="alert">Для удаления введите логин пользователя.</p>{{end}}
+  {{if eq .DeleteStatus "confirmation_invalid"}}<p class="ui-status-banner is-error" role="alert">Логин не совпадает или эту учётную запись нельзя удалить.</p>{{end}}
+  {{$p := .ProfilePagination}}
+  <form method="get" action="/admin/users/{{.Profile.ID}}#profile-results" class="profile-list-filters">
+    <input type="hidden" name="tab" value="sessions">
+    <label class="ui-field"><span class="ui-field-label">Поиск устройства или адреса</span><input type="search" name="q" maxlength="120" value="{{$p.Filter.Search}}"></label>
+    <label class="ui-field"><span class="ui-field-label">Сессии</span><select name="result"><option value="">Все активные</option value="current" {{if eq $p.Filter.Result "current"}}selected{{end}}>Текущая</option><option value="others" {{if eq $p.Filter.Result "others"}}selected{{end}}>Остальные</option></select></label>
+    <label class="ui-field"><span class="ui-field-label">Последняя активность</span><select name="sort"><option value="newest" {{if ne $p.Filter.Sort "oldest"}}selected{{end}}>Сначала новые</option><option value="oldest" {{if eq $p.Filter.Sort "oldest"}}selected{{end}}>Сначала старые</option></select></label>
+    <div class="profile-filter-actions"><button type="submit" class="icon-button ghost" aria-label="Применить фильтры" title="Применить фильтры"><i data-lucide="search" aria-hidden="true"></i><span class="access-icon-fallback" aria-hidden="true">&#8981;</span></button><a class="button ghost" href="{{$p.ResetURL}}">Сбросить</a></div>
+  </form>
+  <div id="profile-results" class="profile-results" tabindex="-1">
+    <p class="profile-list-count">Найдено сессий: {{formatNumber $p.Total}}</p>
+    <div class="table-scroll"><table class="profile-data-table"><thead><tr><th>Устройство</th><th>Последняя активность</th><th>Адрес</th><th>Действие</th></tr></thead><tbody>
+    {{range .Sessions}}<tr data-profile-session="{{.ID}}">
+      <td data-label="Устройство"><details class="profile-row-details"><summary>{{if .UserAgent}}{{.UserAgent}}{{else}}Неизвестное устройство{{end}}</summary><dl class="key-values"><div><dt>Вход</dt><dd>{{formatTime .CreatedAt}}</dd></div><div><dt>Срок сессии</dt><dd>{{formatTime .ExpiresAt}}</dd></div></dl></details>{{if .Current}}<span class="badge ok">Текущая сессия</span>{{end}}</td>
+      <td data-label="Последняя активность">{{formatTime .LastSeenAt}}</td><td data-label="Адрес">{{.IP}}</td>
+      <td data-label="Действие">{{if .Current}}<span class="muted">Вы сейчас здесь</span>{{else}}<form method="post" action="{{$.ProfilePagination.CurrentURL}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="session_id" value="{{.ID}}"><button type="submit" name="action" value="revoke_session" class="icon-button ghost" aria-label="Завершить сессию {{.ID}}" title="Завершить сессию" data-confirm="Завершить выбранную сессию пользователя?"><i data-lucide="log-out" aria-hidden="true"></i><span class="access-icon-fallback" aria-hidden="true">&#215;</span></button></form>{{end}}</td>
+    </tr>{{else}}<tr><td colspan="4" class="muted">Активных сессий с такими условиями нет.</td></tr>{{end}}
+    </tbody></table></div>
+    {{template "access_list_pagination" $p}}
+  </div>
+</section>
+<div class="profile-security-grid">
+    <section class="profile-security-section password-panel">
+      <div class="panel-heading"><div><h2>Установить новый пароль</h2></div></div>
+      {{if eq .PasswordStatus "changed"}}<p class="success-box">Пароль изменён, остальные сессии завершены.</p>{{end}}
+      {{if eq .PasswordStatus "invalid"}}<p class="alert">Пароли должны совпадать и содержать не менее 10 символов.</p>{{end}}
+      <form method="post">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <input type="hidden" name="action" value="change_password">
+        <label class="ui-field"><span class="ui-field-label">Новый пароль</span><input name="new_password" type="password" autocomplete="new-password" placeholder="Не менее 10 символов" required minlength="10"></label>
+        <label class="ui-field"><span class="ui-field-label">Повторите пароль</span><input name="confirm_password" type="password" autocomplete="new-password" placeholder="Повторите новый пароль" required minlength="10"></label>
+        <button type="submit">Установить пароль</button>
+      </form>
+    </section>
+
+    <section class="profile-security-section security-panel">
+      <div class="panel-heading"><div><h2>Состояние аккаунта</h2></div></div>
+      <form method="post" class="stack-actions">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        {{if gt .Profile.FailedLoginCount 0}}<button name="action" value="unlock" class="ghost">Снять блокировку входа</button>{{end}}
+        {{if ne .Profile.Role "admin"}}
+          {{if .Profile.Disabled}}<button name="action" value="enable">Включить пользователя</button>{{else}}<button name="action" value="disable" class="danger" data-confirm="Отключить пользователя и завершить его активные сессии?">Отключить пользователя</button>{{end}}
+        {{end}}
+      </form>
+	  {{if ne .Profile.Role "admin"}}
+	  <form method="post" class="delete-account-form">
+		<input type="hidden" name="csrf" value="{{.CSRF}}">
+		<input type="hidden" name="action" value="delete">
+		<label class="ui-field"><span class="ui-field-label">Подтвердите логином </span><input name="confirm_username" autocomplete="off" placeholder="{{.Profile.Username}}" required></label>
+		<p class="muted">Удаление необратимо: будут удалены сессии, сохранённые настройки, файлы профиля и данные сервисов пользователя.</p>
+		<button type="submit" class="danger" data-confirm="Удалить учётную запись {{.Profile.Username}} без возможности восстановления?">Удалить учётную запись</button>
+	  </form>
+	  {{end}}
+    </section>
+
+</div>
+{{end}}

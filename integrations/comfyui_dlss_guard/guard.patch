@@ -1,0 +1,278 @@
+--- a/dlss5/session.py
++++ b/dlss5/session.py
+@@ -10,6 +10,7 @@
+ import numpy as np
+ 
+ from . import protocol
++from .lifecycle import WorkerGuard
+ from .diagnostics import (
+     LogRing,
+     describe_worker_failure,
+@@ -59,6 +60,7 @@
+         self._logs = LogRing()
+         self._log_thread: threading.Thread | None = None
+         self._closed = False
++        self._guard = None
+         self._frames_submitted = 0
+         # Filesystem timestamps can lag slightly behind the clock.
+         self._started_at = time.time() - 1.0
+@@ -80,6 +82,7 @@
+             ) from exc
+ 
+         try:
++            self._guard = WorkerGuard(self._worker)
+             self._log_thread = threading.Thread(
+                 target=drain,
+                 args=(self._worker.stderr, self._logs),
+@@ -87,7 +90,8 @@
+                 daemon=True,
+             )
+             self._log_thread.start()
+-            self.setup = self._handshake(frame_count)
++            with self._guard.operation(90):
++                self.setup = self._handshake(frame_count)
+         except BaseException:
+             self.abort()
+             raise
+@@ -230,6 +234,18 @@
+         reset: bool,
+         pts: int,
+     ) -> tuple[np.ndarray, int]:
++        with self._guard.operation(30):
++            return self._submit(index=index, rgba=rgba, motion=motion, reset=reset, pts=pts)
++
++    def _submit(
++        self,
++        *,
++        index: int,
++        rgba: np.ndarray,
++        motion: np.ndarray,
++        reset: bool,
++        pts: int,
++    ) -> tuple[np.ndarray, int]:
+         """Send one render-resolution RGBA frame and return the enhanced frame."""
+         if self._closed:
+             raise RuntimeError("This DLSS session is already closed.")
+@@ -271,6 +287,16 @@
+     # -- teardown ------------------------------------------------------------
+ 
+     def close(self) -> None:
++        if self._closed:
++            return
++        try:
++            with self._guard.operation(65):
++                self._finish()
++        finally:
++            if self._closed:
++                self._guard.close()
++
++    def _finish(self) -> None:
+         """Finish the stream and require a clean worker exit."""
+         if self._closed:
+             return
+@@ -319,6 +345,8 @@
+                     self._worker.kill()
+                 except OSError:
+                     pass
++        if self._guard is not None:
++            self._guard.close()
+         self._close_pipes()
+         self._join_log_thread()
+ 
+--- a/nodes/enhance_images.py
++++ b/nodes/enhance_images.py
+@@ -3,6 +3,7 @@
+ from __future__ import annotations
+ 
+ import torch
++import comfy.model_management as model_management
+ from comfy_api.latest import io
+ from comfy.model_management import throw_exception_if_processing_interrupted
+ from comfy.utils import ProgressBar
+@@ -64,6 +65,12 @@
+             raise ValueError("The image batch is empty.")
+         keep_alpha = channels == 4
+ 
++        # D3D12 allocations are outside ComfyUI's model memory manager.
++        images = images.detach().to(device="cpu")
++        model_management.unload_all_models()
++        model_management.soft_empty_cache(force=True)
++        throw_exception_if_processing_interrupted()
++
+         with DlssSession(
+             layout,
+             options,
+--- a/nodes/enhance_video.py
++++ b/nodes/enhance_video.py
+@@ -10,6 +10,7 @@
+ import folder_paths
+ from comfy_api.latest import io, ui
+ from comfy.model_management import throw_exception_if_processing_interrupted
++import comfy.model_management as model_management
+ from comfy.utils import ProgressBar
+ 
+ from ..dlss5.imaging import fit_frame
+@@ -318,6 +319,9 @@
+         quality: str,
+     ):
+         """Decode, render and encode concurrently. Returns (frames, session)."""
++        model_management.unload_all_models()
++        model_management.soft_empty_cache(force=True)
++        throw_exception_if_processing_interrupted()
+         session = DlssSession(
+             layout,
+             options,
+--- /dev/null
++++ b/dlss5/lifecycle.py
+@@ -0,0 +1,151 @@
++"""Bound native worker I/O and tie its Windows descendants to the host lifetime."""
++from contextlib import contextmanager
++import ctypes
++from ctypes import wintypes
++import os
++import subprocess
++import sys
++import threading
++import time
++
++
++class _BasicLimits(ctypes.Structure):
++    _fields_ = [("process_time", ctypes.c_int64), ("job_time", ctypes.c_int64),
++                ("flags", wintypes.DWORD), ("min_ws", ctypes.c_size_t),
++                ("max_ws", ctypes.c_size_t), ("active", wintypes.DWORD),
++                ("affinity", ctypes.c_size_t), ("priority", wintypes.DWORD),
++                ("scheduling", wintypes.DWORD)]
++
++
++class _IOCounters(ctypes.Structure):
++    _fields_ = [(name, ctypes.c_uint64) for name in
++                ("read_ops", "write_ops", "other_ops", "read_bytes", "write_bytes", "other_bytes")]
++
++
++class _Limits(ctypes.Structure):
++    _fields_ = [("basic", _BasicLimits), ("io", _IOCounters),
++                ("process_memory", ctypes.c_size_t), ("job_memory", ctypes.c_size_t),
++                ("peak_process_memory", ctypes.c_size_t), ("peak_job_memory", ctypes.c_size_t)]
++
++
++class WindowsJob:
++    def __init__(self, worker):
++        self.kernel = ctypes.WinDLL("kernel32", use_last_error=True)
++        self.kernel.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
++        self.kernel.CreateJobObjectW.restype = wintypes.HANDLE
++        self.kernel.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
++        self.kernel.SetInformationJobObject.restype = wintypes.BOOL
++        self.kernel.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
++        self.kernel.AssignProcessToJobObject.restype = wintypes.BOOL
++        self.kernel.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
++        self.kernel.TerminateJobObject.restype = wintypes.BOOL
++        self.kernel.CloseHandle.argtypes = [wintypes.HANDLE]
++        self.kernel.CloseHandle.restype = wintypes.BOOL
++        self.handle = self.kernel.CreateJobObjectW(None, None)
++        if not self.handle:
++            raise ctypes.WinError(ctypes.get_last_error())
++        try:
++            limits = _Limits()
++            limits.basic.flags = 0x2000
++            if not self.kernel.SetInformationJobObject(self.handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
++                raise ctypes.WinError(ctypes.get_last_error())
++            if not self.kernel.AssignProcessToJobObject(self.handle, wintypes.HANDLE(int(worker._handle))):
++                raise ctypes.WinError(ctypes.get_last_error())
++        except BaseException:
++            self.close()
++            raise
++
++    def terminate(self):
++        if self.handle and not self.kernel.TerminateJobObject(self.handle, 1):
++            raise ctypes.WinError(ctypes.get_last_error())
++
++    def close(self):
++        if self.handle:
++            self.kernel.CloseHandle(self.handle)
++            self.handle = None
++
++
++def _comfy_cancelled():
++    module = sys.modules.get("comfy.model_management")
++    return bool(module and module.processing_interrupted())
++
++
++class WorkerGuard:
++    def __init__(self, worker, cancelled=_comfy_cancelled):
++        self.worker = worker
++        self.cancelled = cancelled
++        self.deadline = None
++        self.failure = None
++        self.stop = threading.Event()
++        self.job = None
++        self.thread = None
++        try:
++            if os.name == "nt":
++                self.job = WindowsJob(worker)
++            self.thread = threading.Thread(target=self._watch, name="dlss5-worker-watchdog", daemon=True)
++            self.thread.start()
++        except BaseException:
++            worker.kill()
++            worker.wait(timeout=5)
++            if self.job:
++                self.job.close()
++            raise
++
++    def _kill(self):
++        if self.job:
++            self.job.terminate()
++        elif self.worker.poll() is None:
++            self.worker.kill()
++
++    def _watch(self):
++        while not self.stop.wait(0.05):
++            if self.worker.poll() is not None:
++                return
++            try:
++                if self.cancelled():
++                    self.failure = InterruptedError("DLSS cancelled")
++                elif self.deadline is not None and time.monotonic() >= self.deadline:
++                    self.failure = TimeoutError("Native DLSS worker exceeded its operation deadline")
++                if self.failure:
++                    self._kill()
++                    return
++            except BaseException as error:
++                self.failure = error
++                try:
++                    self.worker.kill()
++                except OSError:
++                    pass
++                return
++
++    def _raise_failure(self):
++        if isinstance(self.failure, InterruptedError):
++            module = sys.modules.get("comfy.model_management")
++            if module:
++                module.throw_exception_if_processing_interrupted()
++        if self.failure:
++            raise self.failure
++
++    @contextmanager
++    def operation(self, timeout):
++        self._raise_failure()
++        self.deadline = time.monotonic() + timeout
++        try:
++            yield
++        except BaseException:
++            self._raise_failure()
++            raise
++        finally:
++            self.deadline = None
++        self._raise_failure()
++
++    def close(self):
++        self.stop.set()
++        if self.thread and self.thread is not threading.current_thread():
++            self.thread.join(timeout=2)
++        try:
++            if self.worker.poll() is None:
++                self._kill()
++            self.worker.wait(timeout=5)
++        finally:
++            if self.job:
++                self.job.close()

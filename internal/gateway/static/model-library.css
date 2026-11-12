@@ -1,0 +1,86 @@
+.model-library [hidden] { display: none !important; }
+.model-library { min-width: 0; }
+.model-heading, .model-actions, .model-list-heading, .model-pagination { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.model-heading, .model-list-heading { justify-content: space-between; }
+.model-heading h1 { margin: 0; font-size: var(--font-size-title); }
+.model-heading h2, .model-dialog h2 { margin: 0; font-size: var(--font-size-section); }
+.model-library button, .model-library .button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; white-space: normal; }
+.model-library svg { width: 20px; height: 20px; flex: 0 0 20px; }
+.model-filters { display: grid; grid-template-columns: 160px minmax(160px, 2fr) minmax(160px, 1fr) 44px; align-items: end; gap: 12px; padding-block: 24px 12px; }
+.model-library .ui-field { display: grid; gap: 8px; min-width: 0; }
+.model-library input, .model-library select { width: 100%; min-width: 0; }
+.model-library input[type="checkbox"] { width: auto; }
+.model-list-heading { min-height: 44px; margin-bottom: 12px; font-size: 14px; }
+.model-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.model-card { position: relative; min-width: 0; border: 1px solid var(--color-border); border-radius: 8px; overflow: hidden; background: var(--color-surface); }
+.model-card button { width: 100%; display: block; padding: 0; border: 0; border-radius: 0; text-align: left; color: inherit; background: transparent; }
+.model-card button:hover { background: var(--color-surface-raised); }
+.model-card .model-card-delete { position: absolute; top: 8px; right: 8px; display: inline-flex; width: 44px; height: 44px; padding: 0; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface); }
+.model-cover { aspect-ratio: 4/3; overflow: hidden; background: var(--color-media-bg); display: grid; place-items: center; color: var(--color-text-muted); }
+.model-cover img { width: 100%; height: 100%; object-fit: contain; }
+.model-cover .model-cover-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; font-size: 13px; padding: 16px; }
+.model-cover-empty svg { width: 32px; height: 32px; }
+.model-card-body { padding: 14px; display: grid; gap: 8px; }
+.model-card-title { font-size: 16px; font-weight: 650; overflow-wrap: anywhere; }
+.model-card-meta { display: flex; gap: 8px 16px; flex-wrap: wrap; font-size: 13px; color: var(--color-text-muted); }
+.model-card-update { font-size: 13px; color: var(--color-text); }
+.model-pagination { justify-content: center; padding-block: 24px; }
+.model-downloads { border-top: 1px solid var(--color-border); padding-top: 24px; }
+.model-download-row { padding-block: 16px; border-bottom: 1px solid var(--color-border); display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px 16px; }
+.model-download-row strong, .model-download-row p { overflow-wrap: anywhere; margin: 0; }
+.model-download-row p { font-size: 13px; color: var(--color-text-muted); }
+.model-download-row progress { width: 100%; height: 8px; accent-color: var(--mint); grid-column: 1/-1; }
+.model-download-row .model-download-stats { grid-column: 1/-1; font-variant-numeric: tabular-nums; }
+.model-download-notifications { position: fixed; z-index: 75; top: 80px; right: 20px; width: min(370px, calc(100vw - 32px)); pointer-events: none; }
+.model-download-notifications > button, .model-download-notifications [data-download-notice-list] > *, .model-download-connection { pointer-events: auto; }
+.model-download-notice-toggle { margin-left: auto; margin-bottom: 8px; display: flex !important; background: var(--color-surface) !important; box-shadow: var(--shadow-dialog); }
+[data-download-notice-list] { display: grid; gap: 10px; max-height: min(460px, calc(100dvh - 160px)); overflow-y: auto; overscroll-behavior: contain; }
+.model-download-notice { min-width: 0; padding: 14px 16px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface); box-shadow: var(--shadow-dialog); animation: model-notice-in 180ms ease-out; }
+.model-download-notice header { display: flex; align-items: flex-start; gap: 8px; }
+.model-download-notice strong { flex: 1; min-width: 0; padding-top: 6px; font-size: 14px; overflow-wrap: anywhere; }
+.model-download-notice header button { flex: 0 0 44px; }
+.model-download-notice p { margin: 6px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.model-download-notice-message:empty { display: none; }
+.model-download-notice-message { color: var(--color-text-muted); }
+.model-download-notice progress { display: block; width: 100%; height: 8px; margin-top: 12px; accent-color: var(--mint); }
+.model-download-notice-metrics { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 10px; font-size: 12px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.model-download-notice-metrics span:empty { display: none; }
+.model-download-notice[data-state="completed"] { border-color: var(--color-success); }
+.model-download-notice[data-state="failed"] { border-color: var(--color-danger, #d87888); }
+.model-download-connection { padding: 8px 12px; margin: 0 0 8px; border-radius: 6px; background: var(--color-surface); font-size: 13px; }
+@keyframes model-notice-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .model-download-notice { animation: none; } }
+@media (max-width: 650px) { .model-download-notifications { right: 12px; width: min(350px, calc(100vw - 24px)); } .model-download-notice { padding: 10px 12px; } [data-download-notice-list] { max-height: min(300px, calc(100dvh - 180px)); } }
+.model-dialog { width: min(720px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; overflow: hidden; }
+.model-dialog[open] { display: flex; flex-direction: column; }
+.model-dialog > header { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--color-border); }
+.model-dialog h2 { overflow-wrap: anywhere; min-width: 0; }
+.model-dialog > header button { flex: 0 0 44px; }
+.model-dialog-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px; display: grid; gap: 20px; }
+.model-dialog-body section h3 { margin: 0 0 12px; font-size: 16px; }
+.model-installed-versions[hidden] { display: none; }
+.model-installed-versions select { min-height: 44px; max-width: 100%; }
+.model-dialog footer { padding: 12px 20px; display: flex; gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--color-border); }
+.model-dialog footer > * { min-width: 0; max-width: 100%; }
+.model-detail-media:empty { display: none; }
+.model-detail-media img { display: block; width: 100%; max-height: 300px; object-fit: contain; }
+.model-facts { margin: 0; display: grid; grid-template-columns: 150px minmax(0,1fr); gap: 10px 16px; font-size: 14px; }
+.model-facts dt { color: var(--color-text-muted); }
+.model-facts dd { margin: 0; overflow-wrap: anywhere; }
+.model-description { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; margin: 0; }
+.model-source, [data-version-fields], [data-key-form] { display: grid; gap: 16px; }
+.model-source, [data-version-fields] { padding-bottom: 20px; border-bottom: 1px solid var(--color-border); }
+@media (max-width: 1100px) { .model-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 650px) {
+  .model-heading { align-items: flex-start; }
+  .model-heading h1 { font-size: 24px; }
+  .model-actions { width: 100%; }
+  .model-filters { grid-template-columns: minmax(0,1fr) 44px; }
+  .model-filters > label:first-child, .model-filters > label:nth-child(2) { grid-column: 1/-1; }
+  .model-grid { grid-template-columns: minmax(0,1fr); gap: 16px; }
+  .model-facts { grid-template-columns: minmax(0,1fr); gap: 4px; }
+  .model-facts dd { margin-bottom: 10px; }
+  .model-dialog > header, .model-dialog-body, .model-dialog footer { padding: 16px; }
+  .model-dialog footer button:not(.task-icon-button) { flex: 1 1 160px; }
+  .model-dialog footer .task-icon-button { flex: 0 0 44px; width: 44px; }
+}

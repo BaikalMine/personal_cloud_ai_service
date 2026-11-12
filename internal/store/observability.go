@@ -70,7 +70,7 @@ func (s *Store) CollectGatewayObservation(ctx context.Context, overdueAfter time
 			(SELECT count(*) FROM quick_generation_mining_leases),
 			(SELECT count(*) FROM content_events WHERE sensitivity_classified_at IS NULL AND expires_at > now()),
 			(SELECT count(*) FROM content_media m JOIN content_events e ON e.id=m.event_id
-			 WHERE m.media_type='image' AND m.visual_sensitivity_classified_at IS NULL
+			 WHERE m.media_type IN ('image','video') AND m.visual_sensitivity_classified_at IS NULL
 			   AND m.expires_at > now() AND e.expires_at > now()),
 			COALESCE((SELECT status FROM database_cleanup_state WHERE id=1),'never'),
 			COALESCE((SELECT GREATEST(0,EXTRACT(EPOCH FROM (now()-COALESCE(last_success_at,last_finished_at,last_started_at)))::bigint)
@@ -111,25 +111,33 @@ func (s *Store) GatewayObservationSummary(ctx context.Context) (domain.GatewayOb
 }
 
 func (s *Store) ServiceLatencySummaries(ctx context.Context, since time.Time) ([]domain.ServiceLatencySummary, error) {
+	return s.serviceLatencySummariesRange(ctx, since, nil)
+}
+
+func (s *Store) ServiceLatencySummariesBetween(ctx context.Context, since time.Time, until time.Time) ([]domain.ServiceLatencySummary, error) {
+	return s.serviceLatencySummariesRange(ctx, since, &until)
+}
+
+func (s *Store) serviceLatencySummariesRange(ctx context.Context, since time.Time, until *time.Time) ([]domain.ServiceLatencySummary, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		WITH grouped AS (
 			SELECT component,operation,count(*)::bigint AS samples,
 			       count(*) FILTER (WHERE outcome<>'ok')::bigint AS failures,
 			       COALESCE(percentile_disc(0.50) WITHIN GROUP (ORDER BY latency_ms),0)::bigint AS p50_ms,
 			       COALESCE(percentile_disc(0.95) WITHIN GROUP (ORDER BY latency_ms),0)::bigint AS p95_ms
-			FROM service_observations WHERE observed_at >= $1
+			FROM service_observations WHERE observed_at >= $1 AND ($2::timestamptz IS NULL OR observed_at < $2)
 			GROUP BY component,operation
 		), latest AS (
 			SELECT DISTINCT ON (component,operation)
 			       component,operation,latency_ms,outcome,error_code,detail,observed_at
-			FROM service_observations WHERE observed_at >= $1
+			FROM service_observations WHERE observed_at >= $1 AND ($2::timestamptz IS NULL OR observed_at < $2)
 			ORDER BY component,operation,observed_at DESC,id DESC
 		)
 		SELECT g.component,g.operation,g.samples,g.failures,g.p50_ms,g.p95_ms,
 		       l.latency_ms,l.outcome,l.error_code,l.detail,l.observed_at
 		FROM grouped g JOIN latest l USING(component,operation)
 		ORDER BY g.component,g.operation
-	`, since.UTC())
+	`, since.UTC(), until)
 	if err != nil {
 		return nil, err
 	}
@@ -187,6 +195,14 @@ func (s *Store) GenerationObservabilitySummary(ctx context.Context, since, overd
 }
 
 func (s *Store) GenerationOutcomeGroups(ctx context.Context, since time.Time, limit int) ([]domain.GenerationOutcomeGroup, error) {
+	return s.generationOutcomeGroupsRange(ctx, since, limit, nil)
+}
+
+func (s *Store) GenerationOutcomeGroupsBetween(ctx context.Context, since time.Time, limit int, until time.Time) ([]domain.GenerationOutcomeGroup, error) {
+	return s.generationOutcomeGroupsRange(ctx, since, limit, &until)
+}
+
+func (s *Store) generationOutcomeGroupsRange(ctx context.Context, since time.Time, limit int, until *time.Time) ([]domain.GenerationOutcomeGroup, error) {
 	limit = boundedLimit(limit, 1, 100)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT COALESCE(NULLIF(workflow_id,''),'Без workflow'),COALESCE(NULLIF(model_name,''),'Модель не указана'),
@@ -195,10 +211,10 @@ func (s *Store) GenerationOutcomeGroups(ctx context.Context, since time.Time, li
 		       count(*) FILTER (WHERE state='failed')::bigint,
 		       count(*) FILTER (WHERE state IN ('cancelled','expired'))::bigint
 		FROM generation_jobs
-		WHERE finished_at >= $1 AND state IN ('completed','failed','cancelled','expired')
+		WHERE finished_at >= $1 AND ($3::timestamptz IS NULL OR finished_at < $3) AND state IN ('completed','failed','cancelled','expired')
 		GROUP BY workflow_id,model_name
 		ORDER BY count(*) DESC,workflow_id,model_name LIMIT $2
-	`, since.UTC(), limit)
+	`, since.UTC(), limit, until)
 	if err != nil {
 		return nil, err
 	}
@@ -219,13 +235,21 @@ func (s *Store) GenerationOutcomeGroups(ctx context.Context, since time.Time, li
 }
 
 func (s *Store) GenerationFailureSummaries(ctx context.Context, since time.Time, limit int) ([]domain.GenerationFailureSummary, error) {
+	return s.generationFailureSummariesRange(ctx, since, limit, nil)
+}
+
+func (s *Store) GenerationFailureSummariesBetween(ctx context.Context, since time.Time, limit int, until time.Time) ([]domain.GenerationFailureSummary, error) {
+	return s.generationFailureSummariesRange(ctx, since, limit, &until)
+}
+
+func (s *Store) generationFailureSummariesRange(ctx context.Context, since time.Time, limit int, until *time.Time) ([]domain.GenerationFailureSummary, error) {
 	limit = boundedLimit(limit, 1, 100)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT public_id,correlation_id,username_snapshot,workflow_id,model_name,error_code,error_message,COALESCE(finished_at,updated_at)
 		FROM generation_jobs
-		WHERE state='failed' AND COALESCE(finished_at,updated_at) >= $1
+		WHERE state='failed' AND COALESCE(finished_at,updated_at) >= $1 AND ($3::timestamptz IS NULL OR COALESCE(finished_at,updated_at) < $3)
 		ORDER BY COALESCE(finished_at,updated_at) DESC,id DESC LIMIT $2
-	`, since.UTC(), limit)
+	`, since.UTC(), limit, until)
 	if err != nil {
 		return nil, err
 	}

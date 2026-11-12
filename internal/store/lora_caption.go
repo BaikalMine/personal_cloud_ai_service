@@ -11,12 +11,13 @@ import (
 )
 
 var ErrLoraCaptionQuota = errors.New("caption job quota exceeded")
+var ErrLoraCaptionInferencePending = errors.New("previous caption inference has not settled")
 
 const loraCaptionWorkerLockID int64 = 732190355
-const captionColumns = `id,user_id,COALESCE(dataset_id,''),image_id,asset_id,request_key,instruction_version,input_cipher,result_cipher,state,status,error,attempts,run_token,cancel_requested,created_at,updated_at,expires_at,available_at`
+const captionColumns = `id,user_id,COALESCE(dataset_id,''),image_id,asset_id,request_key,instruction_version,input_cipher,result_cipher,state,status,error,attempts,run_token,cancel_requested,created_at,updated_at,expires_at,available_at,COALESCE(inference_work_id,''),inference_metadata_cipher,run_version`
 
 func scanCaption(scanner datasetScanner) (row domain.LoraCaptionJob, err error) {
-	err = scanner.Scan(&row.ID, &row.UserID, &row.DatasetID, &row.ImageID, &row.AssetID, &row.RequestKey, &row.InstructionVersion, &row.InputCipher, &row.ResultCipher, &row.State, &row.Status, &row.Error, &row.Attempts, &row.RunToken, &row.CancelRequested, &row.CreatedAt, &row.UpdatedAt, &row.ExpiresAt, &row.AvailableAt)
+	err = scanner.Scan(&row.ID, &row.UserID, &row.DatasetID, &row.ImageID, &row.AssetID, &row.RequestKey, &row.InstructionVersion, &row.InputCipher, &row.ResultCipher, &row.State, &row.Status, &row.Error, &row.Attempts, &row.RunToken, &row.CancelRequested, &row.CreatedAt, &row.UpdatedAt, &row.ExpiresAt, &row.AvailableAt, &row.InferenceWorkID, &row.InferenceMetadataCipher, &row.RunVersion)
 	return
 }
 
@@ -49,7 +50,7 @@ func (s *Store) EnqueueLoraCaptions(ctx context.Context, userID int64, datasetID
 	result := []domain.LoraCaptionJob{}
 	for _, job := range jobs {
 		// Reuse completed identical requests and any still-active job for this item.
-		existing, e := scanCaption(tx.QueryRowContext(ctx, `SELECT `+captionColumns+` FROM lora_caption_jobs WHERE user_id=$1 AND (request_key=$2 OR ($3<>'' AND dataset_id=$3 AND image_id=$4 AND state IN ('queued','running'))) ORDER BY (state IN ('queued','running')) DESC,created_at DESC LIMIT 1`, userID, job.RequestKey, datasetID, job.ImageID))
+		existing, e := scanCaption(tx.QueryRowContext(ctx, `SELECT `+captionColumns+` FROM lora_caption_jobs WHERE user_id=$1 AND (request_key=$2 OR ($3<>'' AND dataset_id=$3 AND image_id=$4 AND state IN ('queued','running'))) ORDER BY (state IN ('queued','running')) DESC,created_at DESC LIMIT 1 FOR UPDATE`, userID, job.RequestKey, datasetID, job.ImageID))
 		if e == nil {
 			result = append(result, existing)
 			continue
@@ -79,6 +80,13 @@ func (s *Store) EnqueueLoraCaptions(ctx context.Context, userID int64, datasetID
 		total++
 		result = append(result, row)
 	}
+	seriesID, err := ensureCaptionSeries(ctx, tx, userID, datasetID, result)
+	if err != nil {
+		return nil, err
+	}
+	for index := range result {
+		result[index].SeriesID = seriesID
+	}
 	return result, tx.Commit()
 }
 
@@ -106,19 +114,23 @@ func (s *Store) ListLoraCaptionJobs(ctx context.Context, userID int64, datasetID
 // The session lock stays held for the entire model call. A second Gateway
 // cannot take an old-looking job while its owning worker is still connected.
 func (s *Store) WithLoraCaptionWorker(ctx context.Context, work func(*sql.Conn) error) (bool, error) {
+	return s.withAssistantWorkerLock(ctx, loraCaptionWorkerLockID, work)
+}
+
+func (s *Store) withAssistantWorkerLock(ctx context.Context, lockID int64, work func(*sql.Conn) error) (bool, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer conn.Close()
 	var acquired bool
-	if err = conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock($1)`, loraCaptionWorkerLockID).Scan(&acquired); err != nil || !acquired {
+	if err = conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock($1)`, lockID).Scan(&acquired); err != nil || !acquired {
 		return false, err
 	}
 	defer func() {
 		release, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if _, err := conn.ExecContext(release, `SELECT pg_advisory_unlock($1)`, loraCaptionWorkerLockID); err != nil {
+		if _, err := conn.ExecContext(release, `SELECT pg_advisory_unlock($1)`, lockID); err != nil {
 			conn.Raw(func(any) error { return driver.ErrBadConn })
 		}
 	}()
@@ -127,18 +139,27 @@ func (s *Store) WithLoraCaptionWorker(ctx context.Context, work func(*sql.Conn) 
 
 // Must be called only while holding WithLoraCaptionWorker's session lock.
 func (s *Store) ClaimLoraCaptionJob(ctx context.Context, token string) (domain.LoraCaptionJob, error) {
+	return s.claimLoraCaptionJob(ctx, token, false)
+}
+
+func (s *Store) ClaimLoraCaptionRecoveryJob(ctx context.Context, token string) (domain.LoraCaptionJob, error) {
+	return s.claimLoraCaptionJob(ctx, token, true)
+}
+
+func (s *Store) claimLoraCaptionJob(ctx context.Context, token string, onlyBound bool) (domain.LoraCaptionJob, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.LoraCaptionJob{}, err
 	}
 	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, `UPDATE lora_caption_jobs SET state=CASE WHEN cancel_requested THEN 'cancelled' WHEN attempts>=$1 THEN 'failed' ELSE 'queued' END,
-		status='Восстановлено после остановки обработчика',error=CASE WHEN attempts>=$1 THEN 'Обработчик был прерван несколько раз; повторите задание' ELSE '' END,
-		run_token='',available_at=now(),updated_at=now(),expires_at=CASE WHEN cancel_requested OR attempts>=$1 THEN now()+interval '24 hours' ELSE expires_at END WHERE state='running'`, domain.LoraCaptionMaxAttempts); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE lora_caption_jobs SET state=CASE WHEN cancel_requested THEN 'cancelled' WHEN attempts>=$1 AND inference_work_id IS NULL THEN 'failed' ELSE 'queued' END,
+		status='Восстановлено после остановки обработчика',error=CASE WHEN attempts>=$1 AND inference_work_id IS NULL THEN 'Обработчик был прерван несколько раз; повторите задание' ELSE '' END,
+		attempts=CASE WHEN inference_work_id IS NOT NULL THEN GREATEST(0,attempts-1) ELSE attempts END,
+		run_token='',available_at=now(),updated_at=now(),expires_at=CASE WHEN cancel_requested OR (attempts>=$1 AND inference_work_id IS NULL) THEN now()+interval '24 hours' ELSE expires_at END WHERE state='running' AND (NOT $2::boolean OR inference_work_id IS NOT NULL)`, domain.LoraCaptionMaxAttempts, onlyBound); err != nil {
 		return domain.LoraCaptionJob{}, err
 	}
 	row, err := scanCaption(tx.QueryRowContext(ctx, `UPDATE lora_caption_jobs SET state='running',run_token=$1,attempts=attempts+1,status='Ожидаем vision-модель',error='',updated_at=now()
-		WHERE id=(SELECT id FROM lora_caption_jobs WHERE state='queued' AND available_at<=now() AND NOT cancel_requested ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING `+captionColumns, token))
+		WHERE id=(SELECT id FROM lora_caption_jobs WHERE state='queued' AND available_at<=now() AND NOT cancel_requested AND (NOT $2::boolean OR inference_work_id IS NOT NULL) ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING `+captionColumns, token, onlyBound))
 	if errors.Is(err, sql.ErrNoRows) {
 		return row, tx.Commit()
 	}
@@ -152,6 +173,25 @@ func (s *Store) LoraCaptionRunActive(ctx context.Context, id, token string) (boo
 	var active bool
 	err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM lora_caption_jobs j JOIN users u ON u.id=j.user_id WHERE j.id=$1 AND j.run_token=$2 AND j.state='running' AND NOT j.cancel_requested AND NOT u.disabled AND (u.role='admin' OR u.can_train_image_lora) AND (u.account_expires_at IS NULL OR u.account_expires_at>now()))`, id, token).Scan(&active)
 	return active, err
+}
+
+func (s *Store) SetLoraCaptionWaitingMessage(ctx context.Context, id, token, message string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE lora_caption_jobs SET status=$3,updated_at=now() WHERE id=$1 AND run_token=$2 AND state='running' AND NOT cancel_requested`, id, token, message)
+	return err
+}
+
+// Waiting for another GPU owner is not a failed model call and consumes no retry.
+func (s *Store) PostponeLoraCaptionJob(ctx context.Context, id, token, message string) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `UPDATE lora_caption_jobs SET
+		state=CASE WHEN cancel_requested THEN 'cancelled' ELSE 'queued' END,
+		status=CASE WHEN cancel_requested THEN 'Описание отменено' ELSE $3 END,
+		attempts=GREATEST(0,attempts-1),run_token='',available_at=now()+interval '5 seconds',updated_at=now()
+		WHERE id=$1 AND run_token=$2 AND state='running'`, id, token, message)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n == 1, err
 }
 
 func (s *Store) FinishLoraCaptionJob(ctx context.Context, id, token, state, message string, result []byte, retryAfter time.Duration) (bool, error) {
@@ -196,6 +236,15 @@ func (s *Store) RetryLoraCaption(ctx context.Context, userID int64, id string) (
 	if row.State != "failed" && row.State != "cancelled" {
 		return row, tx.Commit()
 	}
+	if row.InferenceWorkID != "" {
+		var inference domain.GPUInference
+		if err = tx.QueryRowContext(ctx, `SELECT state FROM gpu_inference_requests WHERE id=$1`, row.InferenceWorkID).Scan(&inference.State); err != nil {
+			return row, err
+		}
+		if !inference.Settled() {
+			return row, ErrLoraCaptionInferencePending
+		}
+	}
 	var count int
 	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM lora_caption_jobs WHERE user_id=$1 AND state IN ('queued','running')`, userID).Scan(&count); err != nil {
 		return row, err
@@ -216,7 +265,11 @@ func (s *Store) RetryLoraCaption(ctx context.Context, userID int64, id string) (
 			return row, ErrLoraDatasetConflict
 		}
 	}
-	row, err = scanCaption(tx.QueryRowContext(ctx, `UPDATE lora_caption_jobs SET state='queued',cancel_requested=false,attempts=0,status='Повтор описания поставлен в очередь',error='',result_cipher='',available_at=now(),updated_at=now(),expires_at=now()+interval '30 days' WHERE id=$1 RETURNING `+captionColumns, id))
+	row, err = scanCaption(tx.QueryRowContext(ctx, `UPDATE lora_caption_jobs SET state='queued',cancel_requested=false,attempts=0,status='Повтор описания поставлен в очередь',error='',result_cipher='',inference_work_id=NULL,inference_metadata_cipher='',available_at=now(),updated_at=now(),expires_at=now()+interval '30 days' WHERE id=$1 RETURNING `+captionColumns, id))
+	if err != nil {
+		return row, err
+	}
+	row.SeriesID, err = ensureCaptionSeries(ctx, tx, userID, row.DatasetID, []domain.LoraCaptionJob{row})
 	if err != nil {
 		return row, err
 	}
@@ -224,6 +277,9 @@ func (s *Store) RetryLoraCaption(ctx context.Context, userID int64, id string) (
 }
 
 func (s *Store) CleanupLoraCaptionJobs(ctx context.Context) (int64, error) {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM lora_caption_series WHERE id IN (SELECT id FROM lora_caption_series WHERE expires_at<=now() AND state<>'running' ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED)`); err != nil {
+		return 0, err
+	}
 	res, err := s.db.ExecContext(ctx, `DELETE FROM lora_caption_jobs WHERE id IN (SELECT id FROM lora_caption_jobs WHERE expires_at<=now() AND state IN ('completed','failed','cancelled') LIMIT 100 FOR UPDATE SKIP LOCKED)`)
 	if err != nil {
 		return 0, err

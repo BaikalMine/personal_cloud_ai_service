@@ -1,0 +1,273 @@
+{
+  "DLSS5Settings": {
+    "input": {
+      "required": {
+        "upscaling_mode": [
+          "COMBO",
+          {
+            "tooltip": "DLSS mode. 1x (DLAA) enhances at the source resolution; the other modes also upscale by that factor.",
+            "default": "1x (DLAA / native)",
+            "multiselect": false,
+            "options": [
+              "1x (DLAA / native)",
+              "1.5x (Quality)",
+              "1.724x (Balanced)",
+              "2x (Performance)",
+              "3x (Ultra Performance)"
+            ]
+          }
+        ],
+        "nr_preset": [
+          "COMBO",
+          {
+            "tooltip": "Neural rendering preset inside the DLSS model. Measured to produce identical output at every value on current builds.",
+            "default": "Default",
+            "multiselect": false,
+            "options": [
+              "Default",
+              "Preset #1",
+              "Preset #2",
+              "Preset #3"
+            ]
+          }
+        ],
+        "nr_style": [
+          "COMBO",
+          {
+            "tooltip": "Look of the neural pass: Natural stays closer to the source, Cinematic is stronger.",
+            "default": "Default",
+            "multiselect": false,
+            "options": [
+              "Default",
+              "Natural",
+              "Cinematic"
+            ]
+          }
+        ],
+        "nr_intensity": [
+          "FLOAT",
+          {
+            "tooltip": "Overall strength of the neural rendering pass. Measured on current runtime builds, values above 1.0 have no further effect; use below 1.0 to blend back towards the source.",
+            "default": 1.0,
+            "min": 0.0,
+            "max": 2.0,
+            "step": 0.01
+          }
+        ],
+        "local_tone_strength": [
+          "FLOAT",
+          {
+            "tooltip": "Local tone mapping strength.",
+            "default": 1.0,
+            "min": 0.0,
+            "max": 2.0,
+            "step": 0.01
+          }
+        ],
+        "local_structure_strength": [
+          "FLOAT",
+          {
+            "tooltip": "Local detail and structure reconstruction. Higher keeps more texture; 1.5 is a good balance for AI generated footage.",
+            "default": 1.5,
+            "min": 0.0,
+            "max": 2.0,
+            "step": 0.01
+          }
+        ],
+        "skin_structure_strength": [
+          "FLOAT",
+          {
+            "tooltip": "Skin and pore reconstruction. Requires automatic_mask, which is what tells the model where skin is; with the mask off this control does nothing. -1 leaves it to the model.",
+            "default": 2.0,
+            "min": -1.0,
+            "max": 2.0,
+            "step": 0.01
+          }
+        ],
+        "automatic_mask": [
+          "BOOLEAN",
+          {
+            "tooltip": "Let the model detect the regions it treats as skin. Also the gate for skin_structure_strength.",
+            "default": true
+          }
+        ],
+        "dlss_model_preset": [
+          "COMBO",
+          {
+            "tooltip": "Force a specific DLSS model instead of NVIDIA's choice. Measured detail retention: Default, J and K are the softest, L and M reconstruct markedly more skin and hair texture. Set to Default if the worker reports a different applied preset.",
+            "default": "M",
+            "multiselect": false,
+            "options": [
+              "Default",
+              "J",
+              "K",
+              "L",
+              "M"
+            ]
+          }
+        ],
+        "motion": [
+          "COMBO",
+          {
+            "tooltip": "Motion vectors for temporal accumulation. auto estimates optical flow for sequences and skips it for single images.",
+            "advanced": true,
+            "default": "auto",
+            "multiselect": false,
+            "options": [
+              "auto",
+              "optical_flow",
+              "none"
+            ]
+          }
+        ],
+        "scene_change_threshold": [
+          "FLOAT",
+          {
+            "tooltip": "Mean luminance change above which temporal history is reset.",
+            "advanced": true,
+            "default": 0.24,
+            "min": 0.01,
+            "max": 1.0,
+            "step": 0.01
+          }
+        ],
+        "warmup_frames": [
+          "INT",
+          {
+            "tooltip": "Extra frames the worker renders before the first output settles.",
+            "advanced": true,
+            "default": 0,
+            "min": 0,
+            "max": 16
+          }
+        ],
+        "runtime_dir": [
+          "STRING",
+          {
+            "tooltip": "Optional path to a DLSS 5 runtime directory (the folder holding nvngx.dll). Empty uses config.json, DLSS5_RUNTIME_DIR or the bundled runtime folder.",
+            "advanced": true,
+            "default": "",
+            "multiline": false
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "upscaling_mode",
+        "nr_preset",
+        "nr_style",
+        "nr_intensity",
+        "local_tone_strength",
+        "local_structure_strength",
+        "skin_structure_strength",
+        "automatic_mask",
+        "dlss_model_preset",
+        "motion",
+        "scene_change_threshold",
+        "warmup_frames",
+        "runtime_dir"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "DLSS5_SETTINGS"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "settings"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "DLSS5Settings",
+    "display_name": "DLSS5 Settings",
+    "description": "Neural-rendering controls for the NVIDIA DLSS 5 worker. Connect to DLSS5 Enhance Images or DLSS5 Enhance Video File.",
+    "python_module": "custom_nodes.ComfyUI-DLSS5-Enhancer",
+    "category": "image/upscaling",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": [
+      "dlss",
+      "dlss5",
+      "neural rendering",
+      "nvidia"
+    ],
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
+  "DLSS5EnhanceImages": {
+    "input": {
+      "required": {
+        "images": [
+          "IMAGE",
+          {
+            "tooltip": "Frames in playback order; the batch order is the temporal order."
+          }
+        ],
+        "settings": [
+          "DLSS5_SETTINGS",
+          {
+            "tooltip": "Connect a DLSS5 Settings node."
+          }
+        ],
+        "verify_neural_rendering": [
+          "BOOLEAN",
+          {
+            "tooltip": "Fail the render when the ReShade log shows no signed feature-18 execution, instead of silently returning plain upscaled frames.",
+            "advanced": true,
+            "default": true
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "images",
+        "settings",
+        "verify_neural_rendering"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "IMAGE"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "images"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "DLSS5EnhanceImages",
+    "display_name": "DLSS5 Enhance Images",
+    "description": "Runs every image through NVIDIA DLSS 5 neural rendering (NGX feature 18) on the native worker. Feed video frames in playback order so temporal accumulation works.",
+    "python_module": "custom_nodes.ComfyUI-DLSS5-Enhancer",
+    "category": "image/upscaling",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": [
+      "dlss",
+      "dlss5",
+      "neural rendering",
+      "enhance",
+      "upscale"
+    ],
+    "essentials_category": null,
+    "has_intermediate_output": false
+  }
+}

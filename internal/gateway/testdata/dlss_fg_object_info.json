@@ -1,0 +1,297 @@
+{
+  "ImageBatch": {
+    "input": {
+      "required": {
+        "image1": [
+          "IMAGE"
+        ],
+        "image2": [
+          "IMAGE"
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "image1",
+        "image2"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "IMAGE"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "IMAGE"
+    ],
+    "name": "ImageBatch",
+    "display_name": "Batch Images (DEPRECATED)",
+    "description": "",
+    "python_module": "nodes",
+    "category": "image/batch",
+    "output_node": false,
+    "has_intermediate_output": false,
+    "deprecated": true,
+    "search_aliases": [
+      "combine images",
+      "merge images",
+      "stack images"
+    ]
+  },
+  "RepeatImageBatch": {
+    "input": {
+      "required": {
+        "image": [
+          "IMAGE",
+          {}
+        ],
+        "amount": [
+          "INT",
+          {
+            "default": 1,
+            "min": 1,
+            "max": 4096
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "image",
+        "amount"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "IMAGE"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "IMAGE"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "RepeatImageBatch",
+    "display_name": "Repeat Image Batch",
+    "description": "",
+    "python_module": "comfy_extras.nodes_images",
+    "category": "image/batch",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": [
+      "duplicate image",
+      "clone image"
+    ],
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
+  "RH_DLSS5FrameInterpolation": {
+    "input": {
+      "required": {},
+      "optional": {
+        "output_fps": [
+          [
+            "1x",
+            "2x",
+            "3x",
+            "4x",
+            "23.976",
+            "24",
+            "25",
+            "29.97",
+            "30",
+            "48",
+            "50",
+            "59.94",
+            "60",
+            "72",
+            "90",
+            "96",
+            "120",
+            "144"
+          ],
+          {
+            "default": "2x",
+            "tooltip": "1x = passthrough: the source is returned untouched (no interpolation, no re-encode; the VIDEO object is passed through as-is, motion/keep_audio options are ignored). Either a frame-rate multiplier (2x/3x/4x: DLSS generates one frame per interval, 3x/4x cascade 2x passes) or an exact target output frame rate. For a target rate the node cascades DLSS 2x passes into a dense CFR grid (2/4/8x source) and nearest-picks the target timeline, so e.g. a 24fps source at 60fps interpolates a 96fps grid and picks every ~1.6th frame (1-2-1-2 cadence, no duplicated frames). Target rates must exceed source fps and be at most 6x source; intermediate grid is at most 8x. No tail extension."
+          }
+        ],
+        "video": [
+          "VIDEO",
+          {
+            "tooltip": "Optional video (e.g. LoadVideo). Source frame rate and audio come from this input."
+          }
+        ],
+        "image": [
+          "IMAGE",
+          {
+            "tooltip": "Optional image batch (e.g. LoadImage). Each batch entry is one frame in temporal order; batches are treated as a 24fps source."
+          }
+        ],
+        "motion": [
+          [
+            "auto",
+            "nvof",
+            "dis"
+          ],
+          {
+            "default": "auto",
+            "tooltip": "Motion vectors guiding interpolation. auto = hardware NVOFA optical flow when available, else OpenCV DIS; nvof = hardware NVOFA only; dis = OpenCV DIS. Scene cuts or disabled generation hold the previous frame in each interpolation slot."
+          }
+        ],
+        "scene_change_threshold": [
+          "FLOAT",
+          {
+            "default": 0.24,
+            "min": 0.01,
+            "max": 1.0,
+            "step": 0.01,
+            "tooltip": "Mean luminance change above which temporal history resets (scene cut detection). Higher = fewer resets."
+          }
+        ],
+        "keep_audio": [
+          [
+            "on",
+            "off"
+          ],
+          {
+            "default": "on",
+            "tooltip": "Keep the original audio in the VIDEO output. Audio is stream-copied from the source file; when no source file is available it is re-encoded from the AUDIO input instead."
+          }
+        ],
+        "audio": [
+          "AUDIO",
+          {
+            "tooltip": "Optional audio for the VIDEO output. With a VIDEO input it replaces the source audio while keep_audio is on; with an IMAGE input it is the only way to attach sound. Re-encoded to AAC when it cannot be stream-copied."
+          }
+        ],
+        "runtime_dir": [
+          "STRING",
+          {
+            "default": "",
+            "tooltip": "Optional override of the folder holding dlssg-worker.exe + nvngx.dll + _nvngx.dll + nvngx_dlssg.dll. Empty uses DLSS5_FG_RUNTIME_DIR, then <DLSS5 runtime>/dlssg, then the plugin's runtime/dlssg folder."
+          }
+        ],
+        "wine_prefix": [
+          "STRING",
+          {
+            "default": "",
+            "tooltip": "Linux only: WINEPREFIX for the worker (ignored on Windows, where the worker runs natively). Empty uses DLSS5_WINEPREFIX, then ~/.wine; validated at run time (needs DXVK + DXVK-NVAPI installed in the prefix)."
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [],
+      "optional": [
+        "output_fps",
+        "video",
+        "image",
+        "motion",
+        "scene_change_threshold",
+        "keep_audio",
+        "audio",
+        "runtime_dir",
+        "wine_prefix"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "IMAGE",
+      "VIDEO",
+      "STRING"
+    ],
+    "output_is_list": [
+      false,
+      false,
+      false
+    ],
+    "output_name": [
+      "images",
+      "video",
+      "status"
+    ],
+    "name": "RH_DLSS5FrameInterpolation",
+    "display_name": "RH DLSS5 Frame Interpolation",
+    "description": "Raises a video's frame rate with NVIDIA DLSS frame generation (NGX DLSS-FG): generated frames are interleaved between the source frames instead of blended. Linux streams frames to dlssg-worker.exe under Wine; Windows runs the worker natively. The worker runtime is user-supplied and never redistributed. Connect the outputs to the standard SaveImage / SaveVideo nodes.",
+    "python_module": "custom_nodes.ComfyUI-RH-DLSS5",
+    "category": "video",
+    "output_node": false,
+    "has_intermediate_output": false,
+    "search_aliases": []
+  },
+  "ImageFromBatch": {
+    "input": {
+      "required": {
+        "image": [
+          "IMAGE",
+          {}
+        ],
+        "batch_index": [
+          "INT",
+          {
+            "default": 0,
+            "min": -16384,
+            "max": 16384
+          }
+        ],
+        "length": [
+          "INT",
+          {
+            "default": 1,
+            "min": 1,
+            "max": 4096
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "image",
+        "batch_index",
+        "length"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "IMAGE"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "IMAGE"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "ImageFromBatch",
+    "display_name": "Get Image from Batch",
+    "description": "",
+    "python_module": "comfy_extras.nodes_images",
+    "category": "image/batch",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": [
+      "select image",
+      "pick from batch",
+      "extract image"
+    ],
+    "essentials_category": null,
+    "has_intermediate_output": false
+  }
+}

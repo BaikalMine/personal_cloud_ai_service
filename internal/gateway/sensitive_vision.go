@@ -12,10 +12,10 @@ import (
 
 const sensitiveMediaClassificationTimeout = 75 * time.Second
 
-// queueSensitiveMediaClassification serializes image checks so background
+// queueSensitiveMediaClassification serializes media checks so background
 // moderation never competes with an active generation through parallel calls.
 func (a *App) queueSensitiveMediaClassification() {
-	if a.store == nil || a.contentCipher == nil || a.contentModerator == nil || !a.contentModerator.Configured() || a.sensitiveMediaSlots == nil {
+	if a.cfg.ReleaseValidation != nil || a.store == nil || a.contentCipher == nil || a.contentModerator == nil || !a.contentModerator.Configured() || a.sensitiveMediaSlots == nil {
 		return
 	}
 	select {
@@ -37,6 +37,13 @@ func (a *App) queueSensitiveMediaClassification() {
 				return
 			}
 			for _, item := range items {
+				if item.SizeBytes <= 0 || item.SizeBytes > maxCapturedMedia {
+					if err := a.store.SetContentMediaVisualSensitive(ctx, item.ID, item.EventID, true); err != nil {
+						log.Printf("store unsupported media %d sensitivity: %v", item.ID, err)
+						return
+					}
+					continue
+				}
 				jobID := int64(0)
 				if item.GenerationJobID != nil {
 					jobID = *item.GenerationJobID
@@ -48,14 +55,14 @@ func (a *App) queueSensitiveMediaClassification() {
 				}, maxCapturedMedia)
 				if err != nil {
 					log.Printf("read media %d for visual sensitivity classification: %v", item.ID, err)
-					continue
+					return
 				}
 				imageCtx, imageCancel := context.WithTimeout(itemCtx, sensitiveMediaClassificationTimeout)
 				started := time.Now()
-				sensitive, err := a.contentModerator.ClassifyImage(imageCtx, image, item.MIMEType)
+				sensitive, err := a.contentModerator.ClassifyMedia(imageCtx, image, item.MIMEType)
 				imageCancel()
 				clear(image)
-				a.observeServiceCall(itemCtx, dependencyModerator, "classify_image", started, err, false, "moderation_failed", "")
+				a.observeServiceCall(itemCtx, dependencyModerator, "classify_media", started, err, false, "moderation_failed", "")
 				if err != nil {
 					if errors.Is(err, moderation.ErrUnsupportedImage) {
 						// Large or unsupported files stay behind the privacy curtain.

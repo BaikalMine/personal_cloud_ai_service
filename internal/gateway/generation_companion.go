@@ -18,11 +18,13 @@ import (
 	"ai-access-gateway/internal/promptassistant"
 )
 
-const maxGenerationRecipePayload = 32 << 10
+const maxGenerationRecipePayload = 256 << 10
 
 type generationSavedPayload struct {
-	Version int               `json:"version"`
-	Values  map[string]string `json:"values"`
+	Version        int                         `json:"version"`
+	Values         map[string]string           `json:"values"`
+	ExecutionInput *generationForm             `json:"execution_input,omitempty"`
+	Repeat         *generationRepeatConstraint `json:"repeat,omitempty"`
 }
 
 type generationRecipeView struct {
@@ -35,6 +37,8 @@ type generationRecipeView struct {
 }
 
 type generationVariantView struct {
+	Operation       string                `json:"operation,omitempty"`
+	Postprocess     *postprocessView      `json:"postprocess,omitempty"`
 	ID              int64                 `json:"id"`
 	JobID           string                `json:"job_id,omitempty"`
 	RequestID       string                `json:"request_id,omitempty"`
@@ -55,7 +59,10 @@ type generationVariantView struct {
 
 func (a *App) registerGenerationCompanionRoutes(mux *http.ServeMux, quick func(http.Handler) http.Handler) {
 	a.registerGenerationDraftRoutes(mux, quick)
+	mux.Handle("/generate/library/collections/context", quick(http.HandlerFunc(a.handleGenerationCollectionContext)))
+	a.registerPostprocessQuoteRoutes(mux, quick)
 	mux.Handle("/generate/preflight", quick(http.HandlerFunc(a.handleGenerationPreflight)))
+	mux.Handle("/generate/preview/video", quick(http.HandlerFunc(a.handleGenerationVideoPreview)))
 	mux.Handle("/generate/recipes", quick(http.HandlerFunc(a.handleGenerationRecipes)))
 	mux.Handle("/generate/recipes/delete", quick(http.HandlerFunc(a.handleDeleteGenerationRecipe)))
 	mux.Handle("/generate/variants", quick(http.HandlerFunc(a.handleGenerationVariants)))
@@ -172,7 +179,7 @@ func (a *App) handleGenerationRecipes(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"recipes": items})
 	case http.MethodPost:
-		r.Body = http.MaxBytesReader(w, r.Body, maxGenerationRecipePayload)
+		r.Body = http.MaxBytesReader(w, r.Body, 3*maxGenerationRecipePayload)
 		if !a.validCSRF(r) {
 			writeGenerationError(w, http.StatusForbidden, "проверка безопасности не пройдена")
 			return
@@ -334,15 +341,27 @@ func (a *App) generationVariantViewsFromRows(ctx context.Context, userID int64, 
 	}
 	views := make([]generationVariantView, 0, len(rows))
 	for _, row := range rows {
-		payload, err := a.decodeGenerationSavedPayload(row.PayloadCipher)
-		if err != nil {
-			return nil, err
-		}
 		view := generationVariantView{
 			ID: row.ID, JobID: row.JobPublicID, RequestID: row.RequestID, ParentJobID: row.ParentJobID,
 			PromptID: row.PromptID, TemplateID: row.TemplateID, WorkflowID: row.WorkflowID, ModelName: row.ModelName,
-			Seed: row.Seed, State: row.State, Values: payload.Values, CreatedAt: row.CreatedAt,
+			Seed: row.Seed, State: row.State, CreatedAt: row.CreatedAt,
 			FinishedAt: row.FinishedAt, ErrorMessage: row.ErrorMessage,
+		}
+		if row.UserID != userID {
+			return nil, errPostprocessQuoteInvalid
+		}
+		if isPostprocessJob(domain.GenerationJob{TemplateID: row.TemplateID}) {
+			view.Operation = "postprocess"
+			view.Postprocess, err = a.decodePostprocessVariant(row)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			payload, decodeErr := a.decodeGenerationSavedPayload(row.PayloadCipher)
+			if decodeErr != nil {
+				return nil, decodeErr
+			}
+			view.Values = payload.Values
 		}
 		if row.FinishedAt != nil {
 			view.DurationSeconds = int64(row.FinishedAt.Sub(row.CreatedAt).Seconds())
@@ -398,8 +417,15 @@ func generationRecipeValues(form url.Values, resolvedSeed int64) map[string]stri
 		}
 		value := strings.TrimSpace(raw[0])
 		limit := promptassistant.MaxImagePromptCharacters
+		if name == "krea_pro_settings" {
+			limit = 32768
+		}
 		if name == "positive_prompt" && strings.TrimSpace(form.Get("template_id")) == "minimax-h3-video" {
-			limit = promptassistant.MaxVideoPromptCharacters
+			parts := 0
+			if form.Get("video_long_enabled") == "true" {
+				parts, _ = strconv.Atoi(form.Get("video_long_parts"))
+			}
+			limit = promptassistant.PromptCharacterLimitForVideo(promptassistant.ModeTextToVideo, parts)
 		}
 		if utf8.RuneCountInString(value) > limit {
 			continue
@@ -430,6 +456,30 @@ func allowedGenerationReferenceJobField(name string) bool {
 }
 
 func allowedGenerationRecipeField(name string) bool {
+	if strings.HasPrefix(name, "moss_") {
+		for _, parameter := range mossWorkflowManifest().Parameters {
+			if parameter.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+	if strings.HasPrefix(name, "krea_ultra_") || strings.HasPrefix(name, "krea_pro_") {
+		for _, parameter := range kreaProWorkflowManifest().Parameters {
+			if parameter.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+	if strings.HasPrefix(name, "aihub_") {
+		for _, parameter := range aiHubWorkflowManifest().Parameters {
+			if parameter.Name == name {
+				return true
+			}
+		}
+		return false
+	}
 	if strings.HasPrefix(name, "input_image") || strings.HasPrefix(name, "assistant_") || name == "csrf" || name == "client_request_id" || name == "recipe_name" {
 		return false
 	}
@@ -442,6 +492,7 @@ func allowedGenerationRecipeField(name string) bool {
 	switch name {
 	case "template_id", "generation_workflow", "model", "positive_prompt", "negative_prompt", "width", "height", "steps", "cfg", "denoise", "sampler", "scheduler", "seed",
 		"video_mode", "video_resolution", "video_aspect", "video_use_source_aspect", "video_swap_dimensions", "video_resize_method", "video_proportion", "video_crop_location", "video_pad_color", "video_quality", "video_duration_seconds", "video_reference_size", "video_reference_start", "video_reference_duration", "video_reference_audio", "video_filename", "video_steps", "video_turbo", "video_sampler", "video_scheduler", "video_shift_video", "video_shift_audio",
+		"video_long_enabled", "video_long_parts", "video_long_context", "video_long_transition",
 		"video_sage_attention", "video_low_vram_attention", "video_low_vram_head_chunks", "video_chunk_feed_forward", "video_chunk_feed_forward_chunks", "video_chunk_feed_forward_threshold", "video_clear_vram", "video_memory_optimize", "video_memory_mlp", "video_memory_chunk_rows", "video_memory_precision", "video_memory_qkv", "video_memory_attention", "video_aimdo_enabled", "video_aimdo_residency", "video_sparse_attention", "video_sparse_budget", "video_sparse_early_schedule", "video_sparse_early_steps", "video_sparse_early_kv", "video_sparse_late_steps", "video_sparse_late_kv", "video_sparse_backend",
 		"video_rife_enabled", "video_rife_checkpoint", "video_rife_multiplier", "video_rife_fast_mode", "video_rife_ensemble", "video_rife_dtype", "video_rife_compile", "video_rife_batch_size", "video_rtx_enabled", "video_rtx_scale", "video_rtx_quality", "video_color_match", "video_color_method", "video_color_strength", "video_sharpen_enabled", "video_sharpen_method", "video_sharpen_strength", "video_sharpen_radius", "video_sharpen_threshold", "video_sharpen_iterations", "video_audio_start", "video_output_crf",
 		"aspect_ratio", "output_megapixels", "dimension_multiple", "max_longest_side", "base_megapixels", "loras_configured", "upscale_steps", "upscale_denoise", "upscale_auto_denoise", "upscale_sampler", "krea_sage_enabled", "krea_sage_mode", "krea_sage_allow_compile", "krea_fp16_accumulation", "detail_enabled", "detail_steps", "detail_denoise", "detail_cfg", "detail_sampler", "detail_scheduler", "color_transfer", "color_method", "color_mode", "color_strength", "image_filter_enabled", "image_filter_brightness", "image_filter_contrast", "image_filter_saturation", "image_filter_sharpness", "image_filter_blur", "image_filter_gaussian", "image_filter_edge", "image_filter_detail", "image_level_black", "image_level_mid", "image_level_white", "source_megapixels", "preserve_original_size", "edit_use_custom_size", "edit_aspect_preset", "edit_swap_dimensions", "edit_resize_method", "edit_proportion", "edit_crop_location", "edit_pad_color", "reference_boost", "grounding_pixels", "upscale_factor", "flux_guidance", "flux_detailer_steps", "flux_active_scale", "flux_token_whiten", "flux_norm_equalize", "flux_upscale_mode", "upscale_cfg", "upscale_scheduler", "post_denoise_blur", "post_denoise_edge", "post_denoise_radius", "post_denoise_strength", "skin_preset", "skin_strength", "skin_coolness", "skin_brightness", "skin_rosy", "skin_evenness", "skin_shadow_lift", "skin_smooth", "skin_texture_preserve", "skin_saturation", "skin_highlight_protect", "skin_mask_sensitivity", "skin_mask_feather", "adjust_hue", "adjust_saturation", "adjust_brightness", "adjust_contrast", "adjust_sharpness", "lut_name", "lut_strength", "lut_enabled":

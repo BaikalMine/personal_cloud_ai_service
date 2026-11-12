@@ -12,3 +12,4 @@ __pycache__
 *.zip
 coverage.out
 coverage.html
+artifacts

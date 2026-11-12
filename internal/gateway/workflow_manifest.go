@@ -162,8 +162,14 @@ func workflowManifestCatalogValue() workflowManifestCatalog {
 func workflowManifests() []workflowManifest {
 	return []workflowManifest{
 		miniMaxH3WorkflowManifest(),
+		aiHubWorkflowManifest(),
 		krea2TextWorkflowManifest(),
+		kreaUltraWorkflowManifest(),
+		kreaProWorkflowManifest(),
 		krea2EditWorkflowManifest(),
+		qwen21TextWorkflowManifest(),
+		mossWorkflowManifest(),
+		qwen21EditWorkflowManifest(),
 		flux2EditWorkflowManifest(),
 	}
 }
@@ -180,6 +186,9 @@ func workflowManifestByID(id string) (workflowManifest, bool) {
 func workflowManifestForInput(input generationForm) (workflowManifest, bool) {
 	if manifest, ok := workflowManifestByID(input.PresetID); ok {
 		return manifest, true
+	}
+	if input.PresetID == "" && input.TemplateID == "minimax-h3-video" {
+		return miniMaxH3WorkflowManifest(), true
 	}
 	candidates := make([]workflowManifest, 0, 1)
 	for _, manifest := range workflowManifests() {
@@ -203,7 +212,7 @@ func miniMaxH3WorkflowManifest() workflowManifest {
 		Name:              "MiniMax H3: видео",
 		Description:       "Видео из текста, по ключевым кадрам или по фото-, видео- и аудиореференсам.",
 		ModelFamilies:     []string{modelFamilyMiniMaxH3},
-		ModelCapabilities: []string{"video_integrated_turbo", "video_reference_only"},
+		ModelCapabilities: []string{"video_integrated_turbo", "video_reference_only", "video_beta5", "video_beta6"},
 		ModeParameter:     "video_mode",
 		RequiredClasses: []string{
 			"UNETLoader", "CLIPLoader", "VAELoader", "MiniMaxH3SigmaShift", "RandomNoise",
@@ -238,6 +247,7 @@ func miniMaxH3WorkflowManifest() workflowManifest {
 		Parameters: miniMaxH3WorkflowParameters(),
 		Branches: []workflowBranchManifest{
 			{ID: "external_turbo", Name: "Turbo LoRA", Description: "Опциональная внешняя Turbo LoRA для базовой FL2VA.", ToggleParameter: "video_turbo", Conditions: []workflowCondition{{Field: "video_integrated_turbo", Operator: "equals", Value: false}}, RequiredClasses: []string{"MiniMaxH3TurboLoRA", "MiniMaxH3TurboSampler"}, Order: 10},
+			{ID: "long_video", Name: "Длинное видео · части по 15 секунд", ToggleParameter: "video_long_enabled", RequiredClasses: []string{"MiniMaxH3LongReferenceSampler"}, Order: 5},
 			{ID: "low_vram_attention", Name: "Low VRAM Attention", Description: "Экспериментальное разбиение attention по группам голов.", ToggleParameter: "video_low_vram_attention", RequiredClasses: []string{"MiniMaxLowVRAMAttention"}, Order: 20},
 			{ID: "chunk_feed_forward", Name: "Chunk FeedForward", Description: "Экспериментальное разбиение feed-forward по токенам.", ToggleParameter: "video_chunk_feed_forward", RequiredClasses: []string{"MiniMaxChunkFeedForward"}, Order: 30},
 			{ID: "sage_attention", Name: "SageAttention", Description: "Патч внимания MiniMax H3.", ToggleParameter: "video_sage_attention", RequiredClasses: []string{"MiniMaxH3MemoryEfficientSageAttentionPatch"}, Order: 40},
@@ -255,7 +265,9 @@ func miniMaxH3WorkflowManifest() workflowManifest {
 		QualityProfiles: []workflowQualityProfileManifest{
 			{ID: "regular", Name: "Обычная модель", Description: "Полный проход FL2VA без внешнего Turbo.", Default: true, Conditions: []workflowCondition{{Field: "video_integrated_turbo", Operator: "equals", Value: false}, {Field: "video_turbo", Operator: "equals", Value: false}}, Parameters: map[string]workflowProfileParameterManifest{"video_steps": profileParameter(25, 20, 25, false), "video_sampler": profileValue("euler"), "video_scheduler": profileValue("simple"), "video_shift_video": profileValue(11), "video_shift_audio": profileValue(3)}},
 			{ID: "turbo", Name: "Внешний Turbo", Description: "Быстрый проход FL2VA с официальной Turbo LoRA.", Conditions: []workflowCondition{{Field: "video_integrated_turbo", Operator: "equals", Value: false}, {Field: "video_turbo", Operator: "equals", Value: true}}, Parameters: map[string]workflowProfileParameterManifest{"video_steps": profileParameter(6, 4, 8, false), "video_sampler": profileLockedValue("euler"), "video_scheduler": profileValue("simple"), "video_shift_video": profileValue(11), "video_shift_audio": profileValue(3)}},
-			{ID: "integrated_turbo", Name: "Eros Max", Description: "REF2VA-модель со встроенным Turbo.", Conditions: []workflowCondition{{Field: "video_integrated_turbo", Operator: "equals", Value: true}}, Parameters: map[string]workflowProfileParameterManifest{"video_mode": profileLockedValue("references"), "video_steps": profileParameter(8, 6, 8, false), "video_sampler": profileLockedValue("euler"), "video_scheduler": profileValue("simple"), "video_shift_video": profileValue(12), "video_shift_audio": profileValue(7)}},
+			{ID: "integrated_turbo", Name: "Eros Max beta4", Description: "REF2VA-модель со встроенным Turbo.", Conditions: []workflowCondition{{Field: "video_integrated_turbo", Operator: "equals", Value: true}, {Field: "video_beta5", Operator: "equals", Value: false}, {Field: "video_beta6", Operator: "equals", Value: false}}, Parameters: map[string]workflowProfileParameterManifest{"video_mode": profileLockedValue("references"), "video_steps": profileParameter(8, 6, 8, false), "video_sampler": profileLockedValue("euler"), "video_scheduler": profileValue("simple"), "video_shift_video": profileValue(12), "video_shift_audio": profileValue(7)}},
+			{ID: "integrated_turbo_beta6", Name: "H3 Eros Max beta6", Description: "Встроенный Turbo beta6: 8–12 шагов, shift 10/3.", Conditions: []workflowCondition{{Field: "video_integrated_turbo", Operator: "equals", Value: true}, {Field: "video_beta6", Operator: "equals", Value: true}}, Parameters: map[string]workflowProfileParameterManifest{"video_mode": profileLockedValue("references"), "video_steps": profileParameter(10, 8, 12, false), "video_sampler": profileValue("euler"), "video_scheduler": profileValue("simple"), "video_shift_video": profileValue(10), "video_shift_audio": profileValue(3)}},
+			{ID: "integrated_turbo_beta5", Name: "10Eros Turbo beta5", Description: "REF2VA со встроенным Turbo beta5.", Conditions: []workflowCondition{{Field: "video_integrated_turbo", Operator: "equals", Value: true}, {Field: "video_beta5", Operator: "equals", Value: true}}, Parameters: map[string]workflowProfileParameterManifest{"video_mode": profileLockedValue("references"), "video_steps": profileParameter(6, 6, 8, false), "video_sampler": profileLockedValue("er_sde"), "video_scheduler": profileLockedValue("beta57")}},
 		},
 		PromptAssistant: workflowAssistantManifest{
 			Profile: "minimax-h3-fl2va", ModeProfiles: map[string]string{"frames": "minimax-h3-fl2va", "references": "minimax-h3-ref2va"}, Allowed: true, VisionReferences: true,
@@ -287,6 +299,10 @@ func miniMaxH3WorkflowParameters() []workflowParameterManifest {
 		enumWorkflowParameter("video_mode", "VideoMode", "Режим", "source", "frames", option("frames", "T2VA / I2VA / FL2VA · текст и точные кадры"), option("references", "REF2VA · промт и свободные референсы")),
 		enumWorkflowParameter("video_quality", "VideoQuality", "Качество", "source", 720, option(480, "480p"), option(720, "720p"), option(1080, "1080p"), option(1440, "1440p")),
 		integerWorkflowParameter("video_duration_seconds", "VideoDurationSeconds", "Длительность", "source", 5, 5, 60, 1),
+		booleanWorkflowParameter("video_long_enabled", "VideoLongEnabled", "Длинное видео", "source", false),
+		integerWorkflowParameter("video_long_parts", "VideoLongParts", "Части по 15 секунд", "source", 2, 2, miniMaxLongMaximumParts, 1),
+		enumWorkflowParameter("video_long_context", "VideoLongContext", "Контекст продолжения", "source", 39, option(39, "39 кадров · 1,625 с"), option(22, "22 кадра · 0,917 с")),
+		enumWorkflowParameter("video_long_transition", "VideoLongTransition", "Стыки частей", "source", "continuous", option("continuous", "Плавное продолжение"), option("cinematic", "Киномонтаж · смена ракурса")),
 		stringWorkflowParameter("video_filename", "VideoFilename", "Имя файла", "source", "AI-Gateway-MiniMaxH3", 80),
 		booleanWorkflowParameter("video_turbo", "VideoTurbo", "Turbo LoRA", "generation", false),
 		enumWorkflowParameter("video_reference_size", "VideoReferenceSize", "Размер референсов", "source", "match", option("match", "По размеру кадра"), option("max", "Максимальная детализация")),
@@ -298,8 +314,8 @@ func miniMaxH3WorkflowParameters() []workflowParameterManifest {
 		integerWorkflowParameter("video_reference_duration", "VideoReferenceDuration", "Длительность видеореференса", "source", 5, 1, 15, 1),
 		booleanWorkflowParameter("video_reference_audio", "VideoReferenceAudio", "Использовать звук видеореференса", "source", false),
 		integerWorkflowParameter("video_steps", "VideoSteps", "Шаги", "generation", 25, 4, 25, 1),
-		enumWorkflowParameter("video_sampler", "VideoSampler", "Сэмплер", "generation", "euler", option("euler", "Euler"), option("res_multistep", "Res Multistep")),
-		enumWorkflowParameter("video_scheduler", "VideoScheduler", "Планировщик", "generation", "simple", option("simple", "Simple"), option("sgm_uniform", "SGM Uniform"), option("karras", "Karras"), option("exponential", "Exponential"), option("beta", "Beta"), option("normal", "Normal")),
+		enumWorkflowParameter("video_sampler", "VideoSampler", "Сэмплер", "generation", "euler", option("euler", "Euler"), option("res_multistep", "Res Multistep"), option("er_sde", "ER SDE (10Eros beta5)")),
+		enumWorkflowParameter("video_scheduler", "VideoScheduler", "Планировщик", "generation", "simple", option("simple", "Simple"), option("sgm_uniform", "SGM Uniform"), option("karras", "Karras"), option("exponential", "Exponential"), option("beta", "Beta"), option("normal", "Normal"), option("beta57", "Beta57 (10Eros beta5)")),
 		integerWorkflowParameter("video_shift_video", "VideoShiftVideo", "Video Sigma", "generation", 11, 1, 32, 1),
 		integerWorkflowParameter("video_shift_audio", "VideoShiftAudio", "Audio Sigma", "generation", 3, 1, 32, 1),
 		booleanWorkflowParameter("video_sage_attention", "VideoSageAttention", "SageAttention", "optimization", true),
@@ -898,6 +914,10 @@ func workflowConditionValue(manifest workflowManifest, input generationForm, fie
 		}
 	}
 	switch fieldName {
+	case "video_beta6":
+		return miniMaxErosBeta6(input.ModelName) && input.VideoIntegratedTurbo, true
+	case "video_beta5":
+		return miniMaxErosBeta5Turbo(input.ModelName) && input.VideoIntegratedTurbo, true
 	case "video_integrated_turbo":
 		return input.VideoIntegratedTurbo, true
 	case "video_reference_only":

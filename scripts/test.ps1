@@ -19,6 +19,7 @@ $integrationStarted = $false
 
 Push-Location $projectRoot
 try {
+    & (Join-Path $PSScriptRoot 'test-training-backup.ps1')
     foreach ($scriptPath in @(
         (Join-Path $PSScriptRoot 'backup.ps1'),
         (Join-Path $PSScriptRoot 'restore.ps1')
@@ -87,7 +88,11 @@ try {
 
     & (Join-Path $PSScriptRoot 'test-ui.ps1')
 
+    & (Join-Path $PSScriptRoot 'test-comfy-gpu-guard.ps1')
+    & (Join-Path $PSScriptRoot 'test-ollama-gpu-guard.ps1')
+
     if ($Deep) {
+        & (Join-Path $PSScriptRoot 'test-training-restore.ps1')
         docker run --rm -v "${projectRoot}:/src" -w /src $goImage `
             sh -c '/usr/local/go/bin/go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...'
         if ($LASTEXITCODE -ne 0) {

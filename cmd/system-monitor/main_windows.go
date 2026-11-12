@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"ai-access-gateway/internal/buildinfo"
 	"ai-access-gateway/internal/mining"
 	"ai-access-gateway/internal/miningagent"
 )
@@ -33,7 +34,14 @@ type config struct {
 
 func main() {
 	configPath := flag.String("config", "system-monitor.json", "path to the monitor configuration file")
+	version := flag.Bool("version-json", false, "print the running build and API contracts without starting services")
 	flag.Parse()
+	if *version {
+		if err := buildinfo.Write(os.Stdout, buildinfo.SystemMonitor); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if err := run(*configPath); err != nil {
 		log.Fatal(err)
 	}
@@ -53,6 +61,7 @@ func run(configPath string) error {
 	log.SetFlags(log.Ldate | log.Ltime | log.LUTC)
 	tokenHash := sha256.Sum256([]byte(settings.Token))
 	mux := http.NewServeMux()
+	mux.Handle("/v1/build", buildHandler(tokenHash))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", http.MethodGet)

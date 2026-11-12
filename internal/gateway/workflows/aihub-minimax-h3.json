@@ -1,0 +1,9 @@
+{
+  "id": "aihub-minimax-h3",
+  "name": "AIHUB H3 + Photo Carousel",
+  "description": "Видео по референсам и фотокарусель MiniMax H3 с озвучкой LTX.",
+  "requires_image": false,
+  "allows_images": true,
+  "max_input_images": 9,
+  "builder": "aihub_minimax"
+}

@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 const (
 	LoraDatasetMaxImages    = 100
@@ -50,15 +53,36 @@ type LoraDatasetRow struct {
 }
 
 type LoraDatasetAsset struct {
-	ID        string    `json:"id"`
-	UserID    int64     `json:"-"`
-	Name      string    `json:"name"`
-	Hash      string    `json:"sha256"`
-	MIMEType  string    `json:"mime_type"`
-	SizeBytes int64     `json:"size_bytes"`
-	Width     int       `json:"width"`
-	Height    int       `json:"height"`
-	CreatedAt time.Time `json:"created_at"`
+	ID            string              `json:"id"`
+	UserID        int64               `json:"-"`
+	Name          string              `json:"name"`
+	Hash          string              `json:"sha256"`
+	MIMEType      string              `json:"mime_type"`
+	SizeBytes     int64               `json:"size_bytes"`
+	Width         int                 `json:"width"`
+	Height        int                 `json:"height"`
+	CreatedAt     time.Time           `json:"created_at"`
+	Quality       *LoraDatasetQuality `json:"quality,omitempty"`
+	QualityCipher []byte              `json:"-"`
+}
+
+type LoraDatasetQuality struct {
+	Version     int      `json:"version"`
+	DetailScore float64  `json:"detail_score"`
+	LowDetail   bool     `json:"low_detail"`
+	Colors      []uint16 `json:"colors"`
+}
+
+func (q *LoraDatasetQuality) Valid() bool {
+	if q == nil || q.Version != 1 || len(q.Colors) != 192 || q.DetailScore < 0 || math.IsNaN(q.DetailScore) || math.IsInf(q.DetailScore, 0) {
+		return false
+	}
+	for _, value := range q.Colors {
+		if value > 255 {
+			return false
+		}
+	}
+	return true
 }
 
 type LoraDatasetSnapshot struct {

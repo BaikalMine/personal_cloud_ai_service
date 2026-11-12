@@ -17,12 +17,13 @@
   <script src="/static/dialog-focus.js?v={{.AssetVersion}}" defer></script>
   <script src="/static/vendor/lucide.js?v={{.AssetVersion}}" defer></script>
   <script src="/static/shell.js?v={{.AssetVersion}}" defer></script>
+  <script src="/static/live-events.js?v={{.AssetVersion}}" defer></script>
   <script src="/static/app.js?v={{.AssetVersion}}" defer></script>
   <script src="/static/notifications.js?v={{.AssetVersion}}" defer></script>
 </head>
 <body>
 <a class="skip-link" href="#main-content">К содержимому</a>
-{{if not .CurrentUser}}<div class="auth-theme">{{template "theme_picker" .}}</div>{{end}}
+{{if or (not .CurrentUser) .AuthPage}}<div class="auth-theme">{{template "theme_picker" .}}</div>{{end}}
 {{end}}
 
 {{define "theme_picker"}}

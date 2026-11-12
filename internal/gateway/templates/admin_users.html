@@ -1,43 +1,26 @@
 {{define "admin_users"}}
 {{template "head" .}}
 {{template "admin_nav" .}}
+<link rel="stylesheet" href="/static/admin-access.css?v={{.AssetVersion}}">
 <main class="page" id="main-content">
-  <section class="hero"><div><p class="eyebrow">Управление доступом</p><h1>Пользователи</h1></div><a class="button" href="/admin/invites">Создать приглашение</a></section>
+  <header class="hero"><div><p class="eyebrow">Управление доступом</p><h1>Пользователи</h1></div><a class="button" href="/admin/invites"><i data-lucide="user-plus" aria-hidden="true"></i>Создать приглашение</a></header>
   {{if eq .DeleteStatus "1"}}<p class="success-box">Учётная запись и её данные удалены.</p>{{end}}
-  <section class="panel">
-    <form method="get" class="toolbar ui-toolbar">
-      <label class="search-field ui-field"><span class="ui-field-label">Поиск</span><input name="q" value="{{.Query}}" placeholder="Логин или e-mail"></label>
-      <button type="submit">Найти</button>
-      {{if .Query}}<a class="button ghost" href="/admin/users">Сбросить</a>{{end}}
-    </form>
-    <div class="table-scroll"><table class="users-table">
-      <thead><tr><th>Пользователь</th><th>Email</th><th>Роль</th><th>Учётная запись</th><th>Статус</th><th>Доступ</th><th>Запросы</th><th>Последний вход</th></tr></thead>
-      <tbody>
-      {{range .Users}}
-        <tr>
-          <td data-label="Пользователь"><a class="user-link" href="/admin/users/{{.ID}}"><span class="account-indicator"></span>{{.Username}}</a></td>
-          <td data-label="E-mail">{{.Email}}</td>
-          <td data-label="Роль"><span class="badge">{{roleLabel .Role}}</span></td>
-          <td data-label="Учётная запись" class="account-lifetime-cell">
-            <div class="account-lifetime">
-              {{if .AccountExpiresAt.Valid}}
-                <span class="badge account-kind temporary">Временная</span>
-                <small class="account-expiry-exact">Удаление: {{formatTime .AccountExpiresAt}}</small>
-                <small class="account-expiry-countdown" data-account-expiry="{{.AccountExpiresAt.Time.UnixMilli}}">Вычисляем оставшееся время...</small>
-              {{else}}
-                <span class="badge account-kind permanent">Постоянная</span>
-                <small class="account-expiry-exact">Без автоматического удаления</small>
-              {{end}}
-            </div>
-          </td>
-          <td data-label="Статус">{{if .Disabled}}<span class="badge danger">отключён</span>{{else if .Locked}}<span class="badge danger">заблокирован</span>{{else}}<span class="badge ok">активен</span>{{end}}</td>
-          <td data-label="Доступ">{{if eq .Role "admin"}}<span class="badge ok">все сервисы</span>{{else}}{{if .CanUseQuickGeneration}}<span class="badge ok">Быстрая генерация</span>{{end}} {{if .CanUseComfyUI}}<span class="badge">ComfyUI</span>{{end}} {{if .CanUseOpenWebUI}}<span class="badge">OpenWebUI</span>{{end}}{{end}}</td>
-          <td data-label="Запросы" class="numeric">{{formatNumber .Requests}}</td>
+  <section class="access-list" id="access-results" aria-label="Список пользователей">
+    {{template "access_list_filters" .AccessList}}
+    {{template "access_list_pagination" .AccessList}}
+    <div class="table-scroll"><table class="access-list-table compact-table" data-access-users>
+      <thead><tr><th>Пользователь</th><th>Состояние и срок</th><th>Доступ</th><th>Остаток генераций</th><th>Последний вход</th></tr></thead>
+      <tbody>{{range .AccessList.Users}}
+        <tr data-access-row="{{.ID}}">
+          <td data-label="Пользователь"><a class="user-link" href="/admin/users/{{.ID}}">{{.Username}}</a>{{if .Email.Valid}}<small>{{.Email.String}}</small>{{end}}{{if eq .Role "admin"}}<small>Администратор</small>{{end}}<a class="button ghost" href="/admin/users/{{.ID}}?tab=access"><i data-lucide="user-cog" aria-hidden="true"></i>{{if eq .Role "admin"}}Ресурсы{{else}}Права и лимиты{{end}}</a></td>
+          <td data-label="Состояние и срок"><span class="access-state is-{{.State}}">{{.StateLabel}}</span>{{if .AccountExpiresAt.Valid}}<small>Временный аккаунт</small><time datetime="{{.AccountExpiresAt.Time.Format "2006-01-02T15:04:05Z07:00"}}">Удаление: {{formatTime .AccountExpiresAt}}</time><small data-account-expiry="{{.AccountExpiresAt.Time.UnixMilli}}"></small>{{else}}<small>Постоянный аккаунт</small>{{end}}{{if eq .State "locked"}}<small>Вход закрыт до {{formatTime .LockedUntil}}</small>{{end}}</td>
+          <td data-label="Доступ"><details class="access-row-details"><summary>{{.AccessLabel}}</summary><div class="access-row-facts" tabindex="0" aria-label="Права и лимиты {{.Username}}">{{template "access_summary" .Settings}}</div></details>{{if .Settings.QueuePriority}}<small>Приоритетная очередь</small>{{end}}{{if .Settings.Video}}<small>База видео до {{.Settings.MaxVideoQuality}}p</small>{{end}}</td>
+          <td data-label="Остаток генераций">{{template "access_list_quotas" .Quotas}}</td>
           <td data-label="Последний вход">{{formatTime .LastLoginAt}}</td>
         </tr>
-      {{else}}<tr><td colspan="8" class="muted">Пользователи не найдены.</td></tr>{{end}}
-      </tbody>
+      {{else}}<tr><td colspan="5" class="access-list-empty">Пользователи не найдены. <a href="{{.AccessList.ResetURL}}">Сбросить фильтры</a></td></tr>{{end}}</tbody>
     </table></div>
+    {{if gt .AccessList.Total 50}}{{template "access_list_pagination" .AccessList}}{{end}}
   </section>
 </main>
 </body></html>

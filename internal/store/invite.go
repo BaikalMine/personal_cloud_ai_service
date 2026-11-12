@@ -30,6 +30,7 @@ type CreateInviteParams struct {
 	GrantVideo                      bool
 	GrantAdvancedGenerationSettings bool
 	GrantTrainImageLora             bool
+	GrantHarness                    bool
 	PauseMiningForQuickGeneration   bool
 	QueuePriority                   bool
 	GenerationDailyLimit            int
@@ -54,14 +55,14 @@ func (s *Store) AvailableInvite(ctx context.Context, tokenHash string) (domain.I
 		SELECT id, grant_comfyui, grant_openwebui, grant_quick_generation, grant_text_to_image, grant_image_to_image, grant_video,
 		       grant_advanced_generation_settings, grant_train_image_lora, pause_mining_for_quick_generation,
 		       generation_daily_limit, generation_total_limit, video_generation_daily_limit, video_generation_total_limit,
-		       max_video_generation_quality, account_lifetime_seconds, queue_priority
+		       max_video_generation_quality, account_lifetime_seconds, queue_priority, expires_at, grant_harness
 		FROM invites
 		WHERE token_hash = $1 AND revoked = false AND expires_at > now() AND used_count < max_uses
 	`, tokenHash).Scan(&access.ID, &access.GrantComfyUI, &access.GrantOpenWebUI,
 		&access.GrantQuickGeneration, &access.GrantTextToImage, &access.GrantImageToImage, &access.GrantVideo,
 		&access.GrantAdvancedGenerationSettings, &access.GrantTrainImageLora, &access.PauseMiningForQuickGeneration,
 		&access.GenerationDailyLimit, &access.GenerationTotalLimit, &access.VideoGenerationDailyLimit, &access.VideoGenerationTotalLimit,
-		&access.MaxVideoGenerationQuality, &access.AccountLifetimeSeconds, &access.QueuePriority)
+		&access.MaxVideoGenerationQuality, &access.AccountLifetimeSeconds, &access.QueuePriority, &access.ExpiresAt, &access.GrantHarness)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.InviteAccess{}, ErrInviteUnavailable
 	}
@@ -79,6 +80,7 @@ func (s *Store) RegisterFromInvite(ctx context.Context, params RegisterFromInvit
 	var grantComfyUI, grantOpenWebUI, grantQuickGeneration, grantTextToImage, grantImageToImage, grantVideo bool
 	var grantAdvancedGenerationSettings, grantTrainImageLora, pauseMiningForQuickGeneration bool
 	var queuePriority bool
+	var grantHarness bool
 	var generationDailyLimit int
 	var generationTotalLimit int64
 	var videoGenerationDailyLimit int
@@ -92,12 +94,12 @@ func (s *Store) RegisterFromInvite(ctx context.Context, params RegisterFromInvit
 		RETURNING id, grant_comfyui, grant_openwebui, grant_quick_generation, grant_text_to_image, grant_image_to_image, grant_video,
 		          grant_advanced_generation_settings, grant_train_image_lora, pause_mining_for_quick_generation,
 		          generation_daily_limit, generation_total_limit, video_generation_daily_limit, video_generation_total_limit,
-		          max_video_generation_quality, account_lifetime_seconds, queue_priority
+		          max_video_generation_quality, account_lifetime_seconds, queue_priority, grant_harness
 	`, params.TokenHash).Scan(&inviteID, &grantComfyUI, &grantOpenWebUI,
 		&grantQuickGeneration, &grantTextToImage, &grantImageToImage, &grantVideo,
 		&grantAdvancedGenerationSettings, &grantTrainImageLora, &pauseMiningForQuickGeneration,
 		&generationDailyLimit, &generationTotalLimit, &videoGenerationDailyLimit, &videoGenerationTotalLimit,
-		&maxVideoGenerationQuality, &accountLifetimeSeconds, &queuePriority)
+		&maxVideoGenerationQuality, &accountLifetimeSeconds, &queuePriority, &grantHarness)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, 0, ErrInviteUnavailable
 	}
@@ -115,15 +117,15 @@ func (s *Store) RegisterFromInvite(ctx context.Context, params RegisterFromInvit
 			 can_use_quick_generation, can_generate_text_to_image, can_generate_image_to_image, can_generate_video,
 			 can_use_advanced_generation_settings, can_train_image_lora, pause_mining_for_quick_generation,
 			 generation_daily_limit, generation_total_limit, video_generation_daily_limit, video_generation_total_limit,
-			 max_video_generation_quality, account_expires_at, queue_priority)
+			 max_video_generation_quality, account_expires_at, queue_priority, can_use_harness)
 		VALUES ($1,$2,$3,'user',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
-		        CASE WHEN $18 > 0 THEN now() + ($18 * interval '1 second') ELSE NULL END, $19)
+		        CASE WHEN $18 > 0 THEN now() + ($18 * interval '1 second') ELSE NULL END, $19, $20)
 		RETURNING id
 	`, params.Username, email, params.PasswordHash, grantComfyUI, grantOpenWebUI,
 		grantQuickGeneration, grantTextToImage, grantImageToImage, grantVideo,
 		grantAdvancedGenerationSettings, grantTrainImageLora, pauseMiningForQuickGeneration,
 		generationDailyLimit, generationTotalLimit, videoGenerationDailyLimit, videoGenerationTotalLimit,
-		maxVideoGenerationQuality, accountLifetimeSeconds, queuePriority).Scan(&userID)
+		maxVideoGenerationQuality, accountLifetimeSeconds, queuePriority, grantHarness).Scan(&userID)
 	if err != nil {
 		var pqErr *pq.Error
 		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
@@ -157,14 +159,14 @@ func (s *Store) CreateInvite(ctx context.Context, params CreateInviteParams) (in
 			 grant_quick_generation, grant_text_to_image, grant_image_to_image, grant_video,
 			 grant_advanced_generation_settings, grant_train_image_lora, pause_mining_for_quick_generation,
 			 generation_daily_limit, generation_total_limit, video_generation_daily_limit, video_generation_total_limit,
-			 max_video_generation_quality, account_lifetime_seconds, queue_priority)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+			 max_video_generation_quality, account_lifetime_seconds, queue_priority, grant_harness)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
 		RETURNING id
 	`, params.TokenHash, params.CreatedByUserID, params.MaxUses, params.ExpiresAt, params.GrantComfyUI,
 		params.GrantOpenWebUI, params.GrantQuickGeneration, params.GrantTextToImage, params.GrantImageToImage, params.GrantVideo,
 		params.GrantAdvancedGenerationSettings, params.GrantTrainImageLora, params.PauseMiningForQuickGeneration,
 		params.GenerationDailyLimit, params.GenerationTotalLimit, params.VideoGenerationDailyLimit, params.VideoGenerationTotalLimit,
-		params.MaxVideoGenerationQuality, params.AccountLifetimeSeconds, params.QueuePriority).Scan(&id)
+		params.MaxVideoGenerationQuality, params.AccountLifetimeSeconds, params.QueuePriority, params.GrantHarness).Scan(&id)
 	return id, err
 }
 
@@ -202,7 +204,7 @@ func (s *Store) ListInvites(ctx context.Context, limit int) ([]domain.InviteRow,
 		         WHEN i.used_count >= i.max_uses THEN 'used'
 		         ELSE 'active'
 		       END,
-		       i.created_at, i.queue_priority
+		       i.created_at, i.queue_priority, i.grant_harness
 		FROM invites i LEFT JOIN users u ON u.id = i.created_by_user_id
 		ORDER BY i.created_at DESC LIMIT $1
 	`, limit)
@@ -220,7 +222,7 @@ func (s *Store) ListInvites(ctx context.Context, limit int) ([]domain.InviteRow,
 			&invite.GrantOpenWebUI, &invite.GrantQuickGeneration, &invite.GrantTextToImage, &invite.GrantImageToImage, &invite.GrantVideo,
 			&invite.GrantAdvancedGenerationSettings, &invite.GrantTrainImageLora, &invite.PauseMiningForQuickGeneration,
 			&invite.GenerationDailyLimit, &invite.GenerationTotalLimit, &invite.VideoGenerationDailyLimit, &invite.VideoGenerationTotalLimit,
-			&invite.MaxVideoGenerationQuality, &invite.AccountLifetimeSeconds, &invite.Status, &invite.CreatedAt, &invite.QueuePriority,
+			&invite.MaxVideoGenerationQuality, &invite.AccountLifetimeSeconds, &invite.Status, &invite.CreatedAt, &invite.QueuePriority, &invite.GrantHarness,
 		); err != nil {
 			return nil, err
 		}

@@ -5,7 +5,36 @@
   const generationModules = window.AIGatewayGeneration || {};
   root.dataset.generationClient = "modular";
   root.dataset.generationModules = Object.keys(generationModules).sort().join(",");
+  const submissionAvailable = generationModules.submission?.createController && generationModules.submission?.createPersistence && generationModules.submission?.createTransport && /^[1-9][0-9]*$/.test(root.dataset.generationOwner || "");
+  const assistantAvailable = generationModules.assistant?.createSession && generationModules.assistant?.createPersistence && generationModules.assistant?.createTransport && generationModules.assistantJobs?.createController;
+  const resultsAvailable = generationModules.results?.createView && generationModules.history?.createController && generationModules.history?.createTransport && generationModules.lightbox?.createController && generationModules.batch?.selectedJobs && generationModules.job?.reduce;
+  const feedback = generationModules.feedback;
+  if (!generationModules.payload?.createAdapter || !submissionAvailable || !assistantAvailable || !resultsAvailable || !feedback?.createResource || !generationModules.recipes?.createController) {
+    root.dataset.generationClient = "unavailable";
+    const banner = document.createElement("section");
+    banner.className = "ui-status-banner";
+    banner.setAttribute("role", "alert");
+    const message = document.createElement("p");
+    message.textContent = !generationModules.payload?.createAdapter ? "Не удалось загрузить параметры редактора. Обновите страницу." : !submissionAvailable ? "Не удалось загрузить управление запуском. Обновите страницу." : !assistantAvailable ? "Не удалось загрузить управление ассистентом. Обновите страницу." : !resultsAvailable ? "Не удалось загрузить результаты и историю. Обновите страницу." : "Не удалось загрузить состояния редактора. Обновите страницу.";
+    const reload = document.createElement("button");
+    reload.type = "button";
+    reload.className = "button ghost";
+    reload.textContent = "Обновить страницу";
+    reload.addEventListener("click", () => window.location.reload());
+    banner.append(message, reload);
+    root.prepend(banner);
+    const unavailableForm = document.getElementById("generation-form");
+    unavailableForm?.querySelectorAll("button").forEach(button => { button.disabled = true; });
+    unavailableForm?.addEventListener("submit", event => event.preventDefault());
+    return;
+  }
   const generationStore = generationModules.store?.createStore?.() || null;
+  let generationPageActive = true;
+  let generationPageEpoch = 0;
+  const pageRequests = new Set();
+  const loginURL = () => `/login?${new URLSearchParams({ next: window.location.pathname + window.location.search })}`;
+  const readFeedbackElements = prefix => ({ root: document.getElementById(prefix + "-feedback"), message: document.getElementById(prefix + "-message"), retry: document.getElementById(prefix + "-refresh"), login: document.getElementById(prefix + "-login") });
+  const showReadFeedback = (prefix, state, messages) => feedback.resourceView(readFeedbackElements(prefix), state, { ...messages, loginURL: loginURL() });
   const createStateSlice = (name, api, fallbackState) => {
     let localState = api?.createState?.() || { ...fallbackState };
     generationStore?.setSlice?.(name, localState, `${name}:ready`);
@@ -25,9 +54,7 @@
   });
   const mediaSlice = createStateSlice("media", generationModules.media, { sources: {}, uploaded: {}, uploading: false, error: "" });
   const videoSlice = createStateSlice("video", generationModules.video, { mode: "frames", profileID: "regular" });
-  const assistantSlice = createStateSlice("assistant", generationModules.assistant, {
-    status: "idle", approved: false, original: "", suggestion: "", action: "", correlationID: "", references: [], usage: {}, draftEdited: false, error: "",
-  });
+  const assistantSlice = createStateSlice("assistant", generationModules.assistant);
   const batchSlice = createStateSlice("batch", generationModules.batch, {
     enabled: false, mode: "seeds", count: 4, parameter: "", from: "", to: "", batches: [], selections: {},
   });
@@ -48,6 +75,12 @@
     document.getElementById("input-image-2"),
     document.getElementById("input-image-3"),
     document.getElementById("input-image-4"),
+    document.getElementById("input-image-5"),
+    document.getElementById("input-image-6"),
+    document.getElementById("input-image-7"),
+    document.getElementById("input-image-8"),
+    document.getElementById("input-image-9"),
+    document.getElementById("input-image-10"),
   ];
   const inputAudio = document.getElementById("input-audio");
   const inputVideo = document.getElementById("input-video");
@@ -117,17 +150,21 @@
   const positivePromptLabel = document.getElementById("generation-positive-prompt-label");
   const negativePrompt = document.getElementById("negative-prompt");
   const negativePromptField = document.getElementById("generation-negative-prompt-field");
+  const negativeCFGNote = document.getElementById("generation-negative-cfg-note");
   const generationPromptFields = root.querySelector(".generation-prompt-fields");
   const promptAssistant = document.getElementById("prompt-assistant");
   const promptAssistantEnabled = document.getElementById("prompt-assistant-enabled");
   const promptAssistantDescription = document.getElementById("prompt-assistant-description");
   const promptAssistantControls = document.getElementById("prompt-assistant-controls");
   const promptAssistantTemplate = document.getElementById("prompt-assistant-template");
+  const promptAssistantModel = document.getElementById("prompt-assistant-model");
   const promptAssistantThink = document.getElementById("prompt-assistant-think");
   const promptAssistantImprove = document.getElementById("prompt-assistant-improve");
   const promptAssistantState = document.getElementById("prompt-assistant-state");
   const promptAssistantReview = document.getElementById("prompt-assistant-review");
   const promptAssistantDraft = document.getElementById("prompt-assistant-draft");
+  const promptAssistantNegativeDraft = document.getElementById("prompt-assistant-negative-draft");
+  const promptAssistantNegativeReview = document.getElementById("prompt-assistant-negative-review");
   const promptAssistantReviewMeta = document.getElementById("prompt-assistant-review-meta");
   const promptAssistantReferenceReview = document.getElementById("prompt-assistant-reference-review");
   const promptAssistantReferenceCount = document.getElementById("prompt-assistant-reference-count");
@@ -139,11 +176,9 @@
   const promptAssistantKeep = document.getElementById("prompt-assistant-keep");
   const promptAssistantOpen = document.getElementById("prompt-assistant-open");
   const promptAssistantStale = document.getElementById("prompt-assistant-stale");
-  const assistantCorrections = new Map();
-  let assistantContext = "";
-  let assistantRequestSerial = 0;
-  let assistantRequestBusy = false;
-  let assistantDecisionPromise = Promise.resolve();
+  let assistantSession = null;
+  const durableAssistantEnabled = promptAssistant?.dataset.durableJobs === "true";
+  promptAssistantImprove.disabled = true;
   const model = document.getElementById("generation-model");
   const steps = document.getElementById("generation-steps");
   const cfg = document.getElementById("generation-cfg");
@@ -156,6 +191,7 @@
   const height = document.getElementById("generation-height");
   const aspect = document.getElementById("generation-aspect");
   const outputMegapixels = document.getElementById("generation-output-megapixels");
+  const qwenEditMegapixels = document.getElementById("generation-qwen-edit-megapixels");
   const dimensionMultiple = document.getElementById("generation-dimension-multiple");
   const maxSide = document.getElementById("generation-max-side");
   const resolutionPreview = document.getElementById("generation-resolution-preview");
@@ -203,26 +239,22 @@
   const batchRangeFields = [...root.querySelectorAll(".generation-batch-range-field")];
   const batchEstimate = document.getElementById("generation-batch-estimate");
   const batchError = document.getElementById("generation-batch-error");
-  const batchCompare = document.getElementById("generation-batch-compare");
-  const batchCompareBody = document.getElementById("generation-batch-compare-body");
-  const batchCompareClose = document.getElementById("generation-batch-compare-close");
-  const variantsSection = document.getElementById("generation-variants");
-  const variantsContent = document.getElementById("generation-history-content");
-  const variantsToggle = document.getElementById("generation-history-toggle");
-  const variantList = document.getElementById("generation-variant-list");
-  const variantStateFilter = document.getElementById("generation-variant-state");
-  const variantTemplateFilter = document.getElementById("generation-variant-template");
   const generationQuota = document.getElementById("generation-quota");
-  const variantCount = document.getElementById("generation-variant-count");
   const repeatNotice = document.getElementById("generation-repeat-notice");
   const repeatNoticeTitle = document.getElementById("generation-repeat-title");
   const repeatNoticeMessage = document.getElementById("generation-repeat-message");
   const repeatNoticeDismiss = document.getElementById("generation-repeat-dismiss");
   const outputGrid = document.getElementById("generation-output-grid");
+  const previousResult = document.getElementById("generation-previous-result");
   const resultActions = document.getElementById("generation-result-actions");
   const generationSubmit = document.getElementById("generation-submit");
   const retryGeneration = document.getElementById("generation-retry");
+  const viewGenerationResult = document.getElementById("generation-view-result");
+  const repeatGenerationNow = document.getElementById("generation-repeat-now");
+  let resultSourceJobID = "";
   const cancelGeneration = document.getElementById("generation-cancel");
+  const submissionLogin = document.getElementById("generation-login");
+  const submissionTask = document.getElementById("generation-open-task");
   const editorProfile = document.getElementById("generation-editor-profile");
   const editorProfileTitle = document.getElementById("generation-editor-profile-title");
   const editorProfileDescription = document.getElementById("generation-editor-profile-description");
@@ -247,8 +279,13 @@
   const lightbox = document.getElementById("generation-lightbox");
   const lightboxImage = document.getElementById("generation-lightbox-image");
   const lightboxVideo = document.getElementById("generation-lightbox-video");
+  const lightboxViewport = document.getElementById("generation-lightbox-viewport");
+  const lightboxZoom = document.getElementById("generation-lightbox-zoom");
+  const lightboxScale = document.getElementById("generation-lightbox-scale");
   const lightboxName = document.getElementById("generation-lightbox-name");
   const lightboxDownload = document.getElementById("generation-lightbox-download");
+  const lightboxCompare = document.getElementById("generation-lightbox-compare");
+  const lightboxTitle = document.getElementById("generation-lightbox-title");
   const imagePicker = document.getElementById("generation-image-picker");
   const imagePickerGrid = document.getElementById("generation-image-picker-grid");
   const imagePickerState = document.getElementById("generation-image-picker-state");
@@ -261,15 +298,23 @@
   const uploadedImages = new Map();
   const restoredImages = new Map();
   const draftAssets = new Map();
-  const pendingMediaUploads = new Map();
-  const draftUploadAttempts = new Map();
   let draftController = null;
-  let restoringDraft = false;
-  let draftAdvancedOpen = Boolean(generationAdvanced?.open);
+  let collectionSession = null;
   const imageDraftField = (index) => index === 1 ? "input_image" : `input_image_${index}`;
-  const markDraftDirty = () => { if (!restoringDraft) draftController?.markDirty(); };
-  const draftFieldIsActive = (field) => field === "input_audio" || field === "input_video"
-    ? miniMaxReferencesAreAvailable()
+  const markDraftDirty = () => draftController?.markDirty();
+  const clearPrompt = document.getElementById("generation-prompt-clear");
+  const undoClearPrompt = document.getElementById("generation-prompt-undo-clear");
+  let clearedPrompt = null;
+  const syncPromptActions = () => {
+    const busy = Boolean(assistantSession?.snapshot().busy);
+    if (clearPrompt) clearPrompt.disabled = busy || !(positive?.value || negativePrompt?.value);
+    if (undoClearPrompt) {
+      undoClearPrompt.hidden = !clearedPrompt;
+      undoClearPrompt.disabled = busy;
+    }
+  };
+  const draftFieldIsActive = (field) => field === "input_audio" ? miniMaxAudioIsAvailable() : field === "input_video"
+    ? miniMaxVideoIsAvailable()
     : imageSlots.some((item) => imageDraftField(item.index) === field && item.index <= activeMaxInputImages());
   const hasMissingDraftAssets = () => [...draftAssets.entries()].some(([field, asset]) => draftFieldIsActive(field) && !asset.available);
   let uploadedAudio = "";
@@ -282,36 +327,48 @@
   const videoPlayer = generationModules.studio?.bindReferencePlayer?.({
     media: miniMaxVideoPreviewMedia, button: document.getElementById("minimax-video-play"),
     status: document.getElementById("minimax-video-playback-status"),
-    start: () => form.elements.video_reference_start?.value, duration: () => form.elements.video_reference_duration?.value,
+    start: () => aiHubMatchesDuration() ? 0 : form.elements.video_reference_start?.value,
+    duration: () => aiHubMatchesDuration() ? aiHubReferenceDuration() : isAIHubSelected() ? form.elements.video_duration_seconds?.value : form.elements.video_reference_duration?.value,
+    fallback: async ({ signal }) => {
+      const file = miniMaxVideoFile?.files?.[0];
+      const reference = uploadedVideo || await uploadSelectedAV("video");
+      if (signal.aborted || file !== miniMaxVideoFile?.files?.[0] || reference !== uploadedVideo) throw new Error("Видео изменилось");
+      const response = await fetch("/generate/preview/video", {
+        method: "POST", credentials: "same-origin", signal,
+        body: new URLSearchParams({ csrf: form.elements.csrf?.value || "", input_video: reference }),
+      });
+      if (!response.ok || !response.headers.get("Content-Type")?.startsWith("video/mp4")) throw new Error("Предпросмотр недоступен");
+      return { blob: await response.blob(), duration: response.headers.get("X-Source-Video-Duration") };
+    },
   });
   let primaryImageSize = null;
 
   const krea2EditMaxBaseMegapixels = 4.7;
   const krea2EditMaxLongestSide = 4096;
-  let progressSocket = null;
-  let liveProgressReceived = false;
-  let activeGenerationID = "";
-  let activeGenerationJobID = "";
-  let activeGenerationRequestID = "";
+  let submissionController = null;
+  let submitInFlight = false;
   let pendingParentJobID = "";
-  let generationJobEvents = null;
   let galleryPickerSlot = null;
-  let galleryPickerImages = [];
-  let galleryPickerImagesLoaded = false;
-  let galleryPickerImagesLoading = false;
   const requestedQuery = new URLSearchParams(window.location.search);
   const requestedVariantID = requestedQuery.get("variant") || "";
   const requestedLibraryMediaID = requestedQuery.get("media") || "";
   const requestedLibraryTemplateID = requestedQuery.get("template") || "";
   const requestedLibraryWorkflowID = requestedQuery.get("workflow") || "";
+  const requestedLibraryModelID = requestedQuery.get("library_model") || "";
   const requestedLibrarySlot = requestedQuery.get("slot") || "1";
   const requestedLibraryRole = requestedQuery.get("role") || "base_scene";
   const requestedJobID = requestedQuery.get("job") || "";
+  const requestedBatchID = requestedQuery.get("batch") || "";
+  const requestedEditJobID = requestedQuery.get("edit_job") || "";
+  const requestedLoraJobID = requestedQuery.get("lora_job") || "";
+  const requestedLoraModelID = requestedQuery.get("lora_model") || "";
+  const loraSourceRequested = requestedQuery.has("lora_job") || requestedQuery.has("lora_model");
+  const jobSourceRequested = requestedQuery.has("edit_job") || loraSourceRequested;
+  const sourceID = loraSourceRequested ? requestedLoraJobID : requestedEditJobID;
+  let jobSourceController = null;
+  let loraVerificationController = null;
   let requestedVariantHandled = false;
   let requestedLibraryMediaHandled = false;
-  let requestedJobHandled = false;
-  const activeGenerationStorageKey = "ai-gateway.active-generation";
-  const generationHistoryCollapsedStorageKey = "ai-gateway.generation-history-collapsed";
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const selectedImageFile = (item) => selectedImages.get(item?.index) || item?.input?.files?.[0] || null;
@@ -367,25 +424,91 @@
       });
     });
   };
-  const loadWorkflowCapabilities = async () => {
-    const endpoint = root.dataset.workflowCapabilitiesUrl;
-    if (!endpoint) return;
-    try {
-      const response = await fetch(endpoint, { headers: { Accept: "application/json" }, credentials: "same-origin" });
-      if (!response.ok) return;
-      const catalog = await response.json();
-      if (Number(catalog.schema_version) !== 1 || !Array.isArray(catalog.workflows)) return;
+  const capabilitiesResource = feedback.createResource({
+    load: async signal => {
+      const catalog = await feedback.requestJSON(root.dataset.workflowCapabilitiesUrl, { signal, message: "Не удалось обновить доступность моделей. Можно продолжить с уже загруженными настройками и проверить их перед запуском." });
+      if (Number(catalog.schema_version) !== 1 || !Array.isArray(catalog.workflows) || catalog.workflows.some(item => !item || typeof item.id !== "string")) throw feedback.failure("invalid", "Доступность моделей не обновлена. Повторите проверку.");
+      return catalog;
+    },
+    onValue: catalog => {
+      if (!catalog) return;
       catalog.workflows.forEach((manifest) => {
         if (manifest?.id) workflowManifestsByID.set(manifest.id, manifest);
-        if (manifest?.template_id) workflowManifestsByID.set(manifest.template_id, manifest);
+        if (manifest?.template_id && !workflowManifestsByID.has(manifest.template_id)) workflowManifestsByID.set(manifest.template_id, manifest);
       });
       applyWorkflowCapabilityConstraints();
-      syncMiniMaxVideoModelRules(false);
-    } catch (_) {
-      // The embedded form remains a functional fallback while Gateway reconnects.
-    }
-  };
+      syncMiniMaxVideoProfile();
+    },
+    onState: state => showReadFeedback("generation-capabilities", state, { loading: "Проверяем доступность моделей..." }),
+  });
+  const loadWorkflowCapabilities = () => root.dataset.workflowCapabilitiesUrl ? capabilitiesResource.refresh() : Promise.resolve(false);
+  document.getElementById("generation-capabilities-refresh")?.addEventListener("click", loadWorkflowCapabilities);
   const miniMaxMode = () => generationModules.video?.normalizeMode?.(miniMaxVideoModeSelect?.value) || miniMaxVideoModeSelect?.value || "frames";
+  const miniMaxLongEnabled = () => templateID.value === "minimax-h3-video" && !isAIHubSelected() && Boolean(form.elements.video_long_enabled?.checked);
+  let miniMaxLongPreviousMode = null;
+  const renderMiniMaxLongPlan = () => {
+    const plan = document.getElementById("minimax-long-plan");
+    if (!plan || !miniMaxLongEnabled()) return;
+    const parts = Number(form.elements.video_long_parts?.value || 2);
+    const timeline = generationModules.video?.longTimeline?.(positive?.value, parts) || [];
+    const clock = value => `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
+    plan.replaceChildren(...timeline.map(part => {
+      const item = document.createElement("li");
+      const range = document.createElement("strong");
+      range.textContent = `${clock(part.start)}–${clock(part.end)}`;
+      const text = document.createElement("textarea");
+      text.rows = 3;
+      text.value = part.text;
+      text.placeholder = "Действие и состояние сцены";
+      text.setAttribute("aria-label", `Часть ${part.number}: ${clock(part.start)}–${clock(part.end)}`);
+      text.addEventListener("change", () => {
+        positive.value = generationModules.video.editLongPart(positive.value, parts, part.number, text.value);
+        positive.dispatchEvent(new Event("input", { bubbles: true }));
+        positive.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      item.append(range, text);
+      return item;
+    }));
+    const status = document.getElementById("minimax-long-plan-status");
+    if (status) status.textContent = `· ${timeline.filter(part => part.valid).length}/${timeline.length}`;
+  };
+  const syncMiniMaxLong = () => {
+    const available = templateID.value === "minimax-h3-video" && !isAIHubSelected();
+    const enabled = miniMaxLongEnabled();
+    const control = document.getElementById("minimax-long-control");
+    if (control) control.hidden = !available;
+    if (form.elements.video_long_enabled) form.elements.video_long_enabled.disabled = !available;
+    const fields = document.getElementById("minimax-long-fields");
+    if (fields) fields.hidden = !enabled;
+    for (const name of ["video_long_parts", "video_long_context", "video_long_transition"]) {
+      if (form.elements[name]) form.elements[name].disabled = !enabled;
+    }
+    const duration = form.elements.video_duration_seconds;
+    if (duration) {
+      if (enabled && !duration.readOnly) duration.dataset.shortDuration = duration.value;
+      if (!enabled && duration.readOnly) duration.value = duration.dataset.shortDuration || "5";
+      duration.readOnly = enabled;
+      if (enabled) duration.value = "15";
+    }
+    for (const name of ["video_rife_enabled", "video_rtx_enabled", "video_color_match", "video_sharpen_enabled", "video_clear_vram"]) {
+      const field = form.elements[name];
+      if (!field) continue;
+      if (enabled) {
+        if (field.dataset.longPrevious === undefined) field.dataset.longPrevious = String(field.checked);
+        field.checked = false;
+        field.disabled = true;
+      } else if (field.dataset.longPrevious !== undefined) {
+        field.checked = field.dataset.longPrevious === "true";
+        delete field.dataset.longPrevious;
+        field.disabled = false;
+      }
+      field.closest("label")?.classList.toggle("is-locked", enabled);
+    }
+    const summary = document.getElementById("minimax-long-summary");
+    const parts = Math.min(20, Math.max(2, Number(form.elements.video_long_parts?.value || 2)));
+    if (summary) summary.textContent = `${parts} × 15 с = ${parts * 15} с · 24 FPS`;
+    renderMiniMaxLongPlan();
+  };
   const setMiniMaxMode = (value) => {
     const target = miniMaxVideoModeInputs.find((input) => input.value === value && !input.disabled);
     if (target) {
@@ -418,18 +541,35 @@
     if (miniMaxVideoModelProfile) {
       miniMaxVideoModelProfile.textContent = referenceMode
         ? integratedTurbo
-          ? "Активная ветка: REF2VA · H3 Eros Max beta4. Модель работает только со свободными референсами и уже содержит Turbo."
+          ? `Активная ветка: REF2VA · ${option?.textContent || 'Eros Max'}. Turbo встроен в модель.`
           : "Активная ветка: REF2VA · MiniMax_H3_Ref2VA. Она принимает до четырёх фото, аудио и видео как свободные референсы."
         : "Активная модель: MiniMax_H3_FL2VA. Режим автоматически становится T2VA, I2VA или FL2VA по количеству точных кадров.";
     }
   };
   const syncMiniMaxVideoProfile = ({ applyModelDefaults = false } = {}) => {
+    if (isAIHubSelected()) {
+      syncMiniMaxLong();
+      setMiniMaxMode("references");
+      if (form.elements.video_duration_seconds) form.elements.video_duration_seconds.max = "15";
+      const option = model?.selectedOptions?.[0], steps = form.elements.aihub_steps;
+      if (steps) {
+        const turbo = option?.dataset.videoIntegratedTurbo === "true";
+        const beta6 = turbo && Number(option?.dataset.defaultSteps) === 10;
+        steps.min = beta6 ? "8" : turbo ? "6" : "20";
+        steps.max = beta6 ? "12" : turbo ? "8" : "25";
+        if (applyModelDefaults) steps.value = option?.dataset.defaultSteps || (turbo ? "6" : "25");
+      }
+      return;
+    }
+    if (form.elements.video_duration_seconds) form.elements.video_duration_seconds.max = "60";
     const option = model?.selectedOptions?.[0];
     const integratedTurbo = option?.dataset.videoIntegratedTurbo === "true";
     const referenceOnly = option?.dataset.videoReferenceOnly === "true";
     const turbo = !integratedTurbo && !applyModelDefaults && Boolean(miniMaxVideoTurbo?.checked);
     const manifest = workflowManifestsByID.get("minimax-h3-video");
-    const profileID = generationModules.video?.profileID?.({ integratedTurbo, turbo }) || (integratedTurbo ? "integrated_turbo" : turbo ? "turbo" : "regular");
+    const beta5 = integratedTurbo && option?.dataset.defaultSampler === "er_sde";
+    const beta6 = integratedTurbo && Number(option?.dataset.defaultSteps) === 10;
+    const profileID = beta6 ? "integrated_turbo_beta6" : beta5 ? "integrated_turbo_beta5" : generationModules.video?.profileID?.({ integratedTurbo, turbo }) || (integratedTurbo ? "integrated_turbo" : turbo ? "turbo" : "regular");
     videoSlice.dispatch({ type: "SET_PROFILE", profileID }, (state) => ({ ...state, profileID }));
     const profile = generationModules.video?.findProfile?.(manifest, profileID) || manifest?.quality_profiles?.find((candidate) => candidate.id === profileID);
     const profileRule = (name) => profile?.parameters?.[name] || null;
@@ -441,8 +581,15 @@
       }
     }
     const frameOption = miniMaxVideoModeInputs.find((input) => input.value === "frames");
-    if (frameOption) frameOption.disabled = referenceOnly;
-    if (referenceOnly && miniMaxMode() !== "references") {
+    if (miniMaxLongEnabled() && miniMaxLongPreviousMode === null) miniMaxLongPreviousMode = miniMaxMode();
+    if (frameOption) frameOption.disabled = referenceOnly || miniMaxLongEnabled();
+    if (!miniMaxLongEnabled() && miniMaxLongPreviousMode !== null) {
+      if (!referenceOnly) setMiniMaxMode(miniMaxLongPreviousMode);
+      miniMaxLongPreviousMode = null;
+      syncImageSlots();
+      syncMiniMaxAudioReference();
+    }
+    if ((referenceOnly || miniMaxLongEnabled()) && miniMaxMode() !== "references") {
       setMiniMaxMode("references");
       syncImageSlots();
       syncMiniMaxAudioReference();
@@ -476,6 +623,12 @@
       if (samplerLocked) miniMaxVideoSampler.value = String(profileValue("video_sampler", "euler"));
       miniMaxVideoSampler.disabled = samplerLocked;
     }
+    if (miniMaxVideoScheduler) {
+      const locked = Boolean(profileRule("video_scheduler")?.locked);
+      if (locked) miniMaxVideoScheduler.value = String(profileValue("video_scheduler", "simple"));
+      miniMaxVideoScheduler.disabled = locked;
+    }
+    syncMiniMaxLong();
     if (!miniMaxVideoResolutionPreview) return;
     const quality = Number(miniMaxVideoQuality?.value);
     const calculated = generationModules.video?.scaledResolution?.({
@@ -525,36 +678,21 @@
       await pause(Math.min(250, remaining));
     }
   };
-  const newGenerationRequestID = () => window.crypto?.randomUUID?.() || `generation-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`;
-  const persistActiveGeneration = () => {
-    if (!activeGenerationRequestID) return;
-    try {
-      window.localStorage.setItem(activeGenerationStorageKey, JSON.stringify({ requestID: activeGenerationRequestID, promptID: activeGenerationID, jobID: activeGenerationJobID, savedAt: Date.now() }));
-    } catch (_) {
-      // Private browsing can reject storage; the current tab can still poll normally.
-    }
-  };
-  const clearActiveGeneration = () => {
-    activeGenerationID = "";
-    activeGenerationJobID = "";
-    activeGenerationRequestID = "";
-    try { window.localStorage.removeItem(activeGenerationStorageKey); } catch (_) {}
-  };
-  const storedActiveGeneration = () => {
-    try {
-      const value = JSON.parse(window.localStorage.getItem(activeGenerationStorageKey) || "null");
-      if (!value || typeof value.requestID !== "string" || Date.now() - Number(value.savedAt || 0) > 24 * 60 * 60 * 1000) return null;
-      return value;
-    } catch (_) {
-      return null;
-    }
+  const newGenerationRequestID = () => generationModules.submission.newID(window.crypto);
+  const submissionBlocksLaunch = () => {
+    const state = submissionController?.snapshot();
+    return Boolean(state?.pending || ["auth_required", "storage_error"].includes(state?.phase));
   };
 
-  const setGenerationActions = ({ retry = false, cancel = false } = {}) => {
+  const setGenerationActions = ({ retry = false, cancel = false, authenticate = false, task = false, repeatNow = false, view = false } = {}) => {
     if (!resultActions) return;
-    resultActions.hidden = !retry && !cancel;
+    resultActions.hidden = !retry && !cancel && !authenticate && !task && !view;
+    if (viewGenerationResult) viewGenerationResult.hidden = !view;
     if (retryGeneration) retryGeneration.hidden = !retry;
+    if (repeatGenerationNow) repeatGenerationNow.hidden = !repeatNow;
     if (cancelGeneration) cancelGeneration.hidden = !cancel;
+    if (submissionLogin) submissionLogin.hidden = !authenticate;
+    if (submissionTask) submissionTask.hidden = !task;
   };
 
   // Chrome treats a comma in <input type="number"> as an invalid value on
@@ -568,7 +706,8 @@
   localizedDecimalInputs.forEach((field) => {
     field.dataset.localizedDecimal = "true";
     field.type = "text";
-    field.inputMode = "decimal";
+    // Mobile decimal keypads may omit the minus key.
+    field.inputMode = Number(field.min) < 0 ? "text" : "decimal";
     field.autocomplete = "off";
 
     const hint = document.createElement("small");
@@ -651,7 +790,15 @@
     const sourceMegapixelsValue = sourceWidth * sourceHeight / (1024 * 1024);
     const selected = selectedGenerationWorkflow();
     const isKreaEdit = selected?.dataset.family === "krea2" && selected?.dataset.templateId === "image-to-image";
+    const isQwenEdit = selected?.dataset.family === "qwen21" && selected?.dataset.templateId === "image-to-image";
     const isFluxEdit = selected?.dataset.family === "flux2" && selected?.dataset.templateId === "image-to-image";
+    if (isQwenEdit) {
+      const target = generationModules.output?.qwen21EditSize(primaryImageSize, outputMegapixels?.value);
+      originalResolution.textContent = target
+        ? `Исходник: ${sourceWidth} × ${sourceHeight} · ${sourceMegapixelsValue.toFixed(2).replace(".", ",")} Мп. Qwen обработает ${target.width} × ${target.height}, сохранив пропорции.`
+        : "Пропорции исходного фото не поддерживаются Qwen Image 2.1.";
+      return;
+    }
     const minimumDimension = isKreaEdit || isFluxEdit ? 16 : 256;
     const maximumPixels = isKreaEdit ? krea2EditMaxBaseMegapixels * 1024 * 1024 : Infinity;
     const maximumSide = isKreaEdit ? krea2EditMaxLongestSide : 4096;
@@ -672,18 +819,24 @@
     if (!preserveOriginalSize?.checked || !primaryImageSize) return;
     const selected = selectedGenerationWorkflow();
     if (selected?.dataset.templateId !== "image-to-image") return;
+    const isQwenEdit = selected?.dataset.family === "qwen21";
     const isKreaEdit = selected?.dataset.family === "krea2" && selected?.dataset.templateId === "image-to-image";
     const isFluxEdit = selected?.dataset.family === "flux2" && selected?.dataset.templateId === "image-to-image";
     const minimumDimension = isKreaEdit || isFluxEdit ? 16 : 256;
     const maximumPixels = isKreaEdit ? krea2EditMaxBaseMegapixels * 1024 * 1024 : Infinity;
     const maximumSide = isKreaEdit ? krea2EditMaxLongestSide : 4096;
     const scale = Math.min(1, maximumSide / Math.max(primaryImageSize.width, primaryImageSize.height), Math.sqrt(maximumPixels / (primaryImageSize.width * primaryImageSize.height)));
-    const targetWidth = roundToMultiple(primaryImageSize.width * scale, 8, minimumDimension);
-    const targetHeight = roundToMultiple(primaryImageSize.height * scale, 8, minimumDimension);
+    const qwenSize = isQwenEdit ? generationModules.output?.qwen21EditSize(primaryImageSize, outputMegapixels?.value) : null;
+    if (isQwenEdit && !qwenSize) {
+      updateOriginalResolution();
+      return;
+    }
+    const targetWidth = qwenSize?.width ?? roundToMultiple(primaryImageSize.width * scale, 8, minimumDimension);
+    const targetHeight = qwenSize?.height ?? roundToMultiple(primaryImageSize.height * scale, 8, minimumDimension);
     width.value = String(targetWidth);
     height.value = String(targetHeight);
     aspect.value = "custom";
-    outputMegapixels.value = (targetWidth * targetHeight / (1024 * 1024)).toFixed(2);
+    if (!isQwenEdit) outputMegapixels.value = (targetWidth * targetHeight / (1024 * 1024)).toFixed(2);
     if (sourceMegapixels) sourceMegapixels.value = clamp(targetWidth * targetHeight / (1024 * 1024), 0.25, 16).toFixed(2);
     if (maxSide) maxSide.value = isKreaEdit ? String(krea2EditMaxLongestSide) : "4096";
     updateOriginalResolution();
@@ -722,12 +875,21 @@
     updateAutoDenoise();
   };
 
-  const calculateResolution = () => {
-    if (!aspect || aspect.value === "custom") {
+  const calculateResolution = (event) => {
+    if (!aspect) {
       updateResolutionPreview();
       return;
     }
-    const [ratioWidth, ratioHeight] = aspect.value.split(":").map(Number);
+    const custom = aspect.value === "custom";
+    if (custom && event?.target !== outputMegapixels) {
+      updateResolutionPreview();
+      return;
+    }
+    if (custom && !outputMegapixels.value.trim()) return;
+    const [ratioWidth, ratioHeight] = custom
+      ? [Number(width.value), Number(height.value)]
+      : aspect.value.split(":").map(Number);
+    if (!(ratioWidth > 0 && ratioHeight > 0)) return;
     const megapixels = clamp(numericValue(outputMegapixels.value, 1.9), 0.1, 16);
     const multiple = Number(dimensionMultiple.value) || 16;
     const targetPixels = megapixels * 1024 * 1024;
@@ -812,22 +974,26 @@
     }
   };
 
-  const refreshQueueOverview = async () => {
-    try {
-      const response = await fetch("/generate/queue", { credentials: "same-origin" });
-      if (!response.ok) return;
-      renderQueueOverview(await response.json());
-    } catch (_) {
-      // The queue indicator is informational; generation status has its own error handling.
-    }
-  };
+  const queueResource = feedback.createResource({
+    load: async signal => {
+      const queue = await feedback.requestJSON("/generate/queue", { signal, message: "Очередь не обновлена. Оценка ожидания временно недоступна." });
+      if (![queue.running, queue.pending].every(value => Number.isFinite(Number(value)) && Number(value) >= 0)) throw feedback.failure("invalid", "Состояние очереди не подтверждено. Повторите обновление.");
+      return queue;
+    },
+    onValue: queue => renderQueueOverview(queue),
+    onState: state => {
+      showReadFeedback("generation-queue", state, { loading: "Проверяем очередь..." });
+      if (state.phase === "error" || state.authRequired) {
+        root.dataset.generationAverageSeconds = "0";
+        syncBatchBuilder();
+        if (generationQueue) generationQueue.hidden = true;
+      }
+    },
+  });
+  const refreshQueueOverview = () => queueResource.refresh();
+  document.getElementById("generation-queue-refresh")?.addEventListener("click", refreshQueueOverview);
 
-  const closeProgressSocket = () => {
-    if (!progressSocket) return;
-    progressSocket.onclose = null;
-    progressSocket.close();
-    progressSocket = null;
-  };
+
 
   const workflowStage = (node) => {
     const stages = {
@@ -846,64 +1012,32 @@
     return stages[String(node)] || "ComfyUI выполняет workflow";
   };
 
-  const connectProgressSocket = (promptID) => {
-    closeProgressSocket();
-    liveProgressReceived = false;
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    try {
-      progressSocket = new WebSocket(`${protocol}//${window.location.host}/ws?gateway_service=comfyui`);
-    } catch (_) {
-      return;
-    }
-    progressSocket.onmessage = (event) => {
-      let message;
-      try { message = JSON.parse(event.data); } catch (_) { return; }
-      const data = message?.data || {};
-      if (data.prompt_id && data.prompt_id !== promptID) return;
-      switch (message.type) {
-        case "execution_start":
-          liveProgressReceived = true;
-          setGenerationProgress("ComfyUI начал генерацию", "Подготавливаем workflow", null);
-          break;
-        case "executing":
-          liveProgressReceived = true;
-          if (data.node === null) {
-            setGenerationProgress("Завершаем", "ComfyUI передаёт результат", 100);
-          } else {
-            setGenerationProgress(workflowStage(data.node), "Выполняется текущий этап", null);
-          }
-          break;
-        case "progress": {
-          liveProgressReceived = true;
-          const max = Number(data.max) || 0;
-          const value = Number(data.value) || 0;
-          const percent = max > 0 ? value / max * 100 : null;
-          const detail = max > 0 ? `${value} из ${max} шагов` : "Выполняется";
-          setGenerationProgress(workflowStage(data.node), detail, percent);
-          break;
-        }
+  const renderSubmissionProgress = (message) => {
+    const data = message.data;
+    switch (message.type) {
+      case "execution_start":
+        setGenerationProgress("Генерация началась", "Подготавливаем модель", null);
+        break;
+      case "executing":
+        if (data.node === null) setGenerationProgress("Завершаем", "Получаем результат", 100);
+        else setGenerationProgress(workflowStage(data.node), "Выполняется текущий этап", null);
+        break;
+      case "progress": {
+        const max = Number(data.max) || 0, value = Number(data.value) || 0;
+        setGenerationProgress(workflowStage(data.node), max > 0 ? `${value} из ${max} шагов` : "Выполняется", max > 0 ? value / max * 100 : null);
+        break;
       }
-    };
-    progressSocket.onclose = () => { progressSocket = null; };
+    }
   };
 
   const lightboxFocusTrap = window.AIGatewayDialogFocus?.createFocusTrap?.({ root: lightbox, documentRef: document }) || null;
   const imagePickerFocusTrap = window.AIGatewayDialogFocus?.createFocusTrap?.({ root: imagePicker, documentRef: document }) || null;
-  const lightboxController = generationModules.lightbox?.createController?.({
-    elements: {
-      root: lightbox,
-      image: lightboxImage,
-      video: lightboxVideo,
-      name: lightboxName,
-      download: lightboxDownload,
-    },
-    documentRef: document,
-    windowRef: window,
-    store: generationStore,
-    sensitiveContent: { reveal: (button) => window.aiGatewaySensitiveContent?.reveal?.(button) },
-    focusTrap: lightboxFocusTrap,
-  }) || null;
-  const closeLightbox = () => lightboxController?.close?.();
+  const lightboxController = generationModules.lightbox.createController({
+    elements: { root: lightbox, image: lightboxImage, video: lightboxVideo, viewport: lightboxViewport, zoom: lightboxZoom, scale: lightboxScale, name: lightboxName, download: lightboxDownload, compare: lightboxCompare, title: lightboxTitle },
+    documentRef: document, windowRef: window, store: generationStore,
+    sensitiveContent: { reveal: button => window.aiGatewaySensitiveContent?.reveal?.(button) }, focusTrap: lightboxFocusTrap,
+  });
+  const closeLightbox = () => lightboxController.close();
 
   const closeFieldHelps = (except = null) => {
     fieldHelps.forEach((help) => {
@@ -921,22 +1055,9 @@
     help.style.setProperty("--field-help-shift", `${Math.round(boundedCenter - targetCenter)}px`);
   };
 
-  const downloadURL = (outputURL) => generationModules.lightbox?.downloadURL?.(outputURL, window.location.origin) || (() => {
-    const url = new URL(outputURL, window.location.origin);
-    url.searchParams.set("download", "1");
-    return url.pathname + url.search;
-  })();
-
-  const openLightbox = (output) => {
-    if (lightboxController) {
-      lightboxController.open(output);
-      return;
-    }
-    if (output?.url) window.location.assign(output.url);
-  };
+  const openLightbox = output => lightboxController.open(output);
 
   lightbox?.querySelectorAll("[data-lightbox-close]").forEach((button) => button.addEventListener("click", closeLightbox));
-  lightboxImage?.addEventListener("click", closeLightbox);
   if (!lightboxFocusTrap) document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeLightbox(); });
   fieldHelps.forEach((help) => {
     help.setAttribute("role", "button");
@@ -964,25 +1085,83 @@
   document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeFieldHelps(); });
   window.addEventListener("resize", () => fieldHelps.filter((help) => help.classList.contains("is-open")).forEach(positionFieldHelp));
 
-  const wireVideoPreview = (button, output) => {
-    if (lightboxController) {
-      lightboxController.wireVideoPreview(button, output);
-      return;
-    }
-    button?.addEventListener("click", () => openLightbox(output));
-  };
+  const resultsView = generationModules.results.createView({
+    onReveal: () => studio?.show("result"),
+    documentRef: document, windowRef: window, viewer: lightboxController, feedback,
+    downloadURL: generationModules.lightbox.downloadURL, batchAPI: generationModules.batch,
+    sensitiveContent: { reveal: button => window.aiGatewaySensitiveContent?.reveal?.(button) },
+    postprocess: window.AIGatewayPostprocess, retention: generationRetentionLabel,
+    openLoraComparison: id => loraVerificationController?.openComparison(id),
+  });
+  const renderOutputs = outputs => resultsView.outputs(outputs);
+  viewGenerationResult?.addEventListener("click", async () => {
+    if (!resultSourceJobID) return;
+    try { await refreshJobs(); } catch (_) {}
+    if (resultsView.openJob(resultSourceJobID)) result.classList.add("has-viewer");
+    else outputGrid.querySelector(".generation-output-preview")?.click();
+  });
+  const renderJobMedia = job => resultsView.jobMedia(job);
+  const formatJobDuration = generationModules.results.formatDuration;
 
   const showStep = (step) => {
     // Older saved drafts contain a step number; the studio has one editor now.
     wizardSlice.dispatch({ type: "SHOW_STEP", step });
-    studio?.show("configure");
+    // A late draft must not hide an already recovered result on mobile.
+    if (!draftController?.restoring) studio?.show("configure");
   };
 
   const selectedChoice = () => root.querySelector(".scenario-choice.is-selected");
   const selectedGenerationWorkflow = () => root.querySelector(".generation-workflow-choice.is-selected");
   const isMiniMaxSelected = () => selectedGenerationWorkflow()?.dataset.family === "minimax_h3" || templateID.value === "minimax-h3-video";
+  const isAIHubSelected = () => selectedGenerationWorkflow()?.dataset.presetId === "aihub-minimax-h3";
+  const isKreaProSelected = () => selectedGenerationWorkflow()?.dataset.presetId === "krea2-pro";
+  const isKreaUltraSelected = () => ["krea2-ultra","krea2-pro"].includes(selectedGenerationWorkflow()?.dataset.presetId);
+  const kreaProMode = () => form.elements.krea_pro_mode?.value || "text";
+  const applyKreaProSourceSize = () => {
+    if (!isKreaProSelected() || kreaProMode() === "text" || !form.elements.krea_pro_match_source?.checked || !primaryImageSize) return;
+    const source = primaryImageSize, pixels = numericValue(outputMegapixels?.value,1.9)*1024*1024;
+    const scale = Math.min(Math.sqrt(pixels/(source.width*source.height)),4096/Math.max(source.width,source.height));
+    width.value = String(Math.max(256,Math.floor(source.width*scale/16)*16));
+    height.value = String(Math.max(256,Math.floor(source.height*scale/16)*16));
+    aspect.value = "custom";
+  };
+  let kreaProUI = null;
+  const aiHubMode = () => form.querySelector('[name="aihub_mode"]:checked')?.value || "video";
+  const aiHubCarouselV2 = () => aiHubMode() === "carousel" && form.elements.aihub_carousel_pipeline?.value === "v2";
+  const aiHubCarouselPrompt = () => aiHubCarouselV2() && form.elements.aihub_carousel_source?.value === "prompt";
+  const aiHubMatchesDuration = () => isAIHubSelected() && aiHubMode() === "video" && Boolean(form.elements.aihub_match_duration?.checked);
+  const aiHubReferenceDuration = () => {
+    const value = Number(videoPlayer?.sourceDuration ?? miniMaxVideoPreviewMedia?.duration);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  };
+  const syncAIHubDuration = () => {
+    const match = aiHubMatchesDuration();
+    const duration = aiHubReferenceDuration();
+    const control = form.elements.aihub_match_duration;
+    const status = document.getElementById("aihub-duration-status");
+    // Native media.duration can include a trailing audio packet; the server checks the video stream.
+    const invalid = match && duration !== null && (duration > 30 + 1 / 24 || duration < 5 / 24);
+    control?.setCustomValidity(invalid ? "Длина видеореференса должна быть от 5 кадров до 30 секунд" : "");
+    if (status) status.textContent = invalid ? "Референс вне диапазона: от 5 кадров до 30 секунд"
+      : duration === null ? (match ? "Длительность будет определена при проверке · до 30 секунд" : "Весь ролик · до 30 секунд")
+      : `${duration.toLocaleString("ru-RU", { maximumFractionDigits: 3 })} сек. · весь ролик`;
+    for (const name of ["video_duration_seconds", "video_reference_start"]) {
+      const input = form.elements[name];
+      const label = input?.closest("label");
+      if (!label) continue;
+      if (match) {
+        if (!label.hasAttribute("data-duration-prior-hidden")) label.dataset.durationPriorHidden = String(label.hidden);
+        label.hidden = true;
+        input.disabled = true;
+      } else if (label.hasAttribute("data-duration-prior-hidden")) {
+        label.hidden = isAIHubSelected() ? aiHubMode() === "carousel" || name === "video_reference_start" && aiHubMode() === "photo" : label.dataset.durationPriorHidden === "true";
+        input.disabled = label.hidden || Boolean(input.closest("[inert]"));
+        delete label.dataset.durationPriorHidden;
+      }
+    }
+  };
   const maxInputImages = () => Math.max(1, Number(selectedGenerationWorkflow()?.dataset.maxInputImages || (templateID.value === "minimax-h3-video" ? 4 : 1)));
-  const activeMaxInputImages = () => generationModules.studio.activeImageLimit({
+  const activeMaxInputImages = () => isKreaProSelected() ? ({text:0,identity:2,control:1,inpaint:2,outpaint:1}[kreaProMode()] ?? 4) : isAIHubSelected() ? (aiHubMode() === "carousel" ? 5 : 9) : generationModules.studio.activeImageLimit({
     requiresImage: wizardSlice.get().requiresImage, allowsImages: wizardSlice.get().allowsImages,
     isVideo: isMiniMaxSelected(), videoMode: miniMaxMode(), maximum: maxInputImages(),
   });
@@ -991,20 +1170,23 @@
     isMiniMax: isMiniMaxSelected(),
     mode: miniMaxMode(),
   }) ?? (isMiniMaxSelected() && miniMaxMode() === "references");
-  const miniMaxAudioIsAvailable = () => miniMaxReferencesAreAvailable();
+  const miniMaxAudioIsAvailable = () => miniMaxReferencesAreAvailable() && (!isAIHubSelected() || (aiHubMode() !== "carousel" && form.elements.aihub_voice_conversion?.checked));
+  const miniMaxVideoIsAvailable = () => miniMaxReferencesAreAvailable() && (!isAIHubSelected() || aiHubMode() !== "photo" && !aiHubCarouselPrompt());
 
   const syncMiniMaxAudioReference = () => {
     const available = miniMaxAudioIsAvailable();
-    if (miniMaxReferenceMedia) miniMaxReferenceMedia.hidden = !available;
+    const videoAvailable = miniMaxVideoIsAvailable();
+    if (miniMaxReferenceMedia) miniMaxReferenceMedia.hidden = !videoAvailable && !available;
     if (miniMaxAudioReference) miniMaxAudioReference.hidden = !available;
-    if (miniMaxVideoReference) miniMaxVideoReference.hidden = !available;
-    if (!available) { audioPlayer?.pause(); videoPlayer?.pause(); }
+    if (miniMaxVideoReference) miniMaxVideoReference.hidden = !videoAvailable;
+    if (!available) audioPlayer?.pause();
+    if (!videoAvailable) videoPlayer?.pause();
     if (inputAudio) inputAudio.value = available ? uploadedAudio : "";
-    if (inputVideo) inputVideo.value = available ? uploadedVideo : "";
+    if (inputVideo) inputVideo.value = videoAvailable ? uploadedVideo : "";
   };
 
   const hasPendingMiniMaxAudio = () => miniMaxAudioIsAvailable() && Boolean(miniMaxAudioFile?.files?.[0]) && !uploadedAudio;
-  const hasPendingMiniMaxVideo = () => miniMaxReferencesAreAvailable() && Boolean(miniMaxVideoFile?.files?.[0]) && !uploadedVideo;
+  const hasPendingMiniMaxVideo = () => miniMaxVideoIsAvailable() && Boolean(miniMaxVideoFile?.files?.[0]) && !uploadedVideo;
 
   const clearMiniMaxAudio = () => {
     audioPlayer?.clear();
@@ -1114,20 +1296,23 @@
 
   const syncImageSlots = () => {
     const isMiniMax = isMiniMaxSelected() || templateID.value === "minimax-h3-video";
-    const isImageEdit = templateID.value === "image-to-image";
+    const isImageEdit = templateID.value === "image-to-image" || isKreaProSelected() && kreaProMode() !== "text";
     const referenceMode = miniMaxMode() === "references";
     const wizard = wizardSlice.get();
     const maximum = (wizard.requiresImage || wizard.allowsImages) ? activeMaxInputImages() : 0;
+    const lastSelected = imageSlots.filter(item => item.index <= maximum && (hasSelectedImage(item) || uploadedImages.get(item.index))).reduce((last, item) => Math.max(last, item.index), 0);
     const isKrea = selectedGenerationWorkflow()?.dataset.family === "krea2";
     if (imageSourceGrid) imageSourceGrid.dataset.visibleSlots = String(maximum);
     imageSlots.forEach((item) => {
-      const visible = item.index <= maximum;
+      const visible = item.index <= maximum && (!isAIHubSelected() || item.index <= lastSelected + 1);
       item.slot.hidden = !visible;
       if (inputImages[item.index - 1]) inputImages[item.index - 1].value = visible ? (uploadedImages.get(item.index) || "") : "";
       if (item.galleryChoice) item.galleryChoice.hidden = !(wizard.requiresImage || wizard.allowsImages);
       if (!item.label) return;
-      if (isMiniMax && referenceMode) item.label.textContent = `Референс ${item.index} · необязательно`;
+      if (isAIHubSelected() && aiHubMode() !== "video" && item.index === 1) item.label.textContent = "Фото 1 · обязательно";
+      else if (isMiniMax && referenceMode) item.label.textContent = `Референс ${item.index} · необязательно`;
       else if (isMiniMax) item.label.textContent = item.index === 1 ? "Первый кадр · необязательно" : "Последний кадр · необязательно";
+      else if (isKreaProSelected() && kreaProMode() === "inpaint" && item.index === 2) item.label.textContent = "Фото 2 · маска";
       else if (item.index === 1) item.label.textContent = "Фото 1 · обязательно";
       else item.label.textContent = isKrea && item.index === 2 ? "Фото 2 · дополнительное" : `Фото ${item.index} · референс`;
       const roleControl = item.role?.closest(".image-reference-role");
@@ -1145,10 +1330,8 @@
       }
     });
     const held = imageSlots.filter((item) => item.index > maximum && (hasSelectedImage(item) || draftAssets.has(imageDraftField(item.index)))).map((item) => `Фото ${item.index}`);
-    if (!miniMaxReferencesAreAvailable()) {
-      if (uploadedAudio || miniMaxAudioFile?.files?.length || draftAssets.has("input_audio")) held.push("аудио");
-      if (uploadedVideo || miniMaxVideoFile?.files?.length || draftAssets.has("input_video")) held.push("видео");
-    }
+    if (!miniMaxAudioIsAvailable() && (uploadedAudio || miniMaxAudioFile?.files?.length || draftAssets.has("input_audio"))) held.push("аудио");
+    if (!miniMaxVideoIsAvailable() && (uploadedVideo || miniMaxVideoFile?.files?.length || draftAssets.has("input_video"))) held.push("видео");
     const heldNotice = root.querySelector("#studio-held-media");
     if (heldNotice) {
       heldNotice.hidden = held.length === 0;
@@ -1156,7 +1339,9 @@
     }
     const note = document.getElementById("image-source-note");
     if (isMiniMax && note) {
-      note.textContent = referenceMode
+      note.textContent = isAIHubSelected()
+        ? aiHubMode() === "carousel" ? "Фото 1 обязательно · до 5 фото" : aiHubMode() === "photo" ? "Фото 1 обязательно · до 9 фото-референсов" : "До 9 фото-референсов"
+        : referenceMode
         ? "Файлы необязательны. Добавьте до четырёх фото с устройства или из своей галереи, а также видео и/или аудио; для каждого фото укажите его роль."
         : "Фото необязательны: без них работает текст в видео. Первый и последний кадры можно загрузить с устройства или выбрать из своей галереи.";
       syncReferenceMap();
@@ -1194,11 +1379,14 @@
     updateWorkflowCompatibility();
     const compatibleWorkflows = [...root.querySelectorAll(".generation-workflow-choice")].filter((item) => !item.hidden && !item.disabled);
     if (compatibleWorkflows.length) chooseGenerationWorkflow(compatibleWorkflows[0]);
+    else syncWorkflowFields();
     showStep(2);
   };
 
   const syncStudioSelection = () => {
     const selected = selectedGenerationWorkflow();
+    root.querySelectorAll(".generation-workflow-choice").forEach(item => item.setAttribute("aria-pressed", String(item === selected)));
+    studio?.syncWorkflowPicker();
     const hasWorkflow = Boolean(selected && selected.dataset.available === "true");
     const selectedModel = model?.selectedOptions?.[0];
     const hasModel = Boolean(model?.value && selectedModel && !selectedModel.disabled);
@@ -1236,20 +1424,34 @@
     syncStudioSelection();
   };
 
+  let ordinaryMiniMaxMode = "frames";
   const chooseGenerationWorkflow = (button) => {
     if (button.disabled || button.hidden) return;
-    root.querySelectorAll(".generation-workflow-choice").forEach((item) => item.classList.remove("is-selected"));
+    const previous = selectedGenerationWorkflow();
+    if (previous === button) return;
+    if (previous?.dataset.presetId === "minimax-h3-video") ordinaryMiniMaxMode = miniMaxMode();
+    root.querySelectorAll(".generation-workflow-choice").forEach((item) => {
+      item.classList.remove("is-selected");
+      item.setAttribute("aria-pressed", "false");
+    });
     button.classList.add("is-selected");
+    button.setAttribute("aria-pressed", "true");
     generationWorkflowID.value = button.dataset.presetId;
-    wizardSlice.dispatch({ type: "SELECT_WORKFLOW", workflowID: button.dataset.presetId, available: button.dataset.available === "true" }, (state) => ({
+    wizardSlice.dispatch({ type: "SELECT_WORKFLOW", workflowID: button.dataset.presetId, available: button.dataset.available === "true", requiresImage: button.dataset.requiresImage === "true", allowsImages: button.dataset.allowsImages === "true" }, (state) => ({
       ...state,
       workflowID: button.dataset.presetId || "",
       workflowAvailable: button.dataset.available === "true",
+      requiresImage: button.dataset.requiresImage === "true", allowsImages: button.dataset.allowsImages === "true",
     }));
     updateQuickModelOptions(button);
     if (generationModelField) generationModelField.hidden = false;
+    if (button.dataset.family === "qwen21" && previous?.dataset.family !== "qwen21" && outputMegapixels) outputMegapixels.value = "1";
     applyQuality();
     if (button.dataset.family === "minimax_h3") syncMiniMaxVideoProfile({ applyModelDefaults: true });
+    if (button.dataset.presetId === "minimax-h3-video") {
+      setMiniMaxMode(ordinaryMiniMaxMode);
+    }
+    syncWorkflowFields();
     syncImageSlots();
     syncStudioSelection();
   };
@@ -1285,60 +1487,24 @@
     if (family === "minimax_h3") return "minimax";
     if (family === "flux2") return "flux";
     if (family === "krea2") return "krea";
+    if (family === "moss") return "moss";
+    if (family === "qwen21") return "qwen21";
     return "";
   };
 
-  const namedControlCandidates = (name) => {
-    const named = form.elements.namedItem(name);
-    if (!named) return [];
-    const controls = named instanceof HTMLElement ? [named] : [...named].filter((item) => item instanceof HTMLElement);
-    if (name === "loras_configured" || /^lora_(?:model_strength_|clip_strength_)?\d+$/.test(name)) {
-      const kind = activeLoraSlotKind();
-      const scoped = controls.filter((control) => control.closest(`[data-lora-slots="${kind}"]`));
-      if (scoped.length) return scoped;
-    }
-    const enabled = controls.filter((control) => !control.disabled);
-    return enabled.length ? enabled : controls;
-  };
-
-  const setNamedControlValue = (name, value) => {
-    const controls = namedControlCandidates(name);
-    if (!controls.length) return;
-    if (controls.every((control) => control.type === "radio")) {
-      const option = controls.find((control) => control.value === value);
-      if (option) option.checked = true;
-      return;
-    }
-    const control = controls[0];
-    if (control.type === "checkbox") {
-      control.checked = value === "true" || value === "on" || value === "1";
-      return;
-    }
-    control.value = value;
-  };
+  const generationPayload = generationModules.payload.createAdapter({ form, root, loraKind: activeLoraSlotKind });
+  const namedControlCandidates = generationPayload.controls;
+  const setNamedControlValue = generationPayload.set;
 
   const applySavedValues = (values, { openStep = true } = {}) => {
     if (!values || typeof values !== "object") return false;
-    const scenario = values.template_id ? root.querySelector(`.scenario-choice[data-workflow-id="${CSS.escape(values.template_id)}"]`) : null;
+    let selection;
+    try { selection = generationPayload.resolveSelection(values); } catch (_) { return false; }
+    const { scenario, workflow } = selection;
     if (scenario && !scenario.disabled && !scenario.classList.contains("is-selected")) chooseScenario(scenario);
-    const workflow = values.generation_workflow ? root.querySelector(`.generation-workflow-choice[data-preset-id="${CSS.escape(values.generation_workflow)}"]`) : null;
     if (workflow && !workflow.disabled && !workflow.hidden && !workflow.classList.contains("is-selected")) chooseGenerationWorkflow(workflow);
     syncWorkflowFields();
-    const savedEntries = Object.entries(values).filter(([name]) => (
-      name !== "template_id" && name !== "generation_workflow" && name !== "input_image" && !name.startsWith("input_image_")
-    ));
-    const loraSelections = savedEntries
-      .filter(([name]) => /^lora_\d+$/.test(name))
-      .sort(([left], [right]) => Number(left.slice(5)) - Number(right.slice(5)));
-    loraSelections.forEach(([name, value]) => {
-      setNamedControlValue(name, String(value));
-      syncAdaptiveLoraSlots(activeLoraSlotKind());
-    });
-    savedEntries.forEach(([name, value]) => {
-      if (/^lora_\d+$/.test(name)) return;
-      if (name === "template_id" || name === "generation_workflow" || name === "input_image" || name.startsWith("input_image_")) return;
-      setNamedControlValue(name, String(value));
-    });
+    generationPayload.apply(values, { afterLora: () => syncAdaptiveLoraSlots(activeLoraSlotKind()) });
     syncAdaptiveLoraSlots("krea");
     syncAdaptiveLoraSlots("flux");
     syncWorkflowFields();
@@ -1369,11 +1535,17 @@
   };
 
   const restoreRequestedVariant = () => {
+    if (jobSourceRequested) return;
     if (!requestedVariantID || requestedVariantHandled) return;
     requestedVariantHandled = true;
     const variant = historySlice.get().variants.find((item) => String(item.id) === requestedVariantID);
     if (!variant) {
       showRepeatNotice("Вариант больше недоступен", `История хранится ${generationRetentionLabel}. Выберите другой результат в галерее.`, true);
+      clearRequestedVariantQuery();
+      return;
+    }
+    if (window.AIGatewayPostprocess?.isJob(variant)) {
+      showRepeatNotice("Это постобработка готового файла", "Параметры генерации не изменены. Откройте результат в галерее.", true);
       clearRequestedVariantQuery();
       return;
     }
@@ -1401,9 +1573,10 @@
       const option = model?.selectedOptions?.[0];
       const integratedTurbo = option?.dataset.videoIntegratedTurbo === "true";
       const externalTurbo = !integratedTurbo && Boolean(miniMaxVideoTurbo?.checked);
-      const draftSteps = integratedTurbo ? "6" : externalTurbo ? "4" : "20";
-      const balancedSteps = integratedTurbo ? "8" : externalTurbo ? "6" : "25";
-      const maximumSteps = integratedTurbo ? "8" : externalTurbo ? "8" : "25";
+      const beta6 = integratedTurbo && Number(option?.dataset.defaultSteps) === 10;
+      const draftSteps = beta6 ? "8" : integratedTurbo ? "6" : externalTurbo ? "4" : "20";
+      const balancedSteps = beta6 ? "10" : integratedTurbo ? "8" : externalTurbo ? "6" : "25";
+      const maximumSteps = beta6 ? "12" : integratedTurbo ? "8" : externalTurbo ? "8" : "25";
       Object.assign(values, profile === "draft"
         ? { video_quality: "480", video_duration_seconds: "5", video_steps: draftSteps }
         : profile === "maximum"
@@ -1415,6 +1588,12 @@
         : profile === "maximum"
           ? { source_megapixels: "2", flux_detailer_steps: "32", flux_guidance: "4", flux_upscale_mode: "both" }
           : { source_megapixels: "1", flux_detailer_steps: "25", flux_guidance: "4", flux_upscale_mode: "none" });
+    } else if (family === "krea2" && isKreaUltraSelected()) {
+      Object.assign(values, profile === "draft"
+        ? { output_megapixels: "1", steps: "8", cfg: "2", krea_ultra_step_swap: "5" }
+        : profile === "maximum"
+          ? { output_megapixels: "4.27", steps: "14", cfg: "2", krea_ultra_step_swap: "8" }
+          : { output_megapixels: "1.9", steps: "10", cfg: "2", krea_ultra_step_swap: "6" });
     } else if (family === "krea2") {
       if (isEdit) {
         Object.assign(values, profile === "draft"
@@ -1429,6 +1608,18 @@
             ? { base_megapixels: "1.5", output_megapixels: "4.7", steps: "10", upscale_steps: "8", detail_steps: "4", detail_denoise: "0.04" }
             : { base_megapixels: "1", output_megapixels: "1.9", steps: "8", upscale_steps: "5", detail_steps: "2", detail_denoise: "0.03" });
       }
+    } else if (family === "moss") {
+      Object.assign(values, profile === "draft"
+        ? { steps: "20", cfg: "3", output_megapixels: "1", sampler: "euler", scheduler: "simple" }
+        : profile === "maximum"
+          ? { steps: "50", cfg: "3", output_megapixels: "2", sampler: "euler", scheduler: "simple" }
+          : { steps: "30", cfg: "3", output_megapixels: "1", sampler: "euler", scheduler: "simple" });
+    } else if (family === "qwen21") {
+      Object.assign(values, profile === "draft"
+        ? { steps: "16", cfg: "1", width: "768", height: "768", output_megapixels: "0.6" }
+        : profile === "maximum"
+          ? { steps: "40", cfg: "1", width: "1248", height: "1248", output_megapixels: "1.5" }
+          : { steps: "25", cfg: "1", width: "1024", height: "1024", output_megapixels: "1" });
     } else {
       Object.assign(values, profile === "draft"
         ? { steps: "18", cfg: "6", width: "768", height: "1024" }
@@ -1458,7 +1649,7 @@
     const family = preset?.dataset.family || "";
     const references = selectedReferenceMetadata();
     const hasAudio = Boolean(miniMaxAudioIsAvailable() && (uploadedAudio || miniMaxAudioFile?.files?.[0]));
-    const hasVideo = Boolean(miniMaxReferencesAreAvailable() && (uploadedVideo || miniMaxVideoFile?.files?.[0]));
+    const hasVideo = Boolean(miniMaxVideoIsAvailable() && (uploadedVideo || miniMaxVideoFile?.files?.[0]));
     return { preset, selectedModel, family, references, hasAudio, hasVideo };
   };
 
@@ -1496,7 +1687,7 @@
   const currentBatchConfig = () => ({
     enabled: Boolean(batchEnabled?.checked),
     mode: form.elements.batch_mode?.value || "seeds",
-    count: generationModules.batch?.boundedCount?.(batchCount?.value) || clamp(Math.round(numericValue(batchCount?.value, 4)), 2, 20),
+    count: batchCount?.value ?? "4",
     parameter: batchParameter?.value || "",
     from: batchFrom?.value || "",
     to: batchTo?.value || "",
@@ -1529,11 +1720,14 @@
 
   let batchParameterSignature = "";
   const syncBatchBuilder = ({ resetRange = false } = {}) => {
+    if (loraVerificationController?.sync()) {
+      if (generationSubmit && (submitInFlight || submissionBlocksLaunch())) generationSubmit.disabled = true;
+      return { valid: true, count: 1, error: "" };
+    }
     if (!batchBuilder || !generationModules.batch) return { valid: true, count: 1, error: "" };
     const enabled = Boolean(batchEnabled?.checked);
     const mode = form.elements.batch_mode?.value || "seeds";
     const count = generationModules.batch.boundedCount(batchCount?.value);
-    if (batchCount) batchCount.value = String(count);
     if (batchControls) batchControls.hidden = !enabled;
     if (batchParameterField) batchParameterField.hidden = mode !== "parameter";
     batchRangeFields.forEach((field) => { field.hidden = mode !== "parameter"; });
@@ -1594,8 +1788,9 @@
     batchBuilder.classList.toggle("has-error", enabled && !validation.valid);
     if (generationSubmit) {
       generationSubmit.dataset.batchInvalid = enabled && !validation.valid ? "true" : "false";
-      generationSubmit.textContent = enabled ? `Запустить ${batchVariantCountLabel(validation.count)}` : "Создать";
-      if (!generationSubmit.classList.contains("is-loading")) generationSubmit.disabled = enabled && !validation.valid;
+      const label = enabled ? `Запустить ${batchVariantCountLabel(validation.count)}` : "Создать";
+      if (generationSubmit.textContent !== label) generationSubmit.textContent = label;
+      if (!generationSubmit.classList.contains("is-loading")) generationSubmit.disabled = submitInFlight || submissionBlocksLaunch() || enabled && !validation.valid;
     }
     return validation;
   };
@@ -1631,6 +1826,8 @@
     const options = [];
     if (family === "minimax_h3") {
       if (form.elements.video_rife_enabled?.checked) options.push("плавность движения");
+      if (isAIHubSelected() && form.elements.aihub_dlss_enabled?.checked) options.push("DLSS 5");
+      if (isAIHubSelected() && aiHubMode() !== "carousel" && form.elements.aihub_fg_enabled?.checked) options.push("плавность DLSS FG");
       if (form.elements.video_rtx_enabled?.checked) options.push(`апскейл RTX ${form.elements.video_rtx_scale?.value || "2"}×`);
       if (form.elements.video_color_match?.checked) options.push("перенос палитры");
       if (form.elements.video_sharpen_enabled?.checked) options.push("финальная резкость");
@@ -1640,11 +1837,15 @@
       const labels = { ultimate: "Ultimate SD Upscale", seedvr2: "SeedVR2", both: "два этапа апскейла" };
       options.push(labels[fluxUpscaleMode.value] || "финальный апскейл");
     }
+    if (family === "moss" && form.elements.moss_seedvr2?.checked) options.push("SeedVR2 Sharp");
     if (family === "krea2") {
       const megapixels = Number(outputMegapixels?.value || 0);
       if (templateID.value === "image-to-image") {
         const factor = Number(form.elements.upscale_factor?.value || 1);
         if (!preserveOriginalSize?.checked && factor > 1) options.push(`апскейл ${factor}×`);
+      } else if (isKreaUltraSelected()) {
+        options.push("Lonecat · два прохода");
+        if (form.elements.krea_ultra_speed_boost?.checked) options.push("Speed Boost");
       } else {
         if (Number(upscaleSteps?.value || 0) > 0) options.push("апскейл Krea2");
         if (form.elements.krea_sage_enabled?.checked) options.push("SageAttention");
@@ -1664,11 +1865,18 @@
     const names = ["width", "height", "aspect_ratio", "output_megapixels", "dimension_multiple", "max_longest_side", "base_megapixels",
       "preserve_original_size", "edit_use_custom_size", "edit_aspect_preset", "edit_swap_dimensions", "edit_proportion",
       "source_megapixels", "upscale_factor", "flux_upscale_mode", "video_duration_seconds", "video_rife_enabled",
-      "video_rife_multiplier", "video_rtx_enabled", "video_rtx_scale"];
+      "moss_seedvr2", "moss_upscale_resolution", "krea_pro_mode", "krea_pro_upscaler", "krea_pro_upscale", "krea_pro_relay_scale", "krea_pro_settings",
+      "video_rife_multiplier", "video_rtx_enabled", "video_rtx_scale", "aihub_half_resolution", "aihub_latent_scale", "aihub_photo_frames", "aihub_photo_stride", "aihub_photo_skip", "aihub_fg_enabled", "aihub_fg_multiplier", "aihub_carousel_pipeline", "aihub_carousel_source", "aihub_carousel_refiner", "aihub_photo_count"];
     const values = Object.fromEntries(names.map(name => {
       const control = namedControlCandidates(name).find(item => !item.disabled);
       return [name, control?.type === "checkbox" ? control.checked : control?.value];
     }));
+    if (isKreaProSelected()) values.generation_workflow = "krea2-pro";
+    if (isAIHubSelected()) {
+      values.generation_workflow = "aihub-minimax-h3"; values.aihub_mode = aiHubMode();
+      values.aihub_match_duration = aiHubMatchesDuration();
+      values.aihub_reference_duration = aiHubReferenceDuration();
+    }
     const hasPrimary = references.some(item => Number(item.number) === 1);
     const sourceSize = hasPrimary ? primaryImageSize : null;
     const videoSize = hasPrimary && !sourceSize ? null : generationModules.video?.scaledResolution?.({
@@ -1689,7 +1897,7 @@
       } else variation = "Проверьте параметр и диапазон";
     }
     const plans = variants.map(variant => output.plan({ family, templateID: templateID.value, values: variant, sourceSize, videoSize }));
-    return output.facts(plans, { video: family === "minimax_h3", count: config.enabled ? config.count : 1, variation });
+    return output.facts(plans, { video: family === "minimax_h3" && !(isAIHubSelected() && aiHubMode() === "carousel"), count: config.enabled ? config.count : 1, variation });
   };
 
   const syncGenerationSummary = () => {
@@ -1722,6 +1930,9 @@
     });
     if (!summary) return;
     if (generationSummaryTitle) generationSummaryTitle.textContent = summary.title;
+    if (isAIHubSelected() && miniMaxVideoResolutionPreview) {
+      miniMaxVideoResolutionPreview.textContent = summary.title;
+    }
     renderDefinitionList(generationSummaryFacts, summary.facts);
     if (generationSummaryImpact) {
       generationSummaryImpact.dataset.load = summary.load || "normal";
@@ -1751,7 +1962,7 @@
     const before = profileSnapshot(names);
     Object.entries(profileValues(profile)).forEach(([name, value]) => setNamedControlValue(name, value));
     root.querySelectorAll("[data-generation-profile]").forEach((button) => button.classList.toggle("is-active", button.dataset.generationProfile === profile));
-    if (quality && selectedGenerationWorkflow()?.dataset.family === "krea2" && templateID.value !== "image-to-image") {
+    if (quality && selectedGenerationWorkflow()?.dataset.family === "krea2" && templateID.value !== "image-to-image" && !isKreaUltraSelected()) {
       quality.value = profile === "draft" ? "fast" : profile === "maximum" ? "krea-4-7" : "balanced";
     }
     calculateResolution();
@@ -1770,7 +1981,7 @@
     clearProfileFeedback();
     [...model.options].forEach((option) => {
       if (!option.value) return;
-      const allowed = option.dataset.family === workflow.dataset.family;
+      const allowed = option.dataset.family === workflow.dataset.family && (workflow.dataset.presetId === "aihub-minimax-h3" ? option.dataset.aihubOnly === "true" : option.dataset.aihubOnly !== "true") && (workflow.dataset.presetId !== "krea2-ultra" || !option.textContent.toLowerCase().includes("raw"));
       option.hidden = !allowed;
       option.disabled = option.dataset.available !== "true" || !allowed;
     });
@@ -1781,62 +1992,110 @@
 
   const syncAdaptiveLoraSlots = (kind) => {
     const rows = [...root.querySelectorAll(`[data-lora-slots="${kind}"]`)];
+    const lastSelected = rows.findLastIndex(row => row.querySelector(".generation-lora-select")?.value);
     rows.forEach((row, index) => {
-      const previous = rows[index - 1];
-      const previousSelect = previous?.querySelector(".generation-lora-select");
-      const visible = index === 0 || Boolean(previousSelect?.value);
+      const visible = index <= lastSelected + 1;
       row.hidden = !visible;
       row.querySelectorAll("input, select").forEach((control) => { control.disabled = !visible; });
-      if (visible) return;
       const select = row.querySelector(".generation-lora-select");
-      const strength = row.querySelector(".generation-lora-model");
-      const clipStrength = row.querySelector(".generation-lora-clip");
-      if (select) select.value = "";
-      if (strength) strength.value = "0";
-      if (clipStrength) clipStrength.value = "1";
+      const remove = row.querySelector(".generation-lora-remove");
+      if (remove) {
+        remove.disabled = !visible || !select?.value;
+        remove.style.visibility = select?.value ? "" : "hidden";
+        remove.title = select?.value ? `Удалить LoRA: ${select.selectedOptions[0].textContent}` : "Удалить LoRA";
+        remove.setAttribute("aria-label", remove.title);
+      }
+    });
+  };
+  const compactLoraSlots = (kind) => {
+    const rows = [...root.querySelectorAll(`[data-lora-slots="${kind}"]`)];
+    const fields = [".generation-lora-select", ".generation-lora-model", '[name^="lora_clip_strength_"]'];
+    // Compact only after an explicit removal, not during incremental draft restoration.
+    const selected = rows.filter(row => row.querySelector(fields[0])?.value)
+      .map(row => fields.map(selector => row.querySelector(selector)?.value));
+    rows.forEach((row, index) => {
+      fields.forEach((selector, field) => {
+        const control = row.querySelector(selector);
+        if (control) control.value = selected[index]?.[field] ?? ["", "0", "1"][field];
+      });
     });
   };
 
   const setPromptAssistantState = (message, state = "") => {
     if (!promptAssistantState) return;
+    const launchState = document.getElementById("prompt-assistant-launch-state");
+    feedback.text(launchState, { loading: "Готовится вариант", review: "Вариант готов", approved: "Выбор сохранён", restored: "Исходный текст возвращён", stale: "Вариант неактуален", error: "Нужна проверка" }[state] || "");
     if (message === "нельзя создавать сексуализированный контент с участием несовершеннолетних или персонажей с неоднозначным возрастом") {
       const title = document.createElement("strong");
       title.textContent = "Запрос не обработан";
       const detail = document.createElement("span");
       detail.textContent = "Нельзя создавать сексуализированный контент с участием несовершеннолетних или персонажей с неопределённым возрастом. Измените описание и попробуйте снова.";
       promptAssistantState.replaceChildren(title, detail);
-      promptAssistantState.dataset.state = "safety";
+      feedback.present(promptAssistantState, "safety");
       return;
     }
-    promptAssistantState.textContent = message;
-    promptAssistantState.dataset.state = state;
-    const launchState = document.getElementById("prompt-assistant-launch-state");
-    if (launchState) launchState.textContent = { loading: "Готовится вариант", review: "Вариант готов", approved: "Выбор сохранён", stale: "Вариант неактуален", error: "Нужна проверка" }[state] || "";
+    feedback.present(promptAssistantState, state, message);
   };
 
-  const assistantContextKey = () => JSON.stringify({
-    workflow: generationWorkflowID?.value, model: model?.value, mode: templateID.value,
+  const assistantModelState = () => {
+    const option = promptAssistantModel?.selectedOptions[0];
+    const selected = Boolean(promptAssistantModel?.value);
+    const unavailable = selected && (!durableAssistantEnabled || option?.dataset.available !== "true");
+    const needsVision = selectedReferenceMetadata().length > 0 || isAIHubSelected() && miniMaxVideoIsAvailable() && Boolean(uploadedVideo || miniMaxVideoFile?.files?.length);
+    const unsupported = selected && !unavailable && needsVision && option?.dataset.vision !== "true";
+    return { blocked: unavailable || unsupported, message: unavailable
+      ? "Сохранённая модель недоступна. Выберите другую модель ассистента."
+      : unsupported ? "Эта модель не поддерживает изображения. Выберите модель с анализом референсов."
+        : promptAssistantModel?.dataset.loadError === "true" ? "Список дополнительных моделей не загрузился. Обновите страницу." : "" };
+  };
+  const syncAssistantModel = () => {
+    const status = assistantModelState();
+    const field = document.getElementById("prompt-assistant-model-field");
+    const message = document.getElementById("prompt-assistant-model-status");
+    if (field) field.hidden = !promptAssistantModel?.value && !(durableAssistantEnabled && promptAssistantModel?.options.length > 1);
+    if (message) { message.textContent = status.message; message.hidden = !status.message; }
+    const session = assistantSession?.snapshot();
+    promptAssistantImprove.disabled = status.blocked || !session?.ready || session.busy || session.deciding;
+  };
+  const restoreAssistantModel = (id = "") => {
+    if (!promptAssistantModel) return;
+    promptAssistantModel.querySelectorAll("[data-missing]").forEach(option => option.remove());
+    if (id && ![...promptAssistantModel.options].some(option => option.value === id)) {
+      const option = new Option("Сохранённая модель (недоступна)", id);
+      option.dataset.missing = "true";
+      option.disabled = true;
+      promptAssistantModel.append(option);
+    }
+    promptAssistantModel.value = id;
+    syncAssistantModel();
+  };
+  const captureAssistantInput = () => ({
+    prompt: positive?.value || "", draft: promptAssistantDraft?.value || "", enabled: Boolean(promptAssistantEnabled?.checked),
+    negative: negativePrompt?.value || "", negativeDraft: promptAssistantNegativeDraft?.value || "", cfg: (cfg?.value || "1").replace(",", "."),
+    workflow: generationWorkflowID?.value, model: model?.value, mode: isKreaProSelected() && kreaProMode() !== "text" ? "image-to-image" : templateID.value,
+    kreaProMode: isKreaProSelected() ? kreaProMode() : "",
     videoMode: miniMaxMode(), duration: form.elements.video_duration_seconds?.value,
-    profile: promptAssistantTemplate?.value, think: promptAssistantThink?.checked,
-    images: selectedReferenceMetadata().map(ref => [ref.number, ref.role, previewURLs.get(ref.number) || ref.sourceName]),
-    audio: miniMaxAudioIsAvailable() ? miniMaxAudioFile?.files?.[0]?.name || uploadedAudio : "",
-    video: miniMaxReferencesAreAvailable() ? miniMaxVideoFile?.files?.[0]?.name || uploadedVideo : "",
+    longVideo: { enabled: miniMaxLongEnabled(), parts: Number(form.elements.video_long_parts?.value || 2), ...(miniMaxLongEnabled() ? { transition: form.elements.video_long_transition?.value || "continuous" } : {}) },
+    profile: promptAssistantTemplate?.value, think: Boolean(promptAssistantThink?.checked),
+    assistantModel: promptAssistantModel?.value || "",
+    ...(isAIHubSelected() ? { aiHub: { mode: aiHubMode(), audioSource: aiHubMode() === "carousel" ? "native" : form.elements.aihub_audio_source?.value || "native",
+      carouselPipeline: form.elements.aihub_carousel_pipeline?.value || "legacy",
+      carouselRefiner: form.elements.aihub_carousel_refiner?.value || "flux",
+      carouselSource: form.elements.aihub_carousel_source?.value || "video",
+      task: aiHubMode() === "video" ? form.elements.aihub_task?.value || "reference" : "reference",
+      audioReference: !form.elements.aihub_audio_reference?.disabled && Boolean(form.elements.aihub_audio_reference?.checked),
+      t8: !form.elements.aihub_t8?.disabled && Boolean(form.elements.aihub_t8?.checked),
+      audioPrompt: aiHubMode() !== "carousel" && form.elements.aihub_audio_source?.value === "ltx" ? form.elements.aihub_audio_prompt?.value || "" : "",
+      voiceConversion: aiHubMode() !== "carousel" && Boolean(form.elements.aihub_voice_conversion?.checked),
+      matchDuration: aiHubMatchesDuration(),
+      photoFrames: aiHubMode() === "carousel" ? form.elements.aihub_photo_frames?.value : "",
+      videoStart: miniMaxVideoIsAvailable() ? form.elements.video_reference_start?.value || "0" : "0" } } : {}),
+    images: selectedReferenceMetadata().map(ref => ({ number: ref.number, role: ref.role,
+      local: previewURLs.get(ref.number) || ref.sourceName, value: uploadedImages.get(ref.number) || "" })),
+    audio: { local: miniMaxAudioIsAvailable() ? miniMaxAudioFile?.files?.[0] || uploadedAudio : "", value: miniMaxAudioIsAvailable() ? uploadedAudio : "" },
+    video: { local: miniMaxVideoIsAvailable() ? miniMaxVideoFile?.files?.[0] || uploadedVideo : "", value: miniMaxVideoIsAvailable() ? uploadedVideo : "" },
   });
-  const assistantSourceForIdentifier = identifier => {
-    const number = Number(String(identifier).match(/(?:Picture|image)\s*(\d+)/i)?.[1]);
-    const references = selectedReferenceMetadata();
-    const reference = templateID.value === "minimax-h3-video" ? references[number - 1] : references.find(item => item.number === number);
-    return reference ? { slot: reference.number, value: uploadedImages.get(reference.number) || "" } : null;
-  };
-  const invalidatePromptAssistant = () => {
-    const state = assistantSlice.get();
-    if (state.status === "idle" || state.stale) return;
-    assistantSlice.dispatch({ type: "INVALIDATE" }, current => ({ ...current, stale: true, approved: false, action: "", status: "stale" }));
-    if (promptAssistantStale) promptAssistantStale.hidden = false;
-    if (promptAssistantApply) promptAssistantApply.disabled = true;
-    setPromptAssistantState("Подготовьте новый вариант для текущей модели и материалов.", "stale");
-    markDraftDirty();
-  };
+  const invalidatePromptAssistant = () => assistantSession?.invalidate();
   const renderAssistantSources = () => {
     const list = document.getElementById("prompt-assistant-source-list");
     const section = document.getElementById("prompt-assistant-sources");
@@ -1860,8 +2119,8 @@
       return item;
     }));
     const files = [
-      [miniMaxAudioIsAvailable() && (uploadedAudio || miniMaxAudioFile?.files?.length), "Audio 1", miniMaxAudioName?.textContent, "Голос и звук"],
-      [miniMaxReferencesAreAvailable() && (uploadedVideo || miniMaxVideoFile?.files?.length), "Video 1", miniMaxVideoName?.textContent, "Движение и темп"],
+      [miniMaxAudioIsAvailable() && (uploadedAudio || miniMaxAudioFile?.files?.length), isAIHubSelected() ? "Voice 1" : "Audio 1", miniMaxAudioName?.textContent, isAIHubSelected() ? "Образец голоса · без прослушивания" : "Голос и звук"],
+      [miniMaxVideoIsAvailable() && (uploadedVideo || miniMaxVideoFile?.files?.length), "Video 1", miniMaxVideoName?.textContent, isAIHubSelected() ? "Кадры видео · движение и сцена" : "Движение и темп"],
     ];
     files.filter(([active]) => active).forEach(([, id, name, role]) => {
       const item = document.createElement("li");
@@ -1899,6 +2158,7 @@
     last_frame: "Последний кадр",
     motion_timing: "Движение и темп",
     voice_sound: "Голос и звук",
+    voice_sample: "Образец голоса · Seed-VC",
   };
 
   const renderAssistantDiffSegments = (target, segments) => {
@@ -1939,6 +2199,10 @@
         const status = document.createElement("em");
         status.textContent = "Файл подключён без анализа содержимого";
         item.append(heading, summary, usage, status);
+      } else if (reference.kind === "video") {
+        const status = document.createElement("em");
+        status.textContent = "Проанализированы отдельные кадры, без звука";
+        item.append(heading, summary, usage, status);
       } else {
         item.append(heading, summary, usage);
         const correction = document.createElement("details");
@@ -1950,13 +2214,11 @@
         field.rows = 2;
         field.setAttribute("aria-label", `Уточнение для ${reference.id}`);
         field.placeholder = "Например: волосы светлые, а не тёмные";
-        const savedCorrection = assistantCorrections.get(reference.id);
+        const savedCorrection = assistantSession?.correction(reference.id);
         field.value = savedCorrection && savedCorrection.source === reference.source_value ? savedCorrection.text : "";
         field.dataset.assistantCorrection = reference.id;
         field.addEventListener("input", () => {
-          assistantCorrections.set(reference.id, { text: field.value, source: reference.source_value || "" });
-          invalidatePromptAssistant();
-          markDraftDirty();
+          assistantSession?.setCorrection(reference.id, field.value, reference.source_value || "");
         });
         correction.append(label, field);
         item.append(correction);
@@ -1966,6 +2228,18 @@
   };
 
   const renderPromptAssistantReview = (payload, original) => {
+    if (promptAssistantNegativeReview && promptAssistantNegativeDraft) {
+      const input = captureAssistantInput();
+      const showNegative = generationModules.assistant.supportsNegative(input) && Number(input.cfg) > 1;
+      promptAssistantNegativeReview.hidden = !showNegative;
+      promptAssistantNegativeDraft.value = showNegative ? payload.negative_prompt || "" : "";
+    }
+    const audioReview = document.getElementById("prompt-assistant-audio-review");
+    const audioText = document.getElementById("prompt-assistant-audio-text");
+    if (audioReview && audioText) {
+      audioText.value = payload.audio_prompt || "";
+      audioReview.hidden = !audioText.value;
+    }
     const references = Array.isArray(payload.references) ? payload.references : [];
     renderPromptAssistantReferences(references);
     renderPromptAssistantDiff(original, payload.prompt || "");
@@ -1977,76 +2251,52 @@
     }
   };
 
-  const persistPromptAssistantDecision = async (decision, finalPrompt) => {
-    const state = assistantSlice.get();
-    if (!state.correlationID) throw new Error("Не найден идентификатор варианта ассистента");
-    const body = new URLSearchParams({
-      csrf: form.elements.csrf?.value || "",
-      correlation_id: state.correlationID,
-      decision,
-      final_prompt: finalPrompt || "",
-    });
-    const response = await fetch("/generate/prompt-assistant/decision", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-      body,
-      credentials: "same-origin",
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || "Не удалось сохранить выбор");
-    return payload.decision || decision;
-  };
-
-  const resetPromptAssistantReview = () => {
-    assistantRequestSerial++;
-    assistantContext = "";
-    assistantCorrections.clear();
-    assistantSlice.dispatch({ type: "RESET" }, () => ({
-      status: "idle", approved: false, original: "", suggestion: "", action: "", correlationID: "", references: [], usage: {}, draftEdited: false, error: "",
-    }));
-    if (promptAssistantReview) promptAssistantReview.hidden = true;
-    if (promptAssistantDraft) promptAssistantDraft.value = "";
-    renderPromptAssistantReferences([]);
-    renderPromptAssistantDiff("", "");
-    if (promptAssistantReviewMeta) promptAssistantReviewMeta.textContent = "";
-    if (promptAssistantStale) promptAssistantStale.hidden = true;
-    if (promptAssistantApply) promptAssistantApply.disabled = true;
-  };
+  const resetPromptAssistantReview = () => assistantSession?.reset();
 
   const syncPromptAssistant = () => {
     if (!promptAssistant || !promptAssistantEnabled || !promptAssistantControls || !promptAssistantTemplate) return;
-    const isEdit = templateID.value === "image-to-image";
+    syncAssistantModel();
+    const isEdit = templateID.value === "image-to-image" || isKreaProSelected() && kreaProMode() !== "text";
     const isVideo = templateID.value === "minimax-h3-video";
     const videoProfile = miniMaxMode() === "references" ? "minimax-h3-ref2va" : "minimax-h3-fl2va";
     const frameReferenceCount = isVideo && miniMaxMode() !== "references" ? selectedReferenceMetadata().length : 0;
     const frameAssistantMode = frameReferenceCount >= 2 ? "FL2VA" : frameReferenceCount === 1 ? "I2VA" : "T2VA";
-    const promptCharacterLimit = isVideo ? 7000 : 4000;
+    const promptCharacterLimit = generationModules.assistant.promptCharacterLimit({
+      mode: templateID.value, longVideo: { enabled: miniMaxLongEnabled(), parts: Number(form.elements.video_long_parts?.value || 2) },
+    });
     if (positive) positive.maxLength = promptCharacterLimit;
     if (promptAssistantDraft) promptAssistantDraft.maxLength = promptCharacterLimit;
     if (promptAssistantDraftLimit) promptAssistantDraftLimit.textContent = `Можно изменить перед применением. До ${promptCharacterLimit} символов.`;
     promptAssistant.hidden = !templateID.value;
     promptAssistantControls.hidden = false;
     promptAssistantTemplate.disabled = isVideo;
-    document.getElementById("prompt-assistant-template-field").hidden = isVideo;
     const family = selectedGenerationWorkflow()?.dataset.family || "";
+    const isQwenEdit = isEdit && family === "qwen21";
+    document.getElementById("prompt-assistant-template-field").hidden = isVideo || isQwenEdit;
     document.getElementById("prompt-assistant-mode").textContent = isVideo
       ? `MiniMax H3 · ${miniMaxMode() === "references" ? "REF2VA" : frameAssistantMode}`
-      : `${family === "flux2" ? "Flux2" : "Krea2"} · ${isEdit ? "Редактирование фото" : "Изображение по тексту"}`;
+      : `${family === "moss" ? "MOSS Image" : family === "flux2" ? "Flux2" : family === "qwen21" ? "Qwen Image 2.1" : "Krea2"} · ${isEdit ? "Редактирование фото" : "Изображение по тексту"}`;
     [...promptAssistantTemplate.options].forEach((option) => {
       const imageOnly = option.dataset.imageOnly !== undefined;
       const videoOnly = option.dataset.videoOnly !== undefined;
+      const qwenOnly = option.dataset.qwenEdit !== undefined;
+      const kreaOnly = option.dataset.kreaEdit !== undefined;
+      const fluxOnly = option.dataset.fluxEdit !== undefined;
       const selectedVideoProfile = option.value === videoProfile;
-      option.hidden = isVideo ? !selectedVideoProfile : (imageOnly && !isEdit) || videoOnly;
-      option.disabled = isVideo ? !selectedVideoProfile : (imageOnly && !isEdit) || videoOnly;
+      option.hidden = isVideo ? !selectedVideoProfile : qwenOnly ? !isQwenEdit : kreaOnly ? !isEdit || family !== "krea2" : fluxOnly ? !isEdit || family !== "flux2" : (imageOnly && !isEdit) || videoOnly;
+      option.disabled = option.hidden;
     });
     const selectedAssistantTemplate = promptAssistantTemplate.selectedOptions[0];
     if ((isVideo && selectedAssistantTemplate?.value !== videoProfile) || (!isEdit && selectedAssistantTemplate?.dataset.imageOnly !== undefined) || (!isVideo && selectedAssistantTemplate?.dataset.videoOnly !== undefined)) {
       promptAssistantTemplate.value = isVideo ? videoProfile : "workflow-default";
     }
+    if (isQwenEdit) promptAssistantTemplate.value = "qwen21-edit";
+    else if (promptAssistantTemplate.value === "qwen21-edit") promptAssistantTemplate.value = "workflow-default";
     if (isEdit && family === "flux2" && promptAssistantTemplate.value === "workflow-default") promptAssistantTemplate.value = "flux-edit";
-    if (isEdit && family === "krea2" && promptAssistantTemplate.value === "flux-edit") promptAssistantTemplate.value = "workflow-default";
-    if (!restoringDraft && assistantContext && assistantContext !== assistantContextKey()) invalidatePromptAssistant();
-    if (promptAssistantApply) promptAssistantApply.disabled = assistantSlice.get().stale || !assistantSlice.get().correlationID || !promptAssistantDraft?.value.trim() || assistantRequestBusy;
+    if (isEdit && family === "krea2" && promptAssistantTemplate.value === "workflow-default") promptAssistantTemplate.value = "krea2-edit";
+    if (promptAssistantTemplate.selectedOptions[0]?.disabled) promptAssistantTemplate.value = isQwenEdit ? "qwen21-edit" : isEdit && family === "flux2" ? "flux-edit" : isEdit && family === "krea2" ? "krea2-edit" : "workflow-default";
+    if (!draftController?.restoring) assistantSession?.syncContext();
+    if (promptAssistantApply) promptAssistantApply.disabled = !assistantSession?.snapshot().canApply;
     if (promptAssistantDescription) promptAssistantDescription.textContent = isVideo
       ? miniMaxMode() === "references"
         ? "REF2VA-ассистент сначала разберёт каждый свободный референс и свяжет его роль с Picture, Video или Audio."
@@ -2056,12 +2306,15 @@
             ? "I2VA-ассистент проанализирует точный первый кадр и опишет дальнейшее развитие сцены."
             : "T2VA-ассистент соберёт полноценную видео- и аудиосцену только по вашему тексту."
       : "Локальная модель подготовит вариант, но генерация начнётся только после вашего подтверждения.";
-    if (!promptAssistantEnabled.checked) {
+    if (assistantSession?.snapshot().job.pending) {
+      // The controller owns the live status/countdown even when the panel reopens.
+      promptAssistantApply.disabled = true;
+    } else if (!promptAssistantEnabled.checked) {
       resetPromptAssistantReview();
       setPromptAssistantState("Ассистент выключен. Используется ваш исходный промт.");
     } else if (assistantSlice.get().stale) {
       setPromptAssistantState("Подготовьте новый вариант для текущей модели и материалов.", "stale");
-    } else if (assistantRequestBusy) {
+    } else if (assistantSession?.snapshot().busy) {
       setPromptAssistantState("Ассистент готовит вариант. Панель можно закрыть.", "loading");
     } else if (assistantSlice.get().status === "error") {
       setPromptAssistantState(assistantSlice.get().error || "Не удалось подготовить вариант. Попробуйте ещё раз.", "error");
@@ -2078,6 +2331,105 @@
     }
   };
 
+  const syncAIHubFields = () => {
+    const active = isAIHubSelected();
+    const carousel = aiHubMode() === "carousel";
+    const carouselV2 = aiHubCarouselV2();
+    const photo = aiHubMode() === "photo";
+    const audioSource = form.elements.aihub_audio_source;
+    const originalAudio = audioSource?.querySelector('option[value="original"]');
+    if (originalAudio) { originalAudio.disabled = active && photo; originalAudio.hidden = active && photo; }
+    if (active && photo && audioSource?.value === "original") audioSource.value = "native";
+    const source = form.elements.aihub_audio_source?.value || "native";
+    const show = (element, visible) => {
+      element.hidden = !visible;
+      element.querySelectorAll("input, select, textarea, button").forEach(control => { control.disabled = !visible || Boolean(control.closest("[inert]")); });
+    };
+    root.querySelectorAll("[data-aihub-settings]").forEach(element => show(element, active));
+    const audioSection = root.querySelector(".aihub-audio-settings");
+    if (audioSection) show(audioSection, active && !carousel);
+    root.querySelectorAll("[data-aihub-mode]").forEach(element => show(element, active && element.dataset.aihubMode.split(" ").includes(aiHubMode())));
+    root.querySelectorAll("[data-aihub-carousel-v2]").forEach(element => show(element, active && carouselV2));
+    root.querySelectorAll("[data-aihub-carousel-legacy]").forEach(element => show(element, active && carousel && !carouselV2));
+    root.querySelectorAll("[data-aihub-ltx]").forEach(element => show(element, active && !carousel && source === "ltx"));
+    root.querySelectorAll("[data-aihub-external-audio]").forEach(element => show(element, active && !carousel && source !== "native"));
+    root.querySelectorAll("[data-aihub-sam]").forEach(element => show(element, active && aiHubMode() === "video" && form.elements.aihub_mask?.value === "sam3"));
+    const allowed = new Set((workflowManifestsByID.get("aihub-minimax-h3")?.parameters || []).map(parameter => parameter.name));
+    allowed.add("seed");
+    if (carousel) {
+      if (!carouselV2) allowed.delete("video_duration_seconds");
+      allowed.delete("video_output_crf");
+      if (carouselV2) for (const name of ["video_rtx_enabled", "video_rtx_scale", "video_rtx_quality", "aihub_dlss_enabled", "aihub_dlss_strength"]) allowed.delete(name);
+    }
+    if (photo) allowed.delete("video_reference_start");
+    root.querySelectorAll(".minimax-video-settings").forEach(section => {
+      section.querySelectorAll("label").forEach(label => {
+        const controls = [...label.querySelectorAll("[name]")];
+        if (!controls.length || label.closest("[data-lora-slots]")) return;
+        if (!label.dataset.aihubPriorHidden) label.dataset.aihubPriorHidden = String(label.hidden);
+        const keep = controls.some(control => allowed.has(control.name));
+        if (active) show(label, keep && !section.closest("[inert]"));
+        else if (label.dataset.aihubFiltered) {
+          label.hidden = label.dataset.aihubPriorHidden === "true";
+          delete label.dataset.aihubFiltered;
+        }
+        if (active) label.dataset.aihubFiltered = "true";
+      });
+      section.querySelectorAll(".video-enhancement").forEach(part => {
+        part.hidden = !active && part.hasAttribute("data-aihub-settings") || active && ![...part.querySelectorAll("[name]")].some(control => allowed.has(control.name));
+      });
+      if (active && ![...section.querySelectorAll("[name]")].some(control => !control.disabled)) section.hidden = true;
+      const heading = section.querySelector(".workflow-settings-heading strong");
+      if (heading) {
+        heading.dataset.originalText ||= heading.textContent;
+        if (!active) heading.textContent = heading.dataset.originalText;
+        else if (section.querySelector('[name="video_quality"]')) heading.textContent = "AIHUB · размер результата";
+        else if (section.querySelector("[data-lora-slots]")) heading.textContent = "MiniMax H3 · LoRA";
+        else if (section.querySelector('[name="seed"]')) heading.textContent = "Seed";
+      }
+      section.querySelectorAll(".workflow-settings-heading small, .minimax-model-profile").forEach(note => { note.hidden = active; });
+    });
+    root.querySelectorAll("[data-aihub-dlss-controls]").forEach(element => show(element, active && Boolean(form.elements.aihub_dlss_enabled?.checked)));
+    root.querySelectorAll("[data-aihub-fg]").forEach(element => show(element, active && !carousel));
+    root.querySelectorAll("[data-aihub-fg-controls]").forEach(element => show(element, active && !carousel && Boolean(form.elements.aihub_fg_enabled?.checked)));
+    const oldModes = root.querySelector("#minimax-video-mode");
+    oldModes?.querySelectorAll(":scope > strong, :scope > .minimax-mode-segments, :scope > small").forEach(element => { element.hidden = active; });
+    for (const name of ["video_audio_start", "video_reference_duration", "video_reference_audio"]) {
+      const control = form.querySelector('[name="' + name + '"]');
+      const label = control?.closest("label");
+      if (label) { label.hidden = active; control.disabled = active || Boolean(control.closest("[inert]")); }
+    }
+    const audioTitle = miniMaxAudioReference?.querySelector(".upload-zone strong");
+    if (audioTitle) audioTitle.textContent = active ? "Добавить образец голоса" : "Добавить аудиореференс";
+    const audioHint = miniMaxAudioReference?.querySelector(":scope > .field-hint");
+    if (audioHint) audioHint.hidden = active;
+    const videoLabel = miniMaxVideoReference?.querySelector(".upload-slot-label");
+    if (videoLabel) videoLabel.textContent = active ? "Видео · обязательно" : "Видео · необязательно";
+    const sourceNote = document.getElementById("image-source-note");
+    if (active && sourceNote) sourceNote.textContent = carousel ? "Фото 1 обязательно · до 5 фото" : photo ? "Фото 1 обязательно · до 9 фото-референсов" : "До 9 фото-референсов";
+    if (active && (carousel || photo)) {
+      const first = root.querySelector('[data-image-slot="1"] [data-image-slot-label]');
+      if (first) first.textContent = "Фото 1 · обязательно";
+    }
+    if (active && miniMaxVideoResolutionPreview) {
+      const references = selectedReferenceMetadata();
+      const facts = generationOutputSummary("minimax_h3", references);
+      miniMaxVideoResolutionPreview.textContent = facts?.compact || "";
+    }
+    root.querySelectorAll("[data-generation-profile]").forEach(button => { button.hidden = active; button.disabled = active; });
+    root.querySelectorAll(".generation-profile-picker").forEach(element => { element.hidden = active; });
+    if (active && positivePromptLabel) positivePromptLabel.textContent = carousel ? "Основной промпт · фотокарусель" : "Основной промпт · сцена и действие";
+    if (positive) positive.placeholder = active
+      ? "Девушка с фото 1 идёт по улице, поворачивается к камере и улыбается. Камера плавно приближается. Она говорит: «Доброе утро»."
+      : "Например: портрет в мягком вечернем свете, высокая детализация";
+    root.querySelectorAll('[data-lora-slots="minimax"] [name^="lora_clip_strength_"]').forEach(control => {
+      if (control.closest("label")) control.closest("label").hidden = active;
+      if (active) control.disabled = true;
+    });
+    syncMiniMaxAudioReference();
+    syncAIHubDuration();
+  };
+
   const syncWorkflowFields = () => {
     const preset = selectedGenerationWorkflow();
     const family = preset?.dataset.family || model?.selectedOptions?.[0]?.dataset.family || "";
@@ -2085,7 +2437,15 @@
     const isKrea = family === "krea2";
     const isKreaText = isKrea && !isEdit;
     const isKreaEdit = isKrea && isEdit;
+    const isKreaUltra = isKreaUltraSelected();
+    const resolutionLabel = outputMegapixels?.closest('label')?.querySelector('.ui-field-label');
+    if (resolutionLabel?.firstChild?.nodeType === 3) resolutionLabel.firstChild.textContent = isKreaProSelected() ? 'Мегапиксели генерации ' : 'Итоговые мегапиксели ';
+    if (isKreaProSelected()) {
+      wizardSlice.dispatch({type:"SELECT_WORKFLOW",workflowID:"krea2-pro",available:preset?.dataset.available === "true",requiresImage:kreaProMode()!=="text",allowsImages:kreaProMode()!=="text"});
+    }
+    if (imageSourceFields) imageSourceFields.hidden = !(wizardSlice.get().requiresImage || wizardSlice.get().allowsImages);
     const isFluxEdit = family === "flux2" && isEdit;
+    const isQwenEdit = family === "qwen21" && isEdit;
     const isMiniMax = family === "minimax_h3";
     const minimumDimension = isEdit && preserveOriginalSize?.checked ? 16 : 256;
     applyWorkflowCapabilityConstraints();
@@ -2096,15 +2456,25 @@
       generationOpenExact.setAttribute("aria-label", isMiniMax ? "Перейти к параметрам видео MiniMax H3" : "Открыть точные настройки workflow");
     }
     syncPromptAssistant();
+    if (family === "qwen21" && maxSide) maxSide.value = "4096";
     if (outputMegapixels) {
-      outputMegapixels.max = isKreaEdit ? String(krea2EditMaxBaseMegapixels) : "16";
+      outputMegapixels.max = isKreaEdit ? String(krea2EditMaxBaseMegapixels) : family === "moss" ? "4" : family === "qwen21" || isKreaUltra ? "4.27" : "16";
+      if (family === "moss" && numericValue(outputMegapixels.value, 1) > 4) outputMegapixels.value = "4";
+      if (isKreaUltra && numericValue(outputMegapixels.value) > 4.27) outputMegapixels.value = "4.27";
       if (isKreaEdit && numericValue(outputMegapixels.value, krea2EditMaxBaseMegapixels) > krea2EditMaxBaseMegapixels) {
         outputMegapixels.value = String(krea2EditMaxBaseMegapixels);
+      } else if (family === "qwen21" && numericValue(outputMegapixels.value, 1) > 4.27) {
+        outputMegapixels.value = "1";
       }
     }
     if (isKreaEdit) {
       if (maxSide) maxSide.value = String(krea2EditMaxLongestSide);
       if (preserveOriginalLabel) preserveOriginalLabel.textContent = "Сохранить пропорции исходного фото в безопасном размере Krea2";
+      applyOriginalResolution();
+    } else if (isQwenEdit) {
+      if (maxSide) maxSide.value = "4096";
+      if (preserveOriginalLabel) preserveOriginalLabel.textContent = "Сохранить пропорции исходного фото в безопасном размере Qwen";
+      if (qwenEditMegapixels) qwenEditMegapixels.value = outputMegapixels?.value || "1";
       applyOriginalResolution();
     } else if (preserveOriginalLabel) {
       preserveOriginalLabel.textContent = "Сохранить размер исходного фото";
@@ -2118,13 +2488,22 @@
       });
     };
     setFieldState(".image-edit-field", isEdit);
+    setFieldState(".qwen-edit-resolution-field", isQwenEdit && Boolean(preserveOriginalSize?.checked));
     setFieldState(".krea-edit-field", isKreaEdit);
     setFieldState(".flux-edit-field", isFluxEdit);
     root.querySelectorAll(".size-workflow-field").forEach((field) => {
       field.hidden = Boolean(isMiniMax || (isEdit && preserveOriginalSize?.checked));
     });
     setFieldState(".krea-workflow-field", isKrea);
-    setFieldState(".krea-text-workflow-field", isKreaText);
+    setFieldState(".krea-text-workflow-field", isKreaText && !isKreaUltra);
+    setFieldState(".krea-lora-settings", isKreaText);
+    setFieldState(".moss-settings", family === "moss");
+    setFieldState(".qwen-lora-settings", family === "qwen21");
+    if (form.elements.moss_upscale_resolution) form.elements.moss_upscale_resolution.disabled = family !== "moss" || !form.elements.moss_seedvr2?.checked;
+    setFieldState(".krea-ultra-settings", isKreaUltra);
+    setFieldState(".krea-pro-settings", isKreaProSelected());
+    kreaProUI?.sync();
+    setFieldState(".krea-photoflow-settings", isKrea && !isKreaUltra);
     setFieldState(".flux-edit-settings", isFluxEdit);
     setFieldState(".krea-edit-settings", isKreaEdit);
     setFieldState(".lut-workflow-field", isFluxEdit || isKreaEdit);
@@ -2154,12 +2533,14 @@
       workflowGuides.hidden = ![...workflowGuides.querySelectorAll("[data-workflow-guide]")].some((guide) => !guide.hidden);
     }
     renderLUT();
-    setFieldState(".standard-main-settings", !isEdit && !isMiniMax);
+    setFieldState(".standard-main-settings", (!isEdit || isQwenEdit) && !isMiniMax);
     setFieldState(".minimax-video-settings", isMiniMax);
     setFieldState(".minimax-reference-field", isMiniMax && miniMaxMode() === "references");
-    const hideNegativePrompt = isMiniMax || isKreaText;
+    const qwenCFGOne = family === "qwen21" && Number((cfg?.value || "1").replace(",", ".")) <= 1;
+    const hideNegativePrompt = isMiniMax || isKreaText && !isKreaUltra || qwenCFGOne;
     if (negativePromptField) negativePromptField.hidden = hideNegativePrompt;
     if (negativePrompt) negativePrompt.disabled = hideNegativePrompt;
+    if (negativeCFGNote) negativeCFGNote.hidden = family !== "qwen21" || !qwenCFGOne;
     if (generationPromptFields) generationPromptFields.classList.toggle("is-single", hideNegativePrompt);
     if (positivePromptLabel) positivePromptLabel.textContent = isMiniMax ? "Промт видео" : isKreaText ? "Промт" : "Позитивный промт";
     if (isMiniMax) {
@@ -2169,11 +2550,20 @@
     if (isFluxEdit) syncAdaptiveLoraSlots("flux");
     if (isKreaText) syncAdaptiveLoraSlots("krea");
     if (isMiniMax) syncAdaptiveLoraSlots("minimax");
+    if (family === "moss") syncAdaptiveLoraSlots("moss");
+    if (family === "qwen21") syncAdaptiveLoraSlots("qwen21");
     syncKreaOptionalModules();
-    if (qualityField) qualityField.hidden = !isKreaText;
+    if (qualityField) qualityField.hidden = !isKreaText || isKreaUltra;
     if (editorProfile) editorProfile.hidden = !isEdit;
     syncSelectedImageSummary();
-    if (isFluxEdit) {
+    if (isQwenEdit) {
+      if (editorProfileTitle) editorProfileTitle.textContent = "Qwen Image 2.1: редактирование";
+      if (editorProfileDescription) editorProfileDescription.textContent = "Первое фото изменяется, до девяти следующих задают референсы. В промте используйте <image1>, <image2> … <image10>.";
+      if (editSourceTitle) editSourceTitle.textContent = "Исходное фото и референсы";
+      if (editSourceDescription) editSourceDescription.textContent = "Первое фото задаёт кадр результата; остальные помогают перенести конкретные детали.";
+      if (mainPassTitle) mainPassTitle.textContent = "Параметры Qwen Image 2.1";
+      if (mainPassDescription) mainPassDescription.textContent = "Обычно достаточно 25 шагов, CFG 1 и Euler / Simple.";
+    } else if (isFluxEdit) {
       if (editorProfileTitle) editorProfileTitle.textContent = "Flux2: фото и промт";
       if (editorProfileDescription) editorProfileDescription.textContent = "До четырёх изображений: основной кадр и до трёх дополнительных референсов.";
       if (editSourceTitle) editSourceTitle.textContent = "Исходник и референсы Flux2";
@@ -2195,21 +2585,35 @@
       if (mainPassDescription) mainPassDescription.textContent = "Параметры основного семплирования выбранной схемы генерации.";
     }
     syncGenerationSummary();
+    syncAIHubFields();
     studio?.syncOptions();
+    syncPromptActions();
   };
 
   const applyQuality = () => {
+    if (isKreaUltraSelected()) {
+      if (steps) steps.value = selectedGenerationWorkflow().dataset.defaultSteps || "10";
+      if (cfg) cfg.value = "2";
+      if (sampler) sampler.value = "euler";
+      if (scheduler) scheduler.value = "simple";
+      calculateResolution();
+      syncGenerationSummary();
+      return;
+    }
     const option = model?.selectedOptions[0];
     if (!option?.value) return;
     const baseSteps = Number(option.dataset.defaultSteps || 25);
     const mode = quality?.value || "balanced";
     const isKrea = option.dataset.family === "krea2";
+    const isQwen = option.dataset.family === "qwen21";
     const isEdit = selectedGenerationWorkflow()?.dataset.templateId === "image-to-image";
     const isFluxEdit = option.dataset.family === "flux2" && isEdit;
     if (steps) steps.value = isKrea ? (mode === "fast" ? 4 : baseSteps) : (mode === "fast" ? Math.max(4, Math.round(baseSteps * 0.65)) : mode === "maximum" ? Math.min(100, Math.round(baseSteps * 1.5)) : baseSteps);
     if (cfg && option.dataset.defaultCfg) cfg.value = isFluxEdit ? "1" : option.dataset.defaultCfg;
     if (sampler && option.dataset.defaultSampler) sampler.value = option.dataset.defaultSampler;
     if (scheduler && option.dataset.defaultScheduler) scheduler.value = option.dataset.defaultScheduler;
+    if (isQwen && dimensionMultiple) dimensionMultiple.value = "32";
+    if (option.dataset.family === "moss" && dimensionMultiple) dimensionMultiple.value = "16";
     if (isKrea && !isEdit) {
       const kreaProfiles = {
         fast: { base: "0.75", output: "1", upscaleSteps: "3", detailSteps: "1", detailDenoise: "0.02" },
@@ -2238,6 +2642,11 @@
     calculateResolution();
   };
 
+  form.elements.moss_seedvr2?.addEventListener("change", () => {
+    syncWorkflowFields();
+    syncGenerationSummary();
+  });
+
   model?.addEventListener("change", () => {
     applyQuality();
     if (model.selectedOptions?.[0]?.dataset.family === "minimax_h3") {
@@ -2249,6 +2658,12 @@
   quality?.addEventListener("change", applyQuality);
   [aspect, outputMegapixels, dimensionMultiple, maxSide].forEach((input) => input?.addEventListener("change", calculateResolution));
   outputMegapixels?.addEventListener("input", calculateResolution);
+  qwenEditMegapixels?.addEventListener("change", () => {
+    const value = clamp(numericValue(qwenEditMegapixels.value, 1), 0.3, 4.27);
+    qwenEditMegapixels.value = String(value);
+    outputMegapixels.value = String(value);
+    applyOriginalResolution();
+  });
   autoDenoise?.addEventListener("change", updateAutoDenoise);
   preserveOriginalSize?.addEventListener("change", () => {
     if (preserveOriginalSize.checked) {
@@ -2267,21 +2682,124 @@
   [width, height].forEach((input) => input?.addEventListener("change", () => {
     const selected = selectedGenerationWorkflow();
     const minimumDimension = selected?.dataset.templateId === "image-to-image" && preserveOriginalSize?.checked ? 16 : 256;
-    const value = clamp(Number(input.value) || 1024, minimumDimension, 4096);
+    const maximumDimension = 4096;
+    const value = clamp(Number(input.value) || 1024, minimumDimension, maximumDimension);
     input.value = String(Math.round(value / 8) * 8);
     aspect.value = "custom";
     outputMegapixels.value = (Number(width.value) * Number(height.value) / (1024 * 1024)).toFixed(2);
     updateResolutionPreview();
   }));
   root.querySelectorAll(".generation-lora-select").forEach((select) => {
+    const row = select.closest(".lora-row");
+    const kind = row?.dataset.loraSlots;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "generation-lora-remove ghost";
+    const icon = document.createElement("i");
+    icon.dataset.lucide = "x";
+    icon.setAttribute("aria-hidden", "true");
+    remove.append(icon);
+    row?.append(remove);
+    remove.addEventListener("click", () => {
+      select.value = "";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      const target = !remove.disabled ? remove : [...root.querySelectorAll(`[data-lora-slots="${kind}"] .generation-lora-remove`)].findLast(button => !button.disabled);
+      (target || select).focus({ preventScroll: true });
+    });
     select.addEventListener("change", () => {
-      const strength = select.closest(".lora-row")?.querySelector(".generation-lora-model");
+      const strength = row?.querySelector(".generation-lora-model");
       if (strength) strength.value = select.value ? (select.selectedOptions[0]?.dataset.defaultStrength || "1") : "0";
-      const kind = select.closest("[data-lora-slots]")?.dataset.loraSlots;
-      if (kind) syncAdaptiveLoraSlots(kind);
+      if (kind) {
+        if (!select.value) compactLoraSlots(kind);
+        syncAdaptiveLoraSlots(kind);
+      }
     });
   });
+  window.lucide?.createIcons();
 
+  const assistantProgress = generationModules.assistantProgress?.bindUI({ root });
+  assistantSession = generationModules.assistant.createSession({
+    state: assistantSlice, read: captureAssistantInput, prepare: () => prepareActiveMedia(),
+    transport: generationModules.assistant.createTransport({ csrf: () => form.elements.csrf?.value || "" }),
+    persistence: generationModules.assistant.createPersistence({
+      storage: () => window.localStorage, owner: promptAssistant.dataset.ownerId,
+      validID: generationModules.assistantJobs.validID, onChange: markDraftDirty,
+    }),
+    jobs: generationModules.assistantJobs, newRequestID: newGenerationRequestID,
+    onDirty: markDraftDirty,
+    onProgress: job => assistantProgress?.update(job),
+    onState: state => {
+      syncPromptActions();
+      promptAssistantImprove.disabled = state.busy || state.deciding || !state.ready || assistantModelState().blocked;
+      promptAssistantImprove.classList.toggle("is-loading", state.preparing && !state.job.pending);
+      promptAssistantApply.disabled = !state.canApply;
+      promptAssistantKeep.disabled = state.deciding;
+      const restoreOriginal = document.getElementById("prompt-assistant-restore-original");
+      if (restoreOriginal) {
+        restoreOriginal.hidden = !state.hasOriginal;
+        restoreOriginal.disabled = !state.canRestoreOriginal;
+      }
+      if (promptAssistantStale) promptAssistantStale.hidden = !state.state.stale;
+      const cancel = document.getElementById("prompt-assistant-cancel");
+      cancel.hidden = !state.job.pending;
+      cancel.disabled = Boolean(state.job.cancelling);
+      if (state.job.pending && !state.state.approved) promptAssistantEnabled.checked = true;
+      if (state.message) setPromptAssistantState(state.message, state.phase === "cancelled" ? "" : state.phase);
+    },
+    onRequest: () => { assistantProgress?.reset(); document.getElementById("prompt-assistant-saved-response").hidden = true; },
+    onReset: () => {
+      assistantProgress?.reset();
+      promptAssistantReview.hidden = true;
+      promptAssistantDraft.value = "";
+      if (promptAssistantNegativeDraft) promptAssistantNegativeDraft.value = "";
+      renderPromptAssistantReferences([]);
+      renderPromptAssistantDiff("", "");
+      promptAssistantReviewMeta.textContent = "";
+      promptAssistantStale.hidden = true;
+      promptAssistantApply.disabled = true;
+    },
+    onProposal: (payload, original) => {
+      promptAssistantDraft.value = payload.prompt;
+      renderPromptAssistantReview(payload, original);
+      promptAssistantReview.hidden = false;
+    },
+    onSavedResponse: payload => {
+      document.getElementById("prompt-assistant-saved-text").textContent = payload.prompt + (payload.negative_prompt ? "\n\nНегативный промт\n" + payload.negative_prompt : "") + (payload.audio_prompt ? "\n\nОзвучка LTX\n" + payload.audio_prompt : "");
+      document.getElementById("prompt-assistant-saved-response").hidden = false;
+    },
+    onApplied: (text, audioPrompt, negative) => {
+      positive.value = text;
+      renderMiniMaxLongPlan();
+      const input = captureAssistantInput();
+      if (generationModules.assistant.supportsNegative(input) && Number(input.cfg) > 1 && negativePrompt) negativePrompt.value = negative;
+      if (audioPrompt && form.elements.aihub_audio_source?.value === "ltx") form.elements.aihub_audio_prompt.value = audioPrompt;
+      promptAssistantReview.hidden = true;
+    },
+    onOriginalRestored: (text, originalNegative, originalAudio) => {
+      positive.value = text;
+      renderMiniMaxLongPlan();
+      if (generationModules.assistant.supportsNegative(captureAssistantInput()) && negativePrompt) negativePrompt.value = originalNegative;
+      if (generationWorkflowID?.value === "aihub-minimax-h3" && form.elements.aihub_audio_source?.value === "ltx") form.elements.aihub_audio_prompt.value = originalAudio;
+      promptAssistantReview.hidden = true;
+    },
+    onKept: () => { promptAssistantReview.hidden = true; },
+    onRestore: (state, draft, negativeDraft) => {
+      promptAssistantDraft.value = draft;
+      if (promptAssistantNegativeDraft) promptAssistantNegativeDraft.value = negativeDraft;
+      promptAssistantReview.hidden = state.approved;
+      renderPromptAssistantReview({ prompt: draft, negative_prompt: negativeDraft, audio_prompt: state.audioSuggestion, references: state.references }, state.original);
+    },
+  });
+  document.getElementById("prompt-assistant-cancel")?.addEventListener("click", () => {
+    try { assistantSession.cancel(); } catch (error) { setPromptAssistantState(error.message, "error"); }
+  });
+  window.addEventListener("pagehide", () => assistantSession.suspend());
+  window.addEventListener("pageshow", event => { if (event.persisted) assistantSession.resume(); });
+  const resumeSavedAssistant = () => {
+    if (document.visibilityState === "visible") assistantSession.resume();
+  };
+  window.addEventListener("online", resumeSavedAssistant);
+  document.addEventListener("visibilitychange", resumeSavedAssistant);
   promptAssistantOpen?.addEventListener("click", openPromptAssistant);
   document.getElementById("prompt-assistant-close")?.addEventListener("click", () => promptAssistant.close());
   document.getElementById("prompt-assistant-edit")?.addEventListener("click", () => promptAssistantDraft?.focus());
@@ -2291,6 +2809,11 @@
     markDraftDirty();
   });
   promptAssistantEnabled?.addEventListener("change", syncPromptAssistant);
+  promptAssistantModel?.addEventListener("change", () => {
+    assistantSession?.syncContext();
+    syncAssistantModel();
+    markDraftDirty();
+  });
   promptAssistantTemplate?.addEventListener("change", () => {
     invalidatePromptAssistant();
     syncPromptAssistant();
@@ -2299,204 +2822,57 @@
     invalidatePromptAssistant();
     syncPromptAssistant();
   });
-  positive?.addEventListener("input", () => {
-    if (promptAssistantEnabled?.checked && !assistantSlice.get().approved && assistantSlice.get().status !== "idle") {
-		invalidatePromptAssistant();
-		return;
-    }
-	if (["applied", "edited_after_apply"].includes(assistantSlice.get().action)) {
-		assistantSlice.dispatch({ type: "PROMPT_EDITED" }, (state) => ({ ...state, approved: true, action: "edited_after_apply" }));
-		setPromptAssistantState("Применённый вариант изменён вами. Генерацию можно запускать.", "approved");
-    }
+  const promptEdited = () => {
+    clearedPrompt = null;
+    assistantSession.editPrompt();
+    syncPromptActions();
+  };
+  clearPrompt?.addEventListener("click", () => {
+    if (assistantSession.snapshot().busy) return;
+    clearedPrompt = { positive: positive.value, negative: negativePrompt?.value || "" };
+    positive.value = "";
+    if (negativePrompt) negativePrompt.value = "";
+    resetPromptAssistantReview();
+    syncPromptAssistant();
+    syncPromptActions();
+    markDraftDirty();
   });
-	positive?.addEventListener("change", async () => {
-	  const state = assistantSlice.get();
-	  if (state.action !== "edited_after_apply" || !state.correlationID) return;
-	  try {
-		assistantDecisionPromise = persistPromptAssistantDecision("edited_after_apply", positive.value.trim());
-		await assistantDecisionPromise;
-	  } catch (error) {
-		assistantSlice.dispatch({ type: "DECISION_ERROR", error: error.message }, (current) => ({ ...current, status: "error", approved: false, error: error.message }));
-		setPromptAssistantState(error.message || "Не удалось сохранить изменение", "error");
-	  }
-	});
-	promptAssistantDraft?.addEventListener("input", () => {
-	  assistantSlice.dispatch({ type: "DRAFT_EDITED" }, (state) => ({ ...state, draftEdited: true }));
-	  renderPromptAssistantDiff(assistantSlice.get().original, promptAssistantDraft.value);
-      if (promptAssistantApply) promptAssistantApply.disabled = assistantSlice.get().stale || !assistantSlice.get().correlationID || !promptAssistantDraft.value.trim() || assistantRequestBusy;
-	});
-
+  undoClearPrompt?.addEventListener("click", () => {
+    if (!clearedPrompt || assistantSession.snapshot().busy) return;
+    positive.value = clearedPrompt.positive;
+    if (negativePrompt) negativePrompt.value = clearedPrompt.negative;
+    clearedPrompt = null;
+    assistantSession.editPrompt();
+    syncPromptActions();
+    markDraftDirty();
+  });
+  positive?.addEventListener("input", promptEdited);
+  positive?.addEventListener("input", renderMiniMaxLongPlan);
+  positive?.addEventListener("change", renderMiniMaxLongPlan);
+  positive?.addEventListener("change", () => { void assistantSession.savePromptEdit(); });
+  negativePrompt?.addEventListener("input", promptEdited);
+  negativePrompt?.addEventListener("change", () => { void assistantSession.savePromptEdit(); });
+  cfg?.addEventListener("change", () => { assistantSession.syncContext(); syncWorkflowFields(); });
+  promptAssistantDraft?.addEventListener("input", () => {
+    assistantSession.editDraft();
+    renderPromptAssistantDiff(assistantSlice.get().original, promptAssistantDraft.value);
+  });
+  promptAssistantNegativeDraft?.addEventListener("input", () => { assistantSession.editDraft(); markDraftDirty(); });
   promptAssistantImprove?.addEventListener("click", async () => {
-    if (assistantRequestBusy) return;
+    if (assistantModelState().blocked) { syncAssistantModel(); return; }
     if (assistantSlice.get().draftEdited && !window.confirm("Заменить отредактированный вариант новым ответом?")) return;
-    const original = positive?.value.trim() || "";
-    const mode = templateID.value;
-    const canUseVisualOnlyVideo = mode === "minimax-h3-video" && selectedReferenceMetadata().length > 0;
-    if ((!original && !canUseVisualOnlyVideo) || (mode !== "text-to-image" && mode !== "image-to-image" && mode !== "minimax-h3-video")) {
-      setPromptAssistantState(mode === "minimax-h3-video"
-        ? "Введите промт или добавьте хотя бы одно фото, которое ассистент сможет разобрать."
-        : "Сначала выберите схему генерации и введите позитивный промт.", "error");
-      return;
-    }
-    const serial = ++assistantRequestSerial;
-    const context = assistantContextKey();
-    assistantContext = context;
-    assistantRequestBusy = true;
-    if (promptAssistantApply) promptAssistantApply.disabled = true;
-    if (promptAssistantStale) promptAssistantStale.hidden = true;
-    promptAssistantImprove.disabled = true;
-    promptAssistantImprove.classList.add("is-loading");
-    assistantSlice.dispatch({ type: "REQUEST_START", original }, (state) => ({
-      ...state,
-      status: "loading",
-      stale: false,
-      draftEdited: false,
-      approved: false,
-      original,
-      suggestion: "",
-      action: "",
-      correlationID: "",
-      error: "",
-    }));
-    setPromptAssistantState(promptAssistantThink?.checked ? "Локальная модель обдумывает и дорабатывает промт..." : "Локальная модель дорабатывает промт...", "loading");
-    try {
-      await prepareActiveMedia();
-      if (serial !== assistantRequestSerial || context !== assistantContextKey() || original !== positive.value.trim()) {
-        invalidatePromptAssistant();
-        return;
-      }
-      const body = new URLSearchParams({
-        csrf: form.elements.csrf?.value || "",
-        prompt: original,
-        template_id: mode,
-        assistant_template: promptAssistantTemplate?.value || "workflow-default",
-        assistant_think: promptAssistantThink?.checked ? "true" : "false",
-      });
-      if (mode === "minimax-h3-video") {
-        body.set("video_mode", miniMaxMode());
-        body.set("video_duration_seconds", form.elements.video_duration_seconds?.value || "5");
-        body.set("video_has_audio", miniMaxAudioIsAvailable() && uploadedAudio ? "true" : "false");
-        body.set("video_has_video", miniMaxReferencesAreAvailable() && uploadedVideo ? "true" : "false");
-      }
-      inputImages.forEach((input, index) => {
-        const value = index < activeMaxInputImages() ? (uploadedImages.get(index + 1) || "") : "";
-        if (value) body.set(index === 0 ? "input_image" : `input_image_${index + 1}`, value);
-      });
-      promptAssistantReferences().forEach((reference) => {
-        body.set(`image_role_${reference.number}`, reference.role);
-      });
-      assistantCorrections.forEach((correction, identifier) => {
-        const source = assistantSourceForIdentifier(identifier);
-        if (source?.value && source.value === correction.source) body.set(`image_correction_${source.slot}`, correction.text);
-      });
-      const response = await fetch("/generate/prompt-assistant", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-        body,
-        credentials: "same-origin",
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (serial !== assistantRequestSerial) return;
-      if (context !== assistantContextKey() || original !== positive.value.trim() || assistantSlice.get().stale || assistantSlice.get().draftEdited) {
-        invalidatePromptAssistant();
-        return;
-      }
-      if (!response.ok || !payload.prompt) throw new Error(payload.error || "Не удалось подготовить вариант");
-      payload.references = (Array.isArray(payload.references) ? payload.references : []).map(reference => ({
-        ...reference, source_value: assistantSourceForIdentifier(reference.id)?.value || "",
-      }));
-      promptAssistantDraft.value = payload.prompt;
-      assistantSlice.dispatch({
-        type: "REQUEST_SUCCESS",
-        suggestion: payload.prompt,
-        correlationID: payload.correlation_id || "",
-		references: payload.references || [],
-		usage: payload.usage || {},
-      }, (state) => ({
-        ...state,
-        status: "review",
-        suggestion: payload.prompt,
-        correlationID: payload.correlation_id || "",
-		references: payload.references || [],
-		usage: payload.usage || {},
-		draftEdited: false,
-        error: "",
-      }));
-	  renderPromptAssistantReview(payload, original);
-      promptAssistantReview.hidden = false;
-      promptAssistantApply.disabled = false;
-      setPromptAssistantState(`Вариант подготовлен: ${payload.model || "локальная модель"}. Подтвердите или отредактируйте его.`, "review");
-      if (promptAssistant.open) promptAssistantDraft.focus({ preventScroll: true });
-      markDraftDirty();
-    } catch (error) {
-      if (serial !== assistantRequestSerial) return;
-      assistantSlice.dispatch({ type: "REQUEST_ERROR", error: error.message }, (state) => ({ ...state, status: "error", error: error.message || "Request failed" }));
-      setPromptAssistantState(error.message || "Не удалось подготовить вариант", "error");
-    } finally {
-      assistantRequestBusy = false;
-      promptAssistantImprove.disabled = false;
-      promptAssistantImprove.classList.remove("is-loading");
-    }
+    await assistantSession.improve();
   });
-
   promptAssistantApply?.addEventListener("click", async () => {
-    if (assistantSlice.get().stale || assistantRequestBusy || assistantContext !== assistantContextKey()) {
-      invalidatePromptAssistant();
-      return;
-    }
-    const suggestion = promptAssistantDraft?.value.trim() || "";
-    if (!suggestion) {
-      setPromptAssistantState("Вариант ассистента пуст. Отредактируйте его или оставьте свой промт.", "error");
-      return;
-    }
-	const edited = suggestion !== assistantSlice.get().suggestion;
-	const requestedDecision = edited ? "edited_after_apply" : "applied";
-    const serial = assistantRequestSerial;
-    const currentPrompt = positive.value;
-	promptAssistantApply.disabled = true;
-	promptAssistantKeep.disabled = true;
-	try {
-	  assistantDecisionPromise = persistPromptAssistantDecision(requestedDecision, suggestion);
-	  const savedDecision = await assistantDecisionPromise;
-      if (serial !== assistantRequestSerial || assistantSlice.get().stale || assistantContext !== assistantContextKey() || currentPrompt !== positive.value) return;
-	  positive.value = suggestion;
-	  assistantSlice.dispatch({ type: "APPLY", edited: savedDecision === "edited_after_apply" }, (state) => ({ ...state, status: "approved", approved: true, action: savedDecision, draftEdited: edited }));
-	  promptAssistantReview.hidden = true;
-	  setPromptAssistantState(savedDecision === "edited_after_apply" ? "Ваш отредактированный вариант применён." : "Вариант ассистента применён.", "approved");
-      markDraftDirty();
-      promptAssistant.close();
-	} catch (error) {
-	  assistantSlice.dispatch({ type: "DECISION_ERROR", error: error.message }, (state) => ({ ...state, status: "error", approved: false, error: error.message }));
-	  setPromptAssistantState(error.message || "Не удалось сохранить выбор", "error");
-	} finally {
-	  promptAssistantApply.disabled = assistantSlice.get().stale;
-	  promptAssistantKeep.disabled = false;
-	}
+    if (await assistantSession.apply()) promptAssistant.close();
   });
-
   promptAssistantKeep?.addEventListener("click", async () => {
-	promptAssistantApply.disabled = true;
-	promptAssistantKeep.disabled = true;
-	try {
-      if (!assistantSlice.get().stale && assistantSlice.get().correlationID) {
-        assistantDecisionPromise = persistPromptAssistantDecision("kept_original", positive.value.trim());
-        await assistantDecisionPromise;
-      }
-      assistantRequestSerial++;
-      if (assistantSlice.get().stale || !assistantSlice.get().correlationID) resetPromptAssistantReview();
-	  assistantSlice.dispatch({ type: "KEEP_ORIGINAL" }, (state) => ({ ...state, status: "approved", approved: true, action: "kept_original" }));
-	  assistantContext = assistantContextKey();
-	  promptAssistantReview.hidden = true;
-	  setPromptAssistantState("Оставлен ваш исходный промт. Генерацию можно запускать.", "approved");
-      markDraftDirty();
-      promptAssistant.close();
-	} catch (error) {
-	  assistantSlice.dispatch({ type: "DECISION_ERROR", error: error.message }, (state) => ({ ...state, status: "error", approved: false, error: error.message }));
-	  setPromptAssistantState(error.message || "Не удалось сохранить выбор", "error");
-	} finally {
-	  promptAssistantApply.disabled = false;
-	  promptAssistantKeep.disabled = false;
-	}
+    if (await assistantSession.keep()) promptAssistant.close();
+  });
+  document.getElementById("prompt-assistant-restore-original")?.addEventListener("click", async () => {
+    const current = assistantSlice.get();
+    if (current.action === "edited_after_apply" && !window.confirm("Вернуть исходный текст? Текущие правки в поле промпта будут заменены.")) return;
+    if (await assistantSession.restoreOriginal()) promptAssistantOpen?.focus({ preventScroll: true });
   });
 
   root.querySelectorAll(".scenario-choice").forEach((button) => {
@@ -2517,6 +2893,14 @@
     syncWorkflowFields();
   };
   miniMaxVideoModeInputs.forEach((input) => input.addEventListener("change", handleMiniMaxModeChange));
+  [form.elements.video_long_enabled, form.elements.video_long_parts, form.elements.video_long_context, form.elements.video_long_transition].forEach(control => control?.addEventListener("change", () => {
+    syncMiniMaxVideoProfile();
+    syncImageSlots();
+    syncMiniMaxAudioReference();
+    syncPromptAssistant();
+    invalidatePromptAssistant();
+    form.dispatchEvent(new Event("input", { bubbles: true }));
+  }));
 
   miniMaxAudioFile?.addEventListener("change", () => {
     audioPlayer?.clear();
@@ -2546,6 +2930,18 @@
     clearMiniMaxAudio();
     syncStudioSelection();
   });
+  document.getElementById("minimax-video-browse")?.addEventListener("change", (event) => {
+    const picker = event.currentTarget;
+    if (!picker.files?.length || !miniMaxVideoFile) return;
+    const transfer = new DataTransfer();
+    for (const file of picker.files) transfer.items.add(file);
+    miniMaxVideoFile.files = transfer.files;
+    picker.value = "";
+    miniMaxVideoFile.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  for (const event of ["loadedmetadata", "emptied", "error"]) {
+    miniMaxVideoPreviewMedia?.addEventListener(event, () => { syncAIHubDuration(); syncStudioSelection(); });
+  }
   miniMaxVideoFile?.addEventListener("change", () => {
     draftAssets.delete("input_video");
     const file = miniMaxVideoFile.files?.[0];
@@ -2588,16 +2984,20 @@
   }));
   miniMaxVideoSharpenMethod?.addEventListener("change", syncMiniMaxSharpenFields);
 
+  let galleryPickerSignature = "";
   const renderGalleryImagePicker = () => {
     if (!imagePickerGrid || !imagePickerState) return;
-    imagePickerGrid.replaceChildren();
-    if (!galleryPickerImages.length) {
-      imagePickerState.hidden = false;
-      if (galleryPickerImagesLoading) imagePickerState.textContent = "Загружаем ваши изображения...";
-      else if (galleryPickerImagesLoaded) imagePickerState.textContent = `За последние ${mediaRetentionLabel} доступных изображений нет. Можно загрузить фото с устройства.`;
-      return;
-    }
-    imagePickerState.hidden = true;
+    const state = galleryResource.snapshot(), galleryPickerImages = state.value;
+    feedback.resourceView({ root: document.getElementById("generation-image-picker-feedback"), message: imagePickerState,
+      retry: imagePickerRefresh, login: document.getElementById("generation-image-picker-login") }, state, {
+      loading: "Загружаем ваши изображения...", idle: "Выберите обновление, чтобы загрузить изображения.",
+      empty: `За последние ${mediaRetentionLabel} доступных изображений нет. Можно загрузить фото с устройства.`,
+      showRefresh: true, showBackgroundLoading: true, loginURL: loginURL(),
+    });
+    imagePickerGrid.setAttribute("aria-busy", String(state.loading));
+    const signature = JSON.stringify(galleryPickerImages);
+    if (signature === galleryPickerSignature) return;
+    galleryPickerSignature = signature;
     imagePickerGrid.replaceChildren(...galleryPickerImages.map((entry) => {
       const card = document.createElement("button");
       card.type = "button";
@@ -2641,19 +3041,12 @@
     }));
   };
 
-  const refreshGalleryPickerImages = async () => {
-    if (galleryPickerImagesLoading) return;
-    galleryPickerImagesLoading = true;
-    if (imagePickerRefresh) {
-      imagePickerRefresh.disabled = true;
-      imagePickerRefresh.classList.add("is-loading");
-    }
-    renderGalleryImagePicker();
-    try {
-      const response = await fetch("/generate/library/images", { credentials: "same-origin" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "Не удалось загрузить изображения");
-      galleryPickerImages = (Array.isArray(payload.images) ? payload.images : []).map((entry) => ({
+  const galleryResource = feedback.createResource({
+    initialValue: [],
+    load: async signal => {
+      const payload = await feedback.requestJSON("/generate/library/images", { signal, message: "Не удалось обновить изображения. Повторите запрос." });
+      if (!Array.isArray(payload.images) || payload.images.some(entry => !entry || !Number.isSafeInteger(Number(entry.id)) || Number(entry.id) < 1 || typeof entry.url !== "string")) throw feedback.failure("invalid", "Список изображений не удалось прочитать. Повторите запрос.");
+      return payload.images.map((entry) => ({
         id: Number(entry.id || 0),
         url: String(entry.url || ""),
         name: String(entry.filename || `Изображение ${entry.id || ""}`),
@@ -2661,28 +3054,17 @@
         createdUnix: Number(entry.created_unix || 0),
         expiresUnix: Number(entry.expires_unix || 0),
         sensitive: Boolean(entry.sensitive),
-      })).filter((entry) => entry.id > 0 && entry.url);
-      galleryPickerImagesLoaded = true;
-    } catch (error) {
-      if (!galleryPickerImages.length && imagePickerState) {
-        imagePickerState.hidden = false;
-        imagePickerState.textContent = error.message || "Не удалось загрузить изображения. Попробуйте ещё раз.";
-      }
-      throw error;
-    } finally {
-      galleryPickerImagesLoading = false;
-      if (imagePickerRefresh) {
-        imagePickerRefresh.disabled = false;
-        imagePickerRefresh.classList.remove("is-loading");
-      }
-      renderGalleryImagePicker();
-    }
-  };
+      })).filter(entry => entry.url);
+    },
+    onState: () => renderGalleryImagePicker(),
+  });
+  const refreshGalleryPickerImages = () => galleryResource.refresh();
 
   const closeGalleryImagePicker = () => {
     if (!imagePicker || imagePicker.hidden) return;
     const selectedSlot = galleryPickerSlot;
     imagePicker.hidden = true;
+    galleryResource.pause();
     galleryPickerSlot = null;
     document.body.classList.remove("generation-image-picker-open");
     if (imagePickerFocusTrap) imagePickerFocusTrap.deactivate();
@@ -2698,6 +3080,7 @@
         : item.index === 1 ? "основном фото" : `референсе ${item.index}`;
     }
     imagePicker.hidden = false;
+    galleryResource.resume({ read: false });
     document.body.classList.add("generation-image-picker-open");
     renderGalleryImagePicker();
     const closeButton = imagePicker.querySelector(".generation-image-picker-close");
@@ -2720,6 +3103,8 @@
         if (item.index !== 1) return;
         primaryImageSize = { width: item.previewImage.naturalWidth, height: item.previewImage.naturalHeight };
         applyOriginalResolution();
+        applyKreaProSourceSize();
+        if (isKreaProSelected()) calculateResolution();
         updateOriginalResolution();
         syncSelectedImageSummary();
         syncMiniMaxVideoProfile();
@@ -2734,6 +3119,7 @@
     if (item.state) item.state.textContent = stateMessage;
     if (item.preview) item.preview.hidden = false;
     syncSelectedImageSummary();
+    syncImageSlots();
     syncReferenceMap();
     syncPromptAssistant();
     syncStudioSelection();
@@ -2763,7 +3149,7 @@
 
   const clearRequestedLibraryMediaQuery = () => {
     const url = new URL(window.location.href);
-    ["media", "template", "workflow", "slot", "role"].forEach((name) => url.searchParams.delete(name));
+    ["media", "template", "workflow", "slot", "role", "library_model"].forEach((name) => url.searchParams.delete(name));
     window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
   };
 
@@ -2791,35 +3177,56 @@
       return;
     }
     if (!workflow.classList.contains("is-selected")) chooseGenerationWorkflow(workflow);
+    if (requestedLibraryModelID) {
+      const option = [...(model?.options || [])].find(item => item.value === requestedLibraryModelID && !item.disabled && !item.hidden);
+      if (!option) { showRepeatNotice("Модель недоступна", "Выбранная модель больше не доступна. Повторите выбор назначения в результатах.", true); clearRequestedLibraryMediaQuery(); return; }
+      model.value = option.value; model.dispatchEvent(new Event("change", { bubbles: true }));
+    }
 
     if (template === "minimax-h3-video") {
       const frameRole = requestedLibraryRole === "first_frame" || requestedLibraryRole === "last_frame";
+      if (frameRole && model?.selectedOptions?.[0]?.dataset.videoReferenceOnly === "true") { showRepeatNotice("Роль недоступна", "Эта модель принимает только свободные референсы, не первый или последний кадр.", true); clearRequestedLibraryMediaQuery(); return; }
       setMiniMaxMode(frameRole ? "frames" : "references");
       syncImageSlots();
       syncMiniMaxAudioReference();
     }
-    const requestedSlot = Math.max(1, Number.parseInt(requestedLibrarySlot, 10) || 1);
-    const slotNumber = Math.min(requestedSlot, activeMaxInputImages());
+    const slotNumber = /^[1-9][0-9]*$/.test(requestedLibrarySlot) ? Number(requestedLibrarySlot) : 0;
+    if (template === "minimax-h3-video" && (requestedLibraryRole === "first_frame" && slotNumber !== 1 || requestedLibraryRole === "last_frame" && slotNumber !== 2)) {
+      showRepeatNotice("Роль не соответствует слоту", "Первый кадр относится к слоту 1, последний кадр к слоту 2. Повторите выбор назначения.", true);
+      clearRequestedLibraryMediaQuery(); return;
+    }
     const item = imageSlots.find((candidate) => candidate.index === slotNumber);
-    if (!item || item.slot.hidden) {
+    if (!Number.isSafeInteger(slotNumber) || slotNumber > activeMaxInputImages() || !item || item.slot.hidden) {
       showRepeatNotice("Слот недоступен", "Выбранный workflow поддерживает меньше изображений. Выберите доступный слот.", true);
       clearRequestedLibraryMediaQuery();
       return;
     }
-    if (item.role && requestedLibraryRole) item.role.value = requestedLibraryRole;
+    const previousSource = mediaSlice.get().sources?.[String(item.index)];
+    const previousFile = item.input?.files?.[0];
+    const previousGallery = gallerySelections.get(item.index);
+    const selectedModelID = model?.value;
+    const stamp = generationPageEpoch, controller = new AbortController();
+    pageRequests.add(controller);
     try {
-      await refreshGalleryPickerImages();
-      const entry = galleryPickerImages.find((candidate) => String(candidate.id) === String(requestedLibraryMediaID));
-      if (!entry) throw new Error(`Изображение больше не доступно. Результаты хранятся ${mediaRetentionLabel}.`);
+      const payload = await feedback.requestJSON(`/generate/library/images?media=${encodeURIComponent(requestedLibraryMediaID)}`, { signal: controller.signal, message: "Не удалось загрузить изображение. Повторите перенос из результатов." });
+      if (!generationPageActive || stamp !== generationPageEpoch) return;
+      const raw = Array.isArray(payload.images) && payload.images.length === 1 ? payload.images[0] : null;
+      if (payload.media_id !== requestedLibraryMediaID || !raw) throw new Error(`Изображение больше не доступно. Результаты хранятся ${mediaRetentionLabel}.`);
+      if (!workflow.classList.contains("is-selected") || !scenario.classList.contains("is-selected") || model?.value !== selectedModelID || item.slot.hidden || item.input?.files?.[0] !== previousFile || gallerySelections.get(item.index) !== previousGallery || mediaSlice.get().sources?.[String(item.index)] !== previousSource) throw new Error("Параметры или изображение изменены во время загрузки. Повторите перенос из результатов.");
+      const entry = { id: requestedLibraryMediaID, url: String(raw.url || ""), name: String(raw.filename || "Изображение"), modelName: String(raw.model_name || ""), createdUnix: Number(raw.created_unix), expiresUnix: Number(raw.expires_unix), sensitive: Boolean(raw.sensitive) };
+      if (!entry.url || entry.expiresUnix <= Date.now()) throw new Error("Срок хранения изображения истёк.");
+      if (item.role && requestedLibraryRole) item.role.value = requestedLibraryRole;
       selectGalleryImage(item, entry);
       showStep(2);
       const workflowLabel = workflow.querySelector("strong")?.textContent?.trim() || workflowID;
       showRepeatNotice("Изображение добавлено", `${entry.name} выбрано для «${workflowLabel}», слот ${slotNumber}.`);
       window.requestAnimationFrame(() => item.slot.scrollIntoView({ behavior: "smooth", block: "center" }));
     } catch (error) {
-      showRepeatNotice("Не удалось добавить изображение", error.message || "Обновите медиатеку и выберите другой результат.", true);
+      if (generationPageActive && stamp === generationPageEpoch) showRepeatNotice("Не удалось добавить изображение", error.message || "Обновите медиатеку и выберите другой результат.", true);
     } finally {
-      clearRequestedLibraryMediaQuery();
+      pageRequests.delete(controller);
+      if (generationPageActive && stamp === generationPageEpoch) clearRequestedLibraryMediaQuery();
+      else requestedLibraryMediaHandled = false;
     }
   };
 
@@ -2866,6 +3273,7 @@
     item.input?.addEventListener("input", () => handleImageSelection(item));
     item.remove?.addEventListener("click", () => {
       clearImageSlot(item);
+      syncImageSlots();
       syncStudioSelection();
     });
     item.galleryButton?.addEventListener("click", () => openGalleryImagePicker(item));
@@ -2881,574 +3289,194 @@
   imagePickerRefresh?.addEventListener("click", () => { refreshGalleryPickerImages().catch(() => {}); });
   if (!imagePickerFocusTrap) document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeGalleryImagePicker(); });
 
-  const uploadSelectedImageSource = async (item) => {
-    const file = selectedImageFile(item);
-    const galleryImage = gallerySelections.get(item.index);
-    const source = generationModules.media?.sourceFrom?.(file, galleryImage) || file || galleryImage;
-    if (!source) throw new Error("Не удалось прочитать выбранное фото");
-    if (generationModules.media?.uploadImageSource) {
-      return generationModules.media.uploadImageSource(source, {
-        fetcher: fetch,
-        csrf: form.elements.csrf?.value || "",
-      });
-    }
-    let response;
-    if (galleryImage) {
-      const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", media_id: String(galleryImage.id) });
-      response = await fetch("/generate/library/reuse-image", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-        body,
-        credentials: "same-origin",
-      });
-    } else {
-      const body = new FormData();
-      body.append("image", file, file.name);
-      body.append("type", "input");
-      body.append("overwrite", "true");
-      response = await fetch("/generate/upload/image", { method: "POST", body, credentials: "same-origin" });
-    }
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload.name) throw new Error(payload.error || "ComfyUI не принял фото");
-    return { ...payload, value: [payload.subfolder, payload.name].filter(Boolean).join("/"), source };
+  const mediaUploads = generationModules.media?.createUploadController?.({ settled: () => syncStudioSelection() });
+  const requireMediaUploads = () => {
+    if (!mediaUploads) throw new Error("Модуль загрузки недоступен. Обновите страницу.");
+    return mediaUploads;
   };
-
-  // Autosave and the Next button share uploads so a file is reserved only once.
-  const uploadSelectedImage = (item) => {
+  const uploadSelectedImage = async (item) => {
     const field = imageDraftField(item.index);
-    const source = selectedImageFile(item) || gallerySelections.get(item.index);
-    if (pendingMediaUploads.get(field)?.source === source) return pendingMediaUploads.get(field).promise;
-    const promise = uploadSelectedImageSource(item).then((payload) => {
-      if (source !== (selectedImageFile(item) || gallerySelections.get(item.index))) throw new Error("Выбранное фото изменилось");
-      uploadedImages.set(item.index, payload.value);
-      draftAssets.delete(field);
-      mediaSlice.dispatch({ type: "UPLOAD_SUCCESS", slot: item.index, value: payload.value });
-      if (inputImages[item.index - 1]) inputImages[item.index - 1].value = payload.value;
-      if (item.state) item.state.textContent = "Загружено в вашу сессию";
-      return payload;
-    }).finally(() => {
-      if (pendingMediaUploads.get(field)?.promise === promise) pendingMediaUploads.delete(field);
-      syncStudioSelection();
+    return requireMediaUploads().upload({
+      field,
+      readSource: () => selectedImageFile(item) || gallerySelections.get(item.index),
+      changedMessage: "Выбранное фото изменилось",
+      transfer: (source) => generationModules.media.uploadImageSource(source, {
+        fetcher: fetch, csrf: form.elements.csrf?.value || "", errorMessage: "ComfyUI не принял фото",
+      }),
+      commit: (payload) => {
+        uploadedImages.set(item.index, payload.value);
+        draftAssets.delete(field);
+        mediaSlice.dispatch({ type: "UPLOAD_SUCCESS", slot: item.index, value: payload.value });
+        if (inputImages[item.index - 1]) inputImages[item.index - 1].value = payload.value;
+        feedback.present(item.state, "ready", "Загружено в вашу сессию");
+        return payload;
+      },
     });
-    pendingMediaUploads.set(field, { source, promise });
-    return promise;
   };
 
-  const uploadSelectedAV = (kind) => {
+  const uploadSelectedAV = async (kind) => {
     const field = `input_${kind}`;
     const input = kind === "audio" ? miniMaxAudioFile : miniMaxVideoFile;
-    const source = input?.files?.[0];
-    if (!source) return Promise.reject(new Error("Файл не выбран"));
-    if (pendingMediaUploads.get(field)?.source === source) return pendingMediaUploads.get(field).promise;
-    const promise = (async () => {
-      const body = new FormData();
-      body.append("image", source, source.name);
-      body.append("type", "input");
-      body.append("overwrite", "true");
-      const response = await fetch(`/generate/upload/${kind}`, { method: "POST", body, credentials: "same-origin" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.name) throw new Error(payload.error || "Не удалось загрузить файл");
-      if (source !== input?.files?.[0]) throw new Error("Выбранный файл изменился");
-      const value = [payload.subfolder, payload.name].filter(Boolean).join("/");
-      draftAssets.delete(field);
-      if (kind === "audio") uploadedAudio = value;
-      else uploadedVideo = value;
-      syncMiniMaxAudioReference();
-      const state = kind === "audio" ? miniMaxAudioState : miniMaxVideoState;
-      if (state) state.textContent = "Загружено в вашу сессию";
-      return value;
-    })().finally(() => {
-      if (pendingMediaUploads.get(field)?.promise === promise) pendingMediaUploads.delete(field);
-      syncStudioSelection();
+    return requireMediaUploads().upload({
+      field, readSource: () => input?.files?.[0], changedMessage: "Выбранный файл изменился",
+      transfer: (source) => generationModules.media.uploadSource(source, { kind, fetcher: fetch, errorMessage: "Не удалось загрузить файл" }),
+      commit: ({ value }) => {
+        draftAssets.delete(field);
+        if (kind === "audio") uploadedAudio = value;
+        else uploadedVideo = value;
+        syncMiniMaxAudioReference();
+        const state = kind === "audio" ? miniMaxAudioState : miniMaxVideoState;
+        feedback.present(state, "ready", "Загружено в вашу сессию");
+        return value;
+      },
     });
-    pendingMediaUploads.set(field, { source, promise });
-    return promise;
   };
 
-  let preparingMedia = null;
-  const prepareActiveMedia = async () => {
-    if (preparingMedia) return preparingMedia;
-    const selection = () => [templateID.value, generationWorkflowID.value, model?.value, miniMaxMode()].join("|");
-    const expected = selection();
-    preparingMedia = (async () => {
+  const prepareActiveMedia = async () => requireMediaUploads().prepare({
+    selection: () => [templateID.value, generationWorkflowID.value, model?.value, miniMaxMode()].join("|"),
+    validate: () => {
       if (hasMissingDraftAssets()) throw new Error("Материал черновика недоступен. Замените его или удалите.");
       if (wizardSlice.get().requiresImage && !hasSelectedImage(imageSlots[0]) && !uploadedImages.get(1)) {
         studio?.revealField(imageSlots[0]?.input);
         throw new Error("Добавьте основное фото для редактирования.");
       }
-      for (const item of pendingDraftFiles()) {
-        if (item.state) item.state.textContent = "Загружаем материал...";
-        try { await item.upload(); }
-        catch (error) {
-          if (item.state) item.state.textContent = error.message || "Загрузка не удалась";
-          throw error;
-        }
-      }
-      if (selection() !== expected || pendingDraftFiles().length) throw new Error("Материалы или режим изменились во время загрузки. Проверьте их и повторите запуск.");
-      markDraftDirty();
-    })();
-    try { await preparingMedia; }
-    finally { preparingMedia = null; syncStudioSelection(); }
-  };
-
-  const renderOutputs = (outputs) => {
-    outputGrid.replaceChildren();
-    outputs.forEach((output) => {
-      const media = output.media_type === "video" ? document.createElement("video") : document.createElement("img");
-      media.src = output.url;
-      media.controls = false;
-      media.muted = output.media_type === "video";
-      media.loop = output.media_type === "video";
-      media.playsInline = output.media_type === "video";
-      media.preload = "auto";
-      media.loading = "lazy";
-      media.alt = output.filename;
-      const card = document.createElement("figure");
-      card.className = "generation-output";
-      const previewLink = document.createElement("button");
-      previewLink.className = "generation-output-preview";
-      previewLink.type = "button";
-      previewLink.title = output.media_type === "video" ? "Открыть видеоплеер" : "Открыть на весь экран";
-      if (output.media_type === "video") {
-        previewLink.classList.add("generation-video-preview");
-        const play = document.createElement("span");
-        play.className = "generation-video-play";
-        play.setAttribute("aria-hidden", "true");
-        play.textContent = "▶";
-        previewLink.append(media, play);
-        wireVideoPreview(previewLink, output);
-      } else {
-        previewLink.append(media);
-        previewLink.addEventListener("click", () => openLightbox(output));
-      }
-      const caption = document.createElement("figcaption");
-      const filename = document.createElement("span");
-      filename.textContent = output.filename;
-      const download = document.createElement("a");
-      download.className = "generation-output-download";
-      download.href = downloadURL(output.url);
-      download.download = output.filename;
-      download.textContent = "Скачать файл";
-      caption.append(filename, download);
-      card.append(previewLink, caption);
-      outputGrid.append(card);
-    });
-  };
-
-  const formatExpiry = (milliseconds) => {
-    if (milliseconds <= 0) return "Удаляется при следующей очистке";
-    const totalMinutes = Math.ceil(milliseconds / 60000);
-    const hours = Math.floor(totalMinutes / 60);
-    const minutes = totalMinutes % 60;
-    if (hours >= 24) return `Удалится через ${Math.floor(hours / 24)} дн. ${hours % 24} ч.`;
-    if (hours > 0) return `Удалится через ${hours} ч. ${minutes} мин.`;
-    return `Удалится через ${Math.max(1, minutes)} мин.`;
-  };
-
-  const refreshExpiryLabels = () => {
-    document.querySelectorAll("[data-generation-expiry]").forEach((element) => {
-      const expiresAt = Number(element.dataset.generationExpiry);
-      element.textContent = Number.isFinite(expiresAt) ? formatExpiry(expiresAt - Date.now()) : "Срок хранения неизвестен";
-    });
-  };
-
-  const createLibraryCard = (item) => {
-    const card = document.createElement("figure");
-    card.className = "generation-output generation-library-item";
-    if (item.sensitive) card.classList.add("sensitive-media");
-    const isVideo = item.media_type === "video";
-    const preview = document.createElement("button");
-    preview.className = "generation-output-preview";
-    if (item.sensitive) preview.dataset.sensitiveMedia = "";
-    if (isVideo) {
-      preview.type = "button";
-      preview.classList.add("generation-video-preview");
-      preview.title = "Открыть видеоплеер";
-      const video = document.createElement("video");
-      video.muted = true;
-      video.loop = true;
-      video.playsInline = true;
-      video.preload = "auto";
-      video.src = item.url;
-      const play = document.createElement("span");
-      play.className = "generation-video-play";
-      play.setAttribute("aria-hidden", "true");
-      play.textContent = "▶";
-      preview.append(video, play);
-      if (item.sensitive) {
-        const cover = document.createElement("span");
-        cover.className = "sensitive-media-cover";
-        cover.innerHTML = "<b>Контент 18+</b><small>Нажмите, чтобы показать</small>";
-        preview.append(cover);
-      }
-      wireVideoPreview(preview, item);
-    } else {
-      preview.type = "button";
-      preview.dataset.generationLibraryItem = "";
-      preview.dataset.url = item.url;
-      preview.dataset.filename = item.filename;
-      preview.title = "Открыть на весь экран";
-      const image = document.createElement("img");
-      image.loading = "lazy";
-      image.src = item.url;
-      image.alt = "Результат генерации";
-      preview.append(image);
-      if (item.sensitive) {
-        const cover = document.createElement("span");
-        cover.className = "sensitive-media-cover";
-        cover.innerHTML = "<b>Контент 18+</b><small>Нажмите, чтобы показать</small>";
-        preview.append(cover);
-      }
-      preview.addEventListener("click", () => {
-        if (window.aiGatewaySensitiveContent?.reveal(preview)) return;
-        openLightbox({ filename: item.filename, media_type: "image", url: item.url });
-      });
-    }
-    const caption = document.createElement("figcaption");
-    const filename = document.createElement("span");
-    filename.textContent = item.filename;
-    const actions = document.createElement("div");
-    actions.className = "generation-card-actions";
-    const expiry = document.createElement("time");
-    expiry.className = "generation-expiry";
-    expiry.dataset.generationExpiry = String(item.expires_unix);
-    const hideForm = document.createElement("form");
-    hideForm.method = "post";
-    hideForm.action = "/generate/library/hide";
-		hideForm.dataset.generationHideForm = "";
-    const csrf = document.createElement("input");
-    csrf.type = "hidden";
-    csrf.name = "csrf";
-    csrf.value = form.querySelector("input[name='csrf']")?.value || "";
-    const mediaID = document.createElement("input");
-    mediaID.type = "hidden";
-    mediaID.name = "media_id";
-    mediaID.value = String(item.id);
-    const hide = document.createElement("button");
-    hide.className = "generation-hide";
-    hide.type = "submit";
-    hide.textContent = "Убрать из моей галереи";
-    hideForm.append(csrf, mediaID, hide);
-    actions.append(expiry, hideForm);
-    caption.append(filename, actions);
-    card.append(preview, caption);
-    return card;
-  };
-
-  const renderLibrary = (items) => {
-    let library = document.getElementById("my-results");
-    if (!items.length) {
-      library?.remove();
-      return;
-    }
-    if (!library) {
-      library = document.createElement("section");
-      library.id = "my-results";
-      library.className = "generation-library panel";
-      const heading = document.createElement("div");
-      heading.className = "panel-heading";
-      heading.innerHTML = `<div><p class="section-kicker">Моя галерея</p><h2>Последние результаты</h2><p class="panel-intro">Результаты доступны в вашем профиле ${mediaRetentionLabel}, затем удаляются без возможности восстановления.</p></div>`;
-      const grid = document.createElement("div");
-      grid.className = "generation-output-grid generation-library-grid";
-      library.append(heading, grid);
-      result.insertAdjacentElement("afterend", library);
-    }
-    const grid = library.querySelector(".generation-output-grid");
-    grid.replaceChildren(...items.map(createLibraryCard));
-    refreshExpiryLabels();
-  };
-
-  const refreshLibrary = async () => {
-    if (!document.getElementById("my-results")) return;
-    const response = await fetch("/generate/library/recent", { credentials: "same-origin" });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || "Не удалось обновить галерею");
-    renderLibrary(payload.media || []);
-  };
-
-  const removeLibraryCard = async (hideForm) => {
-    const card = hideForm.closest(".generation-library-item");
-    const button = hideForm.querySelector(".generation-hide");
-    if (!card || !button || button.disabled) return;
-    const originalText = button.textContent;
-    button.disabled = true;
-    button.textContent = "Убираем...";
-    try {
-      const response = await fetch(hideForm.action, {
-        method: "POST",
-        headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-        body: new URLSearchParams(new FormData(hideForm)),
-        credentials: "same-origin",
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.removed) throw new Error(payload.error || "Не удалось убрать результат");
-      card.classList.add("is-removing");
-      window.setTimeout(() => {
-        const library = card.closest(".generation-library");
-        card.remove();
-        if (!library?.querySelector(".generation-library-item")) library.remove();
-      }, 180);
-    } catch (error) {
-      button.disabled = false;
-      button.textContent = error.message || originalText;
-      window.setTimeout(() => { if (!button.disabled) button.textContent = originalText; }, 2400);
-    }
-  };
-
-  root.addEventListener("submit", (event) => {
-    const hideForm = event.target.closest("[data-generation-hide-form]");
-    if (!hideForm) return;
-    event.preventDefault();
-    removeLibraryCard(hideForm);
+    },
+    pending: () => pendingDraftFiles(),
+    progress: (item, state, error) => {
+      if (item.state && isCurrentPendingFile(item)) feedback.present(item.state, state === "error" ? "error" : "loading", state === "error" ? error.message || "Загрузка не удалась" : "Загружаем материал...");
+    },
+    ready: () => markDraftDirty(),
+    changedMessage: "Материалы или режим изменились во время загрузки. Проверьте их и повторите запуск.",
   });
 
-  root.querySelectorAll("[data-generation-library-item]").forEach((button) => {
-    button.addEventListener("click", () => {
-      if (window.aiGatewaySensitiveContent?.reveal(button)) return;
-      openLightbox({
-      filename: button.dataset.filename || "Результат генерации",
-      media_type: "image",
-      url: button.dataset.url,
-      });
-    });
-  });
-  root.querySelectorAll("[data-generation-library-video]").forEach((button) => {
-    wireVideoPreview(button, { filename: button.dataset.filename || "Видео", media_type: "video", url: button.dataset.url });
-  });
-  refreshExpiryLabels();
-  window.setInterval(refreshExpiryLabels, 30000);
 
-  const buildGenerationPayload = () => {
-    const body = new FormData(form);
-    const assistant = assistantSlice.get();
-    const numericFieldNames = new Set([...form.querySelectorAll('input[type="number"], input[data-localized-decimal]')].map((field) => field.name));
-    for (const [name, value] of [...body.entries()]) {
-      if (numericFieldNames.has(name) && typeof value === "string") body.set(name, value.replaceAll(",", "."));
-    }
-    form.querySelectorAll('input[type="checkbox"][name]:not(:disabled)').forEach((checkbox) => {
-      body.set(checkbox.name, checkbox.checked ? "true" : "false");
-    });
-    body.set("template_id", selectedChoice()?.dataset.workflowId || "");
-    body.set("generation_workflow", selectedGenerationWorkflow()?.dataset.presetId || "");
-    body.set("assistant_requested", assistant.original || assistant.correlationID ? "true" : "false");
-	body.set("assistant_applied", ["applied", "edited_after_apply"].includes(assistant.action) ? "true" : "false");
-	body.set("assistant_action", assistant.action);
-    body.set("assistant_template_used", assistant.original ? (promptAssistantTemplate?.value || "") : "");
-    body.set("assistant_think_used", assistant.original && promptAssistantThink?.checked ? "true" : "false");
-    body.set("assistant_original_prompt", assistant.original);
-    body.set("assistant_suggestion", assistant.suggestion);
-    if (assistant.correlationID) body.set("correlation_id", assistant.correlationID);
-    ["input_image", "input_image_2", "input_image_3", "input_image_4"].forEach((name, index) => body.set(name, index < activeMaxInputImages() ? (uploadedImages.get(index + 1) || "") : ""));
-    for (let index = 1; index <= 4; index += 1) {
-      body.delete(`image_role_${index}`);
-      body.delete(`image_source_${index}`);
-      body.delete(`image_source_id_${index}`);
-      body.delete(`image_source_name_${index}`);
-    }
-    selectedReferenceMetadata().forEach((reference) => {
-      body.set(`image_role_${reference.number}`, reference.role || "details");
-      body.set(`image_source_${reference.number}`, reference.source || "unknown");
-      if (reference.sourceID) body.set(`image_source_id_${reference.number}`, reference.sourceID);
-      if (reference.sourceName) body.set(`image_source_name_${reference.number}`, reference.sourceName);
-    });
-    body.set("input_audio", miniMaxAudioIsAvailable() ? uploadedAudio : "");
-    body.set("input_video", miniMaxReferencesAreAvailable() ? uploadedVideo : "");
-    body.set("video_reference_audio", miniMaxReferencesAreAvailable() && uploadedVideo && form.elements.video_reference_audio?.checked ? "true" : "false");
-    if (pendingParentJobID) body.set("parent_job_id", pendingParentJobID);
-    return new URLSearchParams(body);
+  const capturePayloadState = () => {
+    const references = selectedReferenceMetadata();
+    return {
+      selection: { scenarioID: selectedChoice()?.dataset.workflowId || "", workflowID: selectedGenerationWorkflow()?.dataset.presetId || "" },
+      assistant: {
+        ...assistantSlice.get(), enabled: Boolean(promptAssistantEnabled?.checked),
+        template: promptAssistantTemplate?.value || "", think: Boolean(promptAssistantThink?.checked),
+        modelID: promptAssistantModel?.value || "",
+        jobID: assistantSession?.snapshot().record?.id || "", draft: promptAssistantDraft?.value || "",
+        negativeDraft: promptAssistantNegativeDraft?.value || "",
+        corrections: assistantSession?.corrections() || {},
+      },
+      media: {
+        images: imageSlots.map(item => ({
+          slot: item.index, value: uploadedImages.get(item.index) || "", active: item.index <= activeMaxInputImages(),
+          role: item.savedReferenceRole ?? item.role?.value ?? "details", name: selectedImageSource(item)?.name || "",
+          reference: references.find(reference => reference.number === item.index),
+        })),
+        audio: { value: uploadedAudio, active: miniMaxAudioIsAvailable(), name: miniMaxAudioFile?.files?.[0]?.name || miniMaxAudioName?.textContent || "" },
+        video: { value: uploadedVideo, active: miniMaxVideoIsAvailable(), name: miniMaxVideoFile?.files?.[0]?.name || miniMaxVideoName?.textContent || "", referenceAudio: Boolean(form.elements.video_reference_audio?.checked) },
+        assets: draftAssets,
+      },
+      editor: { parentJobID: pendingParentJobID, quality: quality?.value || "", step: wizardSlice.get().step || 1, advanced: Boolean(generationAdvanced?.open) },
+    };
   };
+  const buildGenerationPayload = () => generationPayload.launch(capturePayloadState());
 
   const pendingDraftFiles = ({ all = false } = {}) => [
     ...imageSlots.filter((item) => (all || item.index <= activeMaxInputImages()) && !uploadedImages.get(item.index))
       .map((item) => ({ field: imageDraftField(item.index), source: selectedImageFile(item) || gallerySelections.get(item.index), upload: () => uploadSelectedImage(item), state: item.state })),
     { field: "input_audio", source: (all || miniMaxAudioIsAvailable()) && !uploadedAudio ? miniMaxAudioFile?.files?.[0] : null, upload: () => uploadSelectedAV("audio"), state: miniMaxAudioState },
-    { field: "input_video", source: (all || miniMaxReferencesAreAvailable()) && !uploadedVideo ? miniMaxVideoFile?.files?.[0] : null, upload: () => uploadSelectedAV("video"), state: miniMaxVideoState },
+    { field: "input_video", source: (all || miniMaxVideoIsAvailable()) && !uploadedVideo ? miniMaxVideoFile?.files?.[0] : null, upload: () => uploadSelectedAV("video"), state: miniMaxVideoState },
   ].filter((item) => item.source);
 
-  const captureGenerationDraft = () => {
-    const pending = pendingDraftFiles({ all: true });
-    // Save text first. Upload one reference in the background and save its ID next.
-    const next = !pendingMediaUploads.size && pending.find((item) => draftUploadAttempts.get(item.field) !== item.source);
-    if (next) {
-      draftUploadAttempts.set(next.field, next.source);
-      if (next.state) next.state.textContent = "Сохраняем материал...";
-      next.upload().catch((error) => {
-        if (next.state) next.state.textContent = error.message || "Материал не загружен";
-      }).finally(markDraftDirty);
-    }
-    const body = buildGenerationPayload();
-    imageSlots.forEach((item) => {
-      body.set(imageDraftField(item.index), uploadedImages.get(item.index) || "");
-      body.set(`image_role_${item.index}`, item.savedReferenceRole ?? item.role?.value ?? "details");
-    });
-    body.set("input_audio", uploadedAudio);
-    body.set("input_video", uploadedVideo);
-    const names = new Set([...form.elements].map((control) => control.name).filter(Boolean));
-    names.forEach((name) => {
-      if (name.startsWith("input_image") || /^image_role_[1-4]$/.test(name) || ["input_audio", "input_video"].includes(name)) return;
-      const candidates = namedControlCandidates(name);
-      const control = candidates.find((item) => item.type !== "radio" || item.checked);
-      if (!control || ["file", "submit", "button"].includes(control.type)) return;
-      body.set(name, control.type === "checkbox" ? String(control.checked) : control.value);
-    });
-    body.set("assistant_enabled", String(Boolean(promptAssistantEnabled?.checked)));
-    body.set("assistant_template_used", promptAssistantTemplate?.value || "");
-    body.set("assistant_think_used", String(Boolean(promptAssistantThink?.checked)));
-    body.set("assistant_draft", promptAssistantDraft?.value || "");
-    body.set("assistant_references", JSON.stringify(assistantSlice.get().references || []));
-    body.set("assistant_stale", String(Boolean(assistantSlice.get().stale)));
-    body.set("assistant_corrections", JSON.stringify(Object.fromEntries(assistantCorrections)));
-    body.set("quality_preset", quality?.value || "");
-    body.set("draft_step", String(wizardSlice.get().step || 1));
-    body.set("draft_advanced", String(Boolean(generationAdvanced?.open)));
-    imageSlots.forEach((item) => {
-      const source = selectedImageSource(item);
-      if (source?.name) body.set(`draft_name_${imageDraftField(item.index)}`, source.name);
-    });
-    body.set("draft_name_input_audio", miniMaxAudioFile?.files?.[0]?.name || miniMaxAudioName?.textContent || "");
-    body.set("draft_name_input_video", miniMaxVideoFile?.files?.[0]?.name || miniMaxVideoName?.textContent || "");
-    draftAssets.forEach((asset, field) => {
-      if (asset.id) body.set(`draft_asset_${field}`, asset.id);
-      else if (!asset.available) body.set(`draft_pending_${field}`, asset.name || "Материал");
-      body.set(`draft_name_${field}`, asset.name || "");
-    });
-    pending.forEach((item) => {
-      body.delete(`draft_asset_${item.field}`);
-      body.set(`draft_pending_${item.field}`, item.source.name || item.source.filename || "Материал");
-    });
-    return body;
-  };
+  const isCurrentPendingFile = (item) => pendingDraftFiles({ all: true }).some((current) => current.field === item.field && current.source === item.source);
 
   const applyGenerationDraft = (draft) => {
+    if (!draftController?.apply) throw new Error("Модуль черновика недоступен. Обновите страницу.");
+    draftController.apply(draft);
+  };
+  const renderGenerationDraft = (draft) => {
+    clearedPrompt = null;
     const values = draft.values || {};
-    const scenario = values.template_id && root.querySelector(`.scenario-choice[data-workflow-id="${CSS.escape(values.template_id)}"]`);
-    const workflow = values.generation_workflow && root.querySelector(`.generation-workflow-choice[data-preset-id="${CSS.escape(values.generation_workflow)}"]`);
-    if ((values.template_id && (!scenario || scenario.disabled)) || (values.generation_workflow && (!workflow || workflow.disabled))) {
-      throw new Error("Модель черновика сейчас недоступна. Сохранённая версия не изменена.");
+    if (draft.fresh) form.reset();
+    pendingParentJobID = generationModules.jobSource?.validID(values.parent_job_id) ? values.parent_job_id : "";
+    imageSlots.forEach(clearImageSlot);
+    clearMiniMaxAudio();
+    clearMiniMaxVideo();
+    draftAssets.clear();
+    resetPromptAssistantReview();
+    restoreAssistantModel(values.assistant_model || "");
+    if (!Object.keys(values).length) {
+      form.reset();
+      if (positive) positive.value = "";
+      collectionSession?.restore("");
+      root.querySelectorAll(".scenario-choice, .generation-workflow-choice").forEach((choice) => choice.classList.remove("is-selected"));
+      templateID.value = generationWorkflowID.value = "";
+      wizardSlice.dispatch({ type: "SELECT_SCENARIO", scenarioID: "", requiresImage: false, allowsImages: false });
+      if (generationAdvanced) generationAdvanced.open = false;
+      syncWorkflowFields();
+      const first = root.querySelector(".scenario-choice:not(:disabled)");
+      if (first) chooseScenario(first);
+      showStep(1);
+      return;
     }
-    if (values.model && ![...model.options].some((option) => option.value === values.model && option.dataset.available === "true" && (!workflow || option.dataset.family === workflow.dataset.family))) {
-      throw new Error("Модель черновика сейчас недоступна. Сохранённая версия не изменена.");
-    }
-    const loraKind = { minimax_h3: "minimax", flux2: "flux", krea2: "krea" }[workflow?.dataset.family];
-    if (loraKind) {
-      const choices = [...root.querySelectorAll(`[data-lora-slots="${loraKind}"] select option`)];
-      if (Object.entries(values).some(([name, value]) => /^lora_\d+$/.test(name) && value && !choices.some((option) => option.value === value))) {
-        throw new Error("Одна из LoRA черновика сейчас недоступна. Сохранённая версия не изменена.");
+    applySavedValues(values, { openStep: false });
+    collectionSession?.restore(values.collection_id || "");
+    imageSlots.forEach((item) => {
+      const role = values[`image_role_${item.index}`];
+      if (item.role && [...item.role.options].some((option) => option.value === role)) {
+        if (item.savedReferenceRole !== undefined) item.savedReferenceRole = role;
+        else item.role.value = role;
       }
-    }
-    restoringDraft = true;
-    try {
-      imageSlots.forEach(clearImageSlot);
-      clearMiniMaxAudio();
-      clearMiniMaxVideo();
-      draftAssets.clear();
-      resetPromptAssistantReview();
-      if (!Object.keys(values).length) {
-        form.reset();
-        if (positive) positive.value = "";
-        root.querySelectorAll(".scenario-choice, .generation-workflow-choice").forEach((choice) => choice.classList.remove("is-selected"));
-        templateID.value = generationWorkflowID.value = "";
-        wizardSlice.dispatch({ type: "SELECT_SCENARIO", scenarioID: "", requiresImage: false, allowsImages: false });
-        if (generationAdvanced) generationAdvanced.open = false;
-        draftAdvancedOpen = false;
-        syncWorkflowFields();
-        const first = root.querySelector(".scenario-choice:not(:disabled)");
-        if (first) chooseScenario(first);
-        showStep(1);
-        return;
-      }
-      applySavedValues(values, { openStep: false });
-      imageSlots.forEach((item) => {
-        const role = values[`image_role_${item.index}`];
-        if (item.role && [...item.role.options].some((option) => option.value === role)) {
-          if (item.savedReferenceRole !== undefined) item.savedReferenceRole = role;
-          else item.role.value = role;
+    });
+    syncImageSlots();
+    (draft.assets || []).forEach((asset) => {
+      if (!/^input_(?:image(?:_[2-9])?|audio|video)$/.test(asset.field)) return;
+      draftAssets.set(asset.field, asset);
+      const item = imageSlots.find((slot) => imageDraftField(slot.index) === asset.field);
+      const message = asset.available ? "Восстановлено из черновика" : "Материал недоступен. Замените его или удалите.";
+      if (item) {
+        if (asset.available) {
+          const source = { kind: "restored", name: asset.name, url: asset.url };
+          restoredImages.set(item.index, source);
+          uploadedImages.set(item.index, asset.value);
+          inputImages[item.index - 1].value = asset.value;
+          mediaSlice.dispatch({ type: "SELECT_SOURCE", slot: item.index, source });
+          mediaSlice.dispatch({ type: "UPLOAD_SUCCESS", slot: item.index, value: asset.value });
         }
-      });
-      syncImageSlots();
-      (draft.assets || []).forEach((asset) => {
-        if (!/^input_(?:image(?:_[234])?|audio|video)$/.test(asset.field)) return;
-        draftAssets.set(asset.field, asset);
-        const item = imageSlots.find((slot) => imageDraftField(slot.index) === asset.field);
-        const message = asset.available ? "Восстановлено из черновика" : "Материал недоступен. Замените его или удалите.";
-        if (item) {
-          if (asset.available) {
-            const source = { kind: "restored", name: asset.name, url: asset.url };
-            restoredImages.set(item.index, source);
-            uploadedImages.set(item.index, asset.value);
-            inputImages[item.index - 1].value = asset.value;
-            mediaSlice.dispatch({ type: "SELECT_SOURCE", slot: item.index, source });
-            mediaSlice.dispatch({ type: "UPLOAD_SUCCESS", slot: item.index, value: asset.value });
-          }
-          applyImageSelectionPreview(item, { name: asset.name }, asset.available ? asset.url : "", message);
-        } else if (asset.field === "input_audio") {
-          uploadedAudio = asset.available ? asset.value : "";
-          if (miniMaxAudioName) miniMaxAudioName.textContent = asset.name;
-          if (asset.available) audioPlayer?.setSource(asset.url);
-          if (miniMaxAudioState) miniMaxAudioState.textContent = message;
-          if (miniMaxAudioPreview) miniMaxAudioPreview.hidden = false;
-        } else {
-          uploadedVideo = asset.available ? asset.value : "";
-          if (asset.available) videoPlayer?.setSource(asset.url);
-          if (miniMaxVideoName) miniMaxVideoName.textContent = asset.name;
-          if (miniMaxVideoState) miniMaxVideoState.textContent = message;
-          if (miniMaxVideoPreview) miniMaxVideoPreview.hidden = false;
-        }
-      });
-      if (quality && values.quality_preset) quality.value = values.quality_preset;
-      if (generationAdvanced) generationAdvanced.open = values.draft_advanced === "true";
-      draftAdvancedOpen = Boolean(generationAdvanced?.open);
-      if (promptAssistantEnabled) promptAssistantEnabled.checked = values.assistant_enabled === "true";
-      if (promptAssistantTemplate && values.assistant_template_used) promptAssistantTemplate.value = values.assistant_template_used;
-      if (promptAssistantThink) promptAssistantThink.checked = values.assistant_think_used === "true";
-      syncMiniMaxAudioReference();
-      syncPromptAssistant();
-      if ((values.assistant_original_prompt || values.assistant_suggestion) && promptAssistantEnabled?.checked) {
-        let references = [];
-        try { references = JSON.parse(values.assistant_references || "[]"); } catch (_) {}
-        assistantSlice.dispatch({ type: "REQUEST_START", original: values.assistant_original_prompt });
-        assistantSlice.dispatch({ type: "REQUEST_SUCCESS", suggestion: values.assistant_suggestion, correlationID: values.correlation_id, references });
-        if (["applied", "edited_after_apply"].includes(values.assistant_action)) assistantSlice.dispatch({ type: "APPLY", edited: values.assistant_action === "edited_after_apply" });
-        else if (values.assistant_action === "kept_original") assistantSlice.dispatch({ type: "KEEP_ORIGINAL" });
-        if (promptAssistantDraft) promptAssistantDraft.value = values.assistant_draft || values.assistant_suggestion || "";
-        if (promptAssistantDraft?.value !== values.assistant_suggestion) assistantSlice.dispatch({ type: "DRAFT_EDITED" });
-        try {
-          Object.entries(JSON.parse(values.assistant_corrections || "{}")).forEach(([key, value]) => {
-            if (value && typeof value.text === "string" && typeof value.source === "string") assistantCorrections.set(key, value);
-          });
-        } catch (_) {}
-        if (promptAssistantReview) promptAssistantReview.hidden = assistantSlice.get().approved;
-        renderPromptAssistantReview({ prompt: promptAssistantDraft?.value, references }, values.assistant_original_prompt);
-        if (values.assistant_stale === "true") invalidatePromptAssistant();
-        setPromptAssistantState(assistantSlice.get().approved
-          ? "Подтверждённый вариант восстановлен из черновика."
-          : "Вариант восстановлен. Проверьте его и примените либо оставьте свой промт.", assistantSlice.get().approved ? "approved" : "review");
+        applyImageSelectionPreview(item, { name: asset.name }, asset.available ? asset.url : "", message);
+      } else if (asset.field === "input_audio") {
+        uploadedAudio = asset.available ? asset.value : "";
+        if (miniMaxAudioName) miniMaxAudioName.textContent = asset.name;
+        if (asset.available) audioPlayer?.setSource(asset.url);
+        if (miniMaxAudioState) miniMaxAudioState.textContent = message;
+        if (miniMaxAudioPreview) miniMaxAudioPreview.hidden = false;
+      } else {
+        uploadedVideo = asset.available ? asset.value : "";
+        if (asset.available) videoPlayer?.setSource(asset.url);
+        if (miniMaxVideoName) miniMaxVideoName.textContent = asset.name;
+        if (miniMaxVideoState) miniMaxVideoState.textContent = message;
+        if (miniMaxVideoPreview) miniMaxVideoPreview.hidden = false;
       }
-      syncBatchBuilder();
-      syncGenerationSummary();
-      syncImageSlots();
-      syncStudioSelection();
-      assistantContext = assistantContextKey();
-      showStep(Math.max(1, Math.min(3, Number(values.draft_step) || 2)));
-    } finally { restoringDraft = false; }
+    });
+    if (quality && values.quality_preset) quality.value = values.quality_preset;
+    if (generationAdvanced) generationAdvanced.open = values.draft_advanced === "true";
+    if (promptAssistantEnabled) promptAssistantEnabled.checked = values.assistant_enabled === "true";
+    if (promptAssistantTemplate && values.assistant_template_used) promptAssistantTemplate.value = values.assistant_template_used;
+    if (promptAssistantThink) promptAssistantThink.checked = values.assistant_think_used === "true";
+    syncMiniMaxAudioReference();
+    syncPromptAssistant();
+    assistantSession.restore(values);
+    syncBatchBuilder();
+    syncGenerationSummary();
+    syncImageSlots();
+    syncStudioSelection();
+    showStep(Math.max(1, Math.min(3, Number(values.draft_step) || 2)));
   };
 
   const initializeGenerationDraft = () => {
-    draftController = generationModules.draft?.bindUI?.({
-      document, window, capture: captureGenerationDraft, apply: applyGenerationDraft,
-      hasUnsavedFiles: () => pendingDraftFiles({ all: true }).length > 0,
+    draftController = generationModules.draft?.createSession?.({
+      document, window, root, form, store: generationStore, advanced: generationAdvanced, feedback,
+      parameters: generationPayload, capture: capturePayloadState, apply: renderGenerationDraft,
+      files: { pending: () => pendingDraftFiles({ all: true }), inFlight: () => mediaUploads?.pendingCount || 0, current: isCurrentPendingFile },
       onNavigationBlocked: () => {
         document.dispatchEvent(new CustomEvent("workspace-overlay", { detail: "draft" }));
         studio?.show("configure");
-      },
-      transport: async (operation, body) => {
-        if (body) body.set("csrf", form.elements.csrf?.value || "");
-        const response = await fetch(operation === "delete" ? "/generate/draft/delete" : "/generate/draft", {
-          method: operation === "load" ? "GET" : "POST", body, credentials: "same-origin", cache: "no-store",
-          headers: body ? { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" } : {},
-          signal: AbortSignal.timeout(20000),
-        });
-        return { ok: response.ok, status: response.status, payload: await response.json() };
       },
       onSaved: (draft) => (draft.assets || []).forEach((asset) => {
         const item = imageSlots.find((slot) => imageDraftField(slot.index) === asset.field);
@@ -3466,23 +3494,7 @@
         }
       }),
     });
-    form.addEventListener("input", markDraftDirty);
-    form.addEventListener("change", markDraftDirty);
-    generationAdvanced?.addEventListener("toggle", () => {
-      if (draftAdvancedOpen === generationAdvanced.open) return;
-      draftAdvancedOpen = generationAdvanced.open;
-      markDraftDirty();
-    });
-    root.addEventListener("click", (event) => {
-      if (event.target.closest(".scenario-choice, .generation-workflow-choice, [data-remove-image], #minimax-audio-remove, #minimax-video-remove, #prompt-assistant-apply, #prompt-assistant-keep")) markDraftDirty();
-    });
-    generationStore?.subscribe?.("assistant:change", ({ previous, current }) => {
-      if (["original", "suggestion", "action", "correlationID"].some((key) => previous?.[key] !== current?.[key])) markDraftDirty();
-    });
-    generationStore?.subscribe?.("wizard:change", ({ previous, current }) => {
-      if (["step", "scenarioID", "workflowID"].some((key) => previous?.[key] !== current?.[key])) markDraftDirty();
-    });
-    return draftController?.load({ preserveLocal: Boolean(requestedVariantID || requestedLibraryMediaID || requestedJobID) });
+    return draftController?.load({ preserveLocal: Boolean(requestedVariantID || requestedLibraryMediaID || requestedJobID || requestedBatchID || jobSourceRequested) });
   };
 
   const preflightField = (name) => {
@@ -3550,69 +3562,84 @@
       });
       preflightChecks.append(recover);
     }
-    if (payload?.queue) renderQueueOverview(payload.queue);
+    if (payload?.queue) queueResource.accept(payload.queue);
   };
 
+  const preflightResource = feedback.createResource({
+    load: async signal => {
+      try { await prepareActiveMedia(); }
+      catch (error) { throw feedback.failure("validation", error.message || "Не удалось подготовить материалы для проверки."); }
+      if (signal.aborted) throw feedback.failure("aborted");
+      const checkedBody = buildGenerationPayload();
+      const payload = await feedback.requestJSON("/generate/preflight", { method: "POST", body: checkedBody, signal, message: "Не удалось проверить готовность workflow. Повторите запрос." });
+      if (typeof payload.ok !== "boolean" || !Array.isArray(payload.checks) || payload.checks.some(check => !check || typeof check !== "object")) throw feedback.failure("invalid", "Проверка не подтверждена. Повторите запрос.");
+      if (checkedBody.toString() !== buildGenerationPayload().toString()) throw feedback.failure("stale", "Настройки изменились во время проверки. Проверьте их ещё раз.");
+      return payload;
+    },
+    onValue: payload => { if (payload) renderPreflight(payload); },
+    onState: state => {
+      const failed = state.phase === "error" || state.authRequired;
+      feedback.button(preflightButton, { busy: state.loading, disabled: state.loading || state.authRequired || !state.active });
+      feedback.button(preflightRepeat, { busy: state.loading, disabled: state.loading || state.authRequired || !state.active });
+      feedback.present(preflight, state.loading ? "loading" : failed || state.value?.ok === false ? "error" : state.value?.ok ? "ready" : "");
+      const login = document.getElementById("generation-preflight-login");
+      if (login) { login.hidden = !state.authRequired; login.href = loginURL(); }
+      if (state.loading) {
+        if (preflight) preflight.hidden = false;
+        if (preflightChecks) preflightChecks.replaceChildren();
+        feedback.text(preflightSummary, "Проверяем параметры и материалы...");
+      } else if (failed) renderPreflight({ ok: false, checks: [{ level: "error", label: "Проверка", message: state.message }] });
+      else if (!state.active && preflight && !preflight.hidden) feedback.text(preflightSummary, "Проверка приостановлена. Повторите её перед запуском.");
+    },
+    message: "Не удалось подготовить материалы для проверки. Проверьте выбранные файлы и повторите запрос.",
+  });
   const runPreflight = async ({ reveal = true } = {}) => {
     if (!selectedChoice() || !selectedGenerationWorkflow() || !model?.value || !positive.value.trim()) {
-      const payload = { ok: false, checks: [{ level: "error", label: "Запуск", message: "Выберите сценарий, workflow, модель и заполните позитивный промт." }] };
-      renderPreflight(payload);
+      renderPreflight({ ok: false, checks: [{ level: "error", label: "Запуск", message: "Выберите сценарий, workflow, модель и заполните позитивный промт." }] });
       if (reveal) preflight?.scrollIntoView({ block: "center", behavior: "smooth" });
       return false;
     }
-    if (preflightButton) preflightButton.disabled = true;
-    if (preflightRepeat) preflightRepeat.disabled = true;
-    try {
-      await prepareActiveMedia();
-      const checkedBody = buildGenerationPayload();
-      const response = await fetch("/generate/preflight", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-        body: checkedBody,
-        credentials: "same-origin",
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "Не удалось проверить готовность workflow");
-      if (checkedBody.toString() !== buildGenerationPayload().toString()) throw new Error("Настройки изменились во время проверки. Проверьте их ещё раз.");
-      renderPreflight(payload);
-      if (reveal) preflight?.scrollIntoView({ block: "center", behavior: "smooth" });
-      return Boolean(payload.ok);
-    } catch (error) {
-      renderPreflight({ ok: false, checks: [{ level: "error", label: "Проверка", message: error.message || "Gateway временно недоступен" }] });
-      return false;
-    } finally {
-      if (preflightButton) preflightButton.disabled = false;
-      if (preflightRepeat) preflightRepeat.disabled = false;
-    }
+    const read = await preflightResource.refresh();
+    if (generationPageActive && reveal) preflight?.scrollIntoView({ block: "center", behavior: "smooth" });
+    return read && Boolean(preflightResource.snapshot().value?.ok);
   };
 
-  const renderRecipes = (recipes) => {
-    const items = Array.isArray(recipes) ? recipes : [];
-    recipeSlice.dispatch({ type: "SET_ITEMS", items }, (state) => ({ ...state, items, loading: false }));
+  let recipeOptionsSignature = "";
+  const renderRecipes = state => {
     if (!recipeSelect) return;
-    const selected = recipeSelect.value;
-    recipeSelect.replaceChildren(new Option("Выберите сохранённый набор", ""));
-    items.forEach((recipe) => recipeSelect.append(new Option(recipe.name, String(recipe.id))));
-    recipeSelect.value = items.some((recipe) => String(recipe.id) === selected) ? selected : "";
-    recipeSlice.dispatch({ type: "SELECT", id: recipeSelect.value }, (state) => ({ ...state, selectedID: recipeSelect.value }));
-    if (recipeApply) recipeApply.disabled = !recipeSelect.value;
-    if (recipeDelete) recipeDelete.disabled = !recipeSelect.value;
+    const signature = JSON.stringify(state.items.map(item => [item.id, item.name]));
+    if (signature !== recipeOptionsSignature) {
+      recipeOptionsSignature = signature;
+      recipeSelect.replaceChildren(new Option("Выберите сохранённый набор", ""));
+      state.items.forEach(recipe => recipeSelect.append(new Option(recipe.name, String(recipe.id))));
+    }
+    recipeSelect.value = state.selectedID;
+    const blocked = state.busy || state.read.loading || state.read.authRequired || !state.active;
+    recipeSelect.disabled = blocked;
+    feedback.button(recipeApply, { disabled: blocked || !state.selectedID });
+    feedback.button(recipeDelete, { busy: state.operation === "remove", disabled: blocked || state.needsReview || !state.selectedID });
+    feedback.button(recipeSave, { busy: state.operation === "save", disabled: blocked || state.needsReview });
+    showReadFeedback("generation-recipe", state.read, { loading: "Загружаем наборы...", empty: "Сохранённых наборов пока нет." });
+    const refresh = document.getElementById("generation-recipe-refresh");
+    if (refresh) {
+      refresh.hidden = state.read.authRequired;
+      feedback.button(refresh, { busy: state.read.loading, disabled: state.busy || state.read.loading || state.read.authRequired || !state.active });
+    }
+    if (recipeState) {
+      recipeState.hidden = !state.message || state.read.authRequired;
+      feedback.present(recipeState, state.phase, state.message);
+    }
   };
-
-  const refreshRecipes = async () => {
-    recipeSlice.dispatch({ type: "LOAD_START" }, (state) => ({ ...state, loading: true }));
-    const response = await fetch("/generate/recipes", { credentials: "same-origin" });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || "Не удалось загрузить наборы");
-    renderRecipes(payload.recipes || []);
-  };
-
-  const setRecipeState = (message, state = "") => {
-    recipeSlice.dispatch({ type: "SET_MESSAGE", message, status: state }, (current) => ({ ...current, message: message || "", status: state || "" }));
-    if (!recipeState) return;
-    recipeState.textContent = message || "";
-    recipeState.dataset.state = state;
-  };
+  const recipeController = generationModules.recipes.createController({
+    feedback, slice: recipeSlice, onState: renderRecipes,
+    transport: (operation, body, signal) => feedback.requestJSON(operation === "remove" ? "/generate/recipes/delete" : "/generate/recipes", {
+      signal, method: operation === "read" ? "GET" : "POST", body: body || undefined,
+      message: operation === "read" ? "Не удалось обновить наборы. Повторите запрос." : "Не удалось подтвердить изменение набора.",
+    }),
+  });
+  const refreshRecipes = () => recipeController.refresh();
+  const setRecipeState = (message, state = "") => recipeController.notify(message, state);
+  document.getElementById("generation-recipe-refresh")?.addEventListener("click", refreshRecipes);
 
   const saveRecipe = async () => {
     const name = recipeName?.value.trim() || "";
@@ -3625,31 +3652,14 @@
       setRecipeState("Сначала выберите сценарий и workflow.", "error");
       return;
     }
-    recipeSave.disabled = true;
-    setRecipeState("Сохраняем защищённый набор...");
-    try {
-      const body = buildGenerationPayload();
-      body.set("recipe_name", name);
-      const response = await fetch("/generate/recipes", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body, credentials: "same-origin" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "Не удалось сохранить набор");
-      await refreshRecipes();
-      recipeSelect.value = String(payload.recipe?.id || "");
-      recipeSlice.dispatch({ type: "SELECT", id: recipeSelect.value }, (state) => ({ ...state, selectedID: recipeSelect.value }));
-      if (recipeApply) recipeApply.disabled = !recipeSelect.value;
-      if (recipeDelete) recipeDelete.disabled = !recipeSelect.value;
-      if (recipeName) recipeName.value = "";
-      setRecipeState("Набор сохранён. Фото в него не включаются.", "ready");
-    } catch (error) {
-      setRecipeState(error.message || "Не удалось сохранить набор", "error");
-    } finally {
-      recipeSave.disabled = false;
-    }
+    const body = buildGenerationPayload();
+    body.set("recipe_name", name);
+    const saved = await recipeController.save(body);
+    if (saved.ok && recipeName?.value.trim() === name) recipeName.value = "";
   };
 
   const applyRecipe = () => {
-    const recipe = generationModules.recipes?.selectedRecipe?.({ ...recipeSlice.get(), selectedID: recipeSelect?.value || "" })
-      || recipeSlice.get().items.find((item) => String(item.id) === recipeSelect?.value);
+    const recipe = generationModules.recipes.selectedRecipe(recipeSlice.get());
     if (!recipe) return;
     if (!applySavedValues(recipe.values)) {
       setRecipeState("Этот workflow сейчас недоступен. Проверьте модели и зависимости ComfyUI.", "error");
@@ -3661,797 +3671,64 @@
   const deleteRecipe = async () => {
     const id = recipeSelect?.value || "";
     if (!id || !recipeDelete) return;
-    recipeDelete.disabled = true;
-    setRecipeState("Удаляем набор...");
-    try {
-      const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", recipe_id: id });
-      const response = await fetch("/generate/recipes/delete", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body, credentials: "same-origin" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.deleted) throw new Error(payload.error || "Не удалось удалить набор");
-      await refreshRecipes();
-      setRecipeState("Набор удалён.", "ready");
-    } catch (error) {
-      setRecipeState(error.message || "Не удалось удалить набор", "error");
-    } finally {
-      recipeDelete.disabled = !recipeSelect?.value;
+    const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", recipe_id: id });
+    await recipeController.remove(body);
+  };
+
+  const captureBranchEditor = () => ({
+    values: generationPayload.draft(capturePayloadState()).toString(),
+    files: [...imageSlots.map(item => selectedImageFile(item) || gallerySelections.get(item.index) || restoredImages.get(item.index) || null),
+      miniMaxAudioFile?.files?.[0] || null, miniMaxVideoFile?.files?.[0] || null],
+  });
+  const applyBatchBranch = (payload, batch, job, captured) => {
+    const current = captureBranchEditor();
+    if (captured.values !== current.values || captured.files.some((file, index) => file !== current.files[index])) {
+      throw new Error("Параметры или материалы изменились. Откройте новую ветку ещё раз.");
     }
-  };
-
-  const refreshVariants = async () => {
-    const response = await fetch("/generate/variants", { credentials: "same-origin" });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || "Не удалось загрузить историю вариантов");
-    const variants = Array.isArray(payload.variants) ? payload.variants : [];
-    historySlice.dispatch({ type: "SET_VARIANTS", variants }, (state) => ({ ...state, variants }));
-    if (imagePicker && !imagePicker.hidden) renderGalleryImagePicker();
-    restoreRequestedVariant();
-  };
-
-  const syncGenerationHistoryVisibility = ({ persist = false } = {}) => {
-    if (!variantsContent || !variantsToggle) return;
-    const collapsed = historySlice.get().collapsed;
-    variantsContent.hidden = collapsed;
-    variantsToggle.textContent = collapsed ? "Показать" : "Свернуть";
-    variantsToggle.setAttribute("aria-expanded", String(!collapsed));
-    if (!persist) return;
-    try { window.localStorage.setItem(generationHistoryCollapsedStorageKey, collapsed ? "true" : "false"); } catch (_) {}
-  };
-
-  const jobStateLabels = {
-    draft: "Создано",
-    submitting: "Подготовка",
-    preparing: "Подготовка",
-    uploading: "Загрузка файлов",
-    waiting_for_resources: "Ожидает ресурсы",
-    queued: "В очереди",
-    running: "В работе",
-    cancelling: "Отменяется",
-    postprocessing: "Обработка результата",
-    archiving: "Сохранение результата",
-    completed: "Готово",
-    failed: "Ошибка",
-    error: "Ошибка",
-    cancelled: "Отменено",
-    expired: "Истекло",
-  };
-  const jobTemplateLabels = {
-    "text-to-image": "Текст в изображение",
-    "image-to-image": "Фото и промт",
-    "minimax-h3-video": "Видео MiniMax H3",
-  };
-  const jobStateLabel = (state) => jobStateLabels[state] || "Подготовка";
-  const jobTemplateLabel = (template) => jobTemplateLabels[template] || "Генерация";
-  const formatJobDuration = (seconds) => {
-    const value = Math.max(0, Number(seconds) || 0);
-    if (value < 1) return "меньше 1 сек.";
-    if (value < 60) return `${Math.round(value)} сек.`;
-    if (value < 3600) return `${Math.max(1, Math.round(value / 60))} мин.`;
-    const hours = Math.floor(value / 3600);
-    const minutes = Math.round((value % 3600) / 60);
-    return minutes ? `${hours} ч. ${minutes} мин.` : `${hours} ч.`;
-  };
-  const formatJobTime = (value) => {
-    const date = new Date(value);
-    if (!Number.isFinite(date.getTime())) return "";
-    return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
-  };
-  const cleanModelName = (value) => String(value || "Модель не определена").replaceAll("\\", "/").split("/").pop().replace(/\.(safetensors|ckpt|gguf)$/i, "");
-
-  const setJobsConnectionState = (connected) => {
-    jobSlice.dispatch({ type: "SET_LIVE", live: connected }, (state) => ({ ...state, live: Boolean(connected) }));
-    renderJobCount();
-  };
-
-  const jobCountLabel = (count) => {
-    const value = Math.abs(Number(count) || 0);
-    const lastTwo = value % 100;
-    if (lastTwo >= 11 && lastTwo <= 14) return `${value} заданий`;
-    switch (value % 10) {
-      case 1: return `${value} задание`;
-      case 2:
-      case 3:
-      case 4: return `${value} задания`;
-      default: return `${value} заданий`;
-    }
-  };
-
-  const renderJobCount = (shown = null) => {
-    if (!variantCount) return;
-    const jobs = jobSlice.get();
-    const allIDs = new Set(jobs.items.map((job) => String(job.job_id)));
-    (batchSlice.get().batches || []).forEach((batch) => (batch.jobs || []).forEach((job) => allIDs.add(String(job.job_id))));
-    const total = allIDs.size;
-    const filteredCount = shown === null ? total : shown;
-    const count = filteredCount === total ? jobCountLabel(total) : `Показано ${filteredCount} из ${total}`;
-    const live = jobs.live ? "обновляются автоматически" : "переподключаем обновления";
-    variantCount.textContent = `${count} · ${live} · хранятся ${generationRetentionLabel}`;
-  };
-
-  const renderJobMedia = (job) => {
-    const media = job.media?.find((item) => item.media_type === "image") || job.media?.[0];
-    if (!media) {
-      const placeholder = document.createElement("div");
-      placeholder.className = "generation-job-placeholder";
-      const mark = document.createElement("span");
-      mark.setAttribute("aria-hidden", "true");
-      mark.textContent = job.template_id === "minimax-h3-video" ? "▶" : "◇";
-      const label = document.createElement("small");
-      label.textContent = job.state === "completed" ? "Результат недоступен" : jobStateLabel(job.state);
-      placeholder.append(mark, label);
-      return placeholder;
-    }
-    const preview = document.createElement("button");
-    preview.type = "button";
-    preview.className = "generation-job-preview";
-    preview.setAttribute("aria-label", media.media_type === "video" ? "Открыть видео" : "Открыть изображение");
-    if (media.sensitive) {
-      preview.classList.add("sensitive-media");
-      preview.dataset.sensitiveMedia = "";
-    }
-    if (media.media_type === "video") {
-      const video = document.createElement("video");
-      video.muted = true;
-      video.playsInline = true;
-      video.preload = "metadata";
-      video.src = media.url;
-      const play = document.createElement("span");
-      play.className = "generation-job-play";
-      play.setAttribute("aria-hidden", "true");
-      play.textContent = "▶";
-      preview.append(video, play);
-      wireVideoPreview(preview, media);
-    } else {
-      const image = document.createElement("img");
-      image.loading = "lazy";
-      image.src = media.url;
-      image.alt = "Результат генерации";
-      preview.append(image);
-      preview.addEventListener("click", () => {
-        if (window.aiGatewaySensitiveContent?.reveal(preview)) return;
-        openLightbox(media);
-      });
-    }
-    if (media.sensitive) {
-      const cover = document.createElement("span");
-      cover.className = "sensitive-media-cover";
-      const title = document.createElement("b");
-      title.textContent = "Контент 18+";
-      const hint = document.createElement("small");
-      hint.textContent = "Нажмите, чтобы показать";
-      cover.append(title, hint);
-      preview.append(cover);
-    }
-    return preview;
-  };
-
-  const loadJobDetails = async (details, jobID) => {
-    const content = details.querySelector("[data-job-details-content]");
-    if (!content || details.dataset.loaded === "true" || details.dataset.loading === "true") return;
-    details.dataset.loading = "true";
-    content.textContent = "Загружаем этапы...";
-    try {
-      const response = await fetch(`/generate/jobs/detail?job_id=${encodeURIComponent(jobID)}`, { credentials: "same-origin" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "Не удалось загрузить этапы");
-      const transitions = Array.isArray(payload.transitions) ? payload.transitions : [];
-      const list = document.createElement("ol");
-      list.className = "generation-job-timeline";
-      transitions.forEach((transition) => {
-        const item = document.createElement("li");
-        const time = document.createElement("time");
-        time.dateTime = transition.created_at || "";
-        time.textContent = formatJobTime(transition.created_at);
-        const copy = document.createElement("span");
-        const state = document.createElement("strong");
-        state.textContent = jobStateLabel(transition.state === "failed" ? "error" : transition.state);
-        const message = document.createElement("small");
-        message.textContent = transition.message || "Состояние обновлено";
-        copy.append(state, message);
-        item.append(time, copy);
-        list.append(item);
-      });
-      content.replaceChildren(list);
-      details.dataset.loaded = "true";
-    } catch (error) {
-      content.textContent = error.message || "Не удалось загрузить этапы";
-      content.classList.add("has-error");
-    } finally {
-      delete details.dataset.loading;
-    }
-  };
-
-  const cancelJob = async (job, button) => {
-    if (!job?.job_id || button.disabled) return;
-    button.disabled = true;
-    button.textContent = "Отменяем...";
-    try {
-      const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", job_id: job.job_id });
-      const response = await fetch("/generate/jobs/cancel", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body, credentials: "same-origin" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "Не удалось отменить задание");
-      if (job.prompt_id && activeGenerationID === job.prompt_id) {
-        clearActiveGeneration();
-        closeProgressSocket();
-        resultTitle.textContent = payload.cancelled ? "Генерация отменена" : "Отмена выполняется";
-        resultStatus.textContent = payload.job?.message || "Состояние задания обновлено.";
-        runProgress.hidden = true;
-        setGenerationActions({ retry: true });
-      }
-      await refreshJobs();
-    } catch (error) {
-      showRepeatNotice("Не удалось отменить задание", error.message || "Gateway временно недоступен.", true);
-    } finally {
-      button.disabled = false;
-      button.textContent = "Отменить";
-    }
-  };
-
-  const retryJob = async (job, button) => {
-    if (!job?.job_id || button.disabled) return;
-    button.disabled = true;
-    button.textContent = "Готовим...";
-    try {
-      const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", job_id: job.job_id });
-      const response = await fetch("/generate/jobs/retry", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body, credentials: "same-origin" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "Не удалось восстановить параметры");
-      if (!applySavedValues(payload.values)) throw new Error("Модель или workflow этого задания сейчас недоступны");
-      pendingParentJobID = payload.parent_job_id || "";
-      if (job.prompt_id && activeGenerationID === job.prompt_id) clearActiveGeneration();
-      if (payload.requires_inputs) {
-        showRepeatNotice("Параметры восстановлены", "Заново выберите исходные файлы или референсы, затем запустите генерацию.");
-        window.requestAnimationFrame(() => form.scrollIntoView({ behavior: "smooth", block: "start" }));
-      } else {
-        form.requestSubmit();
-      }
-    } catch (error) {
-      showRepeatNotice("Не удалось повторить задание", error.message || "Параметры больше недоступны.", true);
-    } finally {
-      button.disabled = false;
-      button.textContent = "Повторить";
-    }
-  };
-
-  const batchStateLabels = {
-    queued: "Ожидает запуска",
-    running: "Выполняется",
-    cancelling: "Отменяется",
-    completed: "Готов",
-    partial: "Завершён частично",
-    failed: "Ошибка",
-    cancelled: "Отменён",
-  };
-
-  const cancelGenerationBatch = async (batch, button) => {
-    if (!batch?.batch_id || button.disabled) return;
-    button.disabled = true;
-    button.textContent = "Отменяем...";
-    try {
-      const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", batch_id: batch.batch_id });
-      const response = await fetch("/generate/batches/cancel", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-        body,
-        credentials: "same-origin",
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "Не удалось отменить пакет");
-      showRepeatNotice("Отмена пакета принята", payload.message || "Новые варианты не запустятся. Активный вариант будет остановлен безопасно.");
-      await refreshJobs();
-    } catch (error) {
-      showRepeatNotice("Не удалось отменить пакет", error.message || "Gateway временно недоступен.", true);
-    } finally {
-      button.disabled = false;
-      button.textContent = "Отменить пакет";
-    }
-  };
-
-  const selectGenerationBatchWinner = async (batch, job, button) => {
-    if (!batch?.batch_id || !job?.job_id || button.disabled) return;
-    button.disabled = true;
-    button.textContent = "Сохраняем...";
-    try {
-      const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", batch_id: batch.batch_id, job_id: job.job_id });
-      const response = await fetch("/generate/batches/winner", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-        body,
-        credentials: "same-origin",
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "Не удалось сохранить выбранный вариант");
-      showRepeatNotice("Лучший вариант сохранён", "Его можно открыть, скачать или использовать как основу следующего пакета.");
-      await refreshJobs();
-    } catch (error) {
-      showRepeatNotice("Не удалось выбрать вариант", error.message || "Gateway временно недоступен.", true);
-    } finally {
-      button.disabled = false;
-      button.textContent = "Выбрать лучшим";
-    }
-  };
-
-  const branchFromBatchJob = async (batch, job, button) => {
-    if (!job?.job_id || button.disabled) return;
-    button.disabled = true;
-    button.textContent = "Готовим ветку...";
-    try {
-      const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", job_id: job.job_id });
-      const response = await fetch("/generate/jobs/retry", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-        body,
-        credentials: "same-origin",
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "Не удалось восстановить параметры победителя");
-      if (!applySavedValues(payload.values)) throw new Error("Workflow этого варианта сейчас недоступен");
-      pendingParentJobID = payload.parent_job_id || job.job_id;
-      if (batchEnabled) batchEnabled.checked = true;
-      const mode = batch.mode === "parameter" ? "parameter" : "seeds";
-      const modeControl = [...(form.elements.batch_mode || [])].find?.((control) => control.value === mode);
-      if (modeControl) modeControl.checked = true;
-      if (batchCount) batchCount.value = String(generationModules.batch.boundedCount(batch.total_count || 4));
-      syncBatchBuilder();
-      if (mode === "parameter" && batchParameter) {
-        batchParameter.value = batch.parameter_name || "";
-        const difference = (batch.differences || []).find((item) => item.name === batch.parameter_name);
-        const values = (difference?.values || []).map((item) => numericValue(item.value, NaN)).filter(Number.isFinite);
-        if (values.length && batchFrom && batchTo) {
-          batchFrom.value = String(Math.min(...values));
-          batchTo.value = String(Math.max(...values));
-        }
-      }
-      syncBatchBuilder();
-      showRepeatNotice(
-        "Ветка подготовлена",
-        payload.requires_inputs
-          ? "Параметры победителя восстановлены. Добавьте исходные файлы заново и настройте следующее различие."
-          : "Параметры победителя восстановлены. Измените диапазон или параметр и запустите следующий пакет.",
-      );
-      window.requestAnimationFrame(() => form.scrollIntoView({ behavior: "smooth", block: "start" }));
-    } catch (error) {
-      showRepeatNotice("Не удалось создать ветку", error.message || "Параметры больше недоступны.", true);
-    } finally {
-      button.disabled = false;
-      button.textContent = "Новая ветка";
-    }
-  };
-
-  const openBatchComparison = (batch) => {
-    if (!batchCompare || !batchCompareBody) return;
-    const selected = generationModules.batch.selectedJobs(batchSlice.get(), batch);
-    if (selected.length !== 2) return;
-    const comparison = document.createElement("div");
-    comparison.className = "generation-batch-comparison";
-    selected.forEach((job) => {
-      const item = document.createElement("article");
-      item.className = "generation-batch-comparison-item";
-      item.append(renderJobMedia(job));
-      const copy = document.createElement("div");
-      const title = document.createElement("strong");
-      title.textContent = `Вариант ${job.batch_position}`;
-      const experiment = document.createElement("span");
-      experiment.textContent = `${batch.parameter_label || "Seed"}: ${job.experiment_value || job.seed}`;
-      const prompt = document.createElement("p");
-      prompt.textContent = job.prompt || "Промт не сохранён";
-      copy.append(title, experiment, prompt);
-      item.append(copy);
-      comparison.append(item);
-    });
-    const differences = generationModules.batch.selectedDifferences(batchSlice.get(), batch);
-    const facts = document.createElement("dl");
-    facts.className = "generation-batch-differences";
-    differences.forEach((difference) => {
-      const row = document.createElement("div");
-      const term = document.createElement("dt");
-      const value = document.createElement("dd");
-      term.textContent = difference.label;
-      value.textContent = difference.values.map((item) => `Вариант ${item.position}: ${item.value}`).join(" · ");
-      row.append(term, value);
-      facts.append(row);
-    });
-    batchCompareBody.replaceChildren(comparison, facts);
-    if (typeof batchCompare.showModal === "function") batchCompare.showModal();
-    else batchCompare.setAttribute("open", "");
-  };
-
-  const renderJobCard = (job, { batch = null } = {}) => {
-    const card = document.createElement("article");
-    card.className = `generation-job ui-media-card${batch ? " generation-job--batch" : ""}`;
-    card.dataset.state = job.state || "submitting";
-    card.dataset.jobId = job.job_id || "";
-    if (batch) card.dataset.batchId = batch.batch_id || "";
-    if (["submitting", "preparing", "uploading", "queued", "waiting_for_resources", "waiting_resources", "running", "postprocessing", "archiving"].includes(job.state)) {
-      card.setAttribute("aria-busy", "true");
-    } else if (job.state === "completed") {
-      card.classList.add("is-success");
-    } else if (job.state === "failed" || job.state === "error") {
-      card.classList.add("is-error");
-    }
-    if (batch?.winner_job_id === job.job_id) card.classList.add("is-winner");
-    card.append(renderJobMedia(job));
-    const body = document.createElement("div");
-    body.className = "generation-job-body";
-    const heading = document.createElement("div");
-    heading.className = "generation-job-heading";
-    const headingCopy = document.createElement("span");
-    const title = document.createElement("strong");
-    title.textContent = batch ? `Вариант ${job.batch_position}` : jobTemplateLabel(job.template_id);
-    const modelName = document.createElement("small");
-    modelName.textContent = batch
-      ? `${batch.parameter_label || "Seed"}: ${job.experiment_value || job.seed} · ${cleanModelName(job.model_name)}`
-      : cleanModelName(job.model_name);
-    headingCopy.append(title, modelName);
-    const state = document.createElement("span");
-    state.className = "generation-job-state";
-    state.textContent = batch?.winner_job_id === job.job_id ? "Лучший" : jobStateLabel(job.state);
-    heading.append(headingCopy, state);
-    const message = document.createElement("p");
-    message.className = "generation-job-message";
-    message.textContent = job.message || "Состояние задания обновляется";
-    const prompt = document.createElement("p");
-    prompt.className = "generation-job-prompt";
-    prompt.textContent = job.prompt || "Промт пока не сохранён";
-    const meta = document.createElement("small");
-    meta.className = "generation-job-meta";
-    const seed = Number(job.seed) >= 0 ? `Seed ${job.seed}` : "Случайный seed";
-    meta.textContent = `${formatJobTime(job.created_at)} · ${seed} · ${formatJobDuration(job.duration_seconds)}`;
-    if (job.expires_at) {
-      const expiry = document.createElement("time");
-      expiry.dataset.generationExpiry = String(new Date(job.expires_at).getTime());
-      expiry.textContent = formatExpiry(Number(expiry.dataset.generationExpiry) - Date.now());
-      meta.append(" · ", expiry);
-    }
-    const actions = document.createElement("div");
-    actions.className = "generation-job-actions";
-    if (batch && job.state === "completed") {
-      const compare = document.createElement("label");
-      compare.className = "generation-batch-compare-toggle ui-choice ui-choice--compact";
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.checked = (batchSlice.get().selections?.[String(batch.batch_id)] || []).includes(String(job.job_id));
-      const compareLabel = document.createElement("span");
-      compareLabel.textContent = "Сравнить";
-      compare.append(checkbox, compareLabel);
-      checkbox.addEventListener("change", () => {
-        batchSlice.dispatch({ type: "TOGGLE_COMPARE", batchID: batch.batch_id, jobID: job.job_id });
-        renderJobs();
-      });
-      actions.append(compare);
-      const winner = document.createElement("button");
-      winner.type = "button";
-      winner.className = "button ghost";
-      winner.textContent = batch.winner_job_id === job.job_id ? "Выбран" : "Выбрать лучшим";
-      winner.disabled = batch.winner_job_id === job.job_id;
-      winner.addEventListener("click", () => selectGenerationBatchWinner(batch, job, winner));
-      actions.append(winner);
-    } else if (!batch) {
-      if (job.retryable) {
-        const repeat = document.createElement("button");
-        repeat.type = "button";
-        repeat.className = "button ghost";
-        repeat.textContent = "Повторить";
-        repeat.addEventListener("click", () => retryJob(job, repeat));
-        actions.append(repeat);
-      }
-      if (job.cancellable) {
-        const cancel = document.createElement("button");
-        cancel.type = "button";
-        cancel.className = "button danger ghost";
-        cancel.textContent = "Отменить";
-        cancel.addEventListener("click", () => cancelJob(job, cancel));
-        actions.append(cancel);
+    applyGenerationDraft({ values: { ...payload.values, parent_job_id: payload.parent_job_id || job.job_id, assistant_enabled: "false", assistant_job_id: "" }, assets: payload.assets || [] });
+    pendingParentJobID = payload.parent_job_id || job.job_id;
+    if (batchEnabled) batchEnabled.checked = true;
+    const mode = batch.mode === "parameter" ? "parameter" : "seeds";
+    const modeControl = [...(form.elements.batch_mode || [])].find?.(control => control.value === mode);
+    if (modeControl) modeControl.checked = true;
+    if (batchCount) batchCount.value = String(generationModules.batch.boundedCount(batch.total_count || 4));
+    syncBatchBuilder();
+    if (mode === "parameter" && batchParameter) {
+      batchParameter.value = batch.parameter_name || "";
+      const difference = (batch.differences || []).find(item => item.name === batch.parameter_name);
+      const values = (difference?.values || []).map(item => numericValue(item.value, NaN)).filter(Number.isFinite);
+      if (values.length && batchFrom && batchTo) {
+        batchFrom.value = String(Math.min(...values)); batchTo.value = String(Math.max(...values));
       }
     }
-    const details = document.createElement("details");
-    details.className = "generation-job-details";
-    const summary = document.createElement("summary");
-    summary.textContent = "Этапы";
-    const detailsContent = document.createElement("div");
-    detailsContent.dataset.jobDetailsContent = "";
-    details.append(summary, detailsContent);
-    details.addEventListener("toggle", () => { if (details.open) loadJobDetails(details, job.job_id); });
-    body.append(heading, message, prompt, meta);
-    const footer = document.createElement("div");
-    footer.className = "generation-job-footer";
-    footer.append(actions);
-    card.append(body, footer, details);
-    return card;
+    syncBatchBuilder(); markDraftDirty();
+    showRepeatNotice("Ветка подготовлена", payload.requires_inputs
+      ? "Параметры победителя восстановлены. Добавьте исходные файлы заново и настройте следующее различие."
+      : "Параметры победителя восстановлены. Измените диапазон или параметр и запустите следующий пакет.");
+    window.requestAnimationFrame(() => form.scrollIntoView({ behavior: "smooth", block: "start" }));
   };
-
-  const renderGenerationBatch = (batch, filters) => {
-    const group = document.createElement("section");
-    group.className = "generation-batch-group";
-    group.dataset.state = batch.state || "queued";
-    group.dataset.batchId = batch.batch_id || "";
-    const header = document.createElement("header");
-    header.className = "generation-batch-header";
-    const heading = document.createElement("div");
-    heading.className = "generation-batch-heading";
-    const eyebrow = document.createElement("span");
-    eyebrow.textContent = `${jobTemplateLabel(batch.template_id)} · пакет`;
-    const title = document.createElement("h3");
-    title.textContent = batch.mode === "parameter"
-      ? `${batch.total_count} вариантов · меняется ${batch.parameter_label || batch.parameter_name}`
-      : `${batch.total_count} вариантов · разные seed`;
-    const subtitle = document.createElement("small");
-    subtitle.textContent = `${cleanModelName(batch.model_name)} · ${formatJobTime(batch.created_at)}`;
-    heading.append(eyebrow, title, subtitle);
-    const status = document.createElement("span");
-    status.className = "generation-batch-state";
-    status.textContent = batchStateLabels[batch.state] || "Выполняется";
-    header.append(heading, status);
-    const progress = document.createElement("div");
-    progress.className = "generation-batch-progress";
-    const progressCopy = document.createElement("span");
-    const parts = [`${batch.finished_count || 0} из ${batch.total_count || 0}`];
-    if (batch.completed_count) parts.push(`готово: ${batch.completed_count}`);
-    if (batch.failed_count) parts.push(`ошибок: ${batch.failed_count}`);
-    if (batch.cancelled_count) parts.push(`отменено: ${batch.cancelled_count}`);
-    if (batch.estimated_finish_seconds > 0 && !["completed", "partial", "failed", "cancelled"].includes(batch.state)) {
-      parts.push(`до завершения ${formatJobDuration(batch.estimated_finish_seconds)}`);
-    }
-    progressCopy.textContent = parts.join(" · ");
-    const track = document.createElement("span");
-    track.className = "generation-batch-progress-track";
-    track.setAttribute("role", "progressbar");
-    track.setAttribute("aria-label", "Прогресс пакета вариантов");
-    track.setAttribute("aria-valuemin", "0");
-    track.setAttribute("aria-valuemax", "100");
-    track.setAttribute("aria-valuenow", String(batch.progress_percent || 0));
-    const fill = document.createElement("i");
-    fill.style.width = `${clamp(Number(batch.progress_percent) || 0, 0, 100)}%`;
-    track.append(fill);
-    progress.append(progressCopy, track);
-    const actions = document.createElement("div");
-    actions.className = "generation-batch-actions";
-    const selected = generationModules.batch.selectedJobs(batchSlice.get(), batch);
-    const compare = document.createElement("button");
-    compare.type = "button";
-    compare.className = "button ghost";
-    compare.textContent = selected.length === 2 ? "Сравнить 2 варианта" : `Сравнение ${selected.length}/2`;
-    compare.disabled = selected.length !== 2;
-    compare.addEventListener("click", () => openBatchComparison(batch));
-    actions.append(compare);
-    const winner = (batch.jobs || []).find((job) => job.job_id === batch.winner_job_id);
-    if (winner) {
-      const branch = document.createElement("button");
-      branch.type = "button";
-      branch.className = "button ghost";
-      branch.textContent = "Новая ветка";
-      branch.addEventListener("click", () => branchFromBatchJob(batch, winner, branch));
-      actions.append(branch);
-    }
-    if (batch.cancellable) {
-      const cancel = document.createElement("button");
-      cancel.type = "button";
-      cancel.className = "button danger ghost";
-      cancel.textContent = "Отменить пакет";
-      cancel.addEventListener("click", () => cancelGenerationBatch(batch, cancel));
-      actions.append(cancel);
-    }
-    const children = (batch.jobs || []).filter((job) => (
-      (!filters.stateFilter || job.state === filters.stateFilter)
-      && (!filters.templateFilter || job.template_id === filters.templateFilter)
-    ));
-    const grid = document.createElement("div");
-    grid.className = "generation-batch-jobs";
-    grid.replaceChildren(...children.map((job) => renderJobCard(job, { batch })));
-    group.append(header, progress, actions, grid);
-    return group;
-  };
-
-  const renderJobs = () => {
-    if (!variantsSection || !variantList) return;
-    const items = jobSlice.get().items;
-    const batches = batchSlice.get().batches || [];
-    const batchJobIDs = generationModules.batch?.batchJobIDs?.(batches) || new Set();
-    const knownJobs = [...items];
-    const knownJobIDs = new Set(items.map((job) => String(job.job_id)));
-    batches.forEach((batch) => (batch.jobs || []).forEach((job) => {
-      if (!knownJobIDs.has(String(job.job_id))) knownJobs.push(job);
-    }));
-    let filters = historySlice.dispatch({
-      type: "SET_FILTERS",
-      stateFilter: variantStateFilter?.value || "",
-      templateFilter: variantTemplateFilter?.value || "",
-    }, (state) => ({ ...state, stateFilter: variantStateFilter?.value || "", templateFilter: variantTemplateFilter?.value || "" }));
-    let filteredJobs = (generationModules.history?.filterJobs?.(items, filters) || items.filter((job) => (
-      (!filters.stateFilter || job.state === filters.stateFilter)
-      && (!filters.templateFilter || job.template_id === filters.templateFilter)
-    ))).filter((job) => !batchJobIDs.has(String(job.job_id)));
-    let filteredBatches = generationModules.batch?.filterBatches?.(batches, filters) || [];
-    const requestedJob = requestedJobID && !requestedJobHandled
-      ? knownJobs.find((job) => job.job_id === requestedJobID)
-      : null;
-    const requestedVisible = requestedJob && (
-      filteredJobs.some((job) => job.job_id === requestedJobID)
-      || filteredBatches.some((batch) => (batch.jobs || []).some((job) => job.job_id === requestedJobID))
-    );
-    if (requestedJob && !requestedVisible) {
-      if (variantStateFilter) variantStateFilter.value = "";
-      if (variantTemplateFilter) variantTemplateFilter.value = "";
-      filters = historySlice.dispatch({ type: "SET_FILTERS", stateFilter: "", templateFilter: "" }, (state) => ({ ...state, stateFilter: "", templateFilter: "" }));
-      filteredJobs = items.filter((job) => !batchJobIDs.has(String(job.job_id)));
-      filteredBatches = batches;
-    }
-    const filteredBatchJobCount = filteredBatches.reduce((total, batch) => total + (batch.jobs || []).filter((job) => (
-      (!filters.stateFilter || job.state === filters.stateFilter)
-      && (!filters.templateFilter || job.template_id === filters.templateFilter)
-    )).length, 0);
-    const visibleCount = filteredJobs.length + filteredBatchJobCount;
-    renderJobCount(visibleCount);
-    if (visibleCount === 0) {
-      const empty = document.createElement("p");
-      empty.className = "generation-variant-empty ui-empty-state";
-      empty.textContent = knownJobs.length ? "По этим фильтрам заданий нет." : "Заданий пока нет. Первый запуск появится здесь автоматически.";
-      variantList.replaceChildren(empty);
-      if (requestedJobID && !requestedJobHandled) {
-        requestedJobHandled = true;
-        showRepeatNotice("Задача больше не хранится", `История запусков доступна ${generationRetentionLabel}. Сохранённые результаты можно проверить в галерее.`, true);
-      }
-      return;
-    }
-    const standaloneNodes = filteredJobs.map((job) => {
-      const card = document.createElement("article");
-      card.className = "generation-job ui-media-card";
-      card.dataset.state = job.state || "submitting";
-      card.dataset.jobId = job.job_id || "";
-      if (["submitting", "preparing", "uploading", "queued", "waiting_resources", "running", "postprocessing", "archiving"].includes(job.state)) {
-        card.setAttribute("aria-busy", "true");
-      } else if (job.state === "completed") {
-        card.classList.add("is-success");
-      } else if (job.state === "failed" || job.state === "error") {
-        card.classList.add("is-error");
-      }
-      card.append(renderJobMedia(job));
-      const body = document.createElement("div");
-      body.className = "generation-job-body";
-      const heading = document.createElement("div");
-      heading.className = "generation-job-heading";
-      const headingCopy = document.createElement("span");
-      const title = document.createElement("strong");
-      title.textContent = jobTemplateLabel(job.template_id);
-      const modelName = document.createElement("small");
-      modelName.textContent = cleanModelName(job.model_name);
-      headingCopy.append(title, modelName);
-      const state = document.createElement("span");
-      state.className = "generation-job-state";
-      state.textContent = jobStateLabel(job.state);
-      heading.append(headingCopy, state);
-      const message = document.createElement("p");
-      message.className = "generation-job-message";
-      message.textContent = job.message || "Состояние задания обновляется";
-      const prompt = document.createElement("p");
-      prompt.className = "generation-job-prompt";
-      prompt.textContent = job.prompt || "Промт пока не сохранён";
-      const meta = document.createElement("small");
-      meta.className = "generation-job-meta";
-      const seed = Number(job.seed) >= 0 ? `Seed ${job.seed}` : "Случайный seed";
-      meta.textContent = `${formatJobTime(job.created_at)} · ${seed} · ${formatJobDuration(job.duration_seconds)}`;
-      if (job.expires_at) {
-        const expiry = document.createElement("time");
-        expiry.dataset.generationExpiry = String(new Date(job.expires_at).getTime());
-        expiry.textContent = formatExpiry(Number(expiry.dataset.generationExpiry) - Date.now());
-        meta.append(" · ", expiry);
-      }
-      const actions = document.createElement("div");
-      actions.className = "generation-job-actions";
-      if (job.retryable) {
-        const repeat = document.createElement("button");
-        repeat.type = "button";
-        repeat.className = "button ghost";
-        repeat.textContent = "Повторить";
-        repeat.addEventListener("click", () => retryJob(job, repeat));
-        actions.append(repeat);
-      }
-      if (job.cancellable) {
-        const cancel = document.createElement("button");
-        cancel.type = "button";
-        cancel.className = "button danger ghost";
-        cancel.textContent = "Отменить";
-        cancel.addEventListener("click", () => cancelJob(job, cancel));
-        actions.append(cancel);
-      }
-      const details = document.createElement("details");
-      details.className = "generation-job-details";
-      const summary = document.createElement("summary");
-      summary.textContent = "Этапы";
-      const detailsContent = document.createElement("div");
-      detailsContent.dataset.jobDetailsContent = "";
-      details.append(summary, detailsContent);
-      details.addEventListener("toggle", () => { if (details.open) loadJobDetails(details, job.job_id); });
-      body.append(heading, message, prompt, meta);
-      const footer = document.createElement("div");
-      footer.className = "generation-job-footer";
-      footer.append(actions);
-      card.append(body, footer, details);
-      return card;
-    });
-    const batchNodes = filteredBatches.map((batch) => renderGenerationBatch(batch, filters));
-    variantList.classList.toggle("has-batches", batchNodes.length > 0);
-    variantList.replaceChildren(...batchNodes, ...standaloneNodes);
-    refreshExpiryLabels();
-    if (requestedJobID && !requestedJobHandled) {
-      const target = variantList.querySelector(`[data-job-id="${CSS.escape(requestedJobID)}"]`);
-      requestedJobHandled = true;
-      if (target) {
-        if (historySlice.get().collapsed) {
-          historySlice.dispatch({ type: "SET_COLLAPSED", collapsed: false }, (state) => ({ ...state, collapsed: false }));
-          syncGenerationHistoryVisibility({ persist: true });
-        }
-        target.classList.add("is-notification-target");
-        const details = target.querySelector(".generation-job-details");
-        if (details) details.open = true;
-        window.requestAnimationFrame(() => {
-          const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
-          target.scrollIntoView({ block: "center", behavior: reduceMotion ? "auto" : "smooth" });
-          target.querySelector("summary")?.focus({ preventScroll: true });
-        });
-      } else {
-        showRepeatNotice("Задача больше не хранится", `История запусков доступна ${generationRetentionLabel}. Сохранённые результаты можно проверить в галерее.`, true);
-      }
-    }
-  };
-
-  const refreshJobs = async () => {
-    if (jobSlice.get().loading) return;
-    jobSlice.dispatch({ type: "LOAD_START" }, (state) => ({ ...state, loading: true, error: "" }));
-    try {
-      const [response, batchResponse] = await Promise.all([
-        fetch("/generate/jobs", { credentials: "same-origin", cache: "no-store" }),
-        fetch("/generate/batches", { credentials: "same-origin", cache: "no-store" }).catch(() => null),
-      ]);
-      const [payload, batchPayload] = await Promise.all([
-        response.json().catch(() => ({})),
-        batchResponse?.json().catch(() => ({})) || Promise.resolve({}),
-      ]);
-      if (!response.ok) throw new Error(payload.error || "Не удалось загрузить задания");
-      const items = Array.isArray(payload.jobs) ? payload.jobs : [];
-      jobSlice.dispatch({ type: "SET_JOBS", items, revision: payload.revision }, (state) => ({
-        ...state,
-        loading: false,
-        items,
-        revision: Math.max(Number(state.revision) || 0, Number(payload.revision) || 0),
-        error: "",
-      }));
-      if (batchResponse?.ok) {
-        batchSlice.dispatch({ type: "SET_BATCHES", batches: Array.isArray(batchPayload.batches) ? batchPayload.batches : [] });
-      }
-      renderJobs();
-    } catch (error) {
-      jobSlice.dispatch({ type: "LOAD_ERROR", error: error.message }, (state) => ({ ...state, loading: false, error: error.message || "Load failed" }));
-      if (!jobSlice.get().items.length && variantList) {
-        const empty = document.createElement("p");
-        empty.className = "generation-variant-empty generation-job-load-error ui-empty-state";
-        empty.textContent = error.message || "Не удалось загрузить задания";
-        variantList.replaceChildren(empty);
-      }
-      setJobsConnectionState(false);
-    }
-  };
-
-  let generationPageActive = true;
-  const connectGenerationJobEvents = () => {
-    if (!generationPageActive) return;
-    generationJobEvents?.close();
-    if (!("EventSource" in window)) {
-      setJobsConnectionState(false);
-      return;
-    }
-    generationJobEvents = new EventSource(`/generate/jobs/events?since=${encodeURIComponent(jobSlice.get().revision)}`);
-    generationJobEvents.addEventListener("open", () => setJobsConnectionState(true));
-    generationJobEvents.addEventListener("ready", (event) => {
-      jobSlice.dispatch({ type: "SET_REVISION", revision: event.data }, (state) => ({ ...state, revision: Math.max(Number(state.revision) || 0, Number(event.data) || 0) }));
-      setJobsConnectionState(true);
-    });
-    generationJobEvents.addEventListener("jobs", (event) => {
-      jobSlice.dispatch({ type: "SET_REVISION", revision: event.data }, (state) => ({ ...state, revision: Math.max(Number(state.revision) || 0, Number(event.data) || 0) }));
-      setJobsConnectionState(true);
-      refreshJobs();
-    });
-    generationJobEvents.addEventListener("error", () => setJobsConnectionState(false));
-  };
+  const historyController = generationModules.history.createController({
+    job: jobSlice, batch: batchSlice, history: historySlice, batchAPI: generationModules.batch,
+    transport: generationModules.history.createTransport({ csrf: () => form.elements.csrf?.value || "", fetcher: fetch }),
+    live: window.AIGatewayLiveEvents, storage: () => window.localStorage, requestedJobID, requestedBatchID,
+    onState: state => resultsView.render(state), onNotice: showRepeatNotice, onRevoked: () => resultsView.clear(),
+    onVariants: () => { if (imagePicker && !imagePicker.hidden) renderGalleryImagePicker(); restoreRequestedVariant(); },
+    onVariantsError: () => {
+      if (requestedVariantID && !requestedVariantHandled) showRepeatNotice("Не удалось загрузить вариант", "Проверьте соединение и обновите страницу.", true);
+    },
+    onRepeat: (id, trigger) => {
+      if (window.AIGatewayGeneration?.openRepeat) window.AIGatewayGeneration.openRepeat(id, trigger);
+      else showRepeatNotice("Повтор недоступен", "Обновите страницу и откройте повтор заново.", true);
+    },
+    cancelActive: id => {
+      if (submissionController?.snapshot().record?.jobID !== id) return false;
+      submissionController.cancel(); return true;
+    },
+    branchEditor: { capture: captureBranchEditor, apply: applyBatchBranch },
+  });
+  resultsView.bind(historyController);
+  const refreshJobs = () => historyController.refresh();
+  const refreshVariants = () => historyController.refreshVariants();
 
   const updateGenerationQuota = (quota) => {
     if (!quota || typeof quota !== "object") return;
@@ -4487,170 +3764,153 @@
     syncBatchBuilder();
   };
 
-  const poll = async (promptID) => {
-    const isVideo = selectedGenerationWorkflow()?.dataset.family === "minimax_h3";
-    const deadline = Date.now() + (isVideo ? 60 : 20) * 60 * 1000;
-    let failedAttempts = 0;
-    while (Date.now() < deadline) {
-      if (activeGenerationID !== promptID) return;
-      try {
-        const response = await fetch(`/generate/status?prompt_id=${encodeURIComponent(promptID)}`, { credentials: "same-origin" });
-        const payload = await response.json().catch(() => ({}));
-        if (activeGenerationID !== promptID) return;
-        if (!response.ok) {
-          if (response.status >= 400 && response.status < 500) {
-            clearActiveGeneration();
-            setGenerationActions({ retry: true });
-            resultTitle.textContent = "Не удалось восстановить генерацию";
-            resultStatus.textContent = payload.error || "Доступ к сохранённой генерации больше недоступен.";
-            result.classList.add("has-error");
-            return;
-          }
-          throw new Error(payload.error || "Не удалось получить статус");
-        }
-        failedAttempts = 0;
-        resultStatus.textContent = payload.message || "Проверяем состояние...";
-        if (!liveProgressReceived) {
-          if (payload.state === "queued") {
-            const detail = queuePositionDetail(payload.queue_position, payload.queue_total, payload.estimated_wait_seconds);
-            setQueueProgress(detail);
-          } else if (payload.state === "running") {
-            setGenerationProgress("ComfyUI выполняет workflow", "Статус восстанавливается через HTTP", null);
-          }
-        }
-        if (payload.state === "completed") {
-          clearActiveGeneration();
-          setGenerationActions();
-          resultTitle.textContent = "Готово";
-          setGenerationProgress("Готово", "Результат подготовлен", 100);
-          renderOutputs(payload.outputs || []);
-          try { await refreshLibrary(); } catch (_) {}
-          try { await refreshJobs(); } catch (_) {}
-          try { await refreshVariants(); } catch (_) {}
-          result.scrollIntoView({ block: "start", behavior: "smooth" });
-          return;
-        }
-        if (payload.state === "error") {
-          clearActiveGeneration();
-          setGenerationActions({ retry: true });
-          resultTitle.textContent = "Генерация завершилась с ошибкой";
-          resultStatus.textContent = payload.message || "ComfyUI завершил генерацию с ошибкой";
-          result.classList.add("has-error");
-          return;
-        }
-      } catch (_) {
-        failedAttempts += 1;
-        if (activeGenerationID !== promptID) return;
-        const retryAfter = Math.min(15000, 2000 * failedAttempts);
-        setGenerationProgress("Восстанавливаем связь", "Генерация в ComfyUI не отменена", null);
-        await pauseWithCountdown(
-          retryAfter,
-          (seconds) => { resultStatus.textContent = `Связь с Gateway временно потеряна. Повторяем проверку через ${seconds} сек.`; },
-          () => activeGenerationID === promptID,
-        );
-        continue;
-      }
-      await pause(2000);
-    }
-    if (activeGenerationID === promptID) {
-      resultTitle.textContent = "Генерация всё ещё выполняется";
-      resultStatus.textContent = "Статус сохранён. Откройте страницу позже: Gateway автоматически продолжит проверку результата.";
-      setGenerationActions({ cancel: true });
-    }
+  const setSubmissionActionLabel = (button, text) => {
+    if (!button) return;
+    const label = button?.querySelector("span");
+    const compact = button === cancelGeneration ? {
+      "Отменить генерацию": "Отменить", "Отменить пакет": "Отменить пакет", "Отмена запрошена": "Отменяем",
+    }[text] : "";
+    feedback.text(label, compact || text);
+    button.setAttribute("aria-label", text);
+    button.title = text;
+    button.classList.toggle("is-status-check", button === retryGeneration && text === "Проверить состояние");
   };
-
-  const monitorGeneration = async (promptID) => {
-    if (!promptID) return false;
-    activeGenerationID = promptID;
-    persistActiveGeneration();
-    setGenerationActions({ cancel: true });
-    refreshQueueOverview();
-    connectProgressSocket(promptID);
-    try {
-      await poll(promptID);
-    } finally {
-      closeProgressSocket();
-    }
+  const setSubmissionTask = (record) => {
+    const id = record?.kind === "batch" ? record.batchID : record?.jobID;
+    if (!submissionTask || !id) return false;
+    const kind = record.kind === "batch" ? "generation_batch" : "generation";
+    submissionTask.href = `/tasks?${new URLSearchParams({ task: kind + ":" + id })}`;
     return true;
   };
+  let submissionPresented = false;
+  submissionController = generationModules.submission.createController({
+    persistence: generationModules.submission.createPersistence({ storage: () => window.localStorage, owner: root.dataset.generationOwner }),
+    transport: generationModules.submission.createTransport({ csrf: () => form.elements.csrf?.value || "" }),
+    newRequestID: newGenerationRequestID,
+    socket: root.dataset.generationLiveProgress === "true" ? () => {
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      return new WebSocket(`${protocol}//${window.location.host}/generate/ws`);
+    } : undefined,
+    onState: state => {
+      result.dataset.submissionState = state.phase;
+      resultsView.submissionPhase(state.phase);
+      feedback.button(generationSubmit, { busy: state.phase === "sending" });
+      syncBatchBuilder();
+      if (generationSubmit) generationSubmit.disabled = submitInFlight || submissionBlocksLaunch() || generationSubmit.dataset.batchInvalid === "true";
+      result.setAttribute("aria-busy", String(state.phase === "sending"));
+      if (["finished", "batch_accepted"].includes(state.phase)) return;
+      if (state.phase === "idle") {
+        resultSourceJobID = "";
+        if (submissionPresented) {
+          resultTitle.textContent = "Можно запустить генерацию";
+          resultStatus.textContent = "Параметры сохранены в редакторе.";
+          result.classList.remove("has-error");
+          setSubmissionActionLabel(retryGeneration, "Повторить");
+          setGenerationActions({ retry: true });
+        }
+        return;
+      }
+      const firstPresentation = !submissionPresented;
+      submissionPresented = true;
+      result.hidden = false;
+      if (previousResult) previousResult.hidden = !outputGrid.childElementCount;
+      if (firstPresentation || state.phase === "sending") {
+        studio?.show("result");
+        window.requestAnimationFrame(() => result.scrollIntoView({ block: "start", behavior: "smooth" }));
+      }
+      const knownTask = setSubmissionTask(state.record);
+      resultSourceJobID = "";
+      const cancelling = state.phase === "cancelling" || state.record?.cancelling;
+      const paused = ["paused", "auth_required", "storage_error"].includes(state.phase);
+      setSubmissionActionLabel(retryGeneration, "Проверить состояние");
+      setSubmissionActionLabel(cancelGeneration, cancelling ? "Отмена запрошена" : state.record?.kind === "batch" ? "Отменить пакет" : "Отменить генерацию");
+      if (cancelGeneration) cancelGeneration.disabled = Boolean(cancelling) || state.phase === "auth_required";
+      setGenerationActions({ retry: true, cancel: state.pending, authenticate: state.phase === "auth_required", task: knownTask });
+      if (submissionLogin) submissionLogin.href = `/login?${new URLSearchParams({ next: window.location.pathname + window.location.search })}`;
+      const titles = {
+        sending: state.record?.kind === "batch" ? "Создаём пакет вариантов" : "Отправляем задание",
+        waiting: state.payload?.dispatch_waiting ? "В очереди Gateway" : "Проверяем запуск",
+        running: state.payload?.state === "queued" ? "В очереди ComfyUI" : "Генерация выполняется",
+        recovering: "Проверяем состояние",
+        cancelling: "Отменяем генерацию",
+        paused: "Проверка приостановлена",
+        auth_required: "Нужен повторный вход",
+        storage_error: "Не удалось сохранить состояние",
+      };
+      resultTitle.textContent = titles[state.phase] || "Проверяем состояние";
+      const countdown = state.retrySeconds && state.phase === "recovering" ? ` Следующая проверка через ${state.retrySeconds} сек.` : "";
+      feedback.present(resultStatus, state.phase, state.message + countdown);
+      result.classList.toggle("has-error", ["auth_required", "storage_error"].includes(state.phase));
+      if (paused || cancelling || ["sending", "waiting", "recovering"].includes(state.phase)) runProgress.hidden = true;
+      else if (!state.live) {
+        if (state.payload?.state === "queued") setQueueProgress(queuePositionDetail(state.payload.queue_position, state.payload.queue_total, state.payload.estimated_wait_seconds));
+        else setGenerationProgress("Генерация выполняется", "Ожидаем результат", null);
+      }
+    },
+    onAccepted: payload => {
+      renderOutputs([]);
+      result.classList.remove("has-viewer");
+      pendingParentJobID = "";
+      updateGenerationQuota(payload.quota);
+      refreshQueueOverview();
+      refreshJobs().catch(() => {});
+    },
+    onProgress: renderSubmissionProgress,
+    onFinished: (payload, record, outcome) => {
+      const state = payload.state || payload.batch?.state;
+      const failed = ["error", "failed", "expired"].includes(state);
+      const focusedAction = resultActions?.contains(document.activeElement);
+      result.classList.toggle("has-error", failed);
+      runProgress.hidden = true;
+      if (cancelGeneration) cancelGeneration.disabled = false;
+      setSubmissionActionLabel(retryGeneration, "Повторить");
+      resultSourceJobID = record.kind === "single" ? record.jobID || "" : "";
+      setGenerationActions({ retry: outcome !== "batch_accepted", repeatNow: Boolean(resultSourceJobID), task: setSubmissionTask(record),
+        view: Boolean(resultSourceJobID && state === "completed") });
+      if (record.kind === "batch") {
+        if (payload.batch) historyController.acceptBatch(payload.batch);
+        historyController.setCollapsed(false);
+        resultTitle.textContent = outcome === "batch_accepted" ? "Пакет сохранён" : state === "cancelled" ? "Пакет отменён" : "Пакет завершён";
+        resultStatus.textContent = payload.message || payload.error || (outcome === "batch_accepted" ? "Состояние вариантов доступно в задачах." : "Готовые варианты сохранены.");
+      } else if (state === "completed") {
+        resultTitle.textContent = "Готово";
+        const media = payload.outputs?.length ? payload.outputs : payload.job?.media || [];
+        renderOutputs(media.map(item => ({ ...item, comparison_job_id: resultSourceJobID })));
+        if (media.length) setGenerationProgress("Готово", "Результат подготовлен", 100);
+        resultStatus.textContent = media.length ? payload.message || "Результат сохранён." : "Задание завершено, но сохранённый файл уже недоступен.";
+        refreshVariants().catch(() => {});
+      } else {
+        resultTitle.textContent = state === "cancelled" ? "Генерация отменена" : state === "expired" ? "Генерация прервана" : "Генерация завершилась с ошибкой";
+        resultStatus.textContent = payload.message || payload.error || "Параметры сохранены, можно повторить попытку.";
+      }
+      if (focusedAction) resultTitle.focus({ preventScroll: true });
+      if (record.kind === "single" && state === "completed" && !document.hidden && resultSourceJobID) {
+        const completedID = resultSourceJobID;
+        refreshJobs().then(() => {
+          if (resultSourceJobID === completedID && !document.hidden && resultsView.openJob(completedID)) result.classList.add("has-viewer");
+        }).catch(() => {});
+      } else refreshJobs().catch(() => {});
+      syncBatchBuilder();
+    },
+  });
 
-  const recoverGeneration = async (requestID, { attempts = 24 } = {}) => {
-    if (!requestID) return false;
-    activeGenerationRequestID = requestID;
-    persistActiveGeneration();
-    renderOutputs([]);
+  const startSubmission = async (kind) => {
     result.hidden = false;
     studio?.show("result");
-    runProgress.hidden = false;
-    result.classList.remove("has-error");
-    resultTitle.textContent = "Восстанавливаем генерацию";
-    setGenerationActions({ cancel: Boolean(activeGenerationID || activeGenerationJobID) });
-    for (let attempt = 0; attempt < attempts || activeGenerationJobID; attempt += 1) {
-      if (activeGenerationRequestID !== requestID) return false;
-      let waitingMessage = "";
-      try {
-        const response = await fetch(`/generate/recover?request_id=${encodeURIComponent(requestID)}`, { credentials: "same-origin" });
-        const payload = await response.json().catch(() => ({}));
-        if (activeGenerationRequestID !== requestID) return false;
-        if (response.status === 404) {
-          clearActiveGeneration();
-          setGenerationActions({ retry: true });
-          resultTitle.textContent = "Запуск не был подтверждён";
-          resultStatus.textContent = "Задача не была поставлена в очередь. Её можно запустить ещё раз.";
-          result.classList.add("has-error");
-          return false;
-        }
-        if (!response.ok) throw new Error(payload.error || "Не удалось восстановить запуск");
-        activeGenerationJobID = payload.job_id || activeGenerationJobID;
-        persistActiveGeneration();
-        setGenerationActions({ cancel: Boolean(activeGenerationID || activeGenerationJobID) });
-        if (!payload.prompt_id && ["error", "failed", "cancelled", "expired", "completed"].includes(payload.state)) {
-          resultTitle.textContent = payload.state === "cancelled" ? "Генерация отменена" : "Запуск завершён";
-          resultStatus.textContent = payload.message || "Задание завершено.";
-          result.classList.toggle("has-error", ["error", "failed", "expired"].includes(payload.state));
-          runProgress.hidden = true;
-          clearActiveGeneration();
-          setGenerationActions({ retry: true });
-          refreshJobs();
-          return true;
-        }
-        if (!payload.prompt_id && activeGenerationJobID) {
-          resultTitle.textContent = payload.state === "cancelling" ? "Отменяем генерацию" : payload.dispatch_waiting ? "В очереди Gateway" : "Проверяем запуск";
-          waitingMessage = payload.message || "Задание сохранено на сервере.";
-          setGenerationProgress(resultTitle.textContent, waitingMessage, null, "queue");
-          runProgress.hidden = true;
-        }
-        if (payload.prompt_id) {
-          activeGenerationID = payload.prompt_id;
-          activeGenerationRequestID = payload.request_id || requestID;
-          persistActiveGeneration();
-          resultTitle.textContent = "Генерация выполняется";
-          resultStatus.textContent = payload.message || "Генерация восстановлена.";
-          if (payload.state === "queued") {
-            setQueueProgress(queuePositionDetail(payload.queue_position, payload.queue_total, payload.estimated_wait_seconds));
-          } else if (payload.state === "running") {
-            setGenerationProgress("ComfyUI выполняет workflow", "Статус восстанавливается через HTTP", null);
-          }
-          await monitorGeneration(payload.prompt_id);
-          return true;
-        }
-      } catch (_) {
-        // The request id remains in local storage, so a page reload can continue recovery.
-      }
-      const retryAfter = Math.min(15000, 1500 * (attempt + 1));
-      if (!waitingMessage) setGenerationProgress("Проверяем запуск", "Повторная отправка не требуется", null, "queue");
-      await pauseWithCountdown(
-        retryAfter,
-        (seconds) => { resultStatus.textContent = `${waitingMessage || "Связь с Gateway временно потеряна."} Проверка через ${seconds} сек.`; },
-        () => activeGenerationRequestID === requestID,
-      );
+    try {
+      await submissionController.start(buildGenerationPayload(), {
+        kind, video: selectedGenerationWorkflow()?.dataset.family === "minimax_h3",
+        correlationID: assistantSlice.get().correlationID || "",
+      });
+    } catch (error) {
+      resultTitle.textContent = "Не удалось отправить задание";
+      resultStatus.textContent = error.message || "Проверьте состояние запроса.";
+      result.classList.add("has-error");
+      runProgress.hidden = true;
+      setSubmissionActionLabel(retryGeneration, submissionBlocksLaunch() ? "Проверить состояние" : "Повторить");
+      setGenerationActions({ retry: true, cancel: submissionController.snapshot().pending });
     }
-    resultTitle.textContent = "Статус запуска ещё уточняется";
-    resultStatus.textContent = "Попробуем снова автоматически после обновления страницы. Повторная отправка не нужна.";
-    setGenerationActions();
-    return false;
   };
-
   const launchGenerationBatch = async () => {
     const validation = syncBatchBuilder();
     if (!validation.valid) {
@@ -4658,65 +3918,11 @@
       (batchParameter?.value ? batchFrom : batchParameter)?.focus({ preventScroll: true });
       return;
     }
-    if (!generationSubmit) return;
-    generationSubmit.disabled = true;
-    generationSubmit.classList.add("is-loading");
-    result.hidden = false;
-    studio?.show("result");
-    result.classList.remove("has-error");
-    resultTitle.textContent = "Создаём пакет вариантов";
-    resultStatus.textContent = "Проверяем варианты и резервируем лимит одной транзакцией...";
-    runProgress.hidden = true;
-    setGenerationActions();
-    try {
-      const body = buildGenerationPayload();
-      body.set("client_request_id", newGenerationRequestID());
-      const headers = { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" };
-      if (assistantSlice.get().correlationID) headers["X-Correlation-ID"] = assistantSlice.get().correlationID;
-      const response = await fetch("/generate/batches", { method: "POST", headers, body, credentials: "same-origin" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "Gateway отклонил пакет вариантов");
-      pendingParentJobID = "";
-      updateGenerationQuota(payload.quota);
-      if (payload.batch) {
-        const current = batchSlice.get().batches || [];
-        batchSlice.dispatch({
-          type: "SET_BATCHES",
-          batches: [payload.batch, ...current.filter((batch) => batch.batch_id !== payload.batch.batch_id)],
-        });
-      }
-      if (historySlice.get().collapsed) {
-        historySlice.dispatch({ type: "SET_COLLAPSED", collapsed: false }, (state) => ({ ...state, collapsed: false }));
-        syncGenerationHistoryVisibility({ persist: true });
-      }
-      renderJobs();
-      resultTitle.textContent = "Пакет поставлен в очередь";
-      resultStatus.textContent = `${batchVariantCountLabel(validation.count)} будут выполнены последовательно и появятся ниже без обновления страницы.`;
-      await refreshJobs();
-      window.requestAnimationFrame(() => variantsSection?.scrollIntoView({ block: "start", behavior: "smooth" }));
-    } catch (error) {
-      resultTitle.textContent = "Не удалось создать пакет";
-      resultStatus.textContent = error.message || "Gateway временно недоступен.";
-      result.classList.add("has-error");
-    } finally {
-      generationSubmit.classList.remove("is-loading");
-      syncBatchBuilder();
-    }
+    await startSubmission("batch");
   };
 
   root.querySelectorAll("[data-generation-profile]").forEach((button) => {
     button.addEventListener("click", () => applyGenerationProfile(button.dataset.generationProfile));
-  });
-  variantStateFilter?.addEventListener("change", renderJobs);
-  variantTemplateFilter?.addEventListener("change", renderJobs);
-  try {
-    const collapsed = window.localStorage.getItem(generationHistoryCollapsedStorageKey) === "true";
-    historySlice.dispatch({ type: "SET_COLLAPSED", collapsed }, (state) => ({ ...state, collapsed }));
-  } catch (_) {}
-  syncGenerationHistoryVisibility();
-  variantsToggle?.addEventListener("click", () => {
-    historySlice.dispatch({ type: "TOGGLE_COLLAPSED" }, (state) => ({ ...state, collapsed: !state.collapsed }));
-    syncGenerationHistoryVisibility({ persist: true });
   });
   generationOpenExact?.addEventListener("click", () => {
     studio?.openSettings();
@@ -4725,64 +3931,41 @@
     if (event.target?.name in profileValues("balanced") || event.target?.closest(".studio-basic-settings, .studio-models")) clearProfileFeedback();
     syncBatchBuilder();
     syncGenerationSummary();
-    if (!event.target.closest("#prompt-assistant") && assistantContext && assistantContext !== assistantContextKey()) invalidatePromptAssistant();
+    if (!event.target.closest("#prompt-assistant")) assistantSession?.syncContext();
   });
   form.addEventListener("change", (event) => {
+    if (event.target?.name?.startsWith("aihub_")) { syncWorkflowFields(); syncImageSlots(); syncAIHubFields(); }
     if (event.target?.name in profileValues("balanced") || event.target?.closest(".studio-basic-settings, .studio-models")) clearProfileFeedback();
     syncBatchBuilder();
     syncGenerationSummary();
-    if (!event.target.closest("#prompt-assistant") && assistantContext && assistantContext !== assistantContextKey()) invalidatePromptAssistant();
+    if (!event.target.closest("#prompt-assistant")) assistantSession?.syncContext();
   });
   batchParameter?.addEventListener("change", () => syncBatchBuilder({ resetRange: true }));
-  batchCompareClose?.addEventListener("click", () => batchCompare?.close?.());
-  batchCompare?.addEventListener("click", (event) => {
-    if (event.target === batchCompare) batchCompare.close?.();
-  });
   recipeSelect?.addEventListener("change", () => {
-    recipeSlice.dispatch({ type: "SELECT", id: recipeSelect.value }, (state) => ({ ...state, selectedID: recipeSelect.value }));
-    if (recipeApply) recipeApply.disabled = !recipeSelect.value;
-    if (recipeDelete) recipeDelete.disabled = !recipeSelect.value;
+    recipeController.select(recipeSelect.value);
   });
   recipeApply?.addEventListener("click", applyRecipe);
   recipeDelete?.addEventListener("click", deleteRecipe);
   recipeSave?.addEventListener("click", saveRecipe);
   preflightButton?.addEventListener("click", () => runPreflight());
   preflightRepeat?.addEventListener("click", () => runPreflight({ reveal: false }));
-  retryGeneration?.addEventListener("click", () => form.requestSubmit());
-  cancelGeneration?.addEventListener("click", async () => {
-    const promptID = activeGenerationID;
-    const jobID = activeGenerationJobID;
-    if ((!promptID && !jobID) || cancelGeneration.disabled) return;
-    cancelGeneration.disabled = true;
-    cancelGeneration.textContent = "Отменяем...";
-    try {
-      const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", ...(promptID ? { prompt_id: promptID } : { job_id: jobID }) });
-      const response = await fetch(promptID ? "/generate/cancel" : "/generate/jobs/cancel", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body, credentials: "same-origin" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "Не удалось отменить генерацию");
-      if (!promptID && !payload.cancelled && !["cancelled", "completed", "failed", "expired", "error"].includes(payload.job?.state)) {
-        resultTitle.textContent = "Отмена запрошена";
-        resultStatus.textContent = payload.message || "Ожидаем подтверждения остановки.";
-        refreshJobs();
-        return;
-      }
-      clearActiveGeneration();
-      closeProgressSocket();
-      resultTitle.textContent = payload.cancelled ? "Генерация отменена" : "Генерация завершена";
-      resultStatus.textContent = payload.message || "Генерация отменена.";
-      runProgress.hidden = true;
-      setGenerationActions({ retry: true });
-      refreshJobs();
-    } catch (error) {
-      resultStatus.textContent = error.message || "Не удалось отменить генерацию";
-      result.classList.add("has-error");
-    } finally {
-      cancelGeneration.disabled = false;
-      cancelGeneration.textContent = "Отменить генерацию";
-    }
+  retryGeneration?.addEventListener("click", () => {
+    if (submissionBlocksLaunch()) submissionController.refresh();
+    else if (resultSourceJobID) generationModules.openRepeat?.(resultSourceJobID);
+    else studio?.show("configure");
   });
+  repeatGenerationNow?.addEventListener("click", () => {
+    if (!submissionBlocksLaunch() && resultSourceJobID) generationModules.openRepeatNow?.(resultSourceJobID, repeatGenerationNow);
+  });
+  cancelGeneration?.addEventListener("click", () => submissionController.cancel());
 
   const submitGeneration = async () => {
+    if (submissionBlocksLaunch()) {
+      result.hidden = false;
+      studio?.show("result");
+      submissionController.refresh();
+      return;
+    }
     if (!form.checkValidity()) {
       const invalid = [...form.elements].find((field) => field.willValidate && !field.validity.valid);
       studio?.revealField(invalid);
@@ -4793,33 +3976,12 @@
       studio?.revealField(!positive.value.trim() ? positive : model);
       return;
     }
+    if (loraVerificationController?.active()) { await loraVerificationController.quote(); return; }
     const batchLaunch = Boolean(batchEnabled?.checked);
-    if (!batchLaunch && (activeGenerationID || activeGenerationRequestID)) {
-      result.hidden = false;
-      studio?.show("result");
-      resultTitle.textContent = "Генерация уже выполняется";
-      resultStatus.textContent = "Сначала дождитесь результата или отмените текущую задачу.";
-      return;
-    }
-    if (promptAssistantEnabled?.checked && !assistantSlice.get().approved) {
-      setPromptAssistantState("Перед генерацией подтвердите вариант ассистента или выберите «Оставить мой промт».", "error");
+    if (!await assistantSession.beforeLaunch()) {
       openPromptAssistant();
       return;
     }
-	const assistantBeforeLaunch = assistantSlice.get();
-	if (assistantBeforeLaunch.correlationID && assistantBeforeLaunch.action) {
-	  try {
-		await assistantDecisionPromise;
-		const finalPrompt = assistantBeforeLaunch.action === "kept_original" ? assistantBeforeLaunch.original : positive.value.trim();
-		assistantDecisionPromise = persistPromptAssistantDecision(assistantBeforeLaunch.action, finalPrompt);
-		await assistantDecisionPromise;
-	  } catch (error) {
-		assistantSlice.dispatch({ type: "DECISION_ERROR", error: error.message }, (state) => ({ ...state, status: "error", approved: false, error: error.message }));
-		setPromptAssistantState(error.message || "Не удалось сохранить выбор", "error");
-		openPromptAssistant();
-		return;
-	  }
-	}
     if (!await runPreflight({ reveal: false })) {
       preflight?.scrollIntoView({ block: "center", behavior: "smooth" });
       return;
@@ -4828,92 +3990,170 @@
       await launchGenerationBatch();
       return;
     }
-    const submit = generationSubmit;
-    submit.disabled = true;
-    submit.classList.add("is-loading");
-    result.hidden = false;
-    studio?.show("result");
-    activeGenerationRequestID = newGenerationRequestID();
-    activeGenerationID = "";
-    activeGenerationJobID = "";
-    persistActiveGeneration();
-    setGenerationActions();
-    resultTitle.textContent = "Генерация выполняется";
-    resultStatus.textContent = "Сохраняем задание в очереди Gateway...";
-    result.classList.remove("has-error");
-    runProgress.hidden = false;
-    setGenerationProgress("Подготовка", "Проверяем параметры схемы генерации", null);
-    result.scrollIntoView({ block: "start", behavior: "smooth" });
-    try {
-      const body = buildGenerationPayload();
-      body.set("client_request_id", activeGenerationRequestID);
-      const headers = { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" };
-      if (assistantSlice.get().correlationID) headers["X-Correlation-ID"] = assistantSlice.get().correlationID;
-      const response = await fetch("/generate/run", { method: "POST", headers, body, credentials: "same-origin" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        clearActiveGeneration();
-        setGenerationActions({ retry: true });
-        resultTitle.textContent = "Не удалось выполнить генерацию";
-        resultStatus.textContent = payload.error || "Gateway отклонил запуск. Параметры сохранены, можно повторить попытку.";
-        result.classList.add("has-error");
-        runProgress.hidden = true;
-        return;
-      }
-      renderOutputs([]);
-      pendingParentJobID = "";
-      updateGenerationQuota(payload.quota);
-      refreshJobs();
-      activeGenerationRequestID = payload.request_id || activeGenerationRequestID;
-      activeGenerationJobID = payload.job_id || "";
-      if (!payload.prompt_id) {
-        await recoverGeneration(activeGenerationRequestID);
-        return;
-      }
-      activeGenerationID = payload.prompt_id;
-      persistActiveGeneration();
-      if (payload.state === "queued") {
-        setQueueProgress(queuePositionDetail(payload.queue_position, payload.queue_total, payload.estimated_wait_seconds));
-      } else if (payload.state === "running") {
-        setGenerationProgress("ComfyUI начал генерацию", "Подготавливаем workflow", null);
-      }
-      if (payload.mining_paused) {
-        resultStatus.textContent = "Майнинг подтверждённо остановлен на время этой приоритетной генерации.";
-      } else if (payload.mining_warning) {
-        resultStatus.textContent = payload.mining_warning;
-      }
-      await monitorGeneration(payload.prompt_id);
-    } catch (error) {
-      const recovered = await recoverGeneration(activeGenerationRequestID, { attempts: 8 });
-      if (!recovered && !activeGenerationRequestID) {
-        setGenerationActions({ retry: true });
-        resultTitle.textContent = "Не удалось выполнить генерацию";
-        resultStatus.textContent = error.message || "Неизвестная ошибка";
-        result.classList.add("has-error");
-      }
-    } finally {
-      closeProgressSocket();
-      submit.disabled = false;
-      submit.classList.remove("is-loading");
-    }
+    await startSubmission("single");
   };
-  let submitInFlight = false;
+  if (generationModules.loraVerification) {
+    loraVerificationController = generationModules.loraVerification.create({
+      form, root, getPayload: buildGenerationPayload, prepareInputs: () => runPreflight({ reveal: false }),
+      newRequestID: newGenerationRequestID,
+      onDirty: markDraftDirty, showResults: () => { studio?.show("result"); refreshJobs(); },
+      renderMedia: media => renderJobMedia({ media: [media], template_id: "text-to-image", state: "completed" }),
+    });
+  }
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (jobSourceRequested && (!jobSourceController || jobSourceController.snapshot().blocked)) {
+      document.getElementById("generation-job-source")?.focus({ preventScroll: false });
+      return;
+    }
     if (submitInFlight) return;
     submitInFlight = true;
     try { await submitGeneration(); }
-    finally { submitInFlight = false; }
+    finally {
+      submitInFlight = false;
+      syncBatchBuilder();
+      if (generationSubmit && !loraVerificationController?.active()) generationSubmit.disabled = submissionBlocksLaunch() || generationSubmit.dataset.batchInvalid === "true";
+    }
   });
 
+  if (jobSourceRequested && generationModules.jobSource) {
+    const banner = document.getElementById("generation-job-source");
+    const message = document.getElementById("generation-job-source-message");
+    const retry = document.getElementById("generation-job-source-retry");
+    const replace = document.getElementById("generation-job-source-replace");
+    const keep = document.getElementById("generation-job-source-keep");
+    const back = document.getElementById("generation-job-source-back");
+    back.hidden = !generationModules.jobSource.validID(sourceID);
+    if (!back.hidden) {
+      back.href = loraSourceRequested ? `/train-lora?job=${encodeURIComponent(sourceID)}` : `/tasks?task=generation:${encodeURIComponent(sourceID)}`;
+      if (loraSourceRequested) back.textContent = "К LoRA";
+      try {
+        const target = new URL(requestedQuery.get("return_to") || "", window.location.origin);
+        if (!loraSourceRequested && target.origin === window.location.origin && ["/tasks", "/preview/tasks"].includes(target.pathname)) back.href = target.pathname + target.search;
+      } catch (_) {}
+    }
+    jobSourceController = generationModules.jobSource.createController({
+      id: sourceID, kind: loraSourceRequested ? "lora_training" : "generation", enabled: true,
+      load: async (id, signal) => {
+        const conflict = ["variant", "media", "job"].some(key => requestedQuery.has(key)) || (loraSourceRequested
+          ? requestedQuery.has("edit_job") || requestedQuery.getAll("lora_job").length !== 1 || requestedQuery.getAll("lora_model").length !== 1 || !requestedLoraModelID || requestedLoraModelID.length > 3000 || ["template", "workflow", "slot", "role"].some(key => requestedQuery.has(key))
+          : requestedQuery.getAll("edit_job").length !== 1);
+        if (conflict) throw new Error("Некорректный адрес или выбрано несколько источников. Откройте одну задачу или LoRA из списка.");
+        if (loraSourceRequested) {
+          const response = await fetch(`/api/lora-training/source/${encodeURIComponent(id)}?${new URLSearchParams({ model: requestedLoraModelID })}`, {
+            credentials: "same-origin", cache: "no-store", signal: AbortSignal.any([signal, AbortSignal.timeout(60000)]),
+          });
+          if (response.redirected || response.status === 401) throw new Error("Сеанс завершён. Войдите в аккаунт снова.");
+          const payload = await response.json().catch(() => null);
+          if (!response.ok || !payload) throw new Error(payload?.error || "Не удалось проверить LoRA. Повторите запрос.");
+          return payload;
+        }
+        const body = new URLSearchParams({ csrf: form.elements.csrf?.value || "", job_id: id });
+        const response = await fetch("/generate/jobs/retry", {
+          method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body,
+          credentials: "same-origin", cache: "no-store", signal: AbortSignal.any([signal, AbortSignal.timeout(20000)]),
+        });
+        if (response.redirected || response.status === 401) throw new Error("Сеанс завершён. Войдите в аккаунт снова.");
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload) throw new Error(payload?.error || "Не удалось загрузить параметры задачи. Проверьте соединение и повторите попытку.");
+        return payload;
+      },
+      apply: payload => {
+        // Opening a saved job is editing, never an automatic repeat or batch.
+        const values = { ...payload.values, parent_job_id: loraSourceRequested ? "" : payload.parent_job_id, assistant_enabled: "false", assistant_job_id: "", batch_enabled: "false" };
+        applyGenerationDraft({ values, assets: payload.assets || [], fresh: true });
+        if (loraSourceRequested && requestedQuery.get("lora_check") === "1") loraVerificationController?.start(sourceID, payload.source_name);
+        studio?.show("configure");
+        markDraftDirty();
+      },
+      onConsumed: () => {
+        const url = new URL(window.location.href);
+        if (url.searchParams.get(loraSourceRequested ? "lora_job" : "edit_job") === sourceID || !sourceID) {
+          ["edit_job", "lora_job", "lora_model", "lora_check", "return_to"].forEach(key => url.searchParams.delete(key));
+          window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+        }
+      },
+      onState: state => {
+        const focused = document.activeElement;
+        banner.hidden = state.status === "idle" || state.status === "kept";
+        banner.dataset.state = state.status;
+        banner.setAttribute("aria-busy", String(state.status === "loading" || state.status === "waiting"));
+        message.textContent = state.status === "error" ? state.error : state.status === "conflict"
+          ? "Параметры задачи загружены. Ваши изменения в форме пока не заменены."
+          : state.status === "ready" ? loraSourceRequested ? state.requiresInputs ? "LoRA выбрана. Добавьте исходное изображение." : "LoRA выбрана. Генерация ещё не запущена." : state.requiresInputs ? "Параметры задачи перенесены. Некоторые исходные материалы недоступны: замените их или удалите." : "Параметры и исходные материалы перенесены. Генерация ещё не запущена."
+          : state.status === "paused" ? "Перенос параметров приостановлен." : "Загружаем параметры исходной задачи...";
+        retry.hidden = state.status !== "error";
+        replace.hidden = state.status !== "conflict";
+        keep.hidden = !state.blocked;
+        keep.textContent = state.status === "conflict" ? "Оставить мои параметры" : "Не переносить параметры";
+        if ([retry, replace, keep].includes(focused) && focused.hidden) {
+          const target = !state.blocked ? positive : !retry.hidden ? retry : keep;
+          target?.focus({ preventScroll: true });
+        }
+      },
+    });
+    retry.addEventListener("click", () => jobSourceController.start());
+    replace.addEventListener("click", () => jobSourceController.confirmReplace());
+    keep.addEventListener("click", () => jobSourceController.keepCurrent());
+    const edit = event => { if (event.isTrusted) jobSourceController.markEdited(); };
+    form.addEventListener("input", edit); form.addEventListener("change", edit);
+    form.addEventListener("click", event => {
+      if (event.target.closest(".scenario-choice, .generation-workflow-choice, [data-generation-profile], #generation-recipe-apply, #generation-draft-remote, #generation-draft-delete, [data-remove-image], #minimax-audio-remove, #minimax-video-remove, #prompt-assistant-apply, #prompt-assistant-keep")) edit(event);
+    });
+    document.addEventListener("visibilitychange", () => jobSourceController.setActive(!document.hidden));
+    window.addEventListener("pagehide", () => jobSourceController.setActive(false));
+    window.addEventListener("pageshow", () => jobSourceController.setActive(!document.hidden));
+    jobSourceController.setActive(!document.hidden);
+  } else if (jobSourceRequested) {
+    showRepeatNotice("Не удалось открыть параметры задачи", "Обновите страницу или вернитесь к исходной задаче.", true);
+  }
+
+  collectionSession = generationModules.collectionWorkspace?.bindStudio({
+    root, form, draft: () => draftController, validate: values => generationPayload.resolveSelection(values),
+    revealDraft: ({ focus = true, scroll = true } = {}) => {
+      studio?.show("configure");
+      const bar = document.getElementById("generation-draft-bar");
+      const disclosure = bar?.closest("details");
+      if (disclosure) disclosure.open = true;
+      if (scroll) bar?.scrollIntoView({ block: "nearest" });
+      if (focus) document.getElementById(draftController?.snapshot().status === "conflict" ? "generation-draft-remote" : "generation-draft-save")?.focus();
+    },
+  });
+  void collectionSession?.start();
   const initialID = root.dataset.selectedWorkflow || "";
   const workflowCapabilitiesReady = loadWorkflowCapabilities();
   const initial = (initialID ? root.querySelector(`[data-workflow-id="${CSS.escape(initialID)}"]:not(:disabled)`) : null) || root.querySelector(".scenario-choice:not(:disabled)");
   if (initial) chooseScenario(initial);
-  workflowCapabilitiesReady.finally(async () => {
-    await initializeGenerationDraft();
-    await applyRequestedLibraryMedia().catch(() => {});
-  });
+  let initialSetupPromise = null, initialSetupComplete = false, initialDraftPromise = null;
+  const initializeEditor = () => {
+    if (!generationPageActive || initialSetupComplete) return Promise.resolve();
+    if (initialSetupPromise) return initialSetupPromise;
+    const stamp = generationPageEpoch, current = () => generationPageActive && stamp === generationPageEpoch;
+    initialSetupPromise = (async () => {
+      await (initialDraftPromise ||= initializeGenerationDraft());
+      if (!current()) return;
+      const requestedCollection = new URLSearchParams(location.search).get("collection");
+      if (!jobSourceRequested && generationModules.collections?.validID(requestedCollection)) await collectionSession?.request(requestedCollection);
+      if (!current()) return;
+      if (jobSourceController) await jobSourceController.start();
+      if (!current()) return;
+      if (!jobSourceRequested) await applyRequestedLibraryMedia();
+      if (!current()) return;
+      assistantSession.initialize({ allowResume: !jobSourceRequested });
+      initialSetupComplete = true;
+    })().catch(error => {
+      if (current()) showRepeatNotice("Не удалось восстановить редактор", error.message || "Обновите страницу, чтобы повторить восстановление.", true);
+    }).finally(() => {
+      initialSetupPromise = null;
+      if (generationPageActive && !initialSetupComplete && generationPageEpoch !== stamp) void initializeEditor();
+    });
+    return initialSetupPromise;
+  };
+  kreaProUI = generationModules.kreaPro?.bind({form,onChange:()=>{syncWorkflowFields();syncImageSlots();syncGenerationSummary();assistantSession.syncContext();}});
+  [form.elements.krea_pro_mode,form.elements.krea_pro_upscale,form.elements.krea_pro_match_source].forEach(input=>input?.addEventListener("change",()=>{applyKreaProSourceSize();syncWorkflowFields();syncImageSlots();calculateResolution();syncGenerationSummary();assistantSession.syncContext();}));
+  outputMegapixels?.addEventListener("input",()=>{applyKreaProSourceSize();calculateResolution();});
+  [width,height,aspect].forEach(input=>input?.addEventListener("input",event=>{if(event.isTrusted && isKreaProSelected() && form.elements.krea_pro_match_source)form.elements.krea_pro_match_source.checked=false;}));
+  workflowCapabilitiesReady.then(initializeEditor);
   if (root.dataset.previewOutput) {
     result.hidden = false;
     resultTitle.textContent = "Готово";
@@ -4926,39 +4166,40 @@
   syncPromptAssistant();
   syncBatchBuilder();
   refreshQueueOverview();
-  refreshRecipes().catch((error) => setRecipeState(error.message || "Не удалось загрузить наборы", "error"));
-  refreshJobs().finally(connectGenerationJobEvents);
-  refreshVariants().catch(() => {
-    if (requestedVariantID && !requestedVariantHandled) showRepeatNotice("Не удалось загрузить вариант", "Проверьте соединение и обновите страницу.", true);
-  });
-  const savedGeneration = storedActiveGeneration();
-  if (savedGeneration?.requestID) {
-    activeGenerationRequestID = savedGeneration.requestID;
-    activeGenerationID = savedGeneration.promptID || "";
-    activeGenerationJobID = savedGeneration.jobID || "";
-    if (activeGenerationID) {
-      result.hidden = false;
-      studio?.show("result");
-      runProgress.hidden = false;
-      resultTitle.textContent = "Восстанавливаем генерацию";
-      resultStatus.textContent = "Проверяем сохранённую задачу в Gateway...";
-      monitorGeneration(activeGenerationID);
-    } else {
-      recoverGeneration(activeGenerationRequestID);
-    }
-  }
-  window.setInterval(refreshQueueOverview, 5000);
-  window.setInterval(() => refreshJobs().catch(() => {}), 30000);
-  window.setInterval(() => refreshVariants().catch(() => {}), 30000);
+  refreshRecipes();
+  historyController.start(!document.hidden);
+  resultsView.setVisible(!document.hidden);
+  submissionController.setVisible(!document.hidden);
+  submissionController.resume();
+  const queuePoll = window.AIGatewayLiveEvents.poll(() => {
+    if (!historyController.snapshot().authRequired) return refreshQueueOverview();
+  }, 5000, 30000);
+  queuePoll.start();
   window.addEventListener("pagehide", () => {
     generationPageActive = false;
-    generationJobEvents?.close();
-    generationJobEvents = null;
+    generationPageEpoch++;
+    pageRequests.forEach(request => request.abort()); pageRequests.clear();
+    [capabilitiesResource, queueResource, galleryResource, preflightResource].forEach(resource => resource.pause());
+    recipeController.pause(); closeGalleryImagePicker();
+    closeLightbox();
+    submissionController.suspend(); historyController.suspend(); resultsView.suspend(); queuePoll.stop();
   });
   window.addEventListener("pageshow", event => {
     if (!event.persisted || generationPageActive) return;
     generationPageActive = true;
-    refreshJobs().finally(connectGenerationJobEvents);
+    capabilitiesResource.resume({ read: !capabilitiesResource.snapshot().loaded });
+    queueResource.resume(); preflightResource.resume({ read: false }); recipeController.resume();
+    void initializeEditor();
+    submissionController.setVisible(!document.hidden); submissionController.resume();
+    historyController.setVisible(!document.hidden); historyController.resume();
+    resultsView.setVisible(!document.hidden); queuePoll.start();
+  });
+  document.addEventListener("visibilitychange", () => {
+    submissionController.setVisible(!document.hidden);
+    queuePoll.stop(); resultsView.setVisible(!document.hidden);
+    if (!generationPageActive) return;
+    queuePoll.start(); historyController.setVisible(!document.hidden);
+    if (!document.hidden && !historyController.snapshot().authRequired) refreshQueueOverview();
   });
   generationStore?.emit?.("page:ready", { root, modules: root.dataset.generationModules });
 })();

@@ -9,8 +9,9 @@ const (
 	ExecutionNotDispatched ExecutionOutcome = iota
 	ExecutionUnconfirmed
 	ExecutionCompleted
+	ExecutionStopped
 )
 
 func (outcome ExecutionOutcome) Settled() bool {
-	return outcome == ExecutionNotDispatched || outcome == ExecutionCompleted
+	return outcome == ExecutionNotDispatched || outcome == ExecutionCompleted || outcome == ExecutionStopped
 }

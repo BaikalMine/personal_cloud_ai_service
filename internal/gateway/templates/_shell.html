@@ -55,13 +55,13 @@
 {{end}}
 
 {{define "workspace_notifications"}}
-<div class="notification-center" data-notification-center data-notification-revision="{{or .NotificationSummary.Revision 0}}" data-notification-csrf="{{.CSRF}}">
+<div class="notification-center" data-notification-center data-notification-owner="{{.CurrentUser.ID}}" data-notification-revision="{{or .NotificationSummary.Revision 0}}" data-notification-csrf="{{.CSRF}}">
   <button class="notification-trigger" type="button" data-notification-open aria-expanded="false" aria-controls="notification-panel" aria-label="Задачи: активных {{or .NotificationSummary.ActiveCount 0}}, непрочитанных {{or .NotificationSummary.UnreadCount 0}}" title="Задачи и уведомления"><i data-lucide="bell" aria-hidden="true"></i><span class="notification-count is-unread" data-notification-unread-count {{if not .NotificationSummary.UnreadCount}}hidden{{end}}>{{or .NotificationSummary.UnreadCount 0}}</span></button>
   <section class="notification-panel" id="notification-panel" role="dialog" aria-modal="true" aria-label="Задачи и уведомления" hidden>
     <header class="notification-panel-header"><div><strong>Задачи и уведомления</strong><span data-notification-connection>Подключаем обновления...</span></div><button class="notification-close" type="button" data-notification-close aria-label="Закрыть уведомления"><i data-lucide="x" aria-hidden="true"></i></button></header>
     <dl class="notification-overview"><div><dt>В работе</dt><dd data-notification-active-total>{{or .NotificationSummary.ActiveCount 0}}</dd></div><div><dt>Новые</dt><dd data-notification-unread-total>{{or .NotificationSummary.UnreadCount 0}}</dd></div></dl>
     <div class="notification-list" data-notification-list aria-live="polite"><p class="notification-empty">Загружаем последние события...</p></div>
-    <footer class="notification-panel-footer"><button class="button ghost" type="button" data-notification-read-all {{if not .NotificationSummary.UnreadCount}}disabled{{end}}>Прочитать все</button><a href="/account/profile#notification-settings">Настроить</a></footer>
+    <footer class="notification-panel-footer"><button class="button ghost" type="button" data-notification-read-all {{if not .NotificationSummary.UnreadCount}}disabled{{end}}>Прочитать все</button><a href="/account/profile?tab=notifications#notification-settings">Настроить</a></footer>
   </section>
 </div>
 {{end}}

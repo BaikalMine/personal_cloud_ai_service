@@ -1,71 +1,75 @@
 {{define "admin_workflows"}}
 {{template "head" .}}
 {{template "admin_nav" .}}
+<link rel="stylesheet" href="/static/admin-workflows.css?v={{.AssetVersion}}">
 <main class="page compatibility-page" id="main-content">
   <header class="compatibility-page-head">
-    <div>
-      <p class="eyebrow">Быстрая генерация</p>
-      <h1>Совместимость workflow</h1>
-      <p>Итоговые графы Gateway сверяются с установленными нодами, входами и типами ComfyUI до запуска пользовательской задачи.</p>
-    </div>
+    <h1>Модели и workflow</h1>
     <form method="post" class="compatibility-refresh-form">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <button type="submit">Обновить каталог и проверить</button>
+      <button type="submit"><i data-lucide="refresh-cw" aria-hidden="true"></i>Обновить каталог и проверить</button>
     </form>
   </header>
-
-  {{if .Message}}<p class="alert">{{.Message}}</p>{{end}}
+  {{if .Message}}<p class="ui-status-banner" role="status">{{.Message}}</p>{{end}}
   {{if .Report.Error}}
-  <section class="compatibility-source is-error" aria-live="polite">
-    <div><span>Каталог ComfyUI</span><strong>Недоступен</strong></div>
-    <p>{{.Report.Error}}</p>
+  <section class="compatibility-notice" aria-labelledby="compatibility-unavailable">
+    <h2 id="compatibility-unavailable">Проверка недоступна</h2>
+    <p>Нет доступного каталога ComfyUI. Совместимость не определена.</p>
+    <details><summary>Причина</summary><p>{{.Report.Error}}</p></details>
   </section>
   {{else}}
-  <section class="compatibility-source {{if .Report.Stale}}is-stale{{end}}" aria-label="Состояние каталога ComfyUI">
-    <div><span>Источник</span><strong>{{.Report.SourceLabel}}</strong></div>
-    <div><span>Получен</span><strong>{{formatTime .Report.Snapshot.FetchedAt}}</strong></div>
-    <div><span>Ноды</span><strong>{{.Report.NodeCount}}</strong></div>
-    <div><span>Версия схемы</span><code>{{.Report.Fingerprint}}</code></div>
-    {{if .Report.Stale}}<p>ComfyUI не отдал свежую схему. Результаты ниже рассчитаны по последнему рабочему каталогу и не считаются окончательной проверкой после обновления.</p>{{end}}
-  </section>
-
-  <section class="compatibility-workspace">
-    <header class="compatibility-summary">
-      <div><span>Совместимы</span><strong>{{.Report.Compatible}}</strong></div>
-      <div class="has-error"><span>Ошибки</span><strong>{{.Report.Failed}}</strong></div>
-      <div class="has-warning"><span>Недоступны</span><strong>{{.Report.Unavailable}}</strong></div>
-      <nav aria-label="Связанные действия"><a href="/admin/updates">Обновления</a><a href="{{.PublicBaseURL}}/generate">Открыть генерацию</a></nav>
-    </header>
-
-    <div class="table-scroll compatibility-table-wrap">
-      <table class="compatibility-table">
-        <thead><tr><th>Состояние</th><th>Сценарий</th><th>Модель</th><th>Граф</th><th>Диагностика</th></tr></thead>
+  {{if .Report.Stale}}
+  <div class="compatibility-notice" role="status"><strong>Каталог устарел</strong><p>ComfyUI не отдал свежую схему. Ниже проверен последний рабочий снимок; совместимость после обновления не подтверждена.</p>{{if .Report.Snapshot.LastError}}<details><summary>Причина</summary><p>{{.Report.Snapshot.LastError}}</p></details>{{end}}</div>
+  {{end}}
+  <section class="compatibility-workspace" aria-labelledby="compatibility-heading">
+    <div class="compatibility-section-head"><h2 id="compatibility-heading">Проверка графов</h2><nav aria-label="Связанные действия"><a href="/admin/updates">Обновления</a><a href="{{.PublicBaseURL}}/generate">Генерация<i data-lucide="arrow-up-right" aria-hidden="true"></i></a></nav></div>
+    <dl class="compatibility-summary" aria-label="Все сценарии">
+      <div><dt>Совместимы</dt><dd>{{.Report.Compatible}}</dd></div>
+      <div><dt>Ошибки</dt><dd>{{.Report.Failed}}</dd></div>
+      <div><dt>Недоступны</dt><dd>{{.Report.Unavailable}}</dd></div>
+    </dl>
+    <div class="compatibility-source">
+      <span>Каталог: <strong>{{.Report.SourceLabel}}</strong></span>
+      <span>Получен <time>{{formatTime .Report.Snapshot.FetchedAt}}</time></span>
+      <span>Нод: {{.Report.NodeCount}}</span>
+      <details><summary>Схема</summary><code>{{.Report.Fingerprint}}</code></details>
+    </div>
+    <form method="get" action="/admin/workflows" class="ui-toolbar ui-toolbar--plain compatibility-filters" role="search" aria-label="Поиск сценариев">
+      <label class="ui-field"><span class="ui-field-label">Поиск</span><input type="search" name="q" value="{{.View.Query}}" maxlength="200" placeholder="Модель, workflow или нода"></label>
+      <label class="ui-field"><span class="ui-field-label" id="compatibility-family-label">Семейство</span><select name="family" aria-labelledby="compatibility-family-label"><option value="">Все</option>{{range .View.Families}}<option value="{{.}}" {{if eq $.View.Family .}}selected{{end}}>{{.}}</option>{{end}}</select></label>
+      <label class="ui-field"><span class="ui-field-label" id="compatibility-state-label">Состояние</span><select name="state" aria-labelledby="compatibility-state-label"><option value="">Все состояния</option><option value="ok" {{if eq .View.State "ok"}}selected{{end}}>Совместимы</option><option value="error" {{if eq .View.State "error"}}selected{{end}}>Ошибки</option><option value="unavailable" {{if eq .View.State "unavailable"}}selected{{end}}>Недоступны</option></select></label>
+      <button type="submit" class="ghost icon-button" title="Найти" aria-label="Найти"><i data-lucide="search" aria-hidden="true"></i></button>
+    </form>
+    <div class="compatibility-result-count"><span>Сценарии: {{len .View.Results}} из {{.View.Total}}</span>{{if or .View.Query .View.State .View.Family}}<a href="/admin/workflows">Сбросить фильтры</a>{{end}}</div>
+    <div class="compatibility-table-wrap">
+      <table class="compatibility-table" aria-label="Совместимость сценариев">
+        <thead><tr><th scope="col">Состояние</th><th scope="col">Workflow и версия</th><th scope="col">Модель</th><th scope="col">Предварительная проверка</th></tr></thead>
         <tbody>
-        {{range .Report.Results}}
-          <tr class="compatibility-row is-{{.Status}}">
-            <td data-label="Состояние"><span class="compatibility-state is-{{.Status}}">{{if eq .Status "ok"}}Совместим{{else if eq .Status "unavailable"}}Недоступен{{else}}Ошибка{{end}}</span></td>
-            <td data-label="Сценарий"><strong>{{.Scenario}}</strong><small>{{.Family}} · {{.Description}}</small></td>
-            <td data-label="Модель"><span class="compatibility-model">{{.Model}}</span></td>
-            <td data-label="Граф">{{if gt .NodeCount 0}}<strong>{{.NodeCount}}</strong><small>узлов проверено</small>{{else}}<span class="muted">не собран</span>{{end}}</td>
-            <td data-label="Диагностика">
-              {{if .Issues}}
-              <details class="compatibility-issues" {{if eq .Status "error"}}open{{end}}>
-                <summary>{{len .Issues}} {{if eq (len .Issues) 1}}проблема{{else}}проблемы{{end}}</summary>
-                <ol>
-                {{range .Issues}}
-                  <li><strong>{{.Label}}</strong><span>{{.Message}}</span>{{if .ClassType}}<code>{{.ClassType}}{{if .InputName}} · {{.InputName}}{{end}}</code>{{end}}</li>
-                {{end}}
-                </ol>
+        {{range .View.Results}}
+          <tr class="compatibility-row is-{{.Status}}" data-workflow-id="{{.ID}}">
+            <td data-label="Состояние"><span class="compatibility-state is-{{.Status}}">{{if eq .Status "ok"}}<i data-lucide="check" aria-hidden="true"></i>Совместим{{else if eq .Status "unavailable"}}<i data-lucide="circle-minus" aria-hidden="true"></i>Недоступен{{else}}<i data-lucide="triangle-alert" aria-hidden="true"></i>Ошибка{{end}}</span></td>
+            <td data-label="Workflow и версия"><strong>{{.Scenario}}</strong>{{if .ManifestVersion}}<small>{{.ManifestName}} · v{{.ManifestVersion}}</small>{{else if .DefinitionID}}<small>Версия manifest не указана</small>{{end}}{{if .DefinitionID}}<code>{{.DefinitionID}}</code>{{end}}</td>
+            <td data-label="Модель"><strong>{{.Model}}</strong><small>{{.Family}}</small>{{if .ModelFile}}<code>{{.ModelFile}}</code>{{end}}</td>
+            <td data-label="Предварительная проверка">
+              {{if .Issues}}<p class="compatibility-conclusion">{{(index .Issues 0).Message}}</p>{{else if gt .NodeCount 0}}<p class="compatibility-conclusion">Схема графа совпадает с каталогом.</p>{{end}}
+              {{if gt .NodeCount 0}}<small>{{.NodeCount}} нод в графе</small>{{else}}<small>Граф не собран</small>{{end}}
+              <details class="compatibility-detail">
+                <summary>Состав и диагностика</summary>
+                {{if .Description}}<p>{{.Description}}</p>{{end}}
+                {{if .Files}}<h3>Имена файлов в графе</h3><ul class="compatibility-components compatibility-files">{{range .Files}}<li><code>{{.Name}}</code><small>{{.Class}} · {{.Field}} · нода {{.NodeID}}</small></li>{{end}}</ul>{{end}}
+                {{if .Issues}}<h3>Причины</h3><ol class="compatibility-issues">{{range .Issues}}<li><strong>{{.Label}}</strong><span>{{.Message}}</span>{{if .ClassType}}<code>{{.ClassType}}{{if .InputName}} · {{.InputName}}{{end}}</code>{{end}}</li>{{end}}</ol>{{end}}
+                {{if .Components}}<h3>Обязательные для этого графа</h3><ul class="compatibility-components">{{range .Components}}<li><code>{{.ClassType}}</code><span class="{{if not .Present}}compatibility-missing{{end}}">{{if .Present}}Есть в каталоге{{else}}Нет в каталоге{{end}}</span>{{if .Module}}<small>{{.Module}}</small>{{end}}</li>{{end}}</ul>{{end}}
+                {{if .Branches}}<h3>Опциональные ветки</h3><ul class="compatibility-branches">{{range .Branches}}<li><strong>{{.Name}}</strong><span>{{if .Selected}}Выбрана в сценарии{{else}}Не выбрана{{end}} · ноды {{.Present}}/{{len .Components}}</span><ul class="compatibility-components">{{range .Components}}<li><code>{{.ClassType}}</code><span class="{{if not .Present}}compatibility-missing{{end}}">{{if .Present}}Есть в каталоге{{else}}Нет в каталоге{{end}}</span></li>{{end}}</ul></li>{{end}}</ul>{{end}}
               </details>
-              {{else}}<span class="compatibility-pass">Обязательные входы, значения и соединения совпадают со схемой.</span>{{end}}
             </td>
           </tr>
         {{else}}
-          <tr><td colspan="5" class="empty-state">Сценарии пока не найдены.</td></tr>
+          <tr><td colspan="4" class="empty-state">{{if or .View.Query .View.State .View.Family}}Нет сценариев по выбранным фильтрам.{{else}}Сценарии пока не найдены.{{end}}</td></tr>
         {{end}}
         </tbody>
       </table>
     </div>
+    <p class="compatibility-scope">Проверены схемы графов и значения входов. Выполнение на GPU не проверялось.</p>
   </section>
   {{end}}
 </main>

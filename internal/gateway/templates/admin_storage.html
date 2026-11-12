@@ -1,67 +1,57 @@
 {{define "admin_storage"}}
 {{template "head" .}}
 {{template "admin_nav" .}}
-<main class="page storage-page" id="main-content">
-  <section class="hero admin-hero storage-hero">
-    <div><p class="eyebrow">Эксплуатация</p><h1>Хранилище</h1><p class="hero-copy">Размеры таблиц, сроки хранения и последний проход очистки.</p></div>
-    <a class="button ghost" href="/admin/audit/export" download>Выгрузить аудит CSV</a>
-  </section>
-
-  <section class="metric-grid metrics-four storage-summary" aria-label="Сводка хранилища">
-    <article class="metric-card tone-blue"><span>База данных</span><strong>{{formatBytes .Storage.DatabaseBytes}}</strong><small>весь PostgreSQL</small></article>
-    <article class="metric-card tone-cyan"><span>Пользовательские таблицы</span><strong>{{formatBytes .Storage.VisibleTableBytes}}</strong><small>данные и индексы</small></article>
-    <article class="metric-card tone-green"><span>Оценка строк</span><strong>{{formatNumber .Storage.EstimatedRows}}</strong><small>по статистике PostgreSQL</small></article>
-    <article class="metric-card {{if eq .Storage.Cleanup.Status "ok"}}tone-green{{else if eq .Storage.Cleanup.Status "never"}}tone-amber{{else}}tone-red{{end}}"><span>Последняя очистка</span><strong>{{formatNumber .Storage.Cleanup.TotalDeleted}}</strong><small>удалено строк</small></article>
-  </section>
-
-  <section class="panel storage-cleanup is-{{.Storage.Cleanup.Status}}" aria-labelledby="storage-cleanup-title">
-    <div class="panel-heading storage-cleanup-heading">
-      <div><p class="section-kicker">Автоматическая очистка</p><h2 id="storage-cleanup-title">{{.Storage.Cleanup.StatusLabel}}</h2><p class="panel-intro">Удаление выполняется небольшими пачками и не затрагивает активные записи.</p></div>
-      <span class="storage-cleanup-status is-{{.Storage.Cleanup.Status}}"><i></i>{{.Storage.Cleanup.StatusLabel}}</span>
+<link rel="stylesheet" href="/static/storage.css?v={{.AssetVersion}}">
+<script src="/static/storage-state.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/storage-operations.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/storage.js?v={{.AssetVersion}}" defer></script>
+<main class="page storage-workspace" id="main-content" data-storage-page data-owner="{{.CurrentUser.ID}}" data-csrf="{{.CSRF}}">
+  <header class="storage-heading storage-page-heading"><h1>Хранилище</h1><a class="button ghost" href="/admin/audit/export" download><i data-lucide="download" aria-hidden="true"></i>Аудит CSV</a></header>
+  <nav class="storage-tabs" role="tablist" aria-label="Категория хранилища" data-storage-tabs hidden>
+    <button type="button" role="tab" id="storage-tab-comfy" aria-controls="storage-host-panel" aria-selected="true" data-storage-view="comfy"><i data-lucide="hard-drive" aria-hidden="true"></i>ComfyUI</button>
+    <button type="button" role="tab" id="storage-tab-training" aria-controls="storage-host-panel" aria-selected="false" tabindex="-1" data-storage-view="training"><i data-lucide="layers" aria-hidden="true"></i>Обучение</button>
+    <button type="button" role="tab" id="storage-tab-database" aria-controls="storage-database-panel" aria-selected="false" tabindex="-1" data-storage-view="database"><i data-lucide="database" aria-hidden="true"></i>База данных</button>
+  </nav>
+  <section class="ui-status-banner" data-storage-recovery hidden><p data-storage-recovery-text role="status"></p><button type="button" class="ghost" data-storage-resume><i data-lucide="rotate-ccw" aria-hidden="true"></i>Вернуться к операции</button></section>
+  <section id="storage-host-panel" role="tabpanel" aria-labelledby="storage-tab-comfy" data-storage-host hidden>
+    <div class="storage-view-heading">
+      <div class="ui-segmented" role="group" aria-label="Представление" data-storage-modes>
+        <button type="button" class="ui-segment" data-storage-mode="records" aria-pressed="true">Реестр</button>
+        <button type="button" class="ui-segment" data-storage-mode="files" aria-pressed="false">Файлы на диске</button>
+        <button type="button" class="ui-segment" data-storage-mode="unresolved" aria-pressed="false">Неподтверждённые загрузки</button>
+        <button type="button" class="ui-segment" data-storage-mode="operations" aria-pressed="false">Операции</button>
+      </div>
+      <button type="button" class="ghost icon-button" title="Обновить данные" aria-label="Обновить данные" data-storage-refresh><i data-lucide="refresh-cw" aria-hidden="true"></i></button>
     </div>
-    <dl class="storage-cleanup-facts">
-      <div><dt>Последний запуск</dt><dd>{{with .Storage.Cleanup.LastStartedAt}}{{formatTime .}}{{else}}-{{end}}</dd></div>
-      <div><dt>Последнее успешное завершение</dt><dd>{{with .Storage.Cleanup.LastSuccessAt}}{{formatTime .}}{{else}}-{{end}}</dd></div>
-      <div><dt>Длительность</dt><dd>{{formatDuration .Storage.Cleanup.DurationMS}}</dd></div>
-      <div><dt>Следующий проход</dt><dd>не позднее чем через 15 минут</dd></div>
-    </dl>
-    <div class="storage-cleanup-results">
-      {{range .Storage.Cleanup.Items}}
-      <div class="storage-cleanup-result {{if .Error}}has-error{{end}}"><span><strong>{{.Label}}</strong><small>{{.Table}}</small></span>{{if .Error}}<b>Ошибка</b><p>{{.Error}}</p>{{else}}<b>−{{formatNumber .Deleted}}</b>{{end}}</div>
-      {{else}}
-      <p class="storage-cleanup-empty">На последнем проходе удалять было нечего.</p>
-      {{end}}
+    <dl class="storage-facts storage-metrics" data-storage-metrics aria-label="Сводка"></dl>
+    <p class="storage-freshness" data-storage-freshness></p>
+    <form class="ui-toolbar ui-toolbar--plain storage-filters" data-storage-filters>
+      <label class="ui-field"><span class="ui-field-label">Поиск</span><input type="search" name="q" maxlength="200" placeholder="Имя файла, папка или владелец" autocomplete="off"></label>
+      <label class="ui-field"><span class="ui-field-label">Каталог</span><select name="kind"><option value="">Все</option><option value="input">Входные файлы</option><option value="output">Результаты</option></select></label>
+      <label class="ui-field"><span class="ui-field-label">Состояние</span><select name="state"><option value="">Все</option><option value="pending">Ожидает удаления</option><option value="retry">Повторные попытки</option><option value="mismatched">Содержимое изменилось</option><option value="unconfirmed">Не подтверждено</option><option value="referenced">Используется задачей</option><option value="retained">Хранится</option></select></label>
+      <button type="submit" class="ghost icon-button" title="Найти" aria-label="Найти"><i data-lucide="search" aria-hidden="true"></i></button>
+    </form>
+    <div class="ui-status-banner" data-storage-notice hidden><p></p></div>
+    <p role="status" data-storage-status class="storage-status"></p>
+    <div class="storage-selection" data-storage-selection hidden>
+      <strong data-storage-selected-count></strong>
+      <div><button type="button" class="ghost" data-storage-inspect><i data-lucide="scan-search" aria-hidden="true"></i>Проверить файлы</button><button type="button" data-storage-prepare><i data-lucide="list-checks" aria-hidden="true"></i>Проверить очистку</button><button type="button" class="ghost icon-button" title="Снять выбор" aria-label="Снять выбор" data-storage-clear><i data-lucide="x" aria-hidden="true"></i></button></div>
     </div>
+    <div class="table-scroll storage-list" data-storage-list></div>
+    <div class="storage-pagination"><span data-storage-count></span><div><button type="button" class="ghost icon-button" title="Предыдущая страница" aria-label="Предыдущая страница" data-storage-prev disabled><i data-lucide="chevron-left" aria-hidden="true"></i></button><button type="button" class="ghost icon-button" title="Следующая страница" aria-label="Следующая страница" data-storage-next disabled><i data-lucide="chevron-right" aria-hidden="true"></i></button></div></div>
   </section>
-
-  <section class="panel storage-table-panel">
-    <div class="panel-heading"><div><p class="section-kicker">Под контролем retention</p><h2>Растущие таблицы</h2><p class="panel-intro">Сначала самые тяжёлые. Размер включает данные и индексы; число строк является оценкой PostgreSQL.</p></div>{{if gt .Storage.UnmappedCount 0}}<span class="storage-policy-warning">Без политики: {{.Storage.UnmappedCount}}</span>{{end}}</div>
-    <div class="table-scroll"><table class="storage-table">
-      <thead><tr><th>Данные</th><th>Строки</th><th>Размер</th><th>Самая старая запись</th><th>Срок</th><th>Владелец</th></tr></thead>
-      <tbody>
-      {{range .Storage.ManagedTables}}
-        <tr class="{{if .Unmapped}}is-unmapped{{end}}">
-          <td data-label="Данные"><strong>{{.Label}}</strong><small class="storage-table-name">{{.Name}}</small></td>
-          <td data-label="Строки" class="numeric">≈ {{formatNumber .EstimatedRows}}</td>
-          <td data-label="Размер"><strong>{{formatBytes .TotalBytes}}</strong></td>
-          <td data-label="Самая старая запись">{{with .OldestAt}}{{formatTime .}}{{else}}-{{end}}</td>
-          <td data-label="Срок"><span class="storage-retention {{if .Unmapped}}is-warning{{end}}">{{.Retention}}</span>{{if .Configuration}}<small class="storage-policy-key">{{.Configuration}}</small>{{end}}</td>
-          <td data-label="Владелец">{{.Owner}}</td>
-        </tr>
-      {{else}}<tr><td colspan="6" class="muted">Таблицы не найдены.</td></tr>{{end}}
-      </tbody>
-    </table></div>
-  </section>
-
-  <details class="panel storage-lifecycle">
-    <summary><span><strong>Постоянные и служебные данные</strong><small>Удаляются вместе с объектом, вручную или остаются как служебное состояние.</small></span><b>{{formatNumber (len .Storage.LifecycleTables)}}</b></summary>
-    <div class="table-scroll"><table class="storage-table">
-      <thead><tr><th>Данные</th><th>Строки</th><th>Размер</th><th>Самая старая запись</th><th>Жизненный цикл</th><th>Владелец</th></tr></thead>
-      <tbody>{{range .Storage.LifecycleTables}}
-        <tr><td data-label="Данные"><strong>{{.Label}}</strong><small class="storage-table-name">{{.Name}}</small></td><td data-label="Строки" class="numeric">≈ {{formatNumber .EstimatedRows}}</td><td data-label="Размер"><strong>{{formatBytes .TotalBytes}}</strong></td><td data-label="Самая старая запись">{{with .OldestAt}}{{formatTime .}}{{else}}-{{end}}</td><td data-label="Жизненный цикл">{{.Retention}}</td><td data-label="Владелец">{{.Owner}}</td></tr>
-      {{else}}<tr><td colspan="6" class="muted">Служебных таблиц нет.</td></tr>{{end}}</tbody>
-    </table></div>
-  </details>
+  <div id="storage-database-panel" data-storage-database-panel>{{template "storage_database" .}}</div>
+  <noscript><p class="muted">Данные файлов на хосте не загружены. Доступны состояние и сроки хранения базы данных.</p></noscript>
+  <dialog class="ui-dialog storage-dialog" data-storage-detail aria-labelledby="storage-detail-title">
+    <header><h2 id="storage-detail-title">Сведения</h2><button type="button" class="ghost icon-button" title="Закрыть сведения" aria-label="Закрыть сведения" data-storage-detail-close><i data-lucide="x" aria-hidden="true"></i></button></header>
+    <div class="storage-dialog-body" data-storage-detail-body></div>
+    <footer><button type="button" class="ghost" data-storage-detail-done>Закрыть</button></footer>
+  </dialog>
+  <dialog class="ui-dialog storage-dialog" data-storage-operation aria-labelledby="storage-operation-title">
+    <header><h2 id="storage-operation-title">Проверка очистки</h2><button type="button" class="ghost icon-button" title="Закрыть операцию" aria-label="Закрыть операцию" data-storage-operation-close><i data-lucide="x" aria-hidden="true"></i></button></header>
+    <div class="storage-dialog-body"><div class="ui-status-banner" data-storage-operation-message><p role="status"></p></div><div data-storage-operation-body></div></div>
+    <footer data-storage-operation-actions></footer>
+  </dialog>
 </main>
 </body></html>
 {{end}}

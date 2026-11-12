@@ -1,0 +1,25 @@
+{{define "studio_moss_loras"}}
+{{$root := .}}
+<section class="workflow-settings-section moss-settings" hidden>
+  <div class="workflow-settings-heading"><strong>MOSS Image · LoRA</strong></div>
+  <div class="lora-stack">
+    {{range $root.MossLoraSlots}}
+    <div class="ui-field-grid lora-row flux-lora-row" data-lora-slots="moss" {{if ne . 1}}hidden{{end}}>
+      <span class="lora-number">{{.}}</span>
+      <label class="ui-field"><span class="ui-field-label">LoRA</span><select name="lora_{{.}}" class="generation-lora-select"><option value="">Без LoRA</option>{{range $root.MossLoraGroups}}<optgroup label="{{.Name}}">{{range .Loras}}<option value="{{.Name}}" data-default-strength="{{.DefaultStrength}}">{{.DisplayName}}</option>{{end}}</optgroup>{{end}}</select></label>
+      <label class="ui-field"><span class="ui-field-label">Сила</span><input name="lora_model_strength_{{.}}" class="generation-lora-model" type="number" min="-10" max="10" step="0.05" value="0"></label>
+    </div>
+    {{end}}
+  </div>
+</section>
+{{end}}
+
+{{define "studio_moss_finishing"}}
+<section class="workflow-settings-section moss-settings" hidden>
+  <div class="workflow-settings-heading"><strong>MOSS Image · SeedVR2</strong></div>
+  <div class="ui-field-grid generation-fields">
+    <label class="ui-choice ui-choice--row"><input name="moss_seedvr2" type="checkbox" value="true"><span>Апскейл SeedVR2</span></label>
+    <label class="ui-field"><span class="ui-field-label">Длинная сторона после апскейла</span><input name="moss_upscale_resolution" type="number" min="512" max="4096" step="64" value="2560"></label>
+  </div>
+</section>
+{{end}}

@@ -71,7 +71,8 @@
     if (event.detail !== 'account') closeAccount({ restore: false });
   });
   const resize = () => {
-    const focusWasInSidebar = sidebar.contains(document.activeElement);
+    // The media query can hide the focused close button before this callback runs.
+    const focusWasInSidebar = navigationOpen || sidebar.contains(document.activeElement);
     const focusWasInAccount = account.contains(document.activeElement);
     closeNavigation({ restore: false });
     closeAccount({ restore: false });

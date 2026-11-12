@@ -82,6 +82,28 @@ func writeGenerationJobError(w http.ResponseWriter, status int, job domain.Gener
 	})
 }
 
+func (a *App) reconcileGenerationClientJob(ctx context.Context, job domain.GenerationJob, userID int64) domain.GenerationJob {
+	ctx = generationJobTraceContext(ctx, job)
+	if job.PromptID == "" && !job.State.Terminal() && (job.DispatchQueuedAt == nil || job.SubmissionStartedAt != nil) {
+		if recovered, found, err := a.recoverGenerationJobPrompt(ctx, job); err != nil {
+			logGateway(ctx, slog.LevelError, "generation_job_recovery_failed", "Failed to recover generation job prompt", "job_public_id", job.PublicID, "error", err)
+		} else if found {
+			job = recovered
+			ctx = generationJobTraceContext(ctx, job)
+		}
+	}
+	if job.PromptID != "" && !job.State.Terminal() {
+		if status, err := a.fetchGenerationStatus(ctx, job.PromptID, userID); err == nil {
+			if updated, err := a.reconcileGenerationJobStatus(ctx, job, status); err == nil {
+				job = updated
+			} else {
+				logGateway(ctx, slog.LevelError, "generation_job_reconcile_failed", "Failed to reconcile recovered generation job", "job_public_id", job.PublicID, "error", err)
+			}
+		}
+	}
+	return job
+}
+
 func generationJobInputCount(input generationForm) int {
 	count := input.imageCount()
 	if strings.TrimSpace(input.InputAudio) != "" {
@@ -91,6 +113,18 @@ func generationJobInputCount(input generationForm) int {
 		count++
 	}
 	return count
+}
+
+const generationInputUnavailableMessage = "Исходный файл недоступен или срок его хранения истёк. Загрузите его заново."
+
+func generationJobInputNames(input generationForm) []string {
+	names := input.images()
+	for _, value := range []string{input.InputAudio, input.InputVideo} {
+		if value = strings.TrimSpace(value); value != "" {
+			names = append(names, value)
+		}
+	}
+	return names
 }
 
 func generationJobDependencies(input generationForm, user *User) []string {
@@ -106,6 +140,12 @@ func generationJobDependencies(input generationForm, user *User) []string {
 	}
 	if input.VideoRTXEnabled {
 		dependencies = append(dependencies, "rtx-video-super-resolution")
+	}
+	if input.isAIHub() && input.AIHubDLSSEnabled {
+		dependencies = append(dependencies, "dlss5")
+	}
+	if input.isAIHub() && input.AIHubFGEnabled {
+		dependencies = append(dependencies, "dlss-frame-generation")
 	}
 	if input.VideoColorMatch {
 		dependencies = append(dependencies, "color-match")
@@ -124,7 +164,11 @@ func generationJobValues(form url.Values, resolvedSeed int64) map[string]string 
 			continue
 		}
 		value := strings.TrimSpace(raw[0])
-		if len(value) > 16000 {
+		limit := 16000
+		if name == "krea_pro_settings" {
+			limit = 32768
+		}
+		if len(value) > limit {
 			continue
 		}
 		values[name] = value
@@ -193,8 +237,16 @@ func generationJobDefinition(job domain.GenerationJob) (workflowDefinition, stri
 		definitionID, family = "image-to-image-krea2", modelFamilyKrea2
 	case "photoflow-flux2-edit":
 		definitionID, family = "image-to-image-flux2", modelFamilyFlux2
+	case "qwen-image21":
+		definitionID, family = "text-to-image-qwen21", modelFamilyQwen21
+	case mossPresetID:
+		definitionID, family = "text-to-image-moss", modelFamilyMoss
+	case "qwen-image21-edit":
+		definitionID, family = "image-to-image-qwen21", modelFamilyQwen21
 	case "minimax-h3-video":
 		definitionID, family = "minimax-h3-video", modelFamilyMiniMaxH3
+	case aiHubWorkflowID:
+		definitionID, family = aiHubWorkflowID, modelFamilyMiniMaxH3
 	}
 	definitions, err := loadWorkflowDefinitions()
 	if err != nil {
@@ -211,6 +263,9 @@ func (a *App) ensureGenerationJobProjections(ctx context.Context, job domain.Gen
 	if job.UserID == nil || job.PromptID == "" || len(job.PayloadCipher) == 0 {
 		return nil
 	}
+	if isPostprocessJob(job) {
+		return a.ensurePostprocessJobProjections(ctx, job)
+	}
 	payload, err := a.decodeGenerationSavedPayload(job.PayloadCipher)
 	if err != nil {
 		return err
@@ -219,24 +274,10 @@ func (a *App) ensureGenerationJobProjections(ctx context.Context, job domain.Gen
 		return fmt.Errorf("project generation media references: %w", err)
 	}
 	form := generationJobFormValues(payload.Values)
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "/generate/run", strings.NewReader(form.Encode()))
+	definition, input, err := a.generationProjectionParameters(ctx, job, form)
 	if err != nil {
 		return err
 	}
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	input, err := parseGenerationForm(request)
-	if err != nil {
-		return err
-	}
-	definition, family, err := generationJobDefinition(job)
-	if err != nil {
-		return err
-	}
-	input.TemplateID = job.TemplateID
-	input.PresetID = job.WorkflowID
-	input.ModelName = job.ModelName
-	input.ModelFamily = family
-	input.Seed = job.Seed
 	a.recordGenerationEvent(ctx, job.ID, *job.UserID, job.PromptID, definition, input)
 	a.rememberGenerationVariant(ctx, job.ID, *job.UserID, job.PromptID, input, form)
 	if err := a.store.LinkGenerationJobContentEvent(ctx, job.ID, *job.UserID, job.PromptID); err != nil {
@@ -524,6 +565,13 @@ func (a *App) releaseGenerationJobResources(ctx context.Context, job domain.Gene
 	if err != nil || !fenced {
 		return job, false, err
 	}
+	code := "executor_terminal"
+	if job.PromptID == "" {
+		code = "dispatch_fenced"
+	}
+	if err := a.gpuCoordinator.release(ctx, domain.GPUWorkGeneration, job.PublicID, code); err != nil {
+		return job, false, err
+	}
 	if _, err := a.store.ReleaseQuickGenerationForJob(ctx, job.ID); err != nil {
 		return job, false, err
 	}
@@ -625,6 +673,9 @@ func (a *App) reconcileGenerationJobStatus(ctx context.Context, job domain.Gener
 		return a.failGenerationJob(ctx, job, "generation_owner_deleted", "Владелец задания удалён", errors.New("generation owner was deleted")), nil
 	}
 	userID := *job.UserID
+	if !status.Known || ((job.State == domain.GenerationJobPostprocessing || job.State == domain.GenerationJobArchiving) && (status.State == "queued" || status.State == "running")) {
+		return job, nil
+	}
 	switch status.State {
 	case "queued":
 		updated, err := a.advanceGenerationJob(ctx, job, domain.GenerationJobQueued, status.Message)

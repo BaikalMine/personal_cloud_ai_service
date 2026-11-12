@@ -115,6 +115,7 @@ func TestGatewayIntegrationComfyOwnership(t *testing.T) {
 	assertChunkedMediaRoundTrip(t, ctx, db, app, eventID, userID, spoolDir)
 	assertPriorityMiningResume(t, ctx, repository, userID)
 	assertGenerationDraftAPI(t, ctx, db, app, userID, adminID)
+	assertGenerationCollectionContextAPI(t, ctx, db, app, userID, adminID)
 	assertLoraDatasetAPI(t, ctx, db, app, userID, adminID)
 }
 
@@ -133,7 +134,7 @@ func assertPriorityMiningResume(t *testing.T, ctx context.Context, repository *s
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/state":
-			_ = json.NewEncoder(w).Encode(mining.State{Running: running.Load(), ProcessName: "miner.exe"})
+			_ = json.NewEncoder(w).Encode(mining.State{Available: true, Running: running.Load(), ProcessName: "miner.exe"})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/start":
 			var request mining.Request
 			if decodeErr := json.NewDecoder(r.Body).Decode(&request); decodeErr != nil || request.ScriptPath != `C:\Mining\start.bat` || request.ProcessName != "miner.exe" {
@@ -142,11 +143,11 @@ func assertPriorityMiningResume(t *testing.T, ctx context.Context, repository *s
 			}
 			startCalls.Add(1)
 			running.Store(true)
-			_ = json.NewEncoder(w).Encode(mining.State{Running: true, ProcessName: "miner.exe"})
+			_ = json.NewEncoder(w).Encode(mining.State{Available: true, Running: true, ProcessName: "miner.exe"})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/stop":
 			stopCalls.Add(1)
 			running.Store(false)
-			_ = json.NewEncoder(w).Encode(mining.State{Running: false, ProcessName: "miner.exe"})
+			_ = json.NewEncoder(w).Encode(mining.State{Available: true, Running: false, ProcessName: "miner.exe"})
 		default:
 			http.NotFound(w, r)
 		}
@@ -239,7 +240,7 @@ func assertComfyMediaAccess(t *testing.T, app *App, user *User, target string, w
 func resetGatewayIntegrationDatabase(t *testing.T, db *sql.DB) {
 	t.Helper()
 	if _, err := db.Exec(`
-		TRUNCATE quick_generation_mining_leases, miners, comfy_output_cleanup_tombstones, comfy_input_assets, comfy_userdata, comfy_settings, comfy_output_ownership, content_media, prompt_assistant_runs, content_events,
+		TRUNCATE comfy_storage_operations, training_storage_operations, quick_generation_mining_leases, miners, comfy_input_cleanup_receipts, comfy_output_cleanup_receipts, comfy_output_cleanup_tombstones, comfy_input_assets, comfy_userdata, comfy_settings, comfy_output_ownership, content_media, prompt_assistant_runs, content_events,
 			websocket_sessions, proxy_requests, audit_log, invite_uses, invites, sessions, users RESTART IDENTITY CASCADE
 	`); err != nil {
 		t.Fatal(err)

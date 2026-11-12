@@ -17,7 +17,13 @@ const (
 	visionReferenceMaxSide      = 1536
 	visionReferencePassthrough  = 2 << 20
 	visionReferenceJPEGQuality  = 84
-	visionReferenceDecodePixels = 36_000_000
+	visionReferenceDecodePixels = maxComfyImagePixels
+)
+
+var (
+	errVisionReferenceFormat = errors.New("vision reference format is unsupported")
+	errVisionReferenceSize   = errors.New("vision reference dimensions are too large")
+	errVisionReferenceDecode = errors.New("decode vision reference")
 )
 
 func prepareVisionReference(payload []byte, mimeType string) ([]byte, string, bool, error) {
@@ -26,11 +32,11 @@ func prepareVisionReference(payload []byte, mimeType string) ([]byte, string, bo
 	}
 	config, _, err := image.DecodeConfig(bytes.NewReader(payload))
 	if err != nil || config.Width <= 0 || config.Height <= 0 {
-		return nil, "", false, errors.New("vision reference format is unsupported")
+		return nil, "", false, errVisionReferenceFormat
 	}
 	pixels := int64(config.Width) * int64(config.Height)
-	if pixels <= 0 || pixels > visionReferenceDecodePixels {
-		return nil, "", false, errors.New("vision reference dimensions are too large")
+	if pixels <= 0 || pixels > visionReferenceDecodePixels || config.Width > maxComfyImageSide || config.Height > maxComfyImageSide {
+		return nil, "", false, errVisionReferenceSize
 	}
 	normalizedMIME := strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0]))
 	if max(config.Width, config.Height) <= visionReferenceMaxSide && len(payload) <= visionReferencePassthrough {
@@ -42,7 +48,7 @@ func prepareVisionReference(payload []byte, mimeType string) ([]byte, string, bo
 
 	source, _, err := image.Decode(bytes.NewReader(payload))
 	if err != nil {
-		return nil, "", false, errors.New("decode vision reference")
+		return nil, "", false, errVisionReferenceDecode
 	}
 	width, height := config.Width, config.Height
 	if longest := max(width, height); longest > visionReferenceMaxSide {

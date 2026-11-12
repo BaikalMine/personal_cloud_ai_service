@@ -24,7 +24,8 @@ type Client struct {
 }
 
 type classifyResponse struct {
-	NSFWScore float64 `json:"nsfw_score"`
+	NSFWScore *float64 `json:"nsfw_score"`
+	Sensitive *bool    `json:"sensitive"`
 }
 
 func NewClient(baseURL *url.URL) *Client {
@@ -36,6 +37,13 @@ func (c *Client) Configured() bool {
 }
 
 func (c *Client) ClassifyImage(ctx context.Context, image []byte, mimeType string) (bool, error) {
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(mimeType)), "image/") {
+		return false, ErrUnsupportedImage
+	}
+	return c.ClassifyMedia(ctx, image, mimeType)
+}
+
+func (c *Client) ClassifyMedia(ctx context.Context, image []byte, mimeType string) (bool, error) {
 	if !c.Configured() {
 		return false, errors.New("локальный NSFW-классификатор не настроен")
 	}
@@ -43,7 +51,7 @@ func (c *Client) ClassifyImage(ctx context.Context, image []byte, mimeType strin
 		return false, fmt.Errorf("%w: недопустимый размер", ErrUnsupportedImage)
 	}
 	switch strings.ToLower(strings.TrimSpace(mimeType)) {
-	case "image/jpeg", "image/png", "image/webp":
+	case "image/jpeg", "image/png", "image/webp", "video/mp4", "video/webm", "video/quicktime":
 	default:
 		return false, fmt.Errorf("%w: формат %q", ErrUnsupportedImage, mimeType)
 	}
@@ -62,22 +70,28 @@ func (c *Client) ClassifyImage(ctx context.Context, image []byte, mimeType strin
 		return false, fmt.Errorf("локальный NSFW-классификатор недоступен: %w", err)
 	}
 	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, 8<<10))
+	body, err := io.ReadAll(io.LimitReader(response.Body, (8<<10)+1))
 	if err != nil {
 		return false, err
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		if response.StatusCode == http.StatusRequestEntityTooLarge || response.StatusCode == http.StatusUnsupportedMediaType || response.StatusCode == http.StatusBadRequest {
+			return false, ErrUnsupportedImage
+		}
 		return false, fmt.Errorf("локальный NSFW-классификатор ответил HTTP %d", response.StatusCode)
+	}
+	if len(body) > 8<<10 {
+		return false, errors.New("слишком большой ответ NSFW-классификатора")
 	}
 	var result classifyResponse
 	if err := json.Unmarshal(body, &result); err != nil {
 		return false, fmt.Errorf("некорректный ответ локального NSFW-классификатора: %w", err)
 	}
-	if result.NSFWScore < 0 || result.NSFWScore > 1 {
+	if result.NSFWScore == nil || *result.NSFWScore < 0 || *result.NSFWScore > 1 {
 		return false, errors.New("локальный NSFW-классификатор вернул недопустимую оценку")
 	}
 	// The classifier evaluates the full frame and overlapping regions. Keep a
 	// high-recall threshold: a user can reveal a blurred result, but an exposed
 	// sensitive image cannot be unseen.
-	return result.NSFWScore >= sensitiveScoreThreshold, nil
+	return *result.NSFWScore >= sensitiveScoreThreshold || result.Sensitive != nil && *result.Sensitive, nil
 }

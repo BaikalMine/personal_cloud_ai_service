@@ -1,59 +1,41 @@
 {{define "account_profile"}}
-{{template "head" .}}
-{{template "nav" .}}
-<main class="page" id="main-content">
-  <section class="hero"><div><p class="eyebrow">Аккаунт</p><h1>Профиль</h1></div></section>
-  <section class="panel narrow form-panel">
-    <div class="panel-heading"><div><p class="section-kicker">Данные для входа</p><h2>Контактные данные</h2><p class="panel-intro">E-mail можно использовать вместо логина при входе в AI Gateway.</p></div></div>
-    {{if .Error}}<p class="alert">{{.Error}}</p>{{end}}
-    {{if .Success}}<p class="success-box">{{.Success}}</p>{{end}}
-    <form method="post">
+{{template "account_head" .}}
+<main class="page account-workspace" id="main-content" data-account-page="{{.AccountTab}}">
+  {{template "account_heading" .}}{{template "account_messages" .}}
+  {{if eq .AccountTab "profile"}}
+  <section class="account-section"><header><h2>Данные для входа</h2></header><div class="account-section-body">
+    <form method="post" action="/account/profile" data-account-form>
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      {{if .CanChangeUsername}}
-      <label class="ui-field"><span class="ui-field-label">Логин</span><input name="username" value="{{.ProfileUsername}}" autocomplete="username" required minlength="3" maxlength="48" pattern="[A-Za-z0-9._-]+"></label>
-      {{else}}
-      <label class="ui-field"><span class="ui-field-label">Логин</span><input value="{{.ProfileUsername}}" readonly aria-readonly="true"></label>
-      {{end}}
-      <label class="ui-field"><span class="ui-field-label">E-mail</span><input name="email" type="email" value="{{.ProfileEmail}}" autocomplete="email" maxlength="254" placeholder="name@example.com"></label>
-      <p class="field-hint">E-mail необязателен. Оставьте поле пустым, чтобы удалить адрес из профиля.</p>
-      <button type="submit">Сохранить профиль</button>
+      <fieldset class="account-fields" {{if .WriteUncertain}}disabled{{end}}>
+        <legend class="visually-hidden">Данные профиля</legend>
+        <label class="ui-field"><span class="ui-field-label" id="profile-username-label">Логин</span><input id="profile-username" {{if .CanChangeUsername}}name="username" required minlength="3" maxlength="48" pattern="[A-Za-z0-9._-]+"{{else}}readonly aria-readonly="true"{{end}} value="{{.ProfileUsername}}" autocomplete="username" autocapitalize="none" spellcheck="false" aria-labelledby="profile-username-label" {{if eq .ErrorField "username"}}aria-invalid="true" aria-describedby="profile-username-error"{{else if not .CanChangeUsername}}aria-describedby="profile-username-hint"{{end}}>{{if not .CanChangeUsername}}<small id="profile-username-hint">Логин меняет администратор.</small>{{end}}</label>
+        {{if eq .ErrorField "username"}}<p class="account-field-error" id="profile-username-error" role="alert"><a href="#profile-username">{{.Error}}</a></p>{{end}}
+        <label class="ui-field"><span class="ui-field-label" id="profile-email-label">E-mail</span><input id="profile-email" name="email" type="email" value="{{.ProfileEmail}}" autocomplete="email" maxlength="254" aria-labelledby="profile-email-label" aria-describedby="profile-email-hint{{if eq .ErrorField "email"}} profile-email-error{{end}}" {{if eq .ErrorField "email"}}aria-invalid="true"{{end}}><small id="profile-email-hint">Необязательно. Пустое поле удалит адрес из профиля.</small></label>
+        {{if eq .ErrorField "email"}}<p class="account-field-error" id="profile-email-error" role="alert"><a href="#profile-email">{{.Error}}</a></p>{{end}}
+        <div class="account-form-actions"><button type="submit"><i data-lucide="save" aria-hidden="true"></i>Сохранить профиль</button><p data-account-progress role="status" aria-live="polite"></p></div>
+      </fieldset>
     </form>
-  </section>
-  {{if .CanChangeUsername}}
-  <section class="panel narrow form-panel" id="generation-resources">
-    <div class="panel-heading"><h2>Ресурсы моих генераций</h2></div>
-    {{if .MiningPolicyUpdated}}<p class="success-box" role="status">Настройка майнинга сохранена.</p>{{end}}
-    <form method="post" action="/account/generation-mining">
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <label class="notification-setting-row">
-        <input name="pause_mining_for_quick_generation" type="checkbox" {{if .CurrentUser.PauseMiningForQuickGeneration}}checked{{end}}>
-        <span><strong>Приостанавливать майнинг</strong><small>Во время генерации и работы ассистента.</small></span>
-      </label>
-      <button type="submit">Сохранить настройку майнинга</button>
-    </form>
-  </section>
+    {{template "account_deadline" .}}
+  </div></section>
+  <section class="account-section" id="appearance"><header><h2>Просмотр</h2></header><div class="account-section-body">
+    <form method="post" action="/account/theme" class="account-theme-form"><input type="hidden" name="csrf" value="{{.CSRF}}"><label class="ui-field"><span class="ui-field-label">Тема оформления</span><select name="theme" aria-label="Тема оформления" data-theme-preference-control><option value="system" {{if eq .ThemePreference "system"}}selected{{end}}>Системная</option><option value="light" {{if eq .ThemePreference "light"}}selected{{end}}>Светлая</option><option value="dark" {{if eq .ThemePreference "dark"}}selected{{end}}>Тёмная</option></select></label><noscript><button type="submit"><i data-lucide="save" aria-hidden="true"></i>Сохранить тему</button></noscript></form>
+    <label class="ui-choice ui-choice--row account-preference" data-account-script-only hidden><input type="checkbox" data-sensitive-toggle><span>Показывать материалы 18+<small>Настройка этого браузера.</small></span></label><noscript><p class="account-note">Материалы 18+ скрыты.</p></noscript>
+  </div></section>
+  <div class="account-route-hint" id="notification-settings"><a href="/account/profile?tab=notifications#notification-settings">Настройки уведомлений</a></div>
+  <div class="account-route-hint" id="generation-resources"><a href="/account/profile?tab=access#generation-resources">Доступ и ресурсы</a></div>
+  {{else if eq .AccountTab "notifications"}}
+  <section class="account-section" id="notification-settings"><header><h2>События задач</h2></header><div class="account-section-body">
+    {{if .NotificationLoadError}}<div class="account-message" role="alert"><p>Не удалось загрузить настройки уведомлений.</p><a href="/account/profile?tab=notifications">Повторить загрузку</a></div>{{else}}
+    <form method="post" action="/account/notifications" data-notification-settings data-account-form><input type="hidden" name="csrf" value="{{.CSRF}}"><fieldset class="account-fields" {{if .WriteUncertain}}disabled{{end}}><legend class="visually-hidden">Уведомления о задачах</legend>
+      <label class="ui-choice ui-choice--row account-preference"><input name="in_app_enabled" type="checkbox" {{if .NotificationPreferences.InAppEnabled}}checked{{end}}><span>В интерфейсе<small>Завершения, ошибки и прерывания задач.</small></span></label>
+      <label class="ui-choice ui-choice--row account-preference"><input name="success_enabled" type="checkbox" {{if .NotificationPreferences.SuccessEnabled}}checked{{end}}><span>Успешные задачи<small>Если выключить, останутся ошибки и прерывания.</small></span></label>
+      <label class="ui-choice ui-choice--row account-preference"><input name="browser_enabled" type="checkbox" {{if .NotificationPreferences.BrowserEnabled}}checked{{end}} data-browser-notification-toggle><span>В браузере<small data-browser-notification-status>Разрешение запрашивается после включения.</small></span></label>
+      <div class="account-form-actions"><button type="submit"><i data-lucide="save" aria-hidden="true"></i>Сохранить уведомления</button><p data-account-progress role="status" aria-live="polite"></p></div>
+    </fieldset></form>{{end}}
+  </div></section>
+  {{else if eq .AccountTab "access"}}
+  {{template "account_access" .}}
   {{end}}
-  <section class="panel narrow form-panel notification-settings" id="notification-settings">
-    <div class="panel-heading"><div><p class="section-kicker">Задачи</p><h2>Уведомления</h2><p class="panel-intro">Получайте статус любой генерации: Krea2, Flux2 и MiniMax H3.</p></div></div>
-    <form method="post" action="/account/notifications" data-notification-settings>
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <div class="notification-settings-list">
-        <label class="notification-setting-row">
-          <input name="in_app_enabled" type="checkbox" {{if .NotificationPreferences.InAppEnabled}}checked{{end}}>
-          <span><strong>В интерфейсе</strong><small>Показывать завершения и ошибки в общей шапке.</small></span>
-        </label>
-        <label class="notification-setting-row">
-          <input name="success_enabled" type="checkbox" {{if .NotificationPreferences.SuccessEnabled}}checked{{end}}>
-          <span><strong>Успешные генерации</strong><small>Если выключить, останутся только сообщения об ошибках.</small></span>
-        </label>
-        <label class="notification-setting-row">
-          <input name="browser_enabled" type="checkbox" {{if .NotificationPreferences.BrowserEnabled}}checked{{end}} data-browser-notification-toggle>
-          <span><strong>В браузере</strong><small data-browser-notification-status>Разрешение запрашивается только после включения.</small></span>
-        </label>
-      </div>
-      <button type="submit">Сохранить уведомления</button>
-    </form>
-  </section>
 </main>
 </body></html>
 {{end}}

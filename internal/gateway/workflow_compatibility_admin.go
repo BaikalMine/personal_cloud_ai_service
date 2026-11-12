@@ -16,14 +16,21 @@ const (
 )
 
 type workflowCompatibilityResult struct {
-	ID          string
-	Scenario    string
-	Description string
-	Family      string
-	Model       string
-	Status      string
-	NodeCount   int
-	Issues      []workflowCompatibilityIssue
+	ID              string
+	Scenario        string
+	Description     string
+	Family          string
+	Model           string
+	ModelFile       string
+	DefinitionID    string
+	ManifestName    string
+	ManifestVersion string
+	Components      []workflowCompatibilityComponent
+	Files           []generationExecutionComponent
+	Branches        []workflowCompatibilityBranch
+	Status          string
+	NodeCount       int
+	Issues          []workflowCompatibilityIssue
 }
 
 type workflowCompatibilityReport struct {
@@ -97,7 +104,8 @@ func (a *App) handleAdminWorkflows(w http.ResponseWriter, r *http.Request) {
 		message = report.updateSummary()
 	}
 	a.render(w, r, "admin_workflows", map[string]any{
-		"Title": "Совместимость workflow", "Report": report, "Message": message,
+		"Title": "Модели и workflow", "Report": report, "Message": message,
+		"View": newWorkflowCompatibilityView(report.Results, r.URL.Query()),
 	})
 }
 
@@ -117,13 +125,13 @@ func buildWorkflowCompatibilityResults(catalog generationModelCatalog) []workflo
 	results := make([]workflowCompatibilityResult, 0)
 	for _, group := range catalog.Groups {
 		for _, model := range group.Models {
-			if model.Family != modelFamilyKrea2 && model.Family != modelFamilyFlux2 && model.Family != modelFamilyMiniMaxH3 {
+			if model.Family != modelFamilyKrea2 && model.Family != modelFamilyFlux2 && model.Family != modelFamilyQwen21 && model.Family != modelFamilyMiniMaxH3 && model.Family != modelFamilyMoss {
 				continue
 			}
 			if !model.Available {
 				results = append(results, workflowCompatibilityResult{
 					ID: "model:" + model.ID, Scenario: "Готовность модели", Description: model.Reason,
-					Family: generationFamilyLabel(model.Family), Model: model.DisplayName, Status: workflowCompatibilityUnavailable,
+					Family: generationFamilyLabel(model.Family), Model: model.DisplayName, ModelFile: model.Name, Status: workflowCompatibilityUnavailable,
 					Issues: []workflowCompatibilityIssue{{Level: "warning", Code: "model_unavailable", Label: "Зависимости модели", Message: model.Reason}},
 				})
 				continue
@@ -131,7 +139,7 @@ func buildWorkflowCompatibilityResults(catalog generationModelCatalog) []workflo
 			for _, scenario := range compatibilityScenariosForModel(model, catalog, byID) {
 				result := workflowCompatibilityResult{
 					ID: scenario.ID, Scenario: scenario.Name, Description: scenario.Description,
-					Family: generationFamilyLabel(model.Family), Model: model.DisplayName, Status: workflowCompatibilityOK,
+					Family: generationFamilyLabel(model.Family), Model: model.DisplayName, ModelFile: model.Name, Status: workflowCompatibilityOK,
 				}
 				prompt, buildErr := scenario.Definition.buildPrompt(scenario.Input)
 				if buildErr != nil {
@@ -144,6 +152,7 @@ func buildWorkflowCompatibilityResults(catalog generationModelCatalog) []workflo
 						result.Status = workflowCompatibilityErrorStatus
 					}
 				}
+				result.addComponentDetails(scenario, catalog.ObjectInfo.Schema, prompt)
 				results = append(results, result)
 			}
 		}
@@ -185,6 +194,29 @@ func compatibilityScenariosForModel(model generationModel, catalog generationMod
 	modelKey := strings.ReplaceAll(model.ID, "\\", "/")
 	scenarios := make([]workflowCompatibilityScenario, 0, 5)
 	switch model.Family {
+	case modelFamilyMoss:
+		manifest := mossWorkflowManifest()
+		text := compatibilityManifestInput(model, manifest)
+		scenarios = append(scenarios, workflowCompatibilityScenario{ID: "moss-text:" + modelKey, Name: "MOSS Image: текст", Description: manifest.Description, Definition: definitions[manifest.DefinitionID], Input: text})
+		upscale := text
+		upscale.MossSeedVR2 = true
+		scenarios = append(scenarios, workflowCompatibilityScenario{ID: "moss-seedvr2:" + modelKey, Name: "MOSS Image: SeedVR2", Definition: definitions[manifest.DefinitionID], Input: upscale})
+	case modelFamilyQwen21:
+		textManifest := qwen21TextWorkflowManifest()
+		textInput := compatibilityManifestInput(model, textManifest)
+		scenarios = append(scenarios, workflowCompatibilityScenario{
+			ID: "qwen-text:" + modelKey, Name: "Qwen Image 2.1: текст", Description: textManifest.Description,
+			Definition: definitions[textManifest.DefinitionID], Input: textInput,
+		})
+		editManifest := qwen21EditWorkflowManifest()
+		editInput := compatibilityManifestInput(model, editManifest)
+		editInput.InputImage = "gateway-compatibility/source.png"
+		editInput.PreserveOriginalSize = true
+		editInput.ReferenceImages[0] = "gateway-compatibility/reference.png"
+		scenarios = append(scenarios, workflowCompatibilityScenario{
+			ID: "qwen-edit:" + modelKey, Name: "Qwen Image 2.1: редактирование", Description: editManifest.Description,
+			Definition: definitions[editManifest.DefinitionID], Input: editInput,
+		})
 	case modelFamilyKrea2:
 		textManifest := krea2TextWorkflowManifest()
 		textMode, _ := textManifest.mode("text")
@@ -233,6 +265,23 @@ func compatibilityScenariosForModel(model generationModel, catalog generationMod
 			Definition: definitions[editManifest.DefinitionID], Input: postInput,
 		})
 	case modelFamilyMiniMaxH3:
+		if model.AIHubOnly {
+			manifest := aiHubWorkflowManifest()
+			for _, mode := range []string{"photo", "video"} {
+				input := compatibilityManifestInput(model, manifest)
+				input.AIHubMode, input.AIHubSteps = mode, model.DefaultSteps
+				input.InputImage = "gateway-compatibility/reference.png"
+				if mode == "video" {
+					input.InputVideo = "gateway-compatibility/motion.mp4"
+				}
+				modeManifest, _ := manifest.mode(mode)
+				scenarios = append(scenarios, workflowCompatibilityScenario{
+					ID: "aihub-" + mode + ":" + modelKey, Name: manifest.Name + " / " + modeManifest.Name,
+					Description: manifest.Description, Definition: definitions[manifest.DefinitionID], Input: input,
+				})
+			}
+			break
+		}
 		manifest := miniMaxH3WorkflowManifest()
 		definition := definitions[manifest.DefinitionID]
 		if !model.VideoReferenceOnly {
@@ -378,6 +427,10 @@ func firstCompatibilityLora(groups []generationLoraGroup) (generationLora, bool)
 
 func generationFamilyLabel(family string) string {
 	switch family {
+	case modelFamilyMoss:
+		return "MOSS Image"
+	case modelFamilyQwen21:
+		return "Qwen Image 2.1"
 	case modelFamilyKrea2:
 		return "Krea2"
 	case modelFamilyFlux2:

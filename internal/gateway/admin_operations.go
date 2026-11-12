@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"ai-access-gateway/internal/domain"
+	"ai-access-gateway/internal/store"
 )
 
 const adminOperationsActiveJobLimit = 100
@@ -30,6 +31,26 @@ type adminOperationsView struct {
 	Failures          []domain.GenerationFailureSummary
 	ProblemWorkers    []MaintenanceWorkerState
 	BackgroundWorkers []MaintenanceWorkerState
+	GPU               []adminGPUWorkView
+}
+
+type adminGPUWorkView struct {
+	store.AdminGPUWorkSummary
+	Title string
+}
+
+func adminGPUWorkViews(groups []store.AdminGPUWorkSummary) []adminGPUWorkView {
+	titles := map[domain.GPUWorkKind]string{
+		domain.GPUWorkGeneration: "Генерация",
+		domain.GPUWorkTraining:   "Обучение LoRA",
+		domain.GPUWorkCaption:    "Описание кадров",
+		domain.GPUWorkAssistant:  "Промпт-ассистент",
+	}
+	result := make([]adminGPUWorkView, 0, len(groups))
+	for _, group := range groups {
+		result = append(result, adminGPUWorkView{AdminGPUWorkSummary: group, Title: titles[group.Kind]})
+	}
+	return result
 }
 
 type adminAttentionItem struct {
@@ -138,11 +159,17 @@ func (a *App) loadAdminOperations(ctx context.Context, system SystemOverview) (a
 		}
 	}
 
-	return newAdminOperationsView(time.Now().UTC(), observability, activeJobs, queue, compatibility, storage, system), nil
+	gpu, err := a.store.AdminGPUOverview(ctx)
+	if err != nil {
+		return adminOperationsView{}, err
+	}
+	view := newAdminOperationsView(time.Now().UTC(), observability, activeJobs, queue, compatibility, storage, system, gpu...)
+	return view, nil
 }
 
-func newAdminOperationsView(now time.Time, observability adminObservabilityView, jobs []domain.GenerationJob, queue adminQueueStatusView, compatibility workflowCompatibilityReport, storage databaseStorageView, system SystemOverview) adminOperationsView {
+func newAdminOperationsView(now time.Time, observability adminObservabilityView, jobs []domain.GenerationJob, queue adminQueueStatusView, compatibility workflowCompatibilityReport, storage databaseStorageView, system SystemOverview, gpu ...store.AdminGPUWorkSummary) adminOperationsView {
 	view := adminOperationsView{
+		GPU:           adminGPUWorkViews(gpu),
 		GeneratedAt:   now,
 		Queue:         queue,
 		Generation:    observability.Generation,
@@ -327,6 +354,14 @@ func newAdminActiveJobView(now time.Time, overdueAfter time.Duration, job domain
 
 func buildAdminAttention(view adminOperationsView, dependencies []DependencyStatus) []adminAttentionItem {
 	items := make([]adminAttentionItem, 0, 8)
+	unconfirmed := 0
+	for _, group := range view.GPU {
+		unconfirmed += group.Unconfirmed
+	}
+	if unconfirmed > 0 {
+		items = append(items, adminAttentionItem{Key: "gpu-unconfirmed", Severity: "critical", Title: "Завершение работы GPU не подтверждено",
+			Detail: "Новые задания ждут подтверждения исполнителя.", Count: unconfirmed, Href: "#operations-gpu-work", Action: "К заданиям GPU"})
+	}
 	if view.Generation.OverdueJobs > 0 {
 		items = append(items, adminAttentionItem{
 			Key: "overdue-jobs", Severity: "critical", Title: "Задания не меняют состояние",

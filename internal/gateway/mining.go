@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -31,21 +32,38 @@ var (
 func (a *App) miningOverview(ctx context.Context, includeDisabled, includeScript bool) MiningOverview {
 	miners, err := a.store.ListMiners(ctx, includeDisabled)
 	if err != nil {
-		return MiningOverview{Message: "Не удалось загрузить настройки майнинга."}
+		return MiningOverview{LoadError: true, Message: "Не удалось загрузить настройки майнинга."}
 	}
 	overview := MiningOverview{Available: a.mining != nil && a.mining.Configured(), Miners: make([]MinerView, 0, len(miners))}
 	overview.Agent = a.dependencyStatus(dependencyMiningAgent)
-	if len(miners) == 0 {
-		overview.Message = "Профиль майнинга ещё не настроен."
-		overview.Available = overview.Agent.State == DependencyOnline
+	var inventory mining.Inventory
+	inventoryKnown := false
+	if overview.Available {
+		started := time.Now()
+		var inventoryErr error
+		inventory, inventoryErr = a.mining.Inventory(ctx)
+		if inventoryErr == nil {
+			inventoryKnown = true
+			a.dependencyMonitor().success(dependencyMiningAgent, "Каталог работающих майнеров получен.", &inventory.CollectedAt, time.Since(started))
+		} else if !errors.Is(inventoryErr, mining.ErrInventoryUnsupported) {
+			overview.Available = false
+			overview.Message = "Не удалось проверить работающие майнеры. Команды запуска недоступны."
+			a.dependencyMonitor().failure(dependencyMiningAgent, overview.Message, false, time.Since(started))
+		}
+	}
+	if len(miners) == 0 && !inventoryKnown {
+		if overview.Message == "" {
+			overview.Message = "Профиль майнинга ещё не настроен. Для обнаружения внешнего запуска нужен обновлённый агент."
+		}
+		overview.Agent = a.dependencyStatus(dependencyMiningAgent)
 		return overview
 	}
-	if !overview.Available {
+	if !overview.Available && overview.Message == "" {
 		overview.Message = "Windows-agent управления майнингом не настроен."
 	}
 	for _, miner := range miners {
 		view := MinerView{Miner: miner}
-		if overview.Available {
+		if overview.Available && !inventoryKnown {
 			started := time.Now()
 			state, stateErr := a.mining.State(ctx, miner.ProcessName)
 			view.State = state
@@ -67,15 +85,21 @@ func (a *App) miningOverview(ctx context.Context, includeDisabled, includeScript
 			overview.Running = true
 		}
 	}
+	normalizeMiningProfiles(&overview)
+	if inventoryKnown {
+		applyMiningInventory(&overview, inventory)
+	}
 	if overview.Available && overview.Message == "" {
-		if overview.Running {
+		if miningUncontrolled(overview) {
+			overview.Message = "Работает внешний майнер или несколько майнеров. Добавьте точный BAT в профиль управления."
+		} else if overview.Running {
 			overview.Message = "Майнинг работает и использует вычислительные ресурсы."
 		} else {
-			overview.Message = "Майнинг остановлен, ресурсы доступны нейросетям."
+			overview.Message = "Майнинг остановлен."
 		}
 	}
 	selected := overview.Active
-	if selected == nil {
+	if selected == nil && !overview.Running {
 		selected = overview.Default
 	}
 	if includeScript && overview.Available && selected != nil {
@@ -122,7 +146,10 @@ func (a *App) handleMiningToggle(w http.ResponseWriter, r *http.Request) {
 	if overview.Active != nil {
 		target = overview.Active
 		action = "mining_stopped"
-		state, err = a.mining.Stop(r.Context(), mining.Request{ScriptPath: target.ScriptPath, ProcessName: target.ProcessName})
+		state, err = a.stopMiningManually(r.Context(), target.Miner)
+	} else if miningUncontrolled(overview) {
+		http.Redirect(w, r, "/app?mining=external", http.StatusSeeOther)
+		return
 	} else if overview.Default != nil {
 		if _, leaseErr := a.store.ActiveQuickGenerationMiningLease(r.Context()); leaseErr == nil {
 			http.Redirect(w, r, "/app?mining=priority_busy", http.StatusSeeOther)
@@ -130,7 +157,9 @@ func (a *App) handleMiningToggle(w http.ResponseWriter, r *http.Request) {
 		}
 		target = overview.Default
 		action = "mining_started"
-		state, err = a.mining.Start(r.Context(), mining.Request{ScriptPath: target.ScriptPath, ProcessName: target.ProcessName})
+		var result mining.CommandResult
+		result, err = a.manualMiningCommand(r.Context(), "start", mining.Request{ScriptPath: target.ScriptPath, ProcessName: target.ProcessName}, nil)
+		state = result.State
 	} else {
 		err = errors.New("default miner is not configured")
 	}
@@ -181,7 +210,22 @@ func (a *App) handleAdminMining(w http.ResponseWriter, r *http.Request) {
 	user := a.currentUser(r)
 	status := "updated"
 	switch action {
+	case "restart":
+		overview := a.miningOverview(r.Context(), true, false)
+		if !overview.Available || overview.Active == nil || overview.Active.ID != miner.ID || !sameMiningScript(miner.ScriptPath, overview.Active.State.ScriptPath) || !miner.Enabled {
+			err = errors.New("точный работающий BAT не подтверждён; перезапуск не выполнялся")
+			break
+		}
+		_, err = a.manualMiningCommand(r.Context(), "restart", mining.Request{ScriptPath: miner.ScriptPath, ProcessName: miner.ProcessName}, nil)
+		if err == nil {
+			status = "restarted"
+		}
 	case "update":
+		overview := a.miningOverview(r.Context(), true, false)
+		if !overview.Available || (overview.Active != nil && overview.Active.ID != miner.ID) || (overview.Running && (overview.Active == nil || !sameMiningScript(miner.ScriptPath, overview.Active.State.ScriptPath))) {
+			err = errors.New("состояние профиля не подтверждено или работает другой профиль; обновление не запускалось")
+			break
+		}
 		archiveURL := strings.TrimSpace(r.FormValue("archive_url"))
 		archiveSHA256, sha256OK := normalizeArchiveSHA256(r.FormValue("archive_sha256"))
 		if len(archiveURL) == 0 || len(archiveURL) > 2048 {
@@ -196,9 +240,14 @@ func (a *App) handleAdminMining(w http.ResponseWriter, r *http.Request) {
 			err = errors.New("агент управления майнингом недоступен")
 			break
 		}
-		updateResult, updateErr := a.mining.Update(r.Context(), mining.UpdateRequest{
+		updateRequest := mining.UpdateRequest{
 			ScriptPath: miner.ScriptPath, ProcessName: miner.ProcessName, MinerName: miner.Name, ArchiveURL: archiveURL, ArchiveSHA256: archiveSHA256,
-		})
+		}
+		commandResult, updateErr := a.manualMiningCommand(r.Context(), "update", mining.Request{ScriptPath: miner.ScriptPath, ProcessName: miner.ProcessName}, &updateRequest)
+		updateResult := mining.UpdateResult{}
+		if commandResult.Update != nil {
+			updateResult = *commandResult.Update
+		}
 		err = updateErr
 		if err != nil && updateResult.Message != "" {
 			err = errors.New(updateResult.Message)
@@ -210,6 +259,10 @@ func (a *App) handleAdminMining(w http.ResponseWriter, r *http.Request) {
 			status = "miner-updated"
 		}
 	case "start":
+		if !miner.Enabled {
+			a.renderAdminMining(w, r, "Включите профиль перед запуском.", "")
+			return
+		}
 		if _, leaseErr := a.store.ActiveQuickGenerationMiningLease(r.Context()); leaseErr == nil {
 			a.renderAdminMining(w, r, "Майнинг зарезервирован для приоритетной быстрой генерации. Дождитесь её завершения.", "")
 			return
@@ -223,12 +276,16 @@ func (a *App) handleAdminMining(w http.ResponseWriter, r *http.Request) {
 			a.renderAdminMining(w, r, "Сначала остановите активный профиль "+overview.Active.Name+".", "")
 			return
 		}
-		if _, err = a.mining.Start(r.Context(), mining.Request{ScriptPath: miner.ScriptPath, ProcessName: miner.ProcessName}); err == nil {
+		if overview.Running && (overview.Active == nil || !sameMiningScript(miner.ScriptPath, overview.Active.State.ScriptPath)) {
+			a.renderAdminMining(w, r, "Майнер уже работает, но выбранный BAT не подтверждён. Новый профиль не запускался.", "")
+			return
+		}
+		if _, err = a.manualMiningCommand(r.Context(), "start", mining.Request{ScriptPath: miner.ScriptPath, ProcessName: miner.ProcessName}, nil); err == nil {
 			a.audit(r.Context(), &user.ID, "mining_started", "miner", &id, a.clientIP(r), r.UserAgent(), map[string]any{"name": miner.Name})
 			status = "started"
 		}
 	case "stop":
-		if _, err = a.mining.Stop(r.Context(), mining.Request{ScriptPath: miner.ScriptPath, ProcessName: miner.ProcessName}); err == nil {
+		if _, err = a.stopMiningManually(r.Context(), miner); err == nil {
 			a.audit(r.Context(), &user.ID, "mining_stopped", "miner", &id, a.clientIP(r), r.UserAgent(), map[string]any{"name": miner.Name})
 			status = "stopped"
 		}
@@ -240,13 +297,19 @@ func (a *App) handleAdminMining(w http.ResponseWriter, r *http.Request) {
 		if state, stateErr := a.mining.State(r.Context(), miner.ProcessName); stateErr == nil && state.Running {
 			err = errors.New("нельзя отключить работающий профиль")
 		} else {
-			_, err = a.store.SetMinerEnabled(r.Context(), id, false)
+			err = a.changeStoppedMiner(r.Context(), mining.Request{ScriptPath: miner.ScriptPath, ProcessName: miner.ProcessName}, func() error {
+				_, changeErr := a.store.SetMinerEnabled(r.Context(), id, false)
+				return changeErr
+			})
 		}
 	case "delete":
 		if state, stateErr := a.mining.State(r.Context(), miner.ProcessName); stateErr == nil && state.Running {
 			err = errors.New("нельзя удалить работающий профиль")
 		} else {
-			_, err = a.store.DeleteMiner(r.Context(), id)
+			err = a.changeStoppedMiner(r.Context(), mining.Request{ScriptPath: miner.ScriptPath, ProcessName: miner.ProcessName}, func() error {
+				_, changeErr := a.store.DeleteMiner(r.Context(), id)
+				return changeErr
+			})
 		}
 	default:
 		err = errors.New("неизвестное действие")
@@ -350,8 +413,49 @@ func (a *App) handleCreateMiner(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) renderAdminMining(w http.ResponseWriter, r *http.Request, errorMessage, status string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	view, err := a.loadAdminResource(ctx, "mining", true)
+	if err != nil {
+		http.Error(w, "Не удалось загрузить состояние майнинга. Обновите страницу.", http.StatusServiceUnavailable)
+		return
+	}
+	catalog := view.Mining.Catalog
+	var catalogErr error
+	if !view.Mining.InventoryKnown {
+		catalog, catalogErr = a.mining.Files(ctx)
+	}
+	if catalogErr != nil {
+		if catalog.Message == "" {
+			catalog.Message = catalogErr.Error()
+		}
+		catalog.Files = nil
+	}
+	favorites, favoritesErr := a.store.MiningScriptFavorites(ctx, a.currentUser(r).ID)
+	if favoritesErr != nil {
+		catalog.Message = "Не удалось загрузить избранное. Попробуйте обновить список."
+	}
+	browser := BuildMiningBrowser(catalog, favorites, r.URL.Query())
+	form := r.Form
+	if (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.URL.Query().Get("pick") != "" {
+		if file, ok := catalogScript(catalog, r.URL.Query().Get("pick")); ok {
+			process := miningScriptProcess(catalog, file)
+			for _, state := range view.Mining.External {
+				if sameMiningScript(state.ScriptPath, file.Path) {
+					process = state.ProcessName
+					break
+				}
+			}
+			form = url.Values{"name": {file.Name}, "script_path": {file.Path}, "process_name": {process}}
+		}
+	}
 	a.render(w, r, "admin_mining", map[string]any{
-		"Title": "Управление майнингом", "Mining": a.miningOverview(r.Context(), true, true), "Error": errorMessage, "Status": status,
+		"Title": "Управление майнингом", "Mining": view.Mining, "Resource": view, "Error": errorMessage, "Status": status,
+		"MiningForm":          form,
+		"MiningFiles":         catalog,
+		"MiningBrowser":       browser,
+		"MiningAutoResume":    a.manualMiningResumeEnabled(),
+		"MiningResumePending": a.manualMiningResumePending(*view.Mining),
 	})
 }
 

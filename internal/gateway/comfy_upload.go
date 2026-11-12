@@ -111,6 +111,13 @@ func (a *App) rewriteComfyUploadWithName(w http.ResponseWriter, r *http.Request,
 		return comfyUploadAsset{}, errors.New("invalid ComfyUI multipart upload")
 	}
 	policy := comfyUploadPolicyFromRequest(r)
+	expectedSize := int64(0)
+	if value := r.Header.Get("X-Upload-File-Size"); value != "" {
+		expectedSize, err = strconv.ParseInt(value, 10, 64)
+		if err != nil || expectedSize <= 0 || expectedSize > policy.MaxBody {
+			return comfyUploadAsset{}, errors.New("некорректный размер загружаемого файла")
+		}
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, policy.MaxBody)
 	originalBody := r.Body
 	defer originalBody.Close()
@@ -161,13 +168,28 @@ func (a *App) rewriteComfyUploadWithName(w http.ResponseWriter, r *http.Request,
 			}
 			digest := sha256.New()
 			header := newLimitedBuffer(maxComfyValidationHeader)
-			written, readErr := io.Copy(io.MultiWriter(target, digest, &header), part)
+			outputs := []io.Writer{target, digest, &header}
+			var container *uploadMP4Check
+			ext := strings.ToLower(filepath.Ext(asset.Filename))
+			if policy.Kind == "video" && (ext == ".mp4" || ext == ".mov" || ext == ".m4v") {
+				container = &uploadMP4Check{}
+				outputs = append(outputs, container)
+			}
+			written, readErr := io.Copy(io.MultiWriter(outputs...), part)
 			_ = part.Close()
 			if readErr != nil {
 				return comfyUploadAsset{}, fmt.Errorf("stream ComfyUI upload part: %w", readErr)
 			}
 			if written <= 0 || written > policy.MaxBody {
 				return comfyUploadAsset{}, errors.New("ComfyUI upload file is too large")
+			}
+			if expectedSize > 0 && written != expectedSize {
+				return comfyUploadAsset{}, &uploadValidationError{message: "Файл передан не полностью. Дождитесь окончания его скачивания на устройство и выберите файл заново. Этот файл не сохранён."}
+			}
+			if container != nil {
+				if err := container.validate(); err != nil {
+					return comfyUploadAsset{}, err
+				}
 			}
 			if err := validateComfyUploadPayloadForKind(asset.Filename, header.data, policy.Kind); err != nil {
 				return comfyUploadAsset{}, err

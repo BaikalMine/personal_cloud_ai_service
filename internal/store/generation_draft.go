@@ -24,17 +24,23 @@ func (s *Store) GenerationDraft(ctx context.Context, userID int64) (domain.Gener
 // Global sequence values also prevent an old tab from matching a draft that
 // was deleted and recreated (the ABA problem).
 func (s *Store) SaveGenerationDraft(ctx context.Context, userID, expectedRevision int64, cipher []byte) (domain.GenerationDraftRow, error) {
+	return saveGenerationDraft(ctx, s.db, userID, expectedRevision, cipher)
+}
+
+func saveGenerationDraft(ctx context.Context, db interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, userID, expectedRevision int64, cipher []byte) (domain.GenerationDraftRow, error) {
 	var row domain.GenerationDraftRow
 	var result *sql.Row
 	if expectedRevision == 0 {
-		result = s.db.QueryRowContext(ctx, `INSERT INTO generation_drafts(user_id,payload_cipher)
+		result = db.QueryRowContext(ctx, `INSERT INTO generation_drafts(user_id,payload_cipher)
 			VALUES($1,$2) ON CONFLICT(user_id) DO UPDATE SET
 			payload_cipher=EXCLUDED.payload_cipher,revision=nextval('generation_draft_revision_seq'),
 			updated_at=now(),expires_at=now()+interval '30 days'
 			WHERE generation_drafts.expires_at<=now()
 			RETURNING user_id,revision,payload_cipher,updated_at,expires_at`, userID, cipher)
 	} else {
-		result = s.db.QueryRowContext(ctx, `UPDATE generation_drafts SET payload_cipher=$3,
+		result = db.QueryRowContext(ctx, `UPDATE generation_drafts SET payload_cipher=$3,
 			revision=nextval('generation_draft_revision_seq'),updated_at=now(),expires_at=now()+interval '30 days'
 			WHERE user_id=$1 AND revision=$2 AND expires_at>now()
 			RETURNING user_id,revision,payload_cipher,updated_at,expires_at`, userID, expectedRevision, cipher)

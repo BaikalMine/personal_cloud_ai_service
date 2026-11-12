@@ -252,7 +252,7 @@ func TestEnhanceVideoUsesMiniMaxContextForReferenceAudio(t *testing.T) {
 			!strings.Contains(system, "<Video 1> reference is attached") ||
 			!strings.Contains(system, "<Picture 1> (attached image 1): the base scene") ||
 			!strings.Contains(system, "<Picture 2> (attached image 2): the person or character's identity") ||
-			!strings.Contains(system, "at least three concrete visible attributes") ||
+			!strings.Contains(system, "Carry only role-relevant retained attributes") ||
 			!strings.Contains(system, "keyframe completion, reference generation, video editing, video continuation, audio reuse, audio reference") ||
 			!strings.Contains(system, "Target 1500-2500 characters for detailed_description") ||
 			!strings.Contains(system, "Danbooru-style tags") ||

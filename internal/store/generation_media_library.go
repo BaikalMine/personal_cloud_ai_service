@@ -34,7 +34,7 @@ func (s *Store) ListGenerationMediaForPrompts(ctx context.Context, userID int64,
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT e.external_id,m.id,m.media_type,m.mime_type,m.original_name,m.size_bytes,m.created_at,m.expires_at,
-		       e.is_sensitive,(m.media_type='image' AND m.visual_sensitivity_classified_at IS NULL),
+		       e.is_sensitive,(m.media_type IN ('image','video') AND m.visual_sensitivity_classified_at IS NULL),
 		       (m.pinned_at IS NOT NULL),(m.favorite_at IS NOT NULL),e.generation_job_id,COALESCE(j.public_id,'')
 		FROM content_media m
 		JOIN content_events e ON e.id=m.event_id
@@ -116,7 +116,7 @@ func (s *Store) loadGenerationMediaTags(ctx context.Context, userID int64, media
 
 func (s *Store) loadGenerationMediaCollections(ctx context.Context, userID int64, mediaIDs []int64, locations map[int64]generationMediaLocation, result map[string][]domain.GenerationVariantMedia) error {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT item.media_id,collection.id,collection.name,collection.created_at,collection.updated_at
+		SELECT item.media_id,collection.id,collection.name,collection.revision,collection.created_at,collection.updated_at
 		FROM generation_media_collection_items item
 		JOIN generation_media_collections collection ON collection.id=item.collection_id
 		WHERE collection.user_id=$1 AND item.media_id=ANY($2)
@@ -129,7 +129,7 @@ func (s *Store) loadGenerationMediaCollections(ctx context.Context, userID int64
 	for rows.Next() {
 		var mediaID int64
 		var collection domain.GenerationMediaCollection
-		if err := rows.Scan(&mediaID, &collection.ID, &collection.Name, &collection.CreatedAt, &collection.UpdatedAt); err != nil {
+		if err := rows.Scan(&mediaID, &collection.ID, &collection.Name, &collection.Revision, &collection.CreatedAt, &collection.UpdatedAt); err != nil {
 			return err
 		}
 		location, ok := locations[mediaID]
@@ -175,10 +175,12 @@ func (s *Store) loadGenerationMediaReferenceUses(ctx context.Context, userID int
 
 func (s *Store) ListGenerationMediaCollections(ctx context.Context, userID int64) ([]domain.GenerationMediaCollection, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT collection.id,collection.name,COUNT(media.id),collection.created_at,collection.updated_at
+		SELECT collection.id,collection.name,COUNT(event.id),collection.revision,collection.created_at,collection.updated_at
 		FROM generation_media_collections collection
 		LEFT JOIN generation_media_collection_items item ON item.collection_id=collection.id
 		LEFT JOIN content_media media ON media.id=item.media_id AND media.expires_at > now() AND media.profile_hidden_at IS NULL
+		LEFT JOIN content_events event ON event.id=media.event_id AND event.user_id=collection.user_id
+			AND event.service='comfyui' AND event.kind='comfyui_prompt' AND event.expires_at>now()
 		WHERE collection.user_id=$1
 		GROUP BY collection.id
 		ORDER BY collection.name_key,collection.id
@@ -190,7 +192,7 @@ func (s *Store) ListGenerationMediaCollections(ctx context.Context, userID int64
 	items := make([]domain.GenerationMediaCollection, 0)
 	for rows.Next() {
 		var item domain.GenerationMediaCollection
-		if err := rows.Scan(&item.ID, &item.Name, &item.ItemCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.ItemCount, &item.Revision, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -218,9 +220,11 @@ func (s *Store) CreateGenerationMediaCollection(ctx context.Context, userID int6
 		SELECT $1,$2,$3
 		WHERE EXISTS (SELECT 1 FROM generation_media_collections WHERE user_id=$1 AND name_key=$3)
 		   OR (SELECT COUNT(*) FROM generation_media_collections WHERE user_id=$1) < $4
-		ON CONFLICT(user_id,name_key) DO UPDATE SET name=EXCLUDED.name,updated_at=now()
-		RETURNING id,name,created_at,updated_at
-	`, userID, displayName, nameKey, maxGenerationMediaCollections).Scan(&item.ID, &item.Name, &item.CreatedAt, &item.UpdatedAt)
+		ON CONFLICT(user_id,name_key) DO UPDATE SET name=EXCLUDED.name,updated_at=now(),
+			revision=CASE WHEN generation_media_collections.name=EXCLUDED.name THEN generation_media_collections.revision
+			ELSE nextval('generation_collection_revision_seq') END
+		RETURNING id,name,revision,created_at,updated_at
+	`, userID, displayName, nameKey, maxGenerationMediaCollections).Scan(&item.ID, &item.Name, &item.Revision, &item.CreatedAt, &item.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.GenerationMediaCollection{}, fmt.Errorf("достигнут лимит коллекций: %d", maxGenerationMediaCollections)
 	}

@@ -1,0 +1,50 @@
+# Opt-in overlay. Apply only after the coordinated schema/agent release.
+services:
+  inference-worker:
+    build:
+      context: .
+      target: inference-worker
+    init: true
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
+      OLLAMA_UPSTREAM: ${OLLAMA_UPSTREAM:-http://host.docker.internal:11434}
+      INFERENCE_WORKER_ADDR: :8096
+      INFERENCE_OUTCOME_DIR: /var/lib/inference-outcomes
+      GOMEMLIMIT: 512MiB
+      GOGC: "50"
+    depends_on:
+      app:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - ai-access-backend
+    read_only: true
+    volumes:
+      - inference-outcomes:/var/lib/inference-outcomes
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8096/healthz"]
+      interval: 10s
+      timeout: 4s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    mem_limit: 768m
+    pids_limit: 64
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+volumes:
+  inference-outcomes:

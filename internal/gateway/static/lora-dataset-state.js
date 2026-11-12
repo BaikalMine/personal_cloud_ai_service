@@ -4,6 +4,21 @@
   if (root) root.AIGatewayLoraDataset = api;
 })(typeof window !== "undefined" ? window : null, function () {
   const copy = (value) => JSON.parse(JSON.stringify(value));
+  const editorTarget = (search) => {
+    const query = new URLSearchParams(search);
+    const keys = ["dataset", "image", "asset", "version"];
+    if (!keys.some(key => query.has(key))) return null;
+    const target = {};
+    for (const key of keys) {
+      if (!query.has(key)) continue;
+      const values = query.getAll(key);
+      if (values.length !== 1 || !/^[a-zA-Z0-9_-]{1,96}$/.test(values[0])) return { invalid: true };
+      target[key] = values[0];
+    }
+    if (target.version) return Object.keys(target).length === 1 ? target : { invalid: true };
+    if (!target.dataset || Boolean(target.image) !== Boolean(target.asset)) return { invalid: true };
+    return target;
+  };
   const createID = (random = globalThis.crypto) => {
     if (typeof random.randomUUID === "function") return random.randomUUID();
     // HTTP/IP pages still expose getRandomValues, but not randomUUID.
@@ -12,6 +27,7 @@
   const createController = ({ request, defaults, onChange = () => {}, schedule = setTimeout, unschedule = clearTimeout, newID = createID }) => {
     const state = { dataset: null, manifest: copy(defaults), assets: {}, datasets: [], status: "loading", error: "", dirty: false, ready: false };
     let epoch = 0;
+    let loadEpoch = 0;
     let timer = null;
     let saving = null;
     let clientID = newID();
@@ -19,6 +35,7 @@
     const stopTimer = () => { if (timer !== null) unschedule(timer); timer = null; };
     const setError = (error) => { state.status = error.status === 409 ? "conflict" : "error"; state.error = error.message; publish(); };
     const apply = (view) => {
+      loadEpoch += 1;
       state.dataset = view.dataset;
       state.manifest = copy(view.manifest);
       state.manifest.images ||= [];
@@ -38,13 +55,19 @@
     };
     const load = async (id) => {
       stopTimer();
+      const current = ++loadEpoch;
       state.ready = false; state.status = "loading"; publish();
       try {
         if (!id) id = (await refreshList())[0]?.id;
-        if (id) apply(await request(`/${encodeURIComponent(id)}`));
+        if (current !== loadEpoch) return false;
+        if (id) {
+          const view = await request(`/${encodeURIComponent(id)}`);
+          if (current !== loadEpoch) return false;
+          apply(view);
+        }
         else { state.ready = true; state.status = "empty"; publish("load"); }
         return true;
-      } catch (error) { setError(error); return false; }
+      } catch (error) { if (current === loadEpoch) setError(error); return false; }
     };
     const touch = (kind = "status") => {
       epoch += 1; state.dirty = true;
@@ -84,6 +107,7 @@
       return saving;
     };
     const startNew = ({ preserve = false } = {}) => {
+      loadEpoch += 1;
       stopTimer(); state.dataset = null; clientID = newID();
       if (!preserve) { state.manifest = copy(defaults); state.assets = {}; }
       state.status = "empty"; state.error = ""; state.dirty = false; state.ready = true;
@@ -91,7 +115,7 @@
       if (preserve) touch();
     };
     const ensure = async () => { if (!state.dataset) touch(); return await flush() ? state.dataset?.id : null; };
-    return { state, load, apply, touch, flush, ensure, startNew, refreshList, setError, dispose: stopTimer };
+    return { state, load, apply, touch, flush, ensure, startNew, refreshList, setError, dispose: () => { loadEpoch += 1; stopTimer(); } };
   };
-  return { createController, createID };
+  return { createController, createID, editorTarget };
 });

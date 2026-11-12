@@ -3,7 +3,7 @@
 {{template "admin_nav" .}}
 <main class="page" id="main-content">
   <section class="hero invite-hero">
-    <div><p class="eyebrow">Управление доступом</p><h1>Приглашения</h1><p class="hero-copy">Создавайте постоянные или временные учётные записи с нужным набором сервисов и лимитами.</p></div>
+    <div><p class="eyebrow">Управление доступом</p><h1>Приглашения</h1></div>
   </section>
 
   {{if .InviteLink}}
@@ -13,98 +13,9 @@
   </section>
   {{end}}
 
-  <section class="panel invite-composer">
-    <div class="panel-heading"><div><p class="section-kicker">Новый доступ</p><h2>Создать приглашение</h2></div></div>
-    {{if .Error}}<p class="alert ui-status-banner is-error">{{.Error}}</p>{{end}}
-    <form method="post" class="invite-form" data-invite-composer>
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
+  {{template "invite_composer" .}}
 
-      <fieldset class="invite-account-type">
-        <legend>Тип учётной записи</legend>
-        <label class="invite-type-option ui-choice is-selected"><input type="radio" name="account_type" value="permanent" checked><span><b>Постоянная</b><small>Доступ действует, пока администратор не изменит или не удалит учётную запись.</small></span></label>
-        <label class="invite-type-option ui-choice"><input type="radio" name="account_type" value="temporary"><span><b>Временная</b><small>Учётная запись удаляется по сроку; история и медиа сохраняются по штатному сроку хранения.</small></span></label>
-      </fieldset>
-
-      <div class="invite-builder-grid">
-        <section class="invite-builder-section">
-          <div class="invite-section-heading"><p class="section-kicker">01</p><h3>Доступ</h3><p>Выберите только те интерфейсы и сценарии, которые нужны человеку.</p></div>
-          <div class="invite-access-grid">
-            <label class="invite-access-card invite-access-card--primary ui-choice"><input name="grant_quick_generation" type="checkbox" checked data-quick-generation-access><span><b>Быстрая генерация</b><small>Готовые сценарии без входа в ComfyUI.</small></span></label>
-            <label class="invite-access-card ui-choice"><input name="grant_comfyui" type="checkbox"><span><b>ComfyUI</b><small>Полный рабочий интерфейс.</small></span></label>
-            <label class="invite-access-card ui-choice"><input name="grant_openwebui" type="checkbox"><span><b>OpenWebUI</b><small>Чаты и локальные модели.</small></span></label>
-            <label class="invite-access-card ui-choice"><input name="grant_train_image_lora" type="checkbox"><span><b>Обучение LoRA</b><small>Только модели генерации изображений.</small></span></label>
-          </div>
-          <fieldset class="invite-scenarios" data-quick-scenarios>
-            <legend>Сценарии быстрой генерации</legend>
-            <label><input name="grant_text_to_image" type="checkbox" checked><span>Текст в изображение</span></label>
-            <label><input name="grant_image_to_image" type="checkbox"><span>Фото и промт</span></label>
-            <label><input name="grant_video" type="checkbox"><span>Видео</span></label>
-          </fieldset>
-        </section>
-
-        <section class="invite-builder-section invite-builder-section--limits">
-          <div class="invite-section-heading"><p class="section-kicker">02</p><h3>Ссылка и учётная запись</h3><p>Срок ссылки не связан со сроком временной учётной записи.</p></div>
-          <div class="ui-field-grid invite-limit-grid">
-            <label class="ui-field"><span class="ui-field-label">Ссылка действует</span><select name="invite_ttl_hours"><option value="1">1 час</option><option value="24" selected>24 часа</option><option value="72">3 дня</option><option value="168">7 дней</option><option value="720">30 дней</option></select></label>
-            <label class="ui-field"><span class="ui-field-label">Количество активаций</span><input name="max_uses" type="number" value="1" min="1" max="10000" inputmode="numeric"></label>
-          </div>
-          <label class="invite-temporary-lifetime ui-field" data-temporary-lifetime hidden><span class="ui-field-label">Срок доступа после регистрации</span><select name="temporary_account_hours" disabled><option value="1">1 час</option><option value="6">6 часов</option><option value="12">12 часов</option><option value="24">1 день</option><option value="72">3 дня</option><option value="168" selected>7 дней</option><option value="336">14 дней</option><option value="720">30 дней</option><option value="2160">90 дней</option></select><small class="field-hint">По окончании срока учётная запись удаляется, а история и медиа остаются до штатного срока хранения с пометкой об удалённом пользователе.</small></label>
-        </section>
-      </div>
-
-      <section class="invite-generation-policy" data-quick-policy>
-        <div class="invite-section-heading"><p class="section-kicker">03</p><h3>Генерация и ресурсы</h3><p>Квоты считаются отдельно. Ноль означает отсутствие ограничения для выбранного типа.</p></div>
-        <div class="invite-generation-grid">
-          <fieldset class="ui-field-grid invite-quota-group" data-image-policy>
-            <legend><span>Изображения</span><small>Текст в изображение и фото с промтом</small></legend>
-            <label class="ui-field"><span class="ui-field-label">В сутки</span><input name="image_generation_daily_limit" type="number" value="0" min="0" max="100000" inputmode="numeric"></label>
-            <label class="ui-field"><span class="ui-field-label">Всего</span><input name="image_generation_total_limit" type="number" value="0" min="0" max="10000000" inputmode="numeric"></label>
-          </fieldset>
-          <fieldset class="ui-field-grid invite-quota-group" data-video-policy>
-            <legend><span>Видео</span><small>Отдельная квота для MiniMax H3</small></legend>
-            <label class="ui-field"><span class="ui-field-label">В сутки</span><input name="video_generation_daily_limit" type="number" value="0" min="0" max="100000" inputmode="numeric"></label>
-            <label class="ui-field"><span class="ui-field-label">Всего</span><input name="video_generation_total_limit" type="number" value="0" min="0" max="10000000" inputmode="numeric"></label>
-            <label class="ui-field invite-video-quality"><span class="ui-field-label">Максимум базового качества</span><select name="max_video_generation_quality"><option value="480">480p</option><option value="720" selected>720p</option><option value="1080">1080p</option><option value="1440">1440p · 2K</option></select><small class="field-hint">Финальный RTX-апскейл этим лимитом не ограничивается.</small></label>
-          </fieldset>
-          <fieldset class="invite-runtime-group">
-            <legend><span>Возможности</span><small>Начальные настройки новой учётной записи</small></legend>
-            <label class="service-toggle ui-choice"><input name="grant_advanced_generation_settings" type="checkbox"><span><b>Точные настройки</b><small>Сэмплеры, LoRA и обработка workflow.</small></span></label>
-            <input name="queue_policy_version" type="hidden" value="2">
-            <label class="service-toggle ui-choice"><input name="queue_priority" type="checkbox"><span><b>Приоритетная очередь</b><small>Для новых заданий генерации и обучения.</small></span></label>
-            <label class="service-toggle ui-choice"><input name="pause_mining_for_quick_generation" type="checkbox"><span><b>Приостанавливать майнинг</b><small>Во время генерации и работы ассистента.</small></span></label>
-          </fieldset>
-        </div>
-      </section>
-
-      <div class="invite-submit-row"><p>После создания ссылку можно скопировать один раз. Секретный токен в базе не хранится в открытом виде.</p><button type="submit">Создать приглашение</button></div>
-    </form>
-  </section>
-
-  <section class="panel invite-history-panel">
-    <div class="panel-heading"><div><p class="section-kicker">История</p><h2>Созданные приглашения</h2></div></div>
-    {{if .Invites}}
-    <div class="table-scroll invite-history-table"><table><thead><tr><th>ID</th><th>Создал</th><th>Доступ</th><th>Ограничения</th><th>Учётная запись</th><th>Активации</th><th>Ссылка истекает</th><th>Статус</th><th></th></tr></thead><tbody>
-    {{range .Invites}}
-      <tr>
-        <td data-label="ID">{{.ID}}</td>
-        <td data-label="Создал">{{.CreatedBy}}</td>
-        <td data-label="Доступ"><div class="invite-badge-list">{{if .GrantQuickGeneration}}<span class="badge ok">Быстрая генерация</span>{{if .GrantTextToImage}}<span class="badge">Текст в изображение</span>{{end}}{{if .GrantImageToImage}}<span class="badge">Фото и промт</span>{{end}}{{if .GrantVideo}}<span class="badge">Видео</span>{{end}}{{if .GrantAdvancedGenerationSettings}}<span class="badge">Точные настройки</span>{{end}}{{if .PauseMiningForQuickGeneration}}<span class="badge">Пауза майнинга</span>{{end}}{{end}}{{if .QueuePriority}}<span class="badge warning">Приоритет</span>{{end}}{{if .GrantTrainImageLora}}<span class="badge ok">Обучение LoRA</span>{{end}}{{if .GrantComfyUI}}<span class="badge">ComfyUI</span>{{end}}{{if .GrantOpenWebUI}}<span class="badge">OpenWebUI</span>{{end}}</div></td>
-        <td data-label="Ограничения"><div class="invite-cell-stack"><small class="table-note"><b>Фото:</b> {{if gt .GenerationDailyLimit 0}}{{.GenerationDailyLimit}}/сутки{{else}}без суточного{{end}}, {{if gt .GenerationTotalLimit 0}}{{.GenerationTotalLimit}} всего{{else}}без общего{{end}}</small>{{if .GrantVideo}}<small class="table-note"><b>Видео:</b> {{if gt .VideoGenerationDailyLimit 0}}{{.VideoGenerationDailyLimit}}/сутки{{else}}без суточного{{end}}, {{if gt .VideoGenerationTotalLimit 0}}{{.VideoGenerationTotalLimit}} всего{{else}}без общего{{end}} · база до {{.MaxVideoGenerationQuality}}p</small>{{end}}</div></td>
-        <td data-label="Учётная запись"><div class="invite-cell-stack">{{if gt .AccountLifetimeSeconds 0}}<span class="badge warning">Временная</span><small class="table-note">{{accountLifetimeLabel .AccountLifetimeSeconds}} после регистрации</small>{{else}}<span class="badge">Постоянная</span>{{end}}</div></td>
-        <td data-label="Активации">{{.UsedCount}} / {{.MaxUses}}</td>
-        <td data-label="Ссылка истекает">{{formatTime .ExpiresAt}}</td>
-        <td data-label="Статус"><span class="badge {{if eq .Status "active"}}ok{{else}}danger{{end}}">{{inviteStatusLabel .Status}}</span></td>
-        <td data-label="Действия"><div class="table-actions">
-          <form method="post" action="/admin/invites/{{.ID}}/{{if .Revoked}}unrevoke{{else}}revoke{{end}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="action-button {{if .Revoked}}restore{{else}}warning{{end}}" {{if not .Revoked}}data-confirm="Отозвать это приглашение?"{{end}}><span class="action-icon" aria-hidden="true">{{if .Revoked}}&#8634;{{else}}&#8722;{{end}}</span>{{if .Revoked}}Вернуть{{else}}Отозвать{{end}}</button></form>
-          <form method="post" action="/admin/invites/{{.ID}}/delete"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="action-button danger" type="submit" data-confirm="Удалить приглашение навсегда? Ссылка больше не будет работать."><span class="action-icon" aria-hidden="true">&#215;</span>Удалить</button></form>
-        </div></td>
-      </tr>
-    {{end}}
-    </tbody></table></div>
-    {{else}}
-    <div class="invite-history-empty ui-empty-state"><span aria-hidden="true">+</span><div><h3>Приглашений пока нет</h3><p>Созданные ссылки появятся здесь вместе со статусом, сроком действия и доступами.</p></div></div>
-    {{end}}
-  </section>
+  {{template "access_invitation_list" .}}
 </main>
 </body></html>
 {{end}}

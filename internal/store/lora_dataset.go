@@ -18,7 +18,7 @@ var (
 )
 
 const datasetColumns = `id,user_id,name,revision,manifest_cipher,image_count,size_bytes,created_at,updated_at,expires_at`
-const datasetAssetColumns = `id,user_id,name,content_hash,mime_type,size_bytes,width,height,created_at`
+const datasetAssetColumns = `id,user_id,name,content_hash,mime_type,size_bytes,width,height,created_at,quality_cipher`
 const datasetSnapshotColumns = `id,COALESCE(dataset_id,''),user_id,name,revision,manifest_cipher,manifest_hash,image_count,size_bytes,created_at,expires_at`
 
 type datasetScanner interface{ Scan(...any) error }
@@ -28,7 +28,7 @@ func scanDataset(scanner datasetScanner) (row domain.LoraDatasetRow, err error) 
 	return
 }
 func scanDatasetAsset(scanner datasetScanner) (row domain.LoraDatasetAsset, err error) {
-	err = scanner.Scan(&row.ID, &row.UserID, &row.Name, &row.Hash, &row.MIMEType, &row.SizeBytes, &row.Width, &row.Height, &row.CreatedAt)
+	err = scanner.Scan(&row.ID, &row.UserID, &row.Name, &row.Hash, &row.MIMEType, &row.SizeBytes, &row.Width, &row.Height, &row.CreatedAt, &row.QualityCipher)
 	return
 }
 func scanDatasetSnapshot(scanner datasetScanner) (row domain.LoraDatasetSnapshot, err error) {
@@ -104,6 +104,18 @@ func (s *Store) SaveLoraDataset(ctx context.Context, userID int64, id string, ex
 	if row.Revision != expected {
 		return row, ErrLoraDatasetConflict
 	}
+	row, err = saveLoraDatasetTx(ctx, tx, row, name, cipher, assetIDs)
+	if err != nil {
+		return row, err
+	}
+	return row, tx.Commit()
+}
+
+func saveLoraDatasetTx(ctx context.Context, tx *sql.Tx, row domain.LoraDatasetRow, name string, cipher []byte, assetIDs []string) (domain.LoraDatasetRow, error) {
+	if len(assetIDs) > domain.LoraDatasetMaxImages {
+		return row, ErrLoraDatasetQuota
+	}
+	userID, id := row.UserID, row.ID
 	// Share locks protect referenced assets from orphan collection until the
 	// new manifest and its reference set are committed together.
 	assets, err := tx.QueryContext(ctx, `SELECT id,size_bytes FROM lora_dataset_assets WHERE user_id=$1 AND id=ANY($2) FOR SHARE`, userID, pq.Array(assetIDs))
@@ -148,7 +160,7 @@ func (s *Store) SaveLoraDataset(ctx context.Context, userID int64, id string, ex
 	if _, err = tx.ExecContext(ctx, `INSERT INTO lora_dataset_asset_refs(asset_id,dataset_id) SELECT DISTINCT unnest($1::text[]),$2`, pq.Array(assetIDs), id); err != nil {
 		return row, err
 	}
-	return row, tx.Commit()
+	return row, nil
 }
 
 func (s *Store) DeleteLoraDataset(ctx context.Context, userID int64, id string, revision int64) error {
@@ -165,6 +177,21 @@ func (s *Store) DeleteLoraDataset(ctx context.Context, userID int64, id string, 
 
 func (s *Store) LoraDatasetAsset(ctx context.Context, userID int64, id string) (domain.LoraDatasetAsset, error) {
 	return scanDatasetAsset(s.db.QueryRowContext(ctx, `SELECT `+datasetAssetColumns+` FROM lora_dataset_assets WHERE id=$1 AND user_id=$2`, id, userID))
+}
+
+func (s *Store) SaveLoraDatasetQuality(ctx context.Context, asset domain.LoraDatasetAsset, cipher []byte) error {
+	if len(cipher) == 0 || len(cipher) > 4096 {
+		return errors.New("invalid dataset quality payload")
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE lora_dataset_assets SET quality_cipher=$4 WHERE id=$1 AND user_id=$2 AND content_hash=$3`, asset.ID, asset.UserID, asset.Hash, cipher)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err == nil && count == 0 {
+		return ErrLoraDatasetAsset
+	}
+	return err
 }
 
 func (s *Store) LoraDatasetStorageBytes(ctx context.Context, userID int64) (int64, error) {

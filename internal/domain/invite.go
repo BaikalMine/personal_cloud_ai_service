@@ -4,9 +4,11 @@ import "time"
 
 type InviteAccess struct {
 	ID                              int64
+	ExpiresAt                       time.Time
 	GrantComfyUI                    bool
 	GrantOpenWebUI                  bool
 	GrantQuickGeneration            bool
+	GrantHarness                    bool
 	GrantTextToImage                bool
 	GrantImageToImage               bool
 	GrantVideo                      bool
@@ -23,6 +25,7 @@ type InviteAccess struct {
 }
 
 type InviteRow struct {
+	GrantHarness                    bool
 	ID                              int64
 	CreatedBy                       string
 	MaxUses                         int

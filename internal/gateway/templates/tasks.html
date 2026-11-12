@@ -1,0 +1,54 @@
+{{define "tasks"}}
+{{template "head" .}}
+<link rel="stylesheet" href="/static/tasks.css?v={{.AssetVersion}}">
+<script src="/static/task-model.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/postprocess-view.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/task-gpu.js?v={{.AssetVersion}}" defer></script>
+<script src="/static/tasks.js?v={{.AssetVersion}}" defer></script>
+{{template "nav" .}}
+<main class="page task-page" id="main-content" data-task-page data-csrf="{{.CSRF}}" data-owner="{{.CurrentUser.ID}}">
+  <header class="task-page-heading">
+    <div><h1>Задачи</h1><p class="muted" data-task-count>Загрузка задач...</p></div>
+    <button class="ghost task-icon-button" type="button" data-task-refresh title="Обновить задачи" aria-label="Обновить задачи"><i data-lucide="refresh-cw" aria-hidden="true"></i></button>
+  </header>
+  <form class="task-filters" data-task-filters>
+    <div class="task-type-filters">
+    <fieldset class="ui-segmented ui-segmented--compact task-types" aria-label="Тип задач">
+      <legend class="visually-hidden">Тип задач</legend>
+      <label class="ui-segment"><input type="radio" name="kind" value="" checked><span>Все</span></label>
+      {{if .TaskGenerationAccess}}<label class="ui-segment" data-task-access="generation"><input type="radio" name="kind" value="generation"><span>Генерации</span></label>{{end}}
+      {{if .TaskTrainingAccess}}<label class="ui-segment" data-task-access="training"><input type="radio" name="kind" value="lora_training"><span>Обучение</span></label><label class="ui-segment" data-task-access="training"><input type="radio" name="kind" value="lora_caption"><span>Описания</span></label>{{end}}
+    </fieldset>
+    {{if .TaskTrainingAccess}}<label class="ui-field task-caption-view" data-task-caption-view hidden><span class="ui-field-label">Представление</span><select name="caption_view"><option value="frames">Кадры</option><option value="series">Серии</option></select></label>{{end}}
+    </div>
+    <div class="ui-field-grid task-filter-fields">
+      <label class="ui-field task-search"><span class="ui-field-label">Поиск</span><input type="search" name="search" maxlength="200" placeholder="Название или ID задачи" autocomplete="off"></label>
+      <label class="ui-field"><span class="ui-field-label">Состояние</span><select name="state"><option value="">Все состояния</option><option value="draft">Создано</option><option value="queued">В очереди</option><option value="waiting_for_resources">Ожидание ресурсов</option><option value="preparing">Подготовка</option><option value="uploading">Передача</option><option value="caching">Кеширование</option><option value="running">Выполняется</option><option value="postprocessing">Постобработка</option><option value="archiving">Сохранение</option><option value="installing">Установка</option><option value="completed">Готово</option><option value="failed">Ошибка</option><option value="cancelled">Отменено</option><option value="expired">Истекло</option><option value="partial" hidden disabled>Завершено частично</option></select></label>
+      <label class="ui-field"><span class="ui-field-label">С даты</span><input type="date" name="from"></label>
+      <label class="ui-field"><span class="ui-field-label">По дату</span><input type="date" name="to"></label>
+      <button class="ghost task-icon-button task-filter-reset" type="button" data-task-reset title="Сбросить фильтры" aria-label="Сбросить фильтры"><i data-lucide="filter-x" aria-hidden="true"></i></button>
+    </div>
+  </form>
+  <div class="task-connection ui-status-banner" data-task-connection role="status" hidden><i data-lucide="wifi-off" aria-hidden="true"></i><span data-task-connection-text></span><button type="button" class="ghost" data-task-check>Проверить сейчас</button></div>
+  <p class="ui-status-banner is-error" data-task-error role="alert" hidden></p>
+  <div class="task-workspace">
+    <section class="task-results" aria-label="Список задач" data-task-results>
+      <div class="task-list" data-task-list aria-busy="true"><p class="ui-empty-state">Загрузка задач...</p></div>
+      <div class="task-list-footer"><button type="button" class="ghost" data-task-more hidden>Показать ещё</button><span class="muted" data-task-loaded></span></div>
+      <noscript><p class="ui-status-banner">Обновления задач недоступны без JavaScript.</p><a href="/generate">Генерации</a> <a href="/train-lora">Обучение и описания</a></noscript>
+    </section>
+    <aside class="task-selection-placeholder" data-task-placeholder><i data-lucide="list-checks" aria-hidden="true"></i><h2>Задача не выбрана</h2></aside>
+    <dialog class="task-inspector ui-dialog" data-task-inspector aria-labelledby="task-detail-title">
+      <header class="task-inspector-heading"><div><p class="muted" data-task-detail-kind></p><h2 id="task-detail-title" data-task-detail-title>Задача</h2></div><button type="button" class="ghost task-icon-button" data-task-close title="Вернуться к списку" aria-label="Вернуться к списку"><i data-lucide="x" aria-hidden="true"></i></button></header>
+      <div class="task-inspector-body" data-task-detail-body></div>
+      <p class="task-action-notice ui-status-banner" data-task-action-notice role="status" hidden></p>
+      <footer class="task-inspector-actions" data-task-actions></footer>
+    </dialog>
+  </div>
+  <dialog class="task-confirm ui-dialog" data-task-confirm aria-labelledby="task-confirm-title">
+    <h2 id="task-confirm-title">Отменить задачу?</h2><p data-task-confirm-name></p><p class="muted" data-task-confirm-copy></p>
+    <div class="task-confirm-actions"><button type="button" class="ghost" data-task-confirm-back>Оставить</button><button type="button" class="danger" data-task-confirm-submit>Отменить задачу</button></div>
+  </dialog>
+</main>
+</body></html>
+{{end}}

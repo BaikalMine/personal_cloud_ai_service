@@ -509,8 +509,8 @@ func assertComfyInputLifecycle(t *testing.T, ctx context.Context, db *sql.DB, re
 	if err != nil || len(items) != 1 || items[0].ID != reservationID {
 		t.Fatalf("expired reserved ComfyUI input = %#v, err=%v", items, err)
 	}
-	if deleted, err := repository.DeleteComfyInputAssetsByIDs(ctx, []string{reservationID}); err != nil || deleted != 1 {
-		t.Fatalf("delete reserved ComfyUI input = %d, err=%v", deleted, err)
+	if recorded, err := repository.RecordComfyInputCleanup(ctx, []domain.ComfyInputCleanupResult{{ExpiredComfyInputAsset: items[0], ObservedSizeBytes: items[0].SizeBytes, ObservedHash: items[0].ContentHash, Outcome: "missing"}}, time.Hour); err != nil || recorded.Completed != 1 {
+		t.Fatalf("delete reserved ComfyUI input = %+v, err=%v", recorded, err)
 	}
 }
 
@@ -532,7 +532,7 @@ func assertComfyOutputCleanupLifecycle(t *testing.T, ctx context.Context, db *sq
 	}
 	if due, err := repository.DueComfyOutputCleanup(ctx, 10); err != nil || len(due) != 1 || due[0].Filename != scheduled.Filename {
 		t.Fatalf("scheduled cleanup = %#v err=%v", due, err)
-	} else if _, err := repository.DeleteComfyOutputCleanupByIDs(ctx, []int64{due[0].ID}); err != nil {
+	} else if _, err := repository.RecordComfyOutputCleanup(ctx, []domain.ComfyOutputCleanupResult{{ComfyOutputCleanupTombstone: due[0], Outcome: "missing"}}, time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	eventID, err := repository.InsertContentEvent(ctx, domain.ContentEventRecord{
@@ -586,14 +586,14 @@ func assertComfyOutputCleanupLifecycle(t *testing.T, ctx context.Context, db *sq
 	if err != nil || len(tombstones) != 1 || tombstones[0].ContentHash != contentHash {
 		t.Fatalf("ComfyUI cleanup tombstones = %#v, err=%v", tombstones, err)
 	}
-	if deferred, err := repository.DeferComfyOutputCleanup(ctx, []int64{tombstones[0].ID}, time.Hour); err != nil || deferred != 1 {
-		t.Fatalf("defer ComfyUI output cleanup = %d, err=%v", deferred, err)
+	if deferred, err := repository.RecordComfyOutputCleanup(ctx, []domain.ComfyOutputCleanupResult{{ComfyOutputCleanupTombstone: tombstones[0], Outcome: "mismatched"}}, time.Hour); err != nil || deferred.Deferred != 1 {
+		t.Fatalf("defer ComfyUI output cleanup = %+v, err=%v", deferred, err)
 	}
 	if due, err := repository.DueComfyOutputCleanup(ctx, 10); err != nil || len(due) != 0 {
 		t.Fatalf("deferred tombstone remained due: %#v err=%v", due, err)
 	}
-	if deleted, err := repository.DeleteComfyOutputCleanupByIDs(ctx, []int64{tombstones[0].ID}); err != nil || deleted != 1 {
-		t.Fatalf("delete ComfyUI cleanup tombstone = %d, err=%v", deleted, err)
+	if deleted, err := repository.RecordComfyOutputCleanup(ctx, []domain.ComfyOutputCleanupResult{{ComfyOutputCleanupTombstone: tombstones[0], Outcome: "deleted"}}, time.Hour); err != nil || deleted.Completed != 1 {
+		t.Fatalf("delete ComfyUI cleanup tombstone = %+v, err=%v", deleted, err)
 	}
 	if _, err := db.ExecContext(ctx, `DELETE FROM content_events WHERE id=$1`, eventID); err != nil {
 		t.Fatal(err)
@@ -1454,7 +1454,7 @@ func assertLoraTrainingLifecycle(t *testing.T, ctx context.Context, db *sql.DB, 
 	if _, err := repository.CreateLoraTrainingJob(ctx, newJob("integration-lora-job-duplicate", "integration_lora_duplicate")); !errors.Is(err, store.ErrLoraTrainingAlreadyActive) {
 		t.Fatalf("second active LoRA job error=%v, want ErrLoraTrainingAlreadyActive", err)
 	}
-	claimed, err := repository.ClaimNextLoraTrainingJob(ctx)
+	claimed, err := repository.ClaimNextLoraTrainingJob(ctx, "test-claim")
 	if err != nil || claimed.ID != first.ID || claimed.State != domain.LoraTrainingUploading {
 		t.Fatalf("claim LoRA training job: job=%+v err=%v", claimed, err)
 	}
@@ -1462,7 +1462,7 @@ func assertLoraTrainingLifecycle(t *testing.T, ctx context.Context, db *sql.DB, 
 	if err != nil || cancelling.CancellationRequestedAt == nil || cancelling.State != domain.LoraTrainingUploading {
 		t.Fatalf("request LoRA cancellation during upload: job=%+v err=%v", cancelling, err)
 	}
-	cancelled, err := repository.RequeueLoraTrainingJob(ctx, first.ID, "retry")
+	cancelled, err := repository.RequeueLoraTrainingJob(ctx, first.ID, "test-claim", "retry")
 	if err != nil || cancelled.State != domain.LoraTrainingCancelled || cancelled.FinishedAt == nil {
 		t.Fatalf("finalize concurrent LoRA cancellation: job=%+v err=%v", cancelled, err)
 	}
@@ -1471,7 +1471,7 @@ func assertLoraTrainingLifecycle(t *testing.T, ctx context.Context, db *sql.DB, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repository.ClaimNextLoraTrainingJob(ctx); err != nil {
+	if _, err := repository.ClaimNextLoraTrainingJob(ctx, "test-claim"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repository.RequestLoraTrainingCancellation(ctx, second.PublicID, userID, false); err != nil {
@@ -1489,7 +1489,7 @@ func assertLoraTrainingLifecycle(t *testing.T, ctx context.Context, db *sql.DB, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repository.ClaimNextLoraTrainingJob(ctx); err != nil {
+	if _, err := repository.ClaimNextLoraTrainingJob(ctx, "test-claim"); err != nil {
 		t.Fatal(err)
 	}
 	if err := repository.AttachLoraTrainingAgentJob(ctx, third.ID, "agent-job-integration", "Подготовка", "Агент принял датасет", 5); err != nil {
@@ -1530,7 +1530,7 @@ func assertLoraTrainingLifecycle(t *testing.T, ctx context.Context, db *sql.DB, 
 func resetIntegrationDatabase(t *testing.T, db *sql.DB) {
 	t.Helper()
 	if _, err := db.Exec(`
-		TRUNCATE service_observations, gateway_observations, miners, comfy_output_cleanup_tombstones, comfy_input_assets, comfy_userdata, comfy_settings, comfy_output_ownership, content_media, prompt_assistant_runs, content_events, websocket_sessions, proxy_requests,
+		TRUNCATE comfy_storage_operations, training_storage_operations, service_observations, gateway_observations, miners, comfy_input_cleanup_receipts, comfy_output_cleanup_receipts, comfy_output_cleanup_tombstones, comfy_input_assets, comfy_userdata, comfy_settings, comfy_output_ownership, content_media, prompt_assistant_runs, content_events, websocket_sessions, proxy_requests,
 			audit_log, invite_uses, invites, sessions, users RESTART IDENTITY CASCADE
 		;
 		INSERT INTO miners (name, script_path, process_name, enabled, is_default)

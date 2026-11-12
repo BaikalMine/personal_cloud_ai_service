@@ -26,6 +26,11 @@ const (
 // preserving the model's real constraints: dimensions are divisible by 32 and
 // the temporal latent must contain 4 + 17*n frames.
 func normalizeMiniMaxH3(input *generationForm) error {
+	if err := normalizeMiniMaxLong(input); err != nil {
+		return err
+	}
+	beta5 := miniMaxErosBeta5Turbo(input.ModelName) && input.VideoIntegratedTurbo
+	beta6 := miniMaxErosBeta6(input.ModelName) && input.VideoIntegratedTurbo
 	if input.VideoQuality == 0 {
 		input.VideoQuality = miniMaxH3DefaultQuality
 	}
@@ -55,6 +60,8 @@ func normalizeMiniMaxH3(input *generationForm) error {
 	}
 	if input.VideoSteps == 0 {
 		switch {
+		case beta6:
+			input.VideoSteps = 10
 		case input.VideoIntegratedTurbo:
 			input.VideoSteps = 8
 		case input.VideoTurbo:
@@ -63,8 +70,11 @@ func normalizeMiniMaxH3(input *generationForm) error {
 			input.VideoSteps = 25
 		}
 	}
-	if input.VideoIntegratedTurbo && (input.VideoSteps < 6 || input.VideoSteps > 8) {
-		return errors.New("для H3 Eros Max beta4 выберите от 6 до 8 шагов")
+	if beta6 && (input.VideoSteps < 8 || input.VideoSteps > 12) {
+		return errors.New("для H3 Eros Max beta6 выберите от 8 до 12 шагов")
+	}
+	if input.VideoIntegratedTurbo && !beta6 && (input.VideoSteps < 6 || input.VideoSteps > 8) {
+		return errors.New("для H3 Eros Max Turbo выберите от 6 до 8 шагов")
 	}
 	if !input.VideoIntegratedTurbo && input.VideoTurbo && (input.VideoSteps < 4 || input.VideoSteps > 8) {
 		return errors.New("для MiniMax H3 Turbo выберите от 4 до 8 шагов")
@@ -116,30 +126,37 @@ func normalizeMiniMaxH3(input *generationForm) error {
 	if input.VideoReferenceSize != "match" && input.VideoReferenceSize != "max" {
 		return errors.New("выберите корректное качество референсов")
 	}
+	if beta5 {
+		input.VideoSampler, input.VideoScheduler = "er_sde", "beta57"
+	}
 	if input.VideoScheduler == "" {
 		input.VideoScheduler = "simple"
 	}
-	if !miniMaxH3Allowed(input.VideoScheduler, "simple", "sgm_uniform", "karras", "exponential", "beta", "normal") {
+	if !beta5 && !miniMaxH3Allowed(input.VideoScheduler, "simple", "sgm_uniform", "karras", "exponential", "beta", "normal") {
 		return errors.New("выберите корректный планировщик MiniMax H3")
 	}
 	if input.VideoSampler == "" {
 		input.VideoSampler = "euler"
 	}
-	if input.VideoIntegratedTurbo {
+	if input.VideoIntegratedTurbo && !beta5 && !beta6 {
 		input.VideoSampler = "euler"
 	}
-	if !miniMaxH3Allowed(input.VideoSampler, "euler", "res_multistep") {
+	if !beta5 && !miniMaxH3Allowed(input.VideoSampler, "euler", "res_multistep") {
 		return errors.New("выберите корректный сэмплер MiniMax H3")
 	}
 	if input.VideoShiftVideo == 0 {
-		if input.VideoIntegratedTurbo {
+		if beta6 {
+			input.VideoShiftVideo = 10
+		} else if input.VideoIntegratedTurbo {
 			input.VideoShiftVideo = 12
 		} else {
 			input.VideoShiftVideo = 11
 		}
 	}
 	if input.VideoShiftAudio == 0 {
-		if input.VideoIntegratedTurbo {
+		if beta6 {
+			input.VideoShiftAudio = 3
+		} else if input.VideoIntegratedTurbo {
 			input.VideoShiftAudio = 7
 		} else {
 			input.VideoShiftAudio = 3
@@ -434,6 +451,9 @@ func miniMaxH3Node(classType string, inputs map[string]any) map[string]any {
 // workflow. The H.264 output is deliberate so generated MP4 files remain
 // playable on desktop and Android.
 func buildMiniMaxH3Prompt(input generationForm) (map[string]any, error) {
+	if input.Width < 32 || input.Height < 32 || input.Width%32 != 0 || input.Height%32 != 0 {
+		return nil, errors.New("MiniMax H3: ширина и высота видеокадра должны быть положительными и кратными 32")
+	}
 	if strings.TrimSpace(input.AudioVAE) == "" || strings.TrimSpace(input.TextEncoder) == "" || strings.TrimSpace(input.VAE) == "" {
 		return nil, errors.New("MiniMax H3: не найдены обязательные модели")
 	}
@@ -507,6 +527,13 @@ func buildMiniMaxH3Prompt(input generationForm) (map[string]any, error) {
 		nodes["11"] = miniMaxH3Node("KSamplerSelect", map[string]any{"sampler_name": input.Sampler})
 	}
 	clipInput := miniMaxH3ApplyLoras(nodes, input, modelNodeID)
+	if miniMaxErosBeta5Turbo(input.ModelName) && input.VideoIntegratedTurbo {
+		// beta5 uses the model's own sampling shift, matching the AIHUB profile.
+		modelLink := nodes["9"].(map[string]any)["inputs"].(map[string]any)["model"]
+		nodes["12"].(map[string]any)["inputs"].(map[string]any)["model"] = modelLink
+		nodes["13"].(map[string]any)["inputs"].(map[string]any)["model"] = modelLink
+		delete(nodes, "9")
+	}
 
 	images := input.images()
 	rawImages := make([]string, len(images))

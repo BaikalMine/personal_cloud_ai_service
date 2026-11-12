@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"ai-access-gateway/internal/database"
+	"ai-access-gateway/internal/domain"
 	"ai-access-gateway/internal/security"
 )
 
@@ -128,61 +130,76 @@ func (p RetentionPolicy) WithDefaults() RetentionPolicy {
 }
 
 type Config struct {
-	DatabaseURL                         string
-	AdminUsername                       string
-	AdminPassword                       string
-	SessionSecret                       string
-	PublicBaseURL                       string
-	PublicURL                           *url.URL
-	AdminBaseURL                        string
-	AdminURL                            *url.URL
-	CookieSecure                        bool
-	PublicAddr                          string
-	AdminAddr                           string
-	ComfyUIUpstream                     *url.URL
-	OpenWebUIUpstream                   *url.URL
-	OllamaUpstream                      *url.URL
-	ContentModeratorUpstream            *url.URL
-	PromptAssistantModel                string
-	PromptAssistantVisionModel          string
-	PromptAssistantImageNumPredict      int
-	PromptAssistantImageThinkNumPredict int
-	PromptAssistantVideoNumPredict      int
-	PromptAssistantVideoThinkNumPredict int
-	PromptAssistantImageTimeout         time.Duration
-	PromptAssistantVideoTimeout         time.Duration
-	PromptAssistantKeepAlive            string
-	PromptAssistantVisionTimeout        time.Duration
-	PromptAssistantVisionKeepAlive      string
-	ComfyUIUpstreamAuthHeader           string
-	OpenWebUIUpstreamAuth               string
-	MiningAgentURL                      *url.URL
-	MiningAgentToken                    string
-	SystemMonitorAgentURL               *url.URL
-	SystemMonitorAgentToken             string
-	UpdateAgentURL                      *url.URL
-	UpdateAgentToken                    string
-	LoraTrainingAgentURL                *url.URL
-	LoraTrainingAgentToken              string
-	VirusTotalAPIKey                    string
-	FeatureSuggestionsEnabled           bool
-	TrustedProxies                      []*net.IPNet
-	AdminAllowedNetworks                []*net.IPNet
-	SessionTTL                          time.Duration
-	SessionIdleTimeout                  time.Duration
-	AccountLockThreshold                int
-	AccountLockDuration                 time.Duration
-	DependencyCheckInterval             time.Duration
-	DependencyStaleAfter                time.Duration
-	DependencyOfflineAfter              time.Duration
-	ComfyObjectInfoCacheTTL             time.Duration
-	ComfyObjectInfoMaxStale             time.Duration
-	MediaInFlightLimitBytes             int64
-	MediaSpoolDir                       string
-	PprofEnabled                        bool
-	Retention                           RetentionPolicy
-	DatabaseCleanupBatchSize            int
-	DatabaseCleanupMaxBatches           int
+	Harness                              HarnessConfig
+	DatabaseURL                          string
+	AdminUsername                        string
+	AdminPassword                        string
+	SessionSecret                        string
+	PublicBaseURL                        string
+	PublicURL                            *url.URL
+	AdminBaseURL                         string
+	AdminURL                             *url.URL
+	CookieSecure                         bool
+	PublicAddr                           string
+	AdminAddr                            string
+	ComfyUIUpstream                      *url.URL
+	ComfyGPUGuardRequired                bool
+	ComfyGPUGuardToken                   string
+	ComfyStorageCleanupEnabled           bool
+	OllamaGPUGuardRequired               bool
+	OllamaGPUGuardToken                  string
+	OpenWebUIUpstream                    *url.URL
+	OllamaUpstream                       *url.URL
+	InferenceWorkerURL                   *url.URL
+	ContentModeratorUpstream             *url.URL
+	PromptAssistantModel                 string
+	PromptAssistantModels                []domain.PromptAssistantModel
+	LoraCaptionDurableInference          bool
+	PromptAssistantDurableJobs           bool
+	PromptAssistantVisionModel           string
+	PromptAssistantImageNumPredict       int
+	PromptAssistantImageThinkNumPredict  int
+	PromptAssistantVideoNumPredict       int
+	PromptAssistantVideoThinkNumPredict  int
+	PromptAssistantReasoningTimeout      time.Duration
+	PromptAssistantImageTimeout          time.Duration
+	PromptAssistantVideoTimeout          time.Duration
+	PromptAssistantKeepAlive             string
+	PromptAssistantVisionTimeout         time.Duration
+	PromptAssistantVisionKeepAlive       string
+	ComfyUIUpstreamAuthHeader            string
+	OpenWebUIUpstreamAuth                string
+	MiningAgentURL                       *url.URL
+	MiningAgentToken                     string
+	MiningFencedCommands                 bool
+	SystemMonitorAgentURL                *url.URL
+	SystemMonitorAgentToken              string
+	UpdateAgentURL                       *url.URL
+	UpdateAgentToken                     string
+	LoraTrainingAgentURL                 *url.URL
+	LoraTrainingAgentToken               string
+	GenerationComponentInspectionEnabled bool
+	VirusTotalAPIKey                     string
+	FeatureSuggestionsEnabled            bool
+	TrustedProxies                       []*net.IPNet
+	AdminAllowedNetworks                 []*net.IPNet
+	SessionTTL                           time.Duration
+	SessionIdleTimeout                   time.Duration
+	AccountLockThreshold                 int
+	AccountLockDuration                  time.Duration
+	DependencyCheckInterval              time.Duration
+	DependencyStaleAfter                 time.Duration
+	DependencyOfflineAfter               time.Duration
+	ComfyObjectInfoCacheTTL              time.Duration
+	ComfyObjectInfoMaxStale              time.Duration
+	MediaInFlightLimitBytes              int64
+	MediaSpoolDir                        string
+	PprofEnabled                         bool
+	RestoreDrillMode                     bool
+	ReleaseValidation                    *database.RuntimeValidationRequest
+	Retention                            RetentionPolicy
+	DatabaseCleanupBatchSize             int
+	DatabaseCleanupMaxBatches            int
 }
 
 func Load() (Config, error) {
@@ -206,11 +223,23 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("OLLAMA_UPSTREAM: %w", err)
 	}
+	inferenceWorker, err := parseUpstream(env("INFERENCE_WORKER_URL", "http://inference-worker:8096"))
+	if err != nil || inferenceWorker.User != nil {
+		return Config{}, fmt.Errorf("INFERENCE_WORKER_URL must be an HTTP address without credentials")
+	}
+	harness, err := loadHarnessConfig()
+	if err != nil {
+		return Config{}, err
+	}
 	contentModerator, err := parseUpstream(env("CONTENT_MODERATOR_UPSTREAM", "http://content-moderator:8080"))
 	if err != nil {
 		return Config{}, fmt.Errorf("CONTENT_MODERATOR_UPSTREAM: %w", err)
 	}
 	promptAssistantModel := strings.TrimSpace(env("PROMPT_ASSISTANT_MODEL", "huihui_ai/gemma-4-abliterated:e4b"))
+	promptAssistantModels, err := parsePromptAssistantModels(env("PROMPT_ASSISTANT_MODELS", "[]"))
+	if err != nil {
+		return Config{}, err
+	}
 	if promptAssistantModel == "" || len(promptAssistantModel) > 256 {
 		return Config{}, fmt.Errorf("PROMPT_ASSISTANT_MODEL must contain between 1 and 256 characters")
 	}
@@ -243,6 +272,10 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	promptAssistantKeepAlive := strings.TrimSpace(env("PROMPT_ASSISTANT_KEEP_ALIVE", "0"))
+	promptAssistantReasoningTimeout, err := durationEnvBetween("PROMPT_ASSISTANT_REASONING_TIMEOUT", 15*time.Minute, 15*time.Second, 15*time.Minute)
+	if err != nil {
+		return Config{}, err
+	}
 	keepAliveDuration, err := time.ParseDuration(promptAssistantKeepAlive)
 	if err != nil || keepAliveDuration < 0 || keepAliveDuration > time.Hour {
 		return Config{}, fmt.Errorf("PROMPT_ASSISTANT_KEEP_ALIVE must be a duration between 0 and 1h")
@@ -362,6 +395,14 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	restoreDrillMode, err := booleanEnv("RESTORE_DRILL_MODE", false)
+	if err != nil {
+		return Config{}, err
+	}
+	releaseValidation, err := loadReleaseValidation(restoreDrillMode)
+	if err != nil {
+		return Config{}, err
+	}
 	retention, err := loadRetentionPolicy()
 	if err != nil {
 		return Config{}, err
@@ -391,6 +432,54 @@ func Load() (Config, error) {
 	loraTrainingAgentToken := strings.TrimSpace(env("LORA_TRAINING_AGENT_TOKEN", ""))
 	virusTotalAPIKey := strings.TrimSpace(env("VIRUSTOTAL_API_KEY", ""))
 	featureSuggestionsEnabled := strings.EqualFold(env("FEATURE_SUGGESTIONS_ENABLED", "false"), "true")
+	generationComponentInspectionEnabled, err := booleanEnv("GENERATION_COMPONENT_INSPECTION_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	loraCaptionDurableInference, err := booleanEnv("LORA_CAPTION_DURABLE_INFERENCE", false)
+	if err != nil {
+		return Config{}, err
+	}
+	promptAssistantDurableJobs, err := booleanEnv("PROMPT_ASSISTANT_DURABLE_JOBS", false)
+	if err != nil {
+		return Config{}, err
+	}
+	miningFencedCommands, err := booleanEnv("MINING_FENCED_COMMANDS", false)
+	if err != nil {
+		return Config{}, err
+	}
+	comfyGPUGuardRequired, err := booleanEnv("COMFY_GPU_GUARD_REQUIRED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	comfyGPUGuardToken := strings.TrimSpace(env("COMFY_GPU_GUARD_TOKEN", ""))
+	if comfyGPUGuardRequired && (!miningFencedCommands || len(comfyGPUGuardToken) < 32 || len(comfyGPUGuardToken) > 256 || strings.IndexFunc(comfyGPUGuardToken, func(r rune) bool { return r < 33 || r > 126 }) >= 0) {
+		return Config{}, fmt.Errorf("COMFY_GPU_GUARD_REQUIRED requires MINING_FENCED_COMMANDS and a 32-256 character COMFY_GPU_GUARD_TOKEN")
+	}
+	comfyStorageCleanupEnabled, err := booleanEnv("COMFY_STORAGE_CLEANUP_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	if comfyStorageCleanupEnabled && (!comfyGPUGuardRequired || updateAgentURL == nil || len(updateAgentToken) < 32) {
+		return Config{}, fmt.Errorf("COMFY_STORAGE_CLEANUP_ENABLED requires COMFY_GPU_GUARD_REQUIRED and a configured update agent")
+	}
+	ollamaGPUGuardRequired, err := booleanEnv("OLLAMA_GPU_GUARD_REQUIRED", false)
+	if harness.Enabled() && !miningFencedCommands {
+		return Config{}, fmt.Errorf("Harness requires MINING_FENCED_COMMANDS for safe GPU admission")
+	}
+	if err != nil {
+		return Config{}, err
+	}
+	ollamaGPUGuardToken := strings.TrimSpace(env("OLLAMA_GPU_GUARD_TOKEN", ""))
+	if ollamaGPUGuardRequired && (!miningFencedCommands || len(ollamaGPUGuardToken) < 32 || len(ollamaGPUGuardToken) > 256 || strings.IndexFunc(ollamaGPUGuardToken, func(r rune) bool { return r < 33 || r > 126 }) >= 0) {
+		return Config{}, fmt.Errorf("OLLAMA_GPU_GUARD_REQUIRED requires MINING_FENCED_COMMANDS and a 32-256 character OLLAMA_GPU_GUARD_TOKEN")
+	}
+	if ollamaGPUGuardRequired && comfyGPUGuardRequired && ollamaGPUGuardToken == comfyGPUGuardToken {
+		return Config{}, fmt.Errorf("Ollama and ComfyUI GPU guard tokens must be distinct")
+	}
+	if ollamaGPUGuardRequired && (!loraCaptionDurableInference || !promptAssistantDurableJobs) {
+		return Config{}, fmt.Errorf("OLLAMA_GPU_GUARD_REQUIRED requires LORA_CAPTION_DURABLE_INFERENCE and PROMPT_ASSISTANT_DURABLE_JOBS")
+	}
 	if databaseURL == "" {
 		return Config{}, fmt.Errorf("DATABASE_URL is required")
 	}
@@ -430,61 +519,76 @@ func Load() (Config, error) {
 	}
 
 	return Config{
-		DatabaseURL:                         databaseURL,
-		AdminUsername:                       adminUsername,
-		AdminPassword:                       adminPassword,
-		SessionSecret:                       sessionSecret,
-		PublicBaseURL:                       strings.TrimRight(publicBaseURL.String(), "/"),
-		PublicURL:                           publicBaseURL,
-		AdminBaseURL:                        strings.TrimRight(adminBaseURL.String(), "/"),
-		AdminURL:                            adminBaseURL,
-		CookieSecure:                        cookieSecure,
-		PublicAddr:                          env("PUBLIC_ADDR", ":8090"),
-		AdminAddr:                           env("ADMIN_ADDR", ":8091"),
-		ComfyUIUpstream:                     comfy,
-		OpenWebUIUpstream:                   openWebUI,
-		OllamaUpstream:                      ollama,
-		ContentModeratorUpstream:            contentModerator,
-		PromptAssistantModel:                promptAssistantModel,
-		PromptAssistantVisionModel:          promptAssistantVisionModel,
-		PromptAssistantImageNumPredict:      promptAssistantImageNumPredict,
-		PromptAssistantImageThinkNumPredict: promptAssistantImageThinkNumPredict,
-		PromptAssistantVideoNumPredict:      promptAssistantVideoNumPredict,
-		PromptAssistantVideoThinkNumPredict: promptAssistantVideoThinkNumPredict,
-		PromptAssistantImageTimeout:         promptAssistantImageTimeout,
-		PromptAssistantVideoTimeout:         promptAssistantVideoTimeout,
-		PromptAssistantKeepAlive:            promptAssistantKeepAlive,
-		PromptAssistantVisionTimeout:        promptAssistantVisionTimeout,
-		PromptAssistantVisionKeepAlive:      promptAssistantVisionKeepAlive,
-		ComfyUIUpstreamAuthHeader:           comfyAuth,
-		OpenWebUIUpstreamAuth:               openWebUIAuth,
-		MiningAgentURL:                      miningAgentURL,
-		MiningAgentToken:                    miningAgentToken,
-		SystemMonitorAgentURL:               systemMonitorAgentURL,
-		SystemMonitorAgentToken:             systemMonitorAgentToken,
-		UpdateAgentURL:                      updateAgentURL,
-		UpdateAgentToken:                    updateAgentToken,
-		LoraTrainingAgentURL:                loraTrainingAgentURL,
-		LoraTrainingAgentToken:              loraTrainingAgentToken,
-		VirusTotalAPIKey:                    virusTotalAPIKey,
-		FeatureSuggestionsEnabled:           featureSuggestionsEnabled,
-		TrustedProxies:                      trustedProxies,
-		AdminAllowedNetworks:                adminNetworks,
-		SessionTTL:                          sessionTTL,
-		SessionIdleTimeout:                  sessionIdleTimeout,
-		AccountLockThreshold:                accountLockThreshold,
-		AccountLockDuration:                 accountLockDuration,
-		DependencyCheckInterval:             dependencyCheckInterval,
-		DependencyStaleAfter:                dependencyStaleAfter,
-		DependencyOfflineAfter:              dependencyOfflineAfter,
-		ComfyObjectInfoCacheTTL:             comfyObjectInfoCacheTTL,
-		ComfyObjectInfoMaxStale:             comfyObjectInfoMaxStale,
-		MediaInFlightLimitBytes:             int64(mediaInflightMB) << 20,
-		MediaSpoolDir:                       mediaSpoolDir,
-		PprofEnabled:                        pprofEnabled,
-		Retention:                           retention,
-		DatabaseCleanupBatchSize:            databaseCleanupBatchSize,
-		DatabaseCleanupMaxBatches:           databaseCleanupMaxBatches,
+		DatabaseURL:                          databaseURL,
+		AdminUsername:                        adminUsername,
+		AdminPassword:                        adminPassword,
+		SessionSecret:                        sessionSecret,
+		PublicBaseURL:                        strings.TrimRight(publicBaseURL.String(), "/"),
+		PublicURL:                            publicBaseURL,
+		AdminBaseURL:                         strings.TrimRight(adminBaseURL.String(), "/"),
+		AdminURL:                             adminBaseURL,
+		CookieSecure:                         cookieSecure,
+		PublicAddr:                           env("PUBLIC_ADDR", ":8090"),
+		AdminAddr:                            env("ADMIN_ADDR", ":8091"),
+		ComfyUIUpstream:                      comfy,
+		ComfyGPUGuardRequired:                comfyGPUGuardRequired,
+		ComfyGPUGuardToken:                   comfyGPUGuardToken,
+		ComfyStorageCleanupEnabled:           comfyStorageCleanupEnabled,
+		OllamaGPUGuardRequired:               ollamaGPUGuardRequired,
+		OllamaGPUGuardToken:                  ollamaGPUGuardToken,
+		OpenWebUIUpstream:                    openWebUI,
+		OllamaUpstream:                       ollama,
+		InferenceWorkerURL:                   inferenceWorker,
+		Harness:                              harness,
+		ContentModeratorUpstream:             contentModerator,
+		PromptAssistantModel:                 promptAssistantModel,
+		PromptAssistantModels:                promptAssistantModels,
+		LoraCaptionDurableInference:          loraCaptionDurableInference,
+		PromptAssistantDurableJobs:           promptAssistantDurableJobs,
+		PromptAssistantVisionModel:           promptAssistantVisionModel,
+		PromptAssistantImageNumPredict:       promptAssistantImageNumPredict,
+		PromptAssistantImageThinkNumPredict:  promptAssistantImageThinkNumPredict,
+		PromptAssistantVideoNumPredict:       promptAssistantVideoNumPredict,
+		PromptAssistantVideoThinkNumPredict:  promptAssistantVideoThinkNumPredict,
+		PromptAssistantReasoningTimeout:      promptAssistantReasoningTimeout,
+		PromptAssistantImageTimeout:          promptAssistantImageTimeout,
+		PromptAssistantVideoTimeout:          promptAssistantVideoTimeout,
+		PromptAssistantKeepAlive:             promptAssistantKeepAlive,
+		PromptAssistantVisionTimeout:         promptAssistantVisionTimeout,
+		PromptAssistantVisionKeepAlive:       promptAssistantVisionKeepAlive,
+		ComfyUIUpstreamAuthHeader:            comfyAuth,
+		OpenWebUIUpstreamAuth:                openWebUIAuth,
+		MiningAgentURL:                       miningAgentURL,
+		MiningAgentToken:                     miningAgentToken,
+		MiningFencedCommands:                 miningFencedCommands,
+		SystemMonitorAgentURL:                systemMonitorAgentURL,
+		SystemMonitorAgentToken:              systemMonitorAgentToken,
+		UpdateAgentURL:                       updateAgentURL,
+		UpdateAgentToken:                     updateAgentToken,
+		LoraTrainingAgentURL:                 loraTrainingAgentURL,
+		LoraTrainingAgentToken:               loraTrainingAgentToken,
+		GenerationComponentInspectionEnabled: generationComponentInspectionEnabled,
+		VirusTotalAPIKey:                     virusTotalAPIKey,
+		FeatureSuggestionsEnabled:            featureSuggestionsEnabled,
+		TrustedProxies:                       trustedProxies,
+		AdminAllowedNetworks:                 adminNetworks,
+		SessionTTL:                           sessionTTL,
+		SessionIdleTimeout:                   sessionIdleTimeout,
+		AccountLockThreshold:                 accountLockThreshold,
+		AccountLockDuration:                  accountLockDuration,
+		DependencyCheckInterval:              dependencyCheckInterval,
+		DependencyStaleAfter:                 dependencyStaleAfter,
+		DependencyOfflineAfter:               dependencyOfflineAfter,
+		ComfyObjectInfoCacheTTL:              comfyObjectInfoCacheTTL,
+		ComfyObjectInfoMaxStale:              comfyObjectInfoMaxStale,
+		MediaInFlightLimitBytes:              int64(mediaInflightMB) << 20,
+		MediaSpoolDir:                        mediaSpoolDir,
+		PprofEnabled:                         pprofEnabled,
+		RestoreDrillMode:                     restoreDrillMode,
+		ReleaseValidation:                    releaseValidation,
+		Retention:                            retention,
+		DatabaseCleanupBatchSize:             databaseCleanupBatchSize,
+		DatabaseCleanupMaxBatches:            databaseCleanupMaxBatches,
 	}, nil
 }
 

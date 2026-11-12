@@ -16,11 +16,11 @@ var (
 	ErrGPUWorkInput    = errors.New("invalid GPU admission request")
 )
 
-const gpuWorkColumns = `id,resource_id,kind,job_key,user_id,priority,state,phase,lease_token,lease_until,external_id,cancellation_requested,ready_until,queued_at,created_at,updated_at,held_at,released_at`
+const gpuWorkColumns = `id,resource_id,kind,job_key,user_id,priority,state,phase,lease_token,lease_until,external_id,cancellation_requested,ready_until,queued_at,created_at,updated_at,held_at,released_at,inference_completion`
 const gpuResourceColumns = `id,revision,observation,message,observed_at,valid_until`
 
 func scanGPUWork(row datasetScanner) (work domain.GPUWork, err error) {
-	err = row.Scan(&work.ID, &work.ResourceID, &work.Kind, &work.JobKey, &work.UserID, &work.Priority, &work.State, &work.Phase, &work.LeaseToken, &work.LeaseUntil, &work.ExternalID, &work.CancellationRequested, &work.ReadyUntil, &work.QueuedAt, &work.CreatedAt, &work.UpdatedAt, &work.HeldAt, &work.ReleasedAt)
+	err = row.Scan(&work.ID, &work.ResourceID, &work.Kind, &work.JobKey, &work.UserID, &work.Priority, &work.State, &work.Phase, &work.LeaseToken, &work.LeaseUntil, &work.ExternalID, &work.CancellationRequested, &work.ReadyUntil, &work.QueuedAt, &work.CreatedAt, &work.UpdatedAt, &work.HeldAt, &work.ReleasedAt, &work.InferenceCompletion)
 	return
 }
 func scanGPUResource(row datasetScanner) (resource domain.GPUResource, err error) {
@@ -45,8 +45,31 @@ func invalidateGPUObservation(ctx context.Context, tx *sql.Tx, resourceID string
 func (s *Store) GPUResource(ctx context.Context, id string) (domain.GPUResource, error) {
 	return scanGPUResource(s.db.QueryRowContext(ctx, `SELECT `+gpuResourceColumns+` FROM gpu_resources WHERE id=$1`, id))
 }
+
+func (s *Store) EnsurePrimaryGPUResource(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO gpu_resources(id) VALUES($1) ON CONFLICT(id) DO NOTHING`, domain.GPUPrimaryResource)
+	return err
+}
 func (s *Store) GPUWork(ctx context.Context, id string) (domain.GPUWork, error) {
 	return scanGPUWork(s.db.QueryRowContext(ctx, `SELECT `+gpuWorkColumns+` FROM gpu_work WHERE id=$1`, id))
+}
+
+func (s *Store) GPUWorkBySource(ctx context.Context, kind domain.GPUWorkKind, key string) (domain.GPUWork, error) {
+	return scanGPUWork(s.db.QueryRowContext(ctx, `SELECT `+gpuWorkColumns+` FROM gpu_work WHERE kind=$1 AND job_key=$2`, kind, key))
+}
+
+// Call only after the local client has returned executor completion evidence.
+// Request keys are unique per invocation, including retries of the same caption.
+func (s *Store) RecordGPUInferenceCompletion(ctx context.Context, kind domain.GPUWorkKind, key, code string) error {
+	if (kind != domain.GPUWorkCaption && kind != domain.GPUWorkAssistant && kind != domain.GPUWorkHarnessUltra) || (code != "executor_terminal" && code != "request_not_dispatched" && code != "executor_stopped") {
+		return ErrGPUWorkInput
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE gpu_work SET inference_completion=$3,updated_at=now()
+		WHERE kind=$1 AND job_key=$2 AND state IN ('held','uncertain') AND inference_completion=''
+		AND ($3<>'executor_stopped' OR EXISTS(SELECT 1 FROM gpu_inference_requests r WHERE r.id=gpu_work.id AND r.state='stopped' AND r.executor_id<>'' AND r.completion_code=$3))
+		AND NOT EXISTS(SELECT 1 FROM gpu_inference_requests r WHERE r.id=gpu_work.id AND
+		(r.state NOT IN ('completed','not_dispatched','stopped') OR r.completion_code<>$3))`, kind, key, code)
+	return err
 }
 func (s *Store) EnqueueGPUWork(ctx context.Context, input domain.GPUWorkRequest) (domain.GPUWork, error) {
 	if input.ID == "" || input.ResourceID == "" || input.JobKey == "" || !input.Kind.Valid() || input.UserID <= 0 || !gpuTextValid(input.ID, 96) || !gpuTextValid(input.ResourceID, 64) || !gpuTextValid(input.JobKey, 96) {
@@ -63,7 +86,11 @@ func (s *Store) EnqueueGPUWork(ctx context.Context, input domain.GPUWorkRequest)
 	if _, err = scanGPUResource(tx.QueryRowContext(ctx, `SELECT `+gpuResourceColumns+` FROM gpu_resources WHERE id=$1 FOR UPDATE`, input.ResourceID)); err != nil {
 		return domain.GPUWork{}, err
 	}
-	result, err := tx.ExecContext(ctx, `INSERT INTO gpu_work(id,resource_id,kind,job_key,user_id,priority) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(kind,job_key) DO NOTHING`, input.ID, input.ResourceID, input.Kind, input.JobKey, input.UserID, input.Priority)
+	var queuedAt any
+	if !input.QueuedAt.IsZero() {
+		queuedAt = input.QueuedAt
+	}
+	result, err := tx.ExecContext(ctx, `INSERT INTO gpu_work(id,resource_id,kind,job_key,user_id,priority,queued_at) VALUES($1,$2,$3,$4,$5,$6,LEAST(COALESCE($7::timestamptz,now()),now())) ON CONFLICT(kind,job_key) DO NOTHING`, input.ID, input.ResourceID, input.Kind, input.JobKey, input.UserID, input.Priority, queuedAt)
 	if err != nil {
 		return domain.GPUWork{}, err
 	}
@@ -131,6 +158,12 @@ func (s *Store) AcquireGPUWork(ctx context.Context, id, token string, duration t
 	if err = tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
 		return result, err
 	}
+	if blocked, err := trainingStorageAdmissionBlockedTx(ctx, tx, resource.ID); err != nil {
+		return result, err
+	} else if blocked {
+		result.WaitCode = "storage_cleanup"
+		return result, tx.Commit()
+	}
 	if work.State == domain.GPUWorkWaiting {
 		err = tx.QueryRowContext(ctx, `SELECT position FROM (SELECT w.id,row_number() OVER(ORDER BY w.queued_at-CASE WHEN w.priority THEN ($2::bigint*interval '1 second') ELSE interval '0 seconds' END,w.id) AS position FROM gpu_work w JOIN users u ON u.id=w.user_id WHERE w.resource_id=$1 AND w.state='waiting' AND w.ready_until>now() AND NOT w.cancellation_requested AND NOT u.disabled AND (u.account_expires_at IS NULL OR u.account_expires_at>now())) ranked WHERE id=$3`, resource.ID, int64(domain.GPUPriorityHeadStart.Seconds()), id).Scan(&result.Position)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -165,6 +198,14 @@ func (s *Store) AcquireGPUWork(ctx context.Context, id, token string, duration t
 				result.WaitCode = "executor_unconfirmed"
 			}
 		}
+		return result, tx.Commit()
+	}
+	var externalPermit bool
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM gpu_executor_permits WHERE resource_id=$1 AND state IN ('reserved','running'))`, resource.ID).Scan(&externalPermit); err != nil {
+		return result, err
+	}
+	if externalPermit {
+		result.WaitCode = "external_work"
 		return result, tx.Commit()
 	}
 	if work.State != domain.GPUWorkWaiting || work.CancellationRequested {
@@ -237,7 +278,10 @@ func (s *Store) SetGPUWorkPhase(ctx context.Context, id, token, phase, externalI
 	if err != nil {
 		return work, err
 	}
-	if work.State != domain.GPUWorkHeld || work.LeaseToken != token || work.CancellationRequested || (work.Phase == "running" && (phase != "running" || externalID != work.ExternalID)) || (work.Phase == "reserved" && phase == "running") {
+	if work.State != domain.GPUWorkHeld || work.LeaseToken != token || work.CancellationRequested || work.Phase == "preparing_resources" ||
+		(work.ExternalID != "" && work.ExternalID != externalID) ||
+		(work.Phase == "running" && (phase != "running" || externalID != work.ExternalID)) ||
+		((work.Phase == "reserved" || work.Phase == "resources_ready") && phase == "running") {
 		return work, ErrGPUWorkConflict
 	}
 	work, err = scanGPUWork(tx.QueryRowContext(ctx, `UPDATE gpu_work SET phase=$3,external_id=$4,updated_at=now() WHERE id=$1 AND lease_token=$2 AND lease_until>clock_timestamp() RETURNING `+gpuWorkColumns, id, token, phase, externalID))
@@ -301,8 +345,45 @@ func (s *Store) ReleaseGPUWork(ctx context.Context, id, token string, evidence d
 	}
 	owned := work.State == domain.GPUWorkHeld && live
 	valid := evidence.Code == "executor_terminal" || evidence.Code == "executor_idle" || (owned && evidence.Code == "not_dispatched" && work.Phase == "reserved") || (owned && work.Phase != "reserved" && evidence.Code == "request_completed" && (work.Kind == domain.GPUWorkCaption || work.Kind == domain.GPUWorkAssistant))
+	// Source adapters supply these only after a durable source fence or a
+	// completed client call that explicitly reported no network dispatch.
+	valid = valid || (evidence.Code == "dispatch_fenced" && (work.Kind == domain.GPUWorkGeneration || work.Kind == domain.GPUWorkTraining)) || (evidence.Code == "request_not_dispatched" && (work.Kind == domain.GPUWorkCaption || work.Kind == domain.GPUWorkAssistant))
+	valid = valid || (evidence.Code == "executor_stopped" && (work.Kind == domain.GPUWorkCaption || work.Kind == domain.GPUWorkAssistant))
+	valid = valid || (evidence.Code == "request_not_dispatched" && work.Kind == domain.GPUWorkHarnessUltra && work.InferenceCompletion == evidence.Code)
 	if !valid {
 		return work, ErrGPUWorkInput
+	}
+	if evidence.Code == "dispatch_fenced" {
+		if err = checkGPUSourceFence(ctx, tx, work); err != nil {
+			return work, err
+		}
+	}
+	var executorActive bool
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM gpu_executor_permits WHERE work_id=$1 AND state IN ('reserved','running'))`, id).Scan(&executorActive); err != nil {
+		return work, err
+	}
+	if executorActive {
+		return work, ErrGPUWorkConflict
+	}
+	if work.Kind == domain.GPUWorkCaption || work.Kind == domain.GPUWorkAssistant {
+		job, err := scanInference(tx.QueryRowContext(ctx, `SELECT `+inferenceStatusColumns+` FROM gpu_inference_requests WHERE id=$1 FOR UPDATE`, id))
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return work, err
+		}
+		if evidence.Code == "executor_stopped" && errors.Is(err, sql.ErrNoRows) {
+			return work, ErrGPUWorkConflict
+		}
+		if err == nil && (!job.Settled() || job.CompletionCode != evidence.Code) {
+			return work, ErrGPUWorkConflict
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE quick_generation_mining_leases SET resume_ready=true WHERE gpu_work_id=$1`, id); err != nil {
+			return work, err
+		}
+	}
+	if work.Kind == domain.GPUWorkHarnessUltra {
+		if _, err = tx.ExecContext(ctx, `UPDATE quick_generation_mining_leases SET resume_ready=true WHERE gpu_work_id=$1`, id); err != nil {
+			return work, err
+		}
 	}
 	work, err = scanGPUWork(tx.QueryRowContext(ctx, `UPDATE gpu_work SET state=CASE WHEN cancellation_requested THEN 'cancelled' ELSE 'released' END,lease_token='',lease_until=NULL,released_at=now(),updated_at=now() WHERE id=$1 RETURNING `+gpuWorkColumns, id))
 	if err != nil {
@@ -330,7 +411,14 @@ func (s *Store) RetryGPUWork(ctx context.Context, id string) (domain.GPUWork, er
 	if work.State != domain.GPUWorkReleased && work.State != domain.GPUWorkCancelled {
 		return work, ErrGPUWorkConflict
 	}
-	work, err = scanGPUWork(tx.QueryRowContext(ctx, `UPDATE gpu_work SET state='waiting',phase='reserved',external_id='',cancellation_requested=false,queued_at=now(),ready_until=now()+($2::bigint*interval '1 second'),held_at=NULL,released_at=NULL,updated_at=now() WHERE id=$1 RETURNING `+gpuWorkColumns, id, int64(domain.GPUIntentLifetime.Seconds())))
+	var durableInference bool
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM gpu_inference_requests WHERE id=$1)`, id).Scan(&durableInference); err != nil {
+		return work, err
+	}
+	if durableInference {
+		return work, ErrGPUWorkConflict
+	}
+	work, err = scanGPUWork(tx.QueryRowContext(ctx, `UPDATE gpu_work SET state='waiting',phase='reserved',external_id='',inference_completion='',cancellation_requested=false,queued_at=now(),ready_until=now()+($2::bigint*interval '1 second'),held_at=NULL,released_at=NULL,updated_at=now() WHERE id=$1 RETURNING `+gpuWorkColumns, id, int64(domain.GPUIntentLifetime.Seconds())))
 	if err != nil {
 		return work, err
 	}

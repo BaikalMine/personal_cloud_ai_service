@@ -1,0 +1,51 @@
+.generation-postprocess {
+  width: min(960px, calc(100vw - 32px)); max-width: none;
+  height: min(760px, calc(100dvh - 32px)); max-height: none;
+  padding: 0; overflow: hidden; border: 1px solid var(--color-border); border-radius: 8px;
+  background: var(--color-surface); color: var(--color-text);
+}
+.generation-postprocess[open] { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+.generation-postprocess [hidden] { display: none !important; }
+.postprocess-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--color-border); }
+.generation-postprocess h2 { font-size: var(--font-size-section); margin: 0; overflow-wrap: anywhere; }
+.generation-postprocess h3 { font-size: var(--font-size-body); margin: 0 0 var(--space-3); }
+.postprocess-body { overflow: auto; overscroll-behavior: contain; padding: var(--space-4) var(--space-5); min-height: 0; }
+.postprocess-message { margin: 0 0 var(--space-4); line-height: 1.6; overflow-wrap: anywhere; }
+.generation-postprocess[data-phase="uncertain"] .postprocess-message,
+.generation-postprocess[data-phase="expired"] .postprocess-message { color: var(--color-warning); }
+.postprocess-workspace { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: var(--space-5); align-items: start; }
+.postprocess-source { margin: 0; min-width: 0; position: sticky; top: 0; }
+.postprocess-media { height: 330px; display: grid; place-items: center; overflow: hidden; background: var(--color-bg); border: 1px solid var(--color-border); }
+.postprocess-media img, .postprocess-media video, .postprocess-reference-preview img { width: 100%; height: 100%; min-height: 0; object-fit: contain; display: block; }
+.postprocess-media p, .postprocess-reference-preview p { margin: 0; padding: var(--space-3); text-align: center; color: var(--color-text-muted); overflow-wrap: anywhere; }
+.postprocess-source figcaption { display: grid; gap: var(--space-1); padding-block: var(--space-3); font-size: var(--font-size-utility); color: var(--color-text-muted); overflow-wrap: anywhere; }
+.postprocess-source figcaption strong { color: var(--color-text); }
+.postprocess-editor { min-width: 0; }
+.postprocess-editor fieldset { padding: 0; margin: 0; border: 0; min-width: 0; }
+.postprocess-operation + .postprocess-operation { margin-top: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
+.postprocess-size-fields, .postprocess-color-settings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.postprocess-size-fields:has([hidden]) { grid-template-columns: minmax(0, 1fr); }
+.postprocess-reference-search { display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: var(--space-2); align-items: end; margin-block: var(--space-3); }
+.postprocess-reference-preview { height: 180px; display: grid; place-items: center; overflow: hidden; margin-top: var(--space-3); background: var(--color-bg); border: 1px solid var(--color-border); }
+.postprocess-reference-name { overflow-wrap: anywhere; }
+.postprocess-quote dl { display: grid; grid-template-columns: minmax(80px, auto) minmax(0, 1fr); gap: var(--space-2) var(--space-3); font-size: var(--font-size-label); margin: 0; }
+.postprocess-quote dt { color: var(--color-text-muted); }
+.postprocess-quote dd { margin: 0; overflow-wrap: anywhere; }
+.postprocess-quote p { line-height: 1.6; overflow-wrap: anywhere; }
+.postprocess-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-5); border-top: 1px solid var(--color-border); }
+.postprocess-actions:not(:has(> :not([hidden]))) { display: none; }
+.generation-postprocess button, .generation-postprocess a.button { min-height: 44px; white-space: normal; }
+.generation-postprocess .icon-button { width: 44px; flex: 0 0 44px; }
+.postprocess-actions > * { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 700px) {
+  .generation-postprocess { width: 100vw; height: 100dvh; border-radius: 0; border: 0; }
+  .postprocess-header, .postprocess-body, .postprocess-actions { padding-inline: var(--space-3); }
+  .postprocess-workspace { grid-template-columns: minmax(0, 1fr); gap: var(--space-3); }
+  .postprocess-source { position: static; }
+  .postprocess-media { height: 220px; }
+  .postprocess-actions > * { flex: 1 1 230px; }
+}
+@media (max-width: 380px) {
+  .postprocess-size-fields, .postprocess-color-settings { grid-template-columns: minmax(0, 1fr); }
+  .postprocess-media { height: 180px; }
+}

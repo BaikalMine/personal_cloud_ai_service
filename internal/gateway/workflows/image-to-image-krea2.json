@@ -21,7 +21,7 @@
     "15": {"class_type": "LCImageDenoise", "inputs": {"image": ["14", 0], "blur_strength": "{{post_denoise_blur}}", "edge_preservation": "{{post_denoise_edge}}", "radius_multiplier": "{{post_denoise_radius}}", "strength": "{{post_denoise_strength}}"}},
     "16": {"class_type": "LCSkinBeauty", "inputs": {"image": ["15", 0], "preset": "{{skin_preset}}", "strength": "{{skin_strength}}", "coolness": "{{skin_coolness}}", "brightness": "{{skin_brightness}}", "rosy": "{{skin_rosy}}", "evenness": "{{skin_evenness}}", "shadow_lift": "{{skin_shadow_lift}}", "smooth": "{{skin_smooth}}", "texture_preserve": "{{skin_texture_preserve}}", "saturation": "{{skin_saturation}}", "highlight_protect": "{{skin_highlight_protect}}", "mask_sensitivity": "{{skin_mask_sensitivity}}", "mask_feather": "{{skin_mask_feather}}"}},
     "17": {"class_type": "LCImageAdjust", "inputs": {"image": ["16", 0], "hue": "{{adjust_hue}}", "saturation": "{{adjust_saturation}}", "brightness": "{{adjust_brightness}}", "contrast": "{{adjust_contrast}}", "sharpness": "{{adjust_sharpness}}"}},
-    "18": {"class_type": "LCApplyLUT", "inputs": {"image": ["17", 0], "lut_name": "{{lut_name}}", "strength": "{{lut_strength}}", "log": true}},
+    "18": {"class_type": "LCApplyLUT", "inputs": {"image": ["17", 0], "lut_name": "{{lut_name}}", "strength": "{{lut_strength}}", "log": true, "interpolation": "tetrahedral"}},
     "19": {"class_type": "SaveImage", "inputs": {"filename_prefix": "AI-Gateway-Krea2-Edit", "images": ["18", 0]}},
     "20": {"class_type": "LoadImage", "inputs": {"image": "{{input_image_2}}"}},
     "21": {"class_type": "VAEEncode", "inputs": {"pixels": ["20", 0], "vae": ["3", 0]}}

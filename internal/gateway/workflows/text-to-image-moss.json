@@ -1,0 +1,7 @@
+{
+  "id": "text-to-image-moss",
+  "name": "MOSS Image: текст в изображение",
+  "description": "MOSS Image T2I, Civitai workflow 3006443 version 3411184.",
+  "requires_image": false,
+  "builder": "moss"
+}

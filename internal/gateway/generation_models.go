@@ -13,6 +13,7 @@ const (
 	modelFamilyCheckpoint = "checkpoint"
 	modelFamilyKrea2      = "krea2"
 	modelFamilyFlux2      = "flux2"
+	modelFamilyQwen21     = "qwen21"
 	modelFamilyMiniMaxH3  = "minimax_h3"
 )
 
@@ -33,6 +34,7 @@ type generationModel struct {
 	SupportsImage        bool
 	VideoIntegratedTurbo bool
 	VideoReferenceOnly   bool
+	AIHubOnly            bool
 	DefaultSteps         int
 	DefaultCFG           float64
 	DefaultSampler       string
@@ -53,6 +55,8 @@ type generationModelCatalog struct {
 	LoraGroups        []generationLoraGroup
 	FluxLoraGroups    []generationLoraGroup
 	MiniMaxLoraGroups []generationLoraGroup
+	MossLoraGroups    []generationLoraGroup
+	QwenLoraGroups    []generationLoraGroup
 	byID              map[string]generationModel
 	ObjectInfo        comfyObjectInfoSnapshot
 }
@@ -107,6 +111,19 @@ type comfyNodeInfo struct {
 	Category     string            `json:"category"`
 }
 
+func isQwen21ModelPath(name string) bool {
+	folder, _, found := strings.Cut(strings.ReplaceAll(strings.ToLower(name), "\\", "/"), "/")
+	if !found {
+		return false
+	}
+	switch folder {
+	case "qwen 2.1", "qwen2.1", "qwenimage2.1", "base_qwen_2_1":
+		return true
+	default:
+		return false
+	}
+}
+
 func (a *App) comfyGenerationModels(ctx context.Context) generationModelCatalog {
 	catalog := generationModelCatalog{byID: make(map[string]generationModel)}
 	snapshot, err := a.comfyObjectInfo(ctx, false)
@@ -130,6 +147,8 @@ func buildGenerationModelCatalog(info map[string]comfyNodeInfo) generationModelC
 	loras := comfyChoiceStrings(info, "LoraLoader", "lora_name")
 	catalog.LoraGroups = buildGenerationLoraGroups(loras)
 	catalog.FluxLoraGroups = buildFlux2LoraGroups(loras)
+	qwenLoras := append(append([]string{}, loras...), comfyChoiceStrings(info, "LoraLoaderModelOnly", "lora_name")...)
+	catalog.QwenLoraGroups = buildQwen21LoraGroups(qwenLoras)
 	catalog.MiniMaxLoraGroups = buildMiniMaxH3LoraGroups(loras)
 
 	checkpointModels := make([]generationModel, 0, len(checkpoints))
@@ -143,22 +162,7 @@ func buildGenerationModelCatalog(info map[string]comfyNodeInfo) generationModelC
 		catalog.Groups = append(catalog.Groups, generationModelGroup{Name: "Обычные checkpoint", Models: checkpointModels})
 	}
 
-	kreaEncoder := firstMatchingModel(encoders,
-		func(name string) bool { return strings.EqualFold(name, "qwen3vl_4b_fp8_scaled.safetensors") },
-		func(name string) bool {
-			value := strings.ToLower(name)
-			return strings.Contains(value, "qwen3vl") && strings.Contains(value, "4b") && strings.Contains(value, "heretic")
-		},
-		func(name string) bool {
-			value := strings.ToLower(name)
-			return strings.Contains(value, "qwen3-vl-4b") && strings.Contains(value, "fp8")
-		},
-		func(name string) bool {
-			value := strings.ToLower(name)
-			return strings.Contains(value, "qwen3vl") && strings.Contains(value, "4b")
-		},
-	)
-	kreaVAE := exactModel(vaes, "qwen_image_vae.safetensors")
+	kreaEncoder, kreaVAE := kreaCompanionAssets(encoders, vaes)
 	kreaLora := exactModel(loras, "lenovo_krea2.safetensors")
 	// The installed production edit workflow uses the original v1.2 identity
 	// LoRA. Keep this exact name so a similarly named user LoRA cannot be
@@ -172,6 +176,8 @@ func buildGenerationModelCatalog(info map[string]comfyNodeInfo) generationModelC
 		func(name string) bool { return strings.EqualFold(name, "full_encoder_small_decoder.safetensors") },
 		func(name string) bool { return strings.EqualFold(name, "flux2-vae.safetensors") },
 	)
+	qwenEncoder := exactModel(encoders, "QwenImage2.1\\qwen3vl_8b_int8_convrot.safetensors")
+	qwenVAE := exactModel(vaes, "QwenImage2.1\\qwen_image_2.1_vae_bf16.safetensors")
 	miniMaxEncoder := firstMatchingModel(encoders,
 		func(name string) bool {
 			return strings.EqualFold(name, "MiniMax\\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors")
@@ -185,10 +191,20 @@ func buildGenerationModelCatalog(info map[string]comfyNodeInfo) generationModelC
 	miniMaxAudioVAE := exactModel(vaes, "MiniMax\\minimax_h3_audio_vae_fp32.safetensors")
 	miniMaxReferenceModel := exactModel(diffusion, "MiniMax\\MiniMax_H3_Ref2VA_pruned_int8_convrot.safetensors")
 
-	var kreaModels, fluxModels, miniMaxModels []generationModel
+	var kreaModels, fluxModels, qwenModels, miniMaxModels []generationModel
 	for _, name := range diffusion {
 		lower := strings.ToLower(name)
 		switch {
+		case isQwen21ModelPath(name):
+			model := generationModel{
+				ID: generationModelID(modelFamilyQwen21, name), Name: name, DisplayName: generationModelDisplayName(name), Family: modelFamilyQwen21,
+				TextEncoder: qwenEncoder, VAE: qwenVAE, SupportsImage: true, DefaultSteps: 25, DefaultCFG: 1, DefaultSampler: "euler", DefaultScheduler: "simple",
+			}
+			model.Available = qwenEncoder != "" && qwenVAE != "" && hasGenerationNodes(info, "TextEncodeQwenImage21", "UNETLoader", "CLIPLoader", "VAELoader", "LoadImage", "EmptyLatentImage", "KSampler", "VAEDecode", "SaveImage")
+			if !model.Available {
+				model.Reason = "Для Qwen Image 2.1 нужны совместимый энкодер, VAE и ноды ComfyUI"
+			}
+			qwenModels = append(qwenModels, model)
 		case strings.Contains(lower, "krea2") || strings.Contains(lower, "krea 2"):
 			model := generationModel{
 				ID: generationModelID(modelFamilyKrea2, name), Name: name, DisplayName: generationModelDisplayName(name), Family: modelFamilyKrea2,
@@ -227,12 +243,51 @@ func buildGenerationModelCatalog(info map[string]comfyNodeInfo) generationModelC
 				model.Reason = missingMiniMaxH3Dependencies(miniMaxEncoder, miniMaxVideoVAE, miniMaxAudioVAE, miniMaxReferenceModel)
 			}
 			miniMaxModels = append(miniMaxModels, model)
-		case strings.Contains(lower, "h3erosmax_beta4") || strings.Contains(lower, "h3erosmax-beta4"):
+		case strings.Contains(lower, "minimax_h3_ref2va") || strings.Contains(lower, "10eros") && strings.Contains(lower, "beta5") && strings.Contains(lower, "int8"):
+			model := generationModel{
+				ID: generationModelID(modelFamilyMiniMaxH3, name), Name: name, DisplayName: "10Eros Max H3 beta5 INT8 · AIHUB", Family: modelFamilyMiniMaxH3,
+				TextEncoder: miniMaxEncoder, VAE: miniMaxVideoVAE, AudioVAE: miniMaxAudioVAE, ReferenceModel: name,
+				VideoIntegratedTurbo: true, VideoReferenceOnly: true, AIHubOnly: true,
+				DefaultSteps: 6, DefaultCFG: 1, DefaultSampler: "er_sde", DefaultScheduler: "beta57",
+			}
+			classes := append(aiHubWorkflowManifest().RequiredClasses, "VAEDecodeAudio", "VHS_VideoCombine", "ResizeImageMaskNode")
+			if strings.Contains(lower, "minimax_h3_ref2va") {
+				model.DisplayName = "MiniMax H3 Ref2VA · без Turbo"
+				model.VideoIntegratedTurbo = false
+				model.DefaultSteps, model.DefaultSampler, model.DefaultScheduler = 25, "euler", "simple"
+				model.DefaultVideoShift, model.DefaultAudioShift = 11, 3
+				classes = append(classes, "MiniMaxH3SigmaShift")
+			} else {
+				model.DisplayName = "10Eros Max H3 beta5 · Turbo"
+			}
+			model.Available = miniMaxEncoder != "" && miniMaxVideoVAE != "" && miniMaxAudioVAE != "" && hasGenerationNodes(info, classes...)
+			if !model.Available {
+				model.Reason = "Для AIHUB отсутствуют обязательные модели H3 или ноды ComfyUI"
+			}
+			miniMaxModels = append(miniMaxModels, model)
+			if turbo, _ := aiHubModelProfile(name); turbo {
+				// Separate workflow profile; both entries load the same installed weights.
+				standard := model
+				standard.ID += ":standard"
+				standard.AIHubOnly = false
+				standard.Available = miniMaxEncoder != "" && miniMaxVideoVAE != "" && miniMaxAudioVAE != "" && hasGenerationNodes(info,
+					"MiniMaxH3ReferenceToVideo", "KSamplerSelect", "BasicScheduler", "BasicGuider", "SamplerCustomAdvanced", "VAEDecode", "VAEDecodeAudio", "VHS_LoadVideo", "VHS_VideoCombine", "CR LoRA Stack", "CR Apply LoRA Stack")
+				standard.Reason = ""
+				if !standard.Available {
+					standard.Reason = "Для MiniMax H3 отсутствуют обязательные модели или ноды ComfyUI"
+				}
+				miniMaxModels = append(miniMaxModels, standard)
+			}
+		case miniMaxErosVersion(name) == 4 || miniMaxErosBeta6(name):
 			model := generationModel{
 				ID: generationModelID(modelFamilyMiniMaxH3, name), Name: name, DisplayName: "H3 Eros Max beta4 · встроенный Turbo", Family: modelFamilyMiniMaxH3,
 				TextEncoder: miniMaxEncoder, VAE: miniMaxVideoVAE, AudioVAE: miniMaxAudioVAE, ReferenceModel: name,
 				VideoIntegratedTurbo: true, VideoReferenceOnly: true,
 				DefaultSteps: 8, DefaultCFG: 1, DefaultSampler: "euler", DefaultScheduler: "simple", DefaultVideoShift: 12, DefaultAudioShift: 7,
+			}
+			if miniMaxErosBeta6(name) {
+				model.DisplayName = "H3 Eros Max beta6 · встроенный Turbo"
+				model.DefaultSteps, model.DefaultVideoShift, model.DefaultAudioShift = 10, 10, 3
 			}
 			model.Available = miniMaxEncoder != "" && miniMaxVideoVAE != "" && miniMaxAudioVAE != "" && hasGenerationNodes(info,
 				"MiniMaxH3ReferenceToVideo", "MiniMaxH3SigmaShift", "MiniMaxH3MemoryEfficientSageAttentionPatch",
@@ -241,6 +296,20 @@ func buildGenerationModelCatalog(info map[string]comfyNodeInfo) generationModelC
 				model.Reason = missingMiniMaxH3Dependencies(miniMaxEncoder, miniMaxVideoVAE, miniMaxAudioVAE, name)
 			}
 			miniMaxModels = append(miniMaxModels, model)
+			if miniMaxErosBeta6(name) {
+				// AIHUB and ordinary MiniMax use separate profiles of the same weights.
+				aiHub := model
+				aiHub.ID += ":aihub"
+				aiHub.AIHubOnly = true
+				aiHub.DisplayName = "H3 Eros Max beta6 · Turbo"
+				classes := append(aiHubWorkflowManifest().RequiredClasses, "MiniMaxH3SigmaShift", "VAEDecodeAudio", "VHS_VideoCombine", "ResizeImageMaskNode")
+				aiHub.Available = miniMaxEncoder != "" && miniMaxVideoVAE != "" && miniMaxAudioVAE != "" && hasGenerationNodes(info, classes...)
+				aiHub.Reason = ""
+				if !aiHub.Available {
+					aiHub.Reason = "Для AIHUB отсутствуют обязательные модели H3 или ноды ComfyUI"
+				}
+				miniMaxModels = append(miniMaxModels, aiHub)
+			}
 		}
 	}
 	if len(kreaModels) > 0 {
@@ -249,9 +318,13 @@ func buildGenerationModelCatalog(info map[string]comfyNodeInfo) generationModelC
 	if len(fluxModels) > 0 {
 		catalog.Groups = append(catalog.Groups, generationModelGroup{Name: "Flux 2", Models: fluxModels})
 	}
+	if len(qwenModels) > 0 {
+		catalog.Groups = append(catalog.Groups, generationModelGroup{Name: "Qwen Image 2.1", Models: qwenModels})
+	}
 	if len(miniMaxModels) > 0 {
 		catalog.Groups = append(catalog.Groups, generationModelGroup{Name: "MiniMax H3", Models: miniMaxModels})
 	}
+	appendMossModels(&catalog, info, diffusion, encoders, vaes, loras)
 	for _, group := range catalog.Groups {
 		for _, model := range group.Models {
 			catalog.byID[model.ID] = model
@@ -404,12 +477,17 @@ func generationLoraAllowed(groups []generationLoraGroup, name string) bool {
 }
 
 func buildGenerationPresets(catalog generationModelCatalog) []generationPreset {
-	var krea, kreaEdit, flux *generationModel
+	var krea, kreaEdit, flux, qwen *generationModel
 	kreaCount, fluxCount := 0, 0
 	for _, group := range catalog.Groups {
 		for index := range group.Models {
 			model := group.Models[index]
 			switch model.Family {
+			case modelFamilyQwen21:
+				if qwen == nil || generationModelPreference(model) > generationModelPreference(*qwen) {
+					copy := model
+					qwen = &copy
+				}
 			case modelFamilyKrea2:
 				if model.Available {
 					kreaCount++
@@ -439,6 +517,33 @@ func buildGenerationPresets(catalog generationModelCatalog) []generationPreset {
 		preset := presetFromModel(manifest.ID, manifest.TemplateID, manifest.Name, manifest.Description, *krea, manifest.requiresInput("image"))
 		preset.ModelCount = kreaCount
 		presets = append(presets, preset)
+		ultraManifest := kreaUltraWorkflowManifest()
+		ultraModel := *krea
+		for _, group := range catalog.Groups {
+			for _, candidate := range group.Models {
+				if candidate.Family == modelFamilyKrea2 && candidate.Available && strings.Contains(strings.ToLower(candidate.Name), "krea2turbo") {
+					ultraModel = candidate
+				}
+			}
+		}
+		ultra := presetFromModel(ultraManifest.ID, ultraManifest.TemplateID, ultraManifest.Name, ultraManifest.Description, ultraModel, false)
+		ultra.DefaultSteps, ultra.DefaultCFG, ultra.DefaultSampler, ultra.DefaultScheduler = 10, 2, "euler", "simple"
+		ultra.LoraStrength = 0
+		ultra.ModelCount = kreaCount
+		if !hasGenerationNodes(catalog.ObjectInfo.Info, "GatewayKreaUltraSampler") || exactModel(comfyChoiceStrings(catalog.ObjectInfo.Info, "CLIPLoader", "clip_name"), "qwen3vl_4b_bf16.safetensors") == "" {
+			ultra.Available = false
+			ultra.Reason = "Для Ультра качества нужны пакет Krea2 Ultra и Qwen3VL 4B BF16"
+		}
+		presets = append(presets, ultra)
+		fullManifest := kreaProWorkflowManifest()
+		full := presetFromModel(fullManifest.ID, fullManifest.TemplateID, fullManifest.Name, fullManifest.Description, ultraModel, false)
+		full.DefaultSteps, full.DefaultCFG, full.DefaultSampler, full.DefaultScheduler = 10, 2, "euler", "simple"
+		full.LoraStrength, full.ModelCount, full.MaxInputImages, full.AllowsImages = 0, kreaCount, 4, true
+		if !hasGenerationNodes(catalog.ObjectInfo.Info, fullManifest.RequiredClasses...) || exactModel(comfyChoiceStrings(catalog.ObjectInfo.Info, "GatewayKreaProOptimizer", "assets"), "ready") == "" {
+			full.Available = false
+			full.Reason = "Полный Lonecat: ноды или вспомогательные модели ещё не установлены"
+		}
+		presets = append(presets, full)
 		if kreaEdit != nil {
 			editManifest := krea2EditWorkflowManifest()
 			edit := presetFromModel(editManifest.ID, editManifest.TemplateID, editManifest.Name, editManifest.Description, *kreaEdit, editManifest.requiresInput("image"))
@@ -462,12 +567,54 @@ func buildGenerationPresets(catalog generationModelCatalog) []generationPreset {
 		preset.AllowsImages = preset.MaxInputImages > 0
 		presets = append(presets, preset)
 	}
-	var miniMax *generationModel
-	miniMaxCount := 0
+	if qwen != nil {
+		manifest := qwen21TextWorkflowManifest()
+		preset := presetFromModel(manifest.ID, manifest.TemplateID, manifest.Name, manifest.Description, *qwen, false)
+		presets = append(presets, preset)
+		editManifest := qwen21EditWorkflowManifest()
+		edit := presetFromModel(editManifest.ID, editManifest.TemplateID, editManifest.Name, editManifest.Description, *qwen, true)
+		edit.MaxInputImages = editManifest.maximumInput("image")
+		edit.AllowsImages = true
+		presets = append(presets, edit)
+	}
+	var moss *generationModel
+	mossCount := 0
+	for _, group := range catalog.Groups {
+		for _, candidate := range group.Models {
+			if candidate.Family != modelFamilyMoss {
+				continue
+			}
+			if candidate.Available {
+				mossCount++
+			}
+			if moss == nil || !moss.Available && candidate.Available {
+				copy := candidate
+				moss = &copy
+			}
+		}
+	}
+	if moss != nil {
+		manifest := mossWorkflowManifest()
+		preset := presetFromModel(manifest.ID, manifest.TemplateID, manifest.Name, manifest.Description, *moss, false)
+		preset.ModelCount = mossCount
+		presets = append(presets, preset)
+	}
+	var miniMax, aiHub *generationModel
+	miniMaxCount, aiHubCount := 0, 0
 	for _, group := range catalog.Groups {
 		for index := range group.Models {
 			model := group.Models[index]
 			if model.Family != modelFamilyMiniMaxH3 {
+				continue
+			}
+			if model.AIHubOnly && (aiHub == nil || !aiHub.Available && model.Available || model.Available && model.VideoIntegratedTurbo && !aiHub.VideoIntegratedTurbo) {
+				copy := model
+				aiHub = &copy
+			}
+			if model.AIHubOnly {
+				if model.Available {
+					aiHubCount++
+				}
 				continue
 			}
 			if model.Available {
@@ -487,6 +634,14 @@ func buildGenerationPresets(catalog generationModelCatalog) []generationPreset {
 		preset.AllowsImages = preset.MaxInputImages > 0
 		presets = append(presets, preset)
 	}
+	if aiHub != nil {
+		manifest := aiHubWorkflowManifest()
+		preset := presetFromModel(manifest.ID, manifest.TemplateID, manifest.Name, manifest.Description, *aiHub, false)
+		preset.ModelCount = aiHubCount
+		preset.MaxInputImages = 9
+		preset.AllowsImages = true
+		presets = append(presets, preset)
+	}
 	return presets
 }
 
@@ -503,7 +658,7 @@ func quickGenerationModels(catalog generationModelCatalog) []generationModel {
 	var models []generationModel
 	for _, group := range catalog.Groups {
 		for _, model := range group.Models {
-			if model.Available && (model.Family == modelFamilyKrea2 || model.Family == modelFamilyFlux2 || model.Family == modelFamilyMiniMaxH3) {
+			if model.Available && (model.Family == modelFamilyKrea2 || model.Family == modelFamilyFlux2 || model.Family == modelFamilyQwen21 || model.Family == modelFamilyMiniMaxH3 || model.Family == modelFamilyMoss) {
 				models = append(models, model)
 			}
 		}
@@ -593,7 +748,14 @@ func comfyChoiceStrings(info map[string]comfyNodeInfo, nodeName, inputName strin
 	}
 	var values []string
 	if json.Unmarshal(choices[0], &values) != nil {
-		return nil
+		var kind string
+		var options struct {
+			Options []string `json:"options"`
+		}
+		if json.Unmarshal(choices[0], &kind) != nil || kind != "COMBO" || len(choices) < 2 || json.Unmarshal(choices[1], &options) != nil {
+			return nil
+		}
+		values = options.Options
 	}
 	values = uniqueNonEmptyStrings(values)
 	sort.Strings(values)

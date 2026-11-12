@@ -27,7 +27,7 @@ func TestClientAuthenticatesAndControlsAgent(t *testing.T) {
 		if request.ScriptPath != `testdata/mining/start.bat` || request.ProcessName != "miner.exe" {
 			t.Fatalf("unexpected request: %+v", request)
 		}
-		_ = json.NewEncoder(w).Encode(State{Running: true, PIDs: []int{42}})
+		_ = json.NewEncoder(w).Encode(State{Available: true, Running: true, PIDs: []int{42}})
 	}))
 	defer server.Close()
 	baseURL, _ := url.Parse(server.URL)
@@ -75,6 +75,60 @@ func TestClientWithoutTokenIsUnavailable(t *testing.T) {
 	client := NewClient(&url.URL{Scheme: "http", Host: "localhost"}, "")
 	if _, err := client.State(context.Background(), "miner.exe"); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestCommandWaitsForAgentConfirmationWithoutReplaying(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		time.Sleep(5500 * time.Millisecond)
+		_ = json.NewEncoder(w).Encode(State{Available: true, Running: true})
+	}))
+	defer server.Close()
+	base, _ := url.Parse(server.URL)
+	state, err := NewClient(base, "fixture").Start(context.Background(), Request{})
+	if err != nil || !state.Running || calls != 1 {
+		t.Fatal(state, err, calls)
+	}
+}
+
+func TestCommandDoesNotRedirectOrInventAvailability(t *testing.T) {
+	for _, body := range []string{`{"available":false,"running":false}`, `{"running":false}`} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) }))
+		base, _ := url.Parse(server.URL)
+		state, err := NewClient(base, "fixture").Stop(context.Background(), Request{})
+		server.Close()
+		if (err == nil) != (body == `{"running":false}`) || state.Available != (body == `{"running":false}`) {
+			t.Fatal(state, err)
+		}
+	}
+	replayed := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/other" {
+			replayed = true
+		}
+		w.Header().Set("Location", "/other")
+		w.WriteHeader(http.StatusTemporaryRedirect)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+	base, _ := url.Parse(server.URL)
+	_, err := NewClient(base, "fixture").Start(context.Background(), Request{})
+	if err == nil || replayed {
+		t.Fatal("redirected command", err)
+	}
+}
+
+func TestCommandRejectsIncompleteOrWrongState(t *testing.T) {
+	for _, body := range []string{`{}`, `{"available":true}`, `{"available":true,"running":false}`} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) }))
+		base, _ := url.Parse(server.URL)
+		_, err := NewClient(base, "fixture").Start(context.Background(), Request{})
+		server.Close()
+		if err == nil {
+			t.Fatal("unconfirmed start accepted", body)
+		}
 	}
 }
 

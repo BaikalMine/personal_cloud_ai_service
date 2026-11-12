@@ -54,6 +54,13 @@ func workspaceNavigation(user *domain.User, admin, suggestions bool, adminURL, p
 	if user == nil {
 		return view
 	}
+	if user.Role != "admin" && user.CanUseHarness && !user.CanUseQuickGeneration && !user.CanTrainImageLora {
+		view.Home, view.Context = "/harness/", "Harness"
+		entry := navigationItem{Label: "Harness", Icon: "bot", Href: "/harness/", External: true}
+		view.Groups = []navigationGroup{{Items: []navigationItem{entry}}}
+		view.Mobile = []navigationItem{entry}
+		return view
+	}
 	item := func(label, icon, href string) navigationItem {
 		return navigationItem{Label: label, Icon: icon, Href: href}
 	}
@@ -63,9 +70,11 @@ func workspaceNavigation(user *domain.User, admin, suggestions bool, adminURL, p
 			{Items: []navigationItem{
 				item("Операции", "activity", "/admin"),
 				item("Задачи и контент", "images", "/admin/content"),
+				item("Harness Ultra", "image", "/admin/harness-ultra"),
 				item("Пользователи", "users", "/admin/users"),
 				item("Приглашения", "ticket", "/admin/invites"),
 				item("Модели и workflow", "workflow", "/admin/workflows"),
+				item("Модели и LoRA", "layers", "/admin/models"),
 				item("Обучение LoRA", "scan-face", "/admin/lora-training"),
 			}},
 			{Label: "Инфраструктура", Items: []navigationItem{
@@ -77,6 +86,7 @@ func workspaceNavigation(user *domain.User, admin, suggestions bool, adminURL, p
 				item("Журнал", "scroll-text", "/admin/audit"),
 			}},
 			{Label: "Дополнительно", Items: []navigationItem{
+				item("Harness", "bot", publicURL+"/harness/"),
 				item("Сессии", "monitor-smartphone", "/admin/sessions"),
 				item("Предложения", "message-square", "/admin/suggestions"),
 				item("Перейти в студию", "arrow-left", publicURL+"/generate"),
@@ -91,18 +101,18 @@ func workspaceNavigation(user *domain.User, admin, suggestions bool, adminURL, p
 	} else {
 		primary.Items = append(primary.Items, item("Обзор", "layout-dashboard", "/app"))
 	}
-	primary.Items = append(primary.Items, navigationItem{Label: "Задачи", Icon: "list-checks", Task: true})
+	if user.CanUseService("quick_generation") || user.CanTrainImageLora {
+		primary.Items = append(primary.Items, item("Задачи", "list-checks", "/tasks"))
+	}
 	view.Mobile = append(view.Mobile, primary.Items...)
+	primary.Items = append(primary.Items, item("Модели и LoRA", "layers", "/models"))
 	if user.Role == "admin" || user.CanTrainImageLora {
 		primary.Items = append(primary.Items, item("Мои LoRA", "scan-face", "/train-lora"))
 	}
 	view.Groups = append(view.Groups, primary)
 	tools := navigationGroup{Label: "Инструменты"}
-	if user.Role == "admin" || user.CanUseComfyUI {
-		tools.Items = append(tools.Items, navigationItem{Label: "ComfyUI", Icon: "workflow", Href: "/comfyui/", External: true})
-	}
-	if user.Role == "admin" || user.CanUseOpenWebUI {
-		tools.Items = append(tools.Items, navigationItem{Label: "OpenWebUI", Icon: "messages-square", Href: "/openwebui/", External: true})
+	if user.CanUseService("harness") {
+		tools.Items = append(tools.Items, navigationItem{Label: "Harness", Icon: "bot", Href: "/harness/", External: true})
 	}
 	if len(tools.Items) > 0 {
 		view.Groups = append(view.Groups, tools)

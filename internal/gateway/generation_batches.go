@@ -78,6 +78,7 @@ type generationBatchView struct {
 	CompletedCount         int                             `json:"completed_count"`
 	FailedCount            int                             `json:"failed_count"`
 	CancelledCount         int                             `json:"cancelled_count"`
+	MissingCount           int                             `json:"missing_count,omitempty"`
 	ProgressPercent        int                             `json:"progress_percent"`
 	Cancellable            bool                            `json:"cancellable"`
 	EstimatedStartSeconds  int                             `json:"estimated_start_seconds,omitempty"`
@@ -95,7 +96,7 @@ func parseGenerationBatchSpec(values url.Values) (generationBatchSpec, error) {
 		return generationBatchSpec{}, fmt.Errorf("выберите от %d до %d вариантов", minGenerationBatchSize, maxGenerationBatchSize)
 	}
 	spec := generationBatchSpec{Mode: domain.GenerationBatchMode(strings.TrimSpace(values.Get("batch_mode"))), Count: count}
-	if !spec.Mode.Valid() {
+	if !spec.Mode.Valid() || spec.Mode == domain.GenerationBatchLoraVerification {
 		return generationBatchSpec{}, errors.New("выберите способ изменения вариантов")
 	}
 	if spec.Mode == domain.GenerationBatchSeeds {
@@ -120,7 +121,7 @@ func parseGenerationBatchSpec(values url.Values) (generationBatchSpec, error) {
 }
 
 func generationBatchParameter(input generationForm, name string) (generationBatchParameterSpec, bool) {
-	imageFamily := input.ModelFamily == modelFamilyKrea2 || input.ModelFamily == modelFamilyFlux2
+	imageFamily := input.ModelFamily == modelFamilyKrea2 || input.ModelFamily == modelFamilyFlux2 || input.ModelFamily == modelFamilyQwen21 || input.ModelFamily == modelFamilyMoss
 	miniMax := input.ModelFamily == modelFamilyMiniMaxH3
 	byName := func(spec generationBatchParameterSpec, available bool) (generationBatchParameterSpec, bool) {
 		return spec, available
@@ -277,6 +278,9 @@ func parseGenerationValues(ctx context.Context, values url.Values) (generationFo
 }
 
 func (a *App) buildGenerationBatchCandidates(ctx context.Context, user *User, base generationPreparation, values url.Values, spec generationBatchSpec) ([]generationBatchCandidate, []string, error) {
+	if spec.Mode != domain.GenerationBatchSeeds && spec.Mode != domain.GenerationBatchParameter {
+		return nil, nil, errors.New("этот вид пакета требует отдельного подтверждения")
+	}
 	seedWasRandom := base.Input.Seed < 0 || strings.TrimSpace(values.Get("seed")) == "-1"
 	baseSeed := base.Input.Seed
 	if baseSeed < 0 {
@@ -353,7 +357,7 @@ func generationBatchChildRequestID(batchRequestID string, position int) string {
 }
 
 func generationBatchState(batch domain.GenerationBatch) string {
-	finished := batch.CompletedCount + batch.FailedCount + batch.CancelledCount + batch.ExpiredCount
+	finished := batch.CompletedCount + batch.FailedCount + batch.CancelledCount + batch.ExpiredCount + batch.MissingCount
 	if finished >= batch.TotalCount {
 		switch {
 		case batch.CompletedCount == batch.TotalCount:
@@ -384,12 +388,14 @@ func generationBatchDifferences(batch domain.GenerationBatch, jobs []generationJ
 	if batch.Mode == domain.GenerationBatchParameter {
 		name = batch.ParameterName
 		label = generationBatchParameterLabel(name)
+	} else if batch.Mode == domain.GenerationBatchLoraVerification {
+		name, label = "lora_weight", "Вес проверяемой LoRA"
 	}
 	values := make([]generationBatchDifferenceValue, 0, len(jobs))
 	unique := make(map[string]struct{}, len(jobs))
 	for _, job := range jobs {
 		value := strconv.FormatInt(job.Seed, 10)
-		if batch.Mode == domain.GenerationBatchParameter {
+		if batch.Mode == domain.GenerationBatchParameter || batch.Mode == domain.GenerationBatchLoraVerification {
 			value = job.ExperimentValue
 		}
 		unique[value] = struct{}{}
@@ -399,6 +405,35 @@ func generationBatchDifferences(batch domain.GenerationBatch, jobs []generationJ
 		return nil
 	}
 	return []generationBatchDifferenceView{{Name: name, Label: label, Values: values}}
+}
+
+func makeGenerationBatchView(batch domain.GenerationBatch, children []generationJobView) generationBatchView {
+	finished := batch.CompletedCount + batch.FailedCount + batch.CancelledCount + batch.ExpiredCount + batch.MissingCount
+	cancellable := false
+	for _, child := range children {
+		cancellable = cancellable || child.Cancellable
+	}
+	view := generationBatchView{
+		BatchID: batch.PublicID, ParentBatchID: batch.ParentBatchPublicID, SourceJobID: batch.SourceJobPublicID,
+		WinnerJobID: batch.WinnerJobPublicID, TemplateID: batch.TemplateID, WorkflowID: batch.WorkflowID,
+		ModelName: batch.ModelName, Mode: string(batch.Mode), ParameterName: batch.ParameterName,
+		ParameterLabel: generationBatchParameterLabel(batch.ParameterName), SeedLocked: batch.SeedLocked,
+		State: generationBatchState(batch), TotalCount: batch.TotalCount, FinishedCount: finished,
+		CompletedCount: batch.CompletedCount, FailedCount: batch.FailedCount,
+		CancelledCount:        batch.CancelledCount + batch.ExpiredCount,
+		MissingCount:          batch.MissingCount,
+		Cancellable:           cancellable && batch.CancellationRequestedAt == nil,
+		CancellationRequested: batch.CancellationRequestedAt != nil,
+		CreatedAt:             batch.CreatedAt, UpdatedAt: batch.UpdatedAt, Jobs: children,
+		Differences: generationBatchDifferences(batch, children),
+	}
+	if batch.TotalCount > 0 {
+		view.ProgressPercent = int(math.Round(float64(finished) * 100 / float64(batch.TotalCount)))
+	}
+	if batch.Mode == domain.GenerationBatchLoraVerification {
+		view.ParameterLabel = "Вес проверяемой LoRA"
+	}
+	return view
 }
 
 func (a *App) generationBatchViews(ctx context.Context, userID int64) ([]generationBatchView, error) {
@@ -441,28 +476,13 @@ func (a *App) generationBatchViews(ctx context.Context, userID int64) ([]generat
 		batch := batches[index]
 		jobs := jobsByBatch[batch.ID]
 		children := make([]generationJobView, 0, len(jobs))
-		cancellable := false
 		for _, job := range jobs {
 			view := viewByJobID[job.ID]
 			view.BatchID = batch.PublicID
 			children = append(children, view)
-			cancellable = cancellable || view.Cancellable
 		}
-		finished := batch.CompletedCount + batch.FailedCount + batch.CancelledCount + batch.ExpiredCount
-		view := generationBatchView{
-			BatchID: batch.PublicID, ParentBatchID: batch.ParentBatchPublicID, SourceJobID: batch.SourceJobPublicID,
-			WinnerJobID: batch.WinnerJobPublicID, TemplateID: batch.TemplateID, WorkflowID: batch.WorkflowID,
-			ModelName: batch.ModelName, Mode: string(batch.Mode), ParameterName: batch.ParameterName,
-			ParameterLabel: generationBatchParameterLabel(batch.ParameterName), SeedLocked: batch.SeedLocked,
-			State: generationBatchState(batch), TotalCount: batch.TotalCount, FinishedCount: finished,
-			CompletedCount: batch.CompletedCount, FailedCount: batch.FailedCount,
-			CancelledCount:        batch.CancelledCount + batch.ExpiredCount,
-			ProgressPercent:       int(math.Round(float64(finished) * 100 / float64(batch.TotalCount))),
-			Cancellable:           cancellable && batch.CancellationRequestedAt == nil,
-			CancellationRequested: batch.CancellationRequestedAt != nil,
-			CreatedAt:             batch.CreatedAt, UpdatedAt: batch.UpdatedAt, Jobs: children,
-			Differences: generationBatchDifferences(batch, children),
-		}
+		finished := batch.CompletedCount + batch.FailedCount + batch.CancelledCount + batch.ExpiredCount + batch.MissingCount
+		view := makeGenerationBatchView(batch, children)
 		if averageSeconds > 0 && finished < batch.TotalCount {
 			view.EstimatedStartSeconds = queueWait + queuedAhead*averageSeconds
 			view.EstimatedFinishSeconds = view.EstimatedStartSeconds + (batch.TotalCount-finished)*averageSeconds
@@ -558,9 +578,15 @@ func (a *App) handleGenerationBatches(w http.ResponseWriter, r *http.Request) {
 		writeGenerationError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	collectionID, err := generationCollectionID(r.PostForm)
+	if err != nil {
+		writeGenerationCollectionError(w, err)
+		return
+	}
 	batchPublicID := newRequestID()
 	params := domain.CreateGenerationBatchParams{
-		PublicID: batchPublicID, UserID: user.ID, UsernameSnapshot: user.Username, RequestID: requestID,
+		CollectionID: collectionID,
+		PublicID:     batchPublicID, UserID: user.ID, UsernameSnapshot: user.Username, RequestID: requestID,
 		TemplateID: base.Input.TemplateID, WorkflowID: base.Input.PresetID, ModelName: base.Input.ModelName,
 		Mode: spec.Mode, ParameterName: spec.ParameterName, ParameterValues: parameterValues,
 		SeedLocked: spec.Mode == domain.GenerationBatchParameter, MaxParallel: 1,
@@ -580,6 +606,7 @@ func (a *App) handleGenerationBatches(w http.ResponseWriter, r *http.Request) {
 			PublicID: newRequestID(), CorrelationID: correlation, RequestID: generationBatchChildRequestID(requestID, position),
 			ParentJobID: parentJobID, Position: position, ExperimentValue: candidate.ExperimentValue,
 			Prepared: domain.PreparedGenerationJob{
+				InputNames: generationJobInputNames(candidate.Input),
 				TemplateID: candidate.Input.TemplateID, WorkflowID: candidate.Input.PresetID, ModelName: candidate.Input.ModelName,
 				Seed: candidate.Input.Seed, PayloadCipher: candidate.PayloadCipher,
 				Dependencies: generationJobDependencies(candidate.Input, user), InputCount: generationJobInputCount(candidate.Input),
@@ -588,6 +615,17 @@ func (a *App) handleGenerationBatches(w http.ResponseWriter, r *http.Request) {
 	}
 	batch, created, err := a.store.CreateGenerationBatch(r.Context(), params)
 	if err != nil {
+		if errors.Is(err, store.ErrGenerationCollectionMissing) {
+			writeGenerationCollectionError(w, err)
+			return
+		}
+		if writeGenerationSubmissionError(w, err, "batch", requestID) {
+			return
+		}
+		if errors.Is(err, store.ErrGenerationInputUnavailable) {
+			writeGenerationError(w, http.StatusConflict, generationInputUnavailableMessage)
+			return
+		}
 		status, message := quickGenerationLimitError(err)
 		if !errors.Is(err, store.ErrQuickGenerationDailyLimit) && !errors.Is(err, store.ErrQuickGenerationTotalLimit) && !errors.Is(err, store.ErrQuickGenerationForbidden) {
 			status, message = http.StatusInternalServerError, "не удалось создать пакет вариантов"
@@ -608,7 +646,7 @@ func (a *App) handleGenerationBatches(w http.ResponseWriter, r *http.Request) {
 	if !created {
 		status = http.StatusOK
 	}
-	writeJSON(w, status, map[string]any{"batch": view, "quota": quota, "created": created})
+	writeJSON(w, status, map[string]any{"batch": view, "quota": quota, "created": created, "request_id": requestID, "kind": "batch"})
 }
 
 func (a *App) handleGenerationBatchCancel(w http.ResponseWriter, r *http.Request) {
@@ -718,69 +756,137 @@ func (a *App) dispatchGenerationJobs(ctx context.Context) (int64, error) {
 	if _, linkErr := a.store.LinkGenerationJobAssistantEvents(jobCtx, job.ID, user.ID, job.CorrelationID); linkErr != nil {
 		log.Printf("link generation job %s assistant audit: %v", job.PublicID, linkErr)
 	}
-	payload, err := a.decodeGenerationSavedPayload(job.PayloadCipher)
-	if err != nil {
-		a.failGenerationJob(jobCtx, job, "generation_batch_payload_failed", "Не удалось восстановить параметры генерации", err)
-		return 1, nil
-	}
-	form := generationJobFormValues(payload.Values)
-	input, err := parseGenerationValues(jobCtx, form)
-	if err != nil {
-		a.failGenerationJob(jobCtx, job, "generation_batch_payload_invalid", "Параметры генерации больше не поддерживаются", err)
-		return 1, nil
-	}
-	preparation, err := a.prepareGeneration(jobCtx, &user, input, false)
-	if err != nil {
-		a.failGenerationJob(jobCtx, job, "generation_batch_preflight_failed", "Workflow не прошёл проверку", err)
-		return 1, nil
-	}
-	input, definition, prompt := preparation.Input, preparation.Definition, preparation.Prompt
-	if job.State == domain.GenerationJobPreparing && generationJobInputCount(input) > 0 {
-		job, _, err = a.store.TransitionGenerationJob(jobCtx, job.ID, domain.GenerationJobTransitionParams{State: domain.GenerationJobUploading, Message: "Проверяем референсы"})
-		if err != nil {
-			a.failGenerationJob(jobCtx, job, "generation_batch_input_state_failed", "Не удалось закрепить референсы", err)
+	var preparation generationPreparation
+	if isPostprocessJob(job) {
+		postprocess, prepareErr := a.preparePostprocessDispatch(jobCtx, job)
+		if prepareErr != nil {
+			settleCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			handled, settleErr := a.settlePostprocessDispatchChange(settleCtx, job)
+			cancel()
+			if handled || settleErr != nil {
+				return 1, settleErr
+			}
+		}
+		if errors.Is(prepareErr, errPostprocessDispatchWaiting) {
+			return 0, a.store.PostponeGenerationDispatch(jobCtx, job.ID, job.DispatchToken, "Проверяем исходники постобработки")
+		}
+		if prepareErr != nil {
+			a.failGenerationJob(jobCtx, job, "postprocess_preparation_failed", "Не удалось проверить постобработку", prepareErr)
 			return 1, nil
 		}
-	}
-	if job.State != domain.GenerationJobWaitingForResources {
-		job, err = a.store.PrepareGenerationJob(jobCtx, job.ID, domain.PreparedGenerationJob{
-			TemplateID: input.TemplateID, WorkflowID: input.PresetID, ModelName: input.ModelName, Seed: input.Seed,
-			PayloadCipher: job.PayloadCipher, Dependencies: generationJobDependencies(input, &user), InputCount: generationJobInputCount(input),
-		})
+		preparation = generationPreparation{Postprocess: &postprocess, Prompt: postprocess.Prompt}
+	} else {
+		payload, err := a.decodeGenerationSavedPayload(job.PayloadCipher)
 		if err != nil {
-			a.failGenerationJob(jobCtx, job, "generation_batch_prepare_failed", "Не удалось подготовить генерацию", err)
+			a.failGenerationJob(jobCtx, job, "generation_batch_payload_failed", "Не удалось восстановить параметры генерации", err)
 			return 1, nil
 		}
-		job, _, err = a.store.TransitionGenerationJob(jobCtx, job.ID, domain.GenerationJobTransitionParams{State: domain.GenerationJobWaitingForResources, Message: "Ожидаем ресурсы для генерации"})
+		form := generationJobFormValues(payload.Values)
+		var input generationForm
+		if payload.Repeat != nil {
+			if payload.ExecutionInput == nil {
+				err = errGenerationRepeatDrift
+			} else {
+				input = *payload.ExecutionInput
+				current, currentErr := a.comfyObjectInfo(jobCtx, true)
+				if currentErr != nil || current.Source != comfyObjectInfoLive {
+					return 0, a.store.PostponeGenerationDispatch(jobCtx, job.ID, job.DispatchToken, "Проверяем текущую схему перед повтором")
+				}
+			}
+		} else {
+			input, err = parseGenerationValues(jobCtx, form)
+		}
 		if err != nil {
-			a.failGenerationJob(jobCtx, job, "generation_batch_resource_state_failed", "Не удалось подготовить ресурсы генерации", err)
+			a.failGenerationJob(jobCtx, job, "generation_batch_payload_invalid", "Параметры генерации больше не поддерживаются", err)
 			return 1, nil
 		}
-	}
-	current, err := a.store.GenerationJobByPublicID(jobCtx, user.ID, job.PublicID)
-	if err != nil {
-		return 0, err
-	}
-	if current.DispatchToken != job.DispatchToken || current.State.Terminal() {
-		return 0, nil
-	}
-	job = current
-	if current.CancellationRequestedAt != nil {
-		_, _, _ = a.continueGenerationJobCancellation(jobCtx, current)
-		return 1, nil
+		preparation, err = a.prepareGeneration(jobCtx, &user, input, false)
+		if err != nil {
+			a.failGenerationJob(jobCtx, job, "generation_batch_preflight_failed", "Workflow не прошёл проверку", err)
+			return 1, nil
+		}
+		input = preparation.Input
+		if job.State == domain.GenerationJobPreparing && generationJobInputCount(input) > 0 {
+			job, _, err = a.store.TransitionGenerationJob(jobCtx, job.ID, domain.GenerationJobTransitionParams{State: domain.GenerationJobUploading, Message: "Проверяем референсы"})
+			if err != nil {
+				a.failGenerationJob(jobCtx, job, "generation_batch_input_state_failed", "Не удалось закрепить референсы", err)
+				return 1, nil
+			}
+		}
+		if job.State != domain.GenerationJobWaitingForResources {
+			preparedJob, err := a.store.PrepareGenerationJob(jobCtx, job.ID, domain.PreparedGenerationJob{
+				InputNames: generationJobInputNames(input),
+				TemplateID: input.TemplateID, WorkflowID: input.PresetID, ModelName: input.ModelName, Seed: input.Seed,
+				PayloadCipher: job.PayloadCipher, Dependencies: generationJobDependencies(input, &user), InputCount: generationJobInputCount(input),
+			})
+			if err != nil {
+				a.failGenerationJob(jobCtx, job, "generation_batch_prepare_failed", "Не удалось подготовить генерацию", err)
+				return 1, nil
+			}
+			job = preparedJob
+			job, _, err = a.store.TransitionGenerationJob(jobCtx, job.ID, domain.GenerationJobTransitionParams{State: domain.GenerationJobWaitingForResources, Message: "Ожидаем ресурсы для генерации"})
+			if err != nil {
+				a.failGenerationJob(jobCtx, job, "generation_batch_resource_state_failed", "Не удалось подготовить ресурсы генерации", err)
+				return 1, nil
+			}
+		}
+		current, err := a.store.GenerationJobByPublicID(jobCtx, user.ID, job.PublicID)
+		if err != nil {
+			return 0, err
+		}
+		if current.DispatchToken != job.DispatchToken || current.State.Terminal() {
+			return 0, nil
+		}
+		job = current
+		if current.CancellationRequestedAt != nil {
+			_, _, _ = a.continueGenerationJobCancellation(jobCtx, current)
+			return 1, nil
+		}
+		waitingForFiles, inspectionErr := a.inspectGenerationPreparationRequired(jobCtx, job, &preparation, payload.Repeat != nil && payload.Repeat.FilesObserved)
+		if inspectionErr != nil {
+			a.failGenerationJob(jobCtx, job, "generation_component_inspection_failed", inspectionErr.Error(), inspectionErr)
+			return 1, nil
+		}
+		if waitingForFiles {
+			return 0, a.store.PostponeGenerationDispatch(jobCtx, job.ID, job.DispatchToken, "Проверяем файлы моделей перед запуском")
+		}
+		if err := a.validateGenerationRepeatDispatch(jobCtx, &user, job, payload, preparation); err != nil {
+			if errors.Is(err, errGenerationRepeatWaiting) {
+				return 0, a.store.PostponeGenerationDispatch(jobCtx, job.ID, job.DispatchToken, "Проверяем материалы перед повтором")
+			}
+			a.failGenerationJob(jobCtx, job, "generation_repeat_changed", "Условия повтора изменились. Проверьте их и подтвердите новый запуск", err)
+			return 1, nil
+		}
+		preparation.Repeat = payload.Repeat
 	}
 	var miningLease *domain.QuickGenerationMiningLease
-	promptID, err := a.submitComfyPrompt(jobCtx, user.ID, job.PublicID, user.QueuePriority, prompt, func(sendCtx context.Context) error {
+	promptID, err := a.submitComfyPrompt(jobCtx, user.ID, job.PublicID, user.QueuePriority, preparation.Prompt, func(sendCtx context.Context) error {
+		if preparation.Postprocess != nil {
+			if err := a.refreshPostprocessSubmission(sendCtx, job, preparation.Postprocess); err != nil {
+				return err
+			}
+		}
+		gpuWork, gpuErr := a.gpuCoordinator.admit(sendCtx, domain.GPUWorkGeneration, job.PublicID, &user, job.DispatchToken, job.CreatedAt)
+		if gpuErr != nil {
+			return gpuErr
+		}
 		var warning string
 		var pauseErr error
 		miningLease, warning, pauseErr = a.pauseMiningForQuickGeneration(sendCtx, &user, job.ID)
 		if pauseErr != nil {
-			return pauseErr
+			return fmt.Errorf("%w: %w", errGenerationMiningPause, pauseErr)
 		}
 		if warning != "" {
 			log.Printf("generation %s mining policy: %s", job.PublicID, warning)
 		}
-		return a.store.BeginGenerationJobSubmission(sendCtx, job.ID, job.DispatchToken)
+		if gpuErr := a.gpuCoordinator.dispatch(sendCtx, gpuWork); gpuErr != nil {
+			return gpuErr
+		}
+		execution, err := a.captureGenerationExecution(sendCtx, job, preparation)
+		if err != nil {
+			return err
+		}
+		return a.store.BeginGenerationJobSubmissionWithExecution(sendCtx, job.ID, job.DispatchToken, execution)
 	})
 	// The worker timeout must not erase a receipt or turn an uncertain send into
 	// a failed job. Persist the handoff independently of the expired request.
@@ -788,15 +894,28 @@ func (a *App) dispatchGenerationJobs(ctx context.Context) (int64, error) {
 	defer cancel()
 	jobCtx = generationJobTraceContext(receiptCtx, job)
 	if err != nil {
+		if preparation.Postprocess != nil {
+			if handled, settleErr := a.settlePostprocessDispatchChange(jobCtx, job); handled || settleErr != nil {
+				return 1, settleErr
+			}
+		}
+		if errors.Is(err, errPostprocessDispatchWaiting) {
+			return 0, a.store.PostponeGenerationDispatch(jobCtx, job.ID, job.DispatchToken, "Проверяем исходники постобработки")
+		}
+		var waiting *gpuAdmissionWait
+		if errors.As(err, &waiting) {
+			return 0, a.store.PostponeGenerationDispatch(jobCtx, job.ID, job.DispatchToken, waiting.Error())
+		}
 		if errors.Is(err, errComfyPromptAdmission) {
-			return 0, a.store.PostponeGenerationDispatch(jobCtx, job.ID, job.DispatchToken)
+			return 0, a.store.PostponeGenerationDispatch(jobCtx, job.ID, job.DispatchToken, "Ожидаем свободное место в очереди ComfyUI")
 		}
 		if errors.Is(err, errComfyPromptRejected) {
 			if rejectErr := a.store.RejectGenerationJobSubmission(jobCtx, job.ID, job.DispatchToken); rejectErr != nil {
 				return 1, errors.Join(err, rejectErr)
 			}
 		}
-		a.failGenerationJob(jobCtx, job, "comfy_submission_failed", "ComfyUI не подтвердил запуск", err)
+		code, message := generationSubmissionFailure(err)
+		a.failGenerationJob(jobCtx, job, code, message, err)
 		return 1, err
 	}
 	jobCtx = traceContext(jobCtx, job.CorrelationID, job.ID, promptID)
@@ -813,13 +932,8 @@ func (a *App) dispatchGenerationJobs(ctx context.Context) (int64, error) {
 	if _, commitErr := a.store.CommitQuickGenerationForJob(jobCtx, job.ID); commitErr != nil {
 		log.Printf("commit quota for generation job %s: %v", job.PublicID, commitErr)
 	}
-	a.recordGenerationEvent(jobCtx, job.ID, user.ID, promptID, definition, input)
-	a.rememberGenerationVariant(jobCtx, job.ID, user.ID, promptID, input, form)
-	if linkErr := a.store.LinkGenerationJobContentEvent(jobCtx, job.ID, user.ID, promptID); linkErr != nil {
-		log.Printf("link generation job %s content projection: %v", job.PublicID, linkErr)
-	}
-	if linkErr := a.store.LinkGenerationJobVariant(jobCtx, job.ID, promptID); linkErr != nil {
-		log.Printf("link generation job %s variant projection: %v", job.PublicID, linkErr)
+	if projectionErr := a.ensureGenerationJobProjections(jobCtx, job); projectionErr != nil {
+		log.Printf("project generation job %s: %v", job.PublicID, projectionErr)
 	}
 	if _, _, transitionErr := a.store.TransitionGenerationJob(jobCtx, job.ID, domain.GenerationJobTransitionParams{State: domain.GenerationJobQueued, Message: "Генерация поставлена в очередь ComfyUI"}); transitionErr != nil {
 		return 1, transitionErr

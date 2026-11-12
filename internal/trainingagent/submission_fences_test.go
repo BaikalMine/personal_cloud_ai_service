@@ -64,6 +64,9 @@ func TestSubmissionFenceStopsAnUploadAlreadyInFlight(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("upload did not start")
 	}
+	if activity := controller.Activity(); activity.State != "busy" || activity.PendingSubmissions != 1 {
+		t.Fatalf("in-flight upload reported idle: %+v", activity)
+	}
 	result, err := controller.FenceGatewaySubmission(spec.GatewayJobID)
 	if err != nil || !result.Fenced || !result.Settled || result.Job != nil {
 		t.Fatalf("fence while upload is pending: %+v %v", result, err)
@@ -75,6 +78,9 @@ func TestSubmissionFenceStopsAnUploadAlreadyInFlight(t *testing.T) {
 	}
 	if len(controller.jobs) != 0 || len(controller.queue) != 0 {
 		t.Fatal("late upload reached the executor queue")
+	}
+	if activity := controller.Activity(); activity.State != "idle" || activity.PendingSubmissions != 0 {
+		t.Fatalf("rejected upload still active: %+v", activity)
 	}
 	if err := controller.loadSubmissionFences(); err != nil {
 		t.Fatal(err)

@@ -1,0 +1,33 @@
+const { test, expect } = require("@playwright/test");
+const { settlePage, chooseWorkflow } = require("./helpers.cjs");
+
+test("AIHUB editing and audio controls follow active modes", async ({ page }, info) => {
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.goto("/preview/generate");
+  await settlePage(page);
+  await page.locator('[data-workflow-id="minimax-h3-video"]').click();
+  await chooseWorkflow(page, "aihub-minimax-h3");
+  const task = page.locator('[name="aihub_task"]');
+  const audio = page.locator('[name="aihub_audio_reference"]');
+  await expect(task).toHaveValue("reference");
+  await task.selectOption("replace_clothing");
+  await expect(audio).toBeDisabled();
+  await page.locator('[name="aihub_audio_source"]').selectOption("original");
+  await audio.check();
+  await page.locator('[name="aihub_t8"]').check();
+  await task.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: info.outputPath("aihub-editing.png") });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.locator('[name="aihub_mode"][value="photo"]').check();
+  await expect(task).toBeDisabled();
+  await expect(audio).toBeDisabled();
+  await page.locator('[name="aihub_audio_source"]').selectOption("ltx");
+  await expect(audio).toBeEnabled();
+  await page.locator('[name="aihub_mode"][value="carousel"]').check();
+  await expect(task).toBeDisabled();
+  await expect(audio).toBeDisabled();
+  await page.locator('[name="aihub_mode"][value="video"]').check();
+  await expect(task).toHaveValue("replace_clothing");
+  expect(errors).toEqual([]);
+});

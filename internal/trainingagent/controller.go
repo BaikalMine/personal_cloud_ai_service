@@ -5,7 +5,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -18,42 +17,49 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"ai-access-gateway/internal/componentinspection"
+	"ai-access-gateway/internal/domain"
 	"ai-access-gateway/internal/loratraining"
 )
 
 var (
-	outputNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$`)
-	ownerPattern      = regexp.MustCompile(`[^A-Za-z0-9_-]+`)
-	progressPattern   = regexp.MustCompile(`(?i)(\d{1,6})\s*/\s*(\d{1,6})`)
-	ErrJobNotTerminal = errors.New("LoRA training job is not terminal")
+	outputNamePattern       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$`)
+	progressPattern         = regexp.MustCompile(`(?i)(\d{1,6})\s*/\s*(\d{1,6})`)
+	trainingProgressPattern = regexp.MustCompile(`(?i)^steps:\s*\d{1,3}%\s*\|[^|]*\|\s*(\d+)\s*/\s*(\d+)\s*\[`)
+	ErrJobNotTerminal       = errors.New("LoRA training job is not terminal")
 )
 
 const failedJobRetention = 24 * time.Hour
 
 type jobRecord struct {
-	Spec         loratraining.JobSpec   `json:"spec"`
-	Status       loratraining.JobStatus `json:"status"`
-	DatasetPath  string                 `json:"dataset_path"`
-	ArtifactPath string                 `json:"artifact_path,omitempty"`
-	cancel       context.CancelFunc
+	Spec            loratraining.JobSpec   `json:"spec"`
+	Status          loratraining.JobStatus `json:"status"`
+	DatasetPath     string                 `json:"dataset_path"`
+	ArtifactPath    string                 `json:"artifact_path,omitempty"`
+	ProfileSnapshot *ProfileConfig         `json:"profile_snapshot,omitempty"`
+	cancel          context.CancelFunc
 }
 
 type Controller struct {
-	config           Config
-	ctx              context.Context
-	cancel           context.CancelFunc
-	mu               sync.RWMutex
-	jobs             map[string]*jobRecord
-	byGateway        map[string]string
-	submissionFences map[string]bool
-	queue            chan string
-	wg               sync.WaitGroup
+	config                 Config
+	ctx                    context.Context
+	cancel                 context.CancelFunc
+	mu                     sync.RWMutex
+	storageMu              sync.RWMutex
+	activeStorageOperation string
+	inspectionMu           sync.Mutex
+	components             *componentinspection.Inspector
+	jobs                   map[string]*jobRecord
+	byGateway              map[string]string
+	submissionFences       map[string]bool
+	pendingSubmissions     int
+	queue                  chan string
+	wg                     sync.WaitGroup
 }
 
 func NewController(config Config) (*Controller, error) {
@@ -78,6 +84,12 @@ func NewController(config Config) (*Controller, error) {
 		cancel()
 		return nil, err
 	}
+	components, err := componentinspection.New(config.GenerationComponentDirs)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	controller.components = components
 	controller.wg.Add(2)
 	go controller.worker()
 	go controller.failedJobCleanupWorker()
@@ -86,6 +98,9 @@ func NewController(config Config) (*Controller, error) {
 
 func (controller *Controller) Close() {
 	controller.cancel()
+	if controller.components != nil {
+		controller.components.Close()
+	}
 	controller.wg.Wait()
 }
 
@@ -102,9 +117,25 @@ func (controller *Controller) Profiles() []loratraining.Profile {
 }
 
 func (controller *Controller) Submit(ctx context.Context, spec loratraining.JobSpec, dataset io.Reader) (loratraining.JobStatus, error) {
+	if err := controller.acquireStorageRead(ctx); err != nil {
+		return loratraining.JobStatus{}, err
+	}
+	defer controller.storageMu.RUnlock()
+	controller.mu.Lock()
+	controller.pendingSubmissions++
+	controller.mu.Unlock()
+	defer func() {
+		controller.mu.Lock()
+		controller.pendingSubmissions--
+		controller.mu.Unlock()
+	}()
 	// Older Gateway releases generated 63-bit seeds, while musubi uses NumPy's
 	// legacy 32-bit seed range. Keep the local agent compatible during rollout.
-	spec.Seed = normalizeTrainingSeed(spec.Seed)
+	if spec.Repeat == nil {
+		spec.Seed = normalizeTrainingSeed(spec.Seed)
+	} else {
+		spec.Repeat = spec.Repeat.Clone()
+	}
 	profile, err := controller.validateSpec(spec)
 	if err != nil {
 		return loratraining.JobStatus{}, err
@@ -149,7 +180,7 @@ func (controller *Controller) Submit(ctx context.Context, spec loratraining.JobS
 	}
 	now := time.Now()
 	record := &jobRecord{
-		Spec: spec, DatasetPath: datasetPath,
+		Spec: spec, DatasetPath: datasetPath, ProfileSnapshot: &profile,
 		Status: loratraining.JobStatus{
 			ID: id, GatewayJobID: spec.GatewayJobID, ProfileID: spec.ProfileID, State: "queued",
 			Stage: "В очереди", Progress: 0, Message: "Датасет принят локальным агентом.", CreatedAt: now,
@@ -234,12 +265,14 @@ func (controller *Controller) Cancel(id string) (loratraining.JobStatus, error) 
 	}
 	copyRecord := cloneRecord(record)
 	status := cloneStatus(record.Status)
-	controller.mu.Unlock()
 	_ = controller.persist(copyRecord)
+	controller.mu.Unlock()
 	return status, nil
 }
 
 func (controller *Controller) Delete(id string) (loratraining.JobStatus, error) {
+	controller.storageMu.RLock()
+	defer controller.storageMu.RUnlock()
 	controller.mu.RLock()
 	record := controller.jobs[id]
 	if record == nil {
@@ -319,6 +352,9 @@ func (controller *Controller) failedJobCleanupWorker() {
 }
 
 func (controller *Controller) deleteExpiredFailedJobs(now time.Time) {
+	if err := controller.pruneStorageCleanupReceipts(now); err != nil {
+		log.Printf("retain training storage receipts: %v", err)
+	}
 	cutoff := now.Add(-failedJobRetention)
 	controller.mu.RLock()
 	ids := make([]string, 0)
@@ -387,6 +423,10 @@ func pathWithinDirectory(root, target string, allowRoot bool) bool {
 }
 
 func (controller *Controller) execute(id string) {
+	if err := controller.acquireStorageRead(controller.ctx); err != nil {
+		return
+	}
+	defer controller.storageMu.RUnlock()
 	controller.mu.Lock()
 	record := controller.jobs[id]
 	if record == nil || record.Status.Terminal() {
@@ -400,8 +440,8 @@ func (controller *Controller) execute(id string) {
 	record.Status.Progress = 3
 	record.Status.StartedAt = time.Now()
 	copyRecord := cloneRecord(record)
-	controller.mu.Unlock()
 	_ = controller.persist(copyRecord)
+	controller.mu.Unlock()
 	defer cancel()
 
 	err := controller.run(jobCtx, id)
@@ -420,12 +460,15 @@ func (controller *Controller) execute(id string) {
 
 func (controller *Controller) run(ctx context.Context, id string) error {
 	record := controller.record(id)
-	profile, ok := controller.config.Profile(record.Spec.ProfileID)
-	if !ok {
-		return errors.New("профиль обучения больше не существует")
+	profile, err := controller.executionProfile(record)
+	if err != nil {
+		return err
 	}
 	if detail := profile.Readiness(controller.config); detail != "" {
 		return errors.New(detail)
+	}
+	if err := validateRepeatSpec(record.Spec, profile); err != nil {
+		return err
 	}
 	jobDir := controller.jobDir(id)
 	datasetDir := filepath.Join(jobDir, "dataset")
@@ -439,21 +482,44 @@ func (controller *Controller) run(ctx context.Context, id string) error {
 			return err
 		}
 	}
-	if err := extractDataset(record.DatasetPath, datasetDir, record.Spec.SampleCount, controller.config.MaxDatasetBytes); err != nil {
-		return err
-	}
 	configPath := filepath.Join(jobDir, "dataset.toml")
-	if err := writeDatasetConfig(configPath, filepath.Join(datasetDir, "images"), cacheDir, record.Spec.Resolution); err != nil {
-		return err
-	}
 
 	modelPath := profile.DiT
+	var sourceBefore domain.LoraFileIdentity
 	if profile.StripPrefix != "" {
+		sourceBefore, err = trainingFileIdentity(ctx, profile.DiT)
+		if err != nil {
+			return err
+		}
 		controller.setProgress(id, "preparing", "Готовим базовую модель", 6, "Нормализуем служебные имена тензоров без загрузки модели в ОЗУ.")
 		modelPath = filepath.Join(controller.config.RootDir, "models", profile.ID+"-format-v2.safetensors")
 		if err := normalizeSafeTensorForProfile(profile.DiT, modelPath, profile.StripPrefix, profile.Family); err != nil {
 			return fmt.Errorf("подготовить базовую модель: %w", err)
 		}
+	}
+	controller.setProgress(id, "preparing", "Сохраняем паспорт обучения", 8, "Проверяем контрольные суммы компонентов.")
+	provenance, sources, err := captureTrainingProvenance(ctx, record, profile, controller.config, modelPath)
+	if err != nil {
+		return fmt.Errorf("capture training provenance: %w", err)
+	}
+	if profile.StripPrefix != "" && sourceBefore != provenance.Models[0].LoraFileIdentity {
+		return errors.New("base model changed during normalization")
+	}
+	if err := verifyRepeatProvenance(record.Spec.Repeat, provenance); err != nil {
+		return err
+	}
+	if err := controller.persistProvenance(id, provenance); err != nil {
+		return fmt.Errorf("save training provenance: %w", err)
+	}
+	if err := extractDataset(record.DatasetPath, datasetDir, record.Spec.SampleCount, controller.config.MaxDatasetBytes); err != nil {
+		return err
+	}
+	archiveAfter, err := trainingFileIdentity(ctx, record.DatasetPath)
+	if err != nil || archiveAfter != provenance.DatasetArchive {
+		return errors.Join(err, errors.New("training archive changed during extraction"))
+	}
+	if err := writeDatasetConfig(configPath, filepath.Join(datasetDir, "images"), cacheDir, record.Spec.Resolution); err != nil {
+		return err
 	}
 
 	logPath := filepath.Join(jobDir, "training.log")
@@ -466,28 +532,37 @@ func (controller *Controller) run(ctx context.Context, id string) error {
 	if err := controller.runCommand(ctx, id, logPath, "running", "Обучаем LoRA", 40, 94, controller.trainingArgs(profile, record.Spec, modelPath, configPath, outputDir)...); err != nil {
 		return fmt.Errorf("обучение: %w", err)
 	}
+	if err := verifyTrainingProvenance(ctx, provenance, sources); err != nil {
+		return err
+	}
 
 	controller.setProgress(id, "installing", "Устанавливаем LoRA", 96, "Копируем итоговый адаптер в каталог ComfyUI.")
 	trainedPath, err := findTrainingOutput(outputDir, record.Spec.OutputName)
 	if err != nil {
 		return err
 	}
-	ownerHash := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(record.Spec.Owner))))
-	owner := strings.Trim(ownerPattern.ReplaceAllString(record.Spec.Owner, "_"), "_-")
-	if owner == "" {
-		owner = "user"
-	}
-	owner = truncate(owner, 40) + "-" + hex.EncodeToString(ownerHash[:4])
-	familyDir := "Krea2"
-	if profile.Family == "flux2-klein" {
-		familyDir = "Flux2-Klein"
-	}
-	destinationDir := filepath.Join(controller.config.ComfyLoraDir, "Trained", familyDir, owner)
-	if err := os.MkdirAll(destinationDir, 0o750); err != nil {
+	trainedIdentity, err := trainingFileIdentity(ctx, trainedPath)
+	if err != nil {
 		return err
 	}
 	artifactName := record.Spec.OutputName + ".safetensors"
+	if record.Spec.Repeat != nil {
+		artifactName = truncate(record.Spec.OutputName, 127-len(record.Spec.GatewayJobID)) + "-" + record.Spec.GatewayJobID + ".safetensors"
+	}
+	relative, err := loratraining.ArtifactRelativeName(record.Spec.Owner, profile.Family, artifactName)
+	if err != nil {
+		return err
+	}
+	destinationDir := filepath.Dir(filepath.Join(controller.config.ComfyLoraDir, filepath.FromSlash(relative)))
+	if err := os.MkdirAll(destinationDir, 0o750); err != nil {
+		return err
+	}
 	destination := filepath.Join(destinationDir, artifactName)
+	if record.Spec.Repeat != nil {
+		if _, err := os.Lstat(destination); !errors.Is(err, os.ErrNotExist) {
+			return errors.New("repeat artifact destination already exists or cannot be checked")
+		}
+	}
 	if _, err := os.Stat(destination); err == nil {
 		suffix := truncate(record.Spec.GatewayJobID, 8)
 		artifactName = record.Spec.OutputName + "-" + suffix + ".safetensors"
@@ -496,24 +571,33 @@ func (controller *Controller) run(ctx context.Context, id string) error {
 	if err := copyFileAtomic(trainedPath, destination); err != nil {
 		return fmt.Errorf("установить LoRA: %w", err)
 	}
-	info, err := os.Stat(destination)
-	if err != nil {
+	artifact, err := trainingFileIdentity(ctx, destination)
+	if err != nil || artifact.SHA256 != trainedIdentity.SHA256 || artifact.Bytes != trainedIdentity.Bytes {
+		return errors.Join(err, errors.New("installed adapter differs from training output"))
+	}
+	verifiedAt := time.Now().UTC()
+	provenance.Artifact, provenance.VerifiedAt = &artifact, &verifiedAt
+	if err := provenance.Validate(); err != nil {
 		return err
 	}
 	controller.mu.Lock()
-	record = controller.jobs[id]
+	record = cloneRecord(controller.jobs[id])
 	record.ArtifactPath = destination
+	record.Status.Provenance = provenance
 	record.Status.State = "completed"
 	record.Status.Stage = "Готово"
 	record.Status.Progress = 100
 	record.Status.Message = "LoRA установлена в ComfyUI и готова к использованию."
 	record.Status.ArtifactName = artifactName
-	record.Status.ArtifactBytes = info.Size()
+	record.Status.ArtifactBytes = artifact.Bytes
 	record.Status.FinishedAt = time.Now()
 	record.cancel = nil
-	copyRecord := cloneRecord(record)
+	if err := controller.persist(record); err != nil {
+		controller.mu.Unlock()
+		return fmt.Errorf("save completed training provenance: %w", err)
+	}
+	controller.jobs[id] = record
 	controller.mu.Unlock()
-	_ = controller.persist(copyRecord)
 	_ = os.Remove(record.DatasetPath)
 	_ = os.RemoveAll(datasetDir)
 	_ = os.RemoveAll(cacheDir)
@@ -699,18 +783,22 @@ func splitCommandLines(data []byte, atEOF bool) (advance int, token []byte, err 
 
 func (controller *Controller) commandLine(id, state, stage string, start, end int, line string) {
 	progress := start
-	if match := progressPattern.FindStringSubmatch(line); len(match) == 3 {
-		current, _ := strconv.Atoi(match[1])
-		total, _ := strconv.Atoi(match[2])
-		if total > 0 && current <= total {
-			progress = start + int(float64(end-start)*float64(current)/float64(total))
-		}
-	}
 	controller.mu.Lock()
 	record := controller.jobs[id]
 	if record == nil {
 		controller.mu.Unlock()
 		return
+	}
+	pattern := progressPattern
+	if state == "running" {
+		pattern = trainingProgressPattern
+	}
+	if match := pattern.FindStringSubmatch(line); len(match) == 3 {
+		current, _ := strconv.Atoi(match[1])
+		total, _ := strconv.Atoi(match[2])
+		if total > 0 && current <= total && (state != "running" || total == record.Spec.MaxSteps) {
+			progress = start + int(float64(end-start)*float64(current)/float64(total))
+		}
 	}
 	record.Status.LogTail = append(record.Status.LogTail, line)
 	if len(record.Status.LogTail) > 80 {
@@ -723,10 +811,10 @@ func (controller *Controller) commandLine(id, state, stage string, start, end in
 		record.Status.Stage = stage
 	}
 	copyRecord := cloneRecord(record)
-	controller.mu.Unlock()
 	if shouldPersist {
 		_ = controller.persist(copyRecord)
 	}
+	controller.mu.Unlock()
 }
 
 func (controller *Controller) appendLog(id, line string) {
@@ -752,8 +840,8 @@ func (controller *Controller) setProgress(id, state, stage string, progress int,
 	record.Status.Progress = progress
 	record.Status.Message = message
 	copyRecord := cloneRecord(record)
-	controller.mu.Unlock()
 	_ = controller.persist(copyRecord)
+	controller.mu.Unlock()
 }
 
 func (controller *Controller) finish(id, state, stage string, progress int, message, errorMessage string) {
@@ -771,8 +859,8 @@ func (controller *Controller) finish(id, state, stage string, progress int, mess
 	record.Status.FinishedAt = time.Now()
 	record.cancel = nil
 	copyRecord := cloneRecord(record)
-	controller.mu.Unlock()
 	_ = controller.persist(copyRecord)
+	controller.mu.Unlock()
 }
 
 func (controller *Controller) validateSpec(spec loratraining.JobSpec) (ProfileConfig, error) {
@@ -800,6 +888,9 @@ func (controller *Controller) validateSpec(spec loratraining.JobSpec) (ProfileCo
 	}
 	if strings.TrimSpace(spec.GatewayJobID) == "" || len(spec.GatewayJobID) > 96 {
 		return ProfileConfig{}, errors.New("некорректный идентификатор Gateway")
+	}
+	if err := validateRepeatSpec(spec, profile); err != nil {
+		return ProfileConfig{}, err
 	}
 	return profile, nil
 }
@@ -887,16 +978,7 @@ func findTrainingOutput(outputDir, outputName string) (string, error) {
 	if info, err := os.Stat(direct); err == nil && info.Mode().IsRegular() {
 		return direct, nil
 	}
-	matches, _ := filepath.Glob(filepath.Join(outputDir, outputName+"*.safetensors"))
-	if len(matches) == 0 {
-		return "", errors.New("Musubi завершился без итогового файла LoRA")
-	}
-	sort.Slice(matches, func(i, j int) bool {
-		left, _ := os.Stat(matches[i])
-		right, _ := os.Stat(matches[j])
-		return left.ModTime().After(right.ModTime())
-	})
-	return matches[0], nil
+	return "", errors.New("Musubi завершился без итогового файла LoRA")
 }
 
 func copyFileAtomic(sourcePath, destinationPath string) error {
@@ -961,13 +1043,24 @@ func (controller *Controller) persist(record *jobRecord) error {
 	}
 	target := filepath.Join(controller.jobDir(record.Status.ID), "status.json")
 	temporary := target + ".partial"
-	if err := os.WriteFile(temporary, payload, 0o640); err != nil {
+	file, err := os.OpenFile(temporary, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o640)
+	if err != nil {
 		return err
 	}
-	if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
+	_, writeErr := file.Write(payload)
+	syncErr := file.Sync()
+	closeErr := file.Close()
+	if err := errors.Join(writeErr, syncErr, closeErr); err != nil {
+		_ = os.Remove(temporary)
 		return err
 	}
-	return os.Rename(temporary, target)
+	// Live writers hold mu. Rename replaces the last committed file on Windows
+	// and Linux without a delete-first gap for readers or process restarts.
+	if err := os.Rename(temporary, target); err != nil {
+		_ = os.Remove(temporary)
+		return err
+	}
+	return nil
 }
 
 func (controller *Controller) loadJobs() error {
@@ -986,6 +1079,12 @@ func (controller *Controller) loadJobs() error {
 		}
 		if record.Status.ID == "" || record.Spec.GatewayJobID == "" || filepath.Base(filepath.Dir(filename)) != record.Status.ID {
 			return errors.New("incomplete training execution inventory")
+		}
+		if p := record.Status.Provenance; p != nil {
+			if p.Validate() != nil || p.GatewayJobID != record.Spec.GatewayJobID || p.Profile.ID != record.Spec.ProfileID ||
+				p.Artifact != nil && (p.Artifact.Name != record.Status.ArtifactName || p.Artifact.Bytes != record.Status.ArtifactBytes) {
+				return domain.ErrLoraProvenance
+			}
 		}
 		if !record.Status.Terminal() {
 			record.Status.ExecutionUnconfirmed = true
@@ -1014,6 +1113,11 @@ func cloneRecord(record *jobRecord) *jobRecord {
 		return nil
 	}
 	copyRecord := *record
+	copyRecord.Spec.Repeat = record.Spec.Repeat.Clone()
+	if record.ProfileSnapshot != nil {
+		profile := *record.ProfileSnapshot
+		copyRecord.ProfileSnapshot = &profile
+	}
 	copyRecord.Status = cloneStatus(record.Status)
 	copyRecord.cancel = nil
 	return &copyRecord
@@ -1021,6 +1125,7 @@ func cloneRecord(record *jobRecord) *jobRecord {
 
 func cloneStatus(status loratraining.JobStatus) loratraining.JobStatus {
 	status.LogTail = append([]string(nil), status.LogTail...)
+	status.Provenance = status.Provenance.Clone()
 	return status
 }
 

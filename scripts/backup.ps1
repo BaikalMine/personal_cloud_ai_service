@@ -2,11 +2,29 @@ param(
     [string] $Destination,
     [ValidateRange(1, 100)]
     [int] $Keep = 3,
-    [switch] $SkipRestoreDrill
+    [switch] $SkipRestoreDrill,
+    [string] $TrainingConfig = (Join-Path $env:ProgramData 'AI-LoRA-Training-Agent/config.json'),
+    [string] $TrainingBackupTool,
+    [ValidateSet('database')]
+    [string] $DatasetPolicy,
+    [switch] $SkipTrainingBackup
 )
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'training-backup-common.ps1')
+if ([string]::IsNullOrWhiteSpace($TrainingBackupTool)) {
+    $TrainingBackupTool = Join-Path $projectRoot 'bin/training-backup.exe'
+}
+if (-not $SkipTrainingBackup) {
+    if ($DatasetPolicy -ne 'database') {
+        throw 'Choose -DatasetPolicy database to include saved datasets in the PostgreSQL dump.'
+    }
+    if (-not (Test-Path -LiteralPath $TrainingConfig -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $TrainingBackupTool -PathType Leaf)) {
+        throw 'Training config or backup tool is missing. Build cmd/training-backup, or explicitly choose -SkipTrainingBackup for an incomplete backup.'
+    }
+}
 if ([string]::IsNullOrWhiteSpace($Destination)) {
     $Destination = Join-Path $projectRoot 'backups'
 }
@@ -18,6 +36,7 @@ $databaseName = "ai-gateway-$stamp.dump"
 $openWebName = "openwebui-data-$stamp.tar.gz"
 $databasePath = Join-Path $Destination $databaseName
 $openWebPath = Join-Path $Destination $openWebName
+$trainingPath = Join-Path $Destination "training-$stamp.zip"
 $databaseTempPath = "/tmp/$databaseName"
 $openWebPaused = $false
 
@@ -41,6 +60,28 @@ try {
     docker cp "ai-gateway-postgres:${databaseTempPath}" $databasePath
     Assert-NativeSuccess 'Cannot copy the PostgreSQL backup to Windows.'
 
+    $backupPaths = @($databasePath, $openWebPath)
+    $trainingSummary = [ordered]@{ Included = $false; DatasetPolicy = 'database'; Archive = $null }
+    if (-not $SkipTrainingBackup) {
+        $training = Invoke-TrainingBackupTool -Tool $TrainingBackupTool -ToolArguments @(
+            '-mode', 'export', '-config', $TrainingConfig, '-archive', $trainingPath,
+            '-dataset-policy', $DatasetPolicy
+        )
+        $backupPaths += $trainingPath
+        $trainingSummary.Included = $true
+        $trainingSummary.Archive = [IO.Path]::GetFileName($trainingPath)
+        if ($training.PSObject.Properties['warnings']) {
+            foreach ($warning in @($training.warnings)) { Write-Warning $warning }
+        }
+        foreach ($model in @($training.external_models)) {
+            if ($null -ne $model -and $model.PSObject.Properties['error']) {
+                Write-Warning "External model inventory: $($model.path): $($model.error)"
+            }
+        }
+    } else {
+        Write-Warning 'Trained LoRA files are excluded. This is not a complete training backup.'
+    }
+
     docker pause openwebui | Out-Null
     Assert-NativeSuccess 'Cannot pause OpenWebUI for a consistent volume backup.'
     $openWebPaused = $true
@@ -57,7 +98,7 @@ try {
         tar -tzf "/backup/$openWebName" | Out-Null
     Assert-NativeSuccess 'OpenWebUI archive validation failed.'
 
-    $files = @($databasePath, $openWebPath) | ForEach-Object {
+    $files = $backupPaths | ForEach-Object {
         $item = Get-Item -LiteralPath $_
         $hash = Get-FileHash -LiteralPath $_ -Algorithm SHA256
         [pscustomobject] [ordered]@{
@@ -67,14 +108,16 @@ try {
         }
     }
     $manifest = [ordered]@{
+        Version   = 2
         CreatedAt = (Get-Date).ToUniversalTime().ToString('o')
         Files     = $files
+        Training  = $trainingSummary
     }
     $manifestPath = Join-Path $Destination "backup-$stamp.json"
     $manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
     if (-not $SkipRestoreDrill) {
-        & (Join-Path $PSScriptRoot 'restore.ps1') -Manifest $manifestPath
+        & (Join-Path $PSScriptRoot 'restore.ps1') -Manifest $manifestPath -TrainingBackupTool $TrainingBackupTool
         $expiredManifests = @(Get-ChildItem -LiteralPath $Destination -Filter 'backup-*.json' -File |
             Sort-Object Name -Descending | Select-Object -Skip $Keep)
         foreach ($expiredManifest in $expiredManifests) {

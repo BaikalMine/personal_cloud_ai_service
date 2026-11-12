@@ -27,6 +27,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 
+	"ai-access-gateway/internal/componentinspection"
 	"ai-access-gateway/internal/domain"
 	"ai-access-gateway/internal/store"
 )
@@ -143,6 +144,7 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 	mux.Handle("/generate", page)
 	mux.Handle("/generate/", page)
 	mux.Handle("/generate/capabilities", capabilities)
+	mux.Handle("/generate/ws", a.requireAuth(a.requireServiceAccess("comfyui", a.quickGenerationSocketHandler())))
 	mux.Handle("/gallery", gallery)
 	mux.Handle("/gallery/", gallery)
 	mux.Handle("/generate/upload/image", upload)
@@ -150,8 +152,17 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 	mux.Handle("/generate/upload/video", uploadVideo)
 	mux.Handle("/generate/run", run)
 	mux.Handle("/generate/recover", recover)
+	mux.Handle("/generate/submission", quick(http.HandlerFunc(a.handleGenerationSubmission)))
+	mux.Handle("/generate/submission/close", quick(http.HandlerFunc(a.handleGenerationSubmission)))
 	mux.Handle("/generate/jobs", quick(http.HandlerFunc(a.handleGenerationJobs)))
 	mux.Handle("/generate/jobs/detail", quick(http.HandlerFunc(a.handleGenerationJobDetail)))
+	mux.Handle("/generate/jobs/passport", quick(http.HandlerFunc(a.handleGenerationPassport)))
+	mux.Handle("/generate/jobs/comparison", quick(http.HandlerFunc(a.handleGenerationComparison)))
+	mux.Handle("/generate/jobs/output-measurement", quick(http.HandlerFunc(a.handleGenerationOutputMeasurement)))
+	mux.Handle("/generate/jobs/repeat/check", quick(http.HandlerFunc(a.handleGenerationRepeat)))
+	mux.Handle("/generate/jobs/repeat/submit", quick(http.HandlerFunc(a.handleGenerationRepeat)))
+	mux.Handle("/generate/jobs/repeat/discard", quick(http.HandlerFunc(a.handleGenerationRepeat)))
+	mux.Handle("/generate/jobs/repeat/status", quick(http.HandlerFunc(a.handleGenerationRepeatStatus)))
 	mux.Handle("/generate/jobs/events", quick(http.HandlerFunc(a.handleGenerationJobEvents)))
 	mux.Handle("/generate/jobs/cancel", quick(http.HandlerFunc(a.handleGenerationJobCancel)))
 	mux.Handle("/generate/jobs/retry", quick(http.HandlerFunc(a.handleGenerationJobRetry)))
@@ -160,6 +171,8 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 	mux.Handle("/generate/batches/winner", quick(http.HandlerFunc(a.handleGenerationBatchWinner)))
 	mux.Handle("/generate/prompt-assistant", promptAssistant)
 	mux.Handle("/generate/prompt-assistant/decision", promptAssistantDecision)
+	mux.Handle("/generate/prompt-assistant/jobs", quick(http.HandlerFunc(a.handlePromptAssistantJobs)))
+	mux.Handle("/generate/prompt-assistant/jobs/cancel", quick(http.HandlerFunc(a.handleCancelPromptAssistantJob)))
 	mux.Handle("/generate/status", status)
 	mux.Handle("/generate/cancel", cancel)
 	mux.Handle("/generate/queue", queue)
@@ -174,6 +187,7 @@ func (a *App) registerGenerationRoutes(mux *http.ServeMux) {
 	mux.Handle("/generate/library/export", exportLibrary)
 	mux.Handle("/generate/library/reuse-image", reuseLibraryImage)
 	mux.Handle("/generate/library/images", libraryImages)
+	mux.Handle("/generate/library/destinations", quick(http.HandlerFunc(a.handleGalleryDestinations)))
 	mux.Handle("/generate/library/recent", recentLibrary)
 	mux.Handle("/generate/library/", library)
 	a.registerGenerationCompanionRoutes(mux, quick)
@@ -253,8 +267,12 @@ func (a *App) handleGeneratePage(w http.ResponseWriter, r *http.Request) {
 	a.classifyPendingSensitiveContent(r.Context())
 	a.queueSensitiveMediaClassification()
 	recentMedia := a.recentGenerationMedia(r.Context(), user.ID)
+	assistantModels, assistantModelsErr := a.assistantModelChoices(r.Context(), user.ID)
 	a.render(w, r, "generate", map[string]any{
 		"Title":                            "Быстрая генерация",
+		"PromptAssistantDurableJobs":       a.cfg.PromptAssistantDurableJobs,
+		"PromptAssistantModels":            assistantModels,
+		"PromptAssistantModelsUnavailable": assistantModelsErr != nil,
 		"Workflows":                        views,
 		"ModelGroups":                      catalog.Groups,
 		"GenerationPresets":                presets,
@@ -262,6 +280,10 @@ func (a *App) handleGeneratePage(w http.ResponseWriter, r *http.Request) {
 		"LoraGroups":                       filterGenerationLoraGroups(catalog.LoraGroups, policy.KreaLoraGroups),
 		"FluxLoraGroups":                   filterGenerationLoraGroups(catalog.FluxLoraGroups, policy.FluxLoraGroups),
 		"MiniMaxLoraGroups":                catalog.MiniMaxLoraGroups,
+		"MossLoraGroups":                   catalog.MossLoraGroups,
+		"QwenLoraGroups":                   catalog.QwenLoraGroups,
+		"QwenLoraSlots":                    []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+		"MossLoraSlots":                    []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
 		"ComfyOnline":                      catalog.Online,
 		"ModelsAvailable":                  catalog.AvailableCount > 0,
 		"SelectedWorkflow":                 r.URL.Query().Get("workflow"),
@@ -409,10 +431,22 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 		}
 		parentJobID = &parent.ID
 	}
+	collectionID, err := generationCollectionID(r.PostForm)
+	if err != nil {
+		writeGenerationCollectionError(w, err)
+		return
+	}
 	job, shouldSubmit, err := a.store.ClaimGenerationJob(r.Context(), domain.CreateGenerationJobParams{
-		PublicID: newRequestID(), CorrelationID: correlation, UserID: user.ID, UsernameSnapshot: user.Username, RequestID: requestID, ParentJobID: parentJobID,
+		PublicID: newRequestID(), CorrelationID: correlation, UserID: user.ID, UsernameSnapshot: user.Username, RequestID: requestID, ParentJobID: parentJobID, CollectionID: collectionID,
 	})
 	if err != nil {
+		if errors.Is(err, store.ErrGenerationCollectionMissing) {
+			writeGenerationCollectionError(w, err)
+			return
+		}
+		if writeGenerationSubmissionError(w, err, "single", requestID) {
+			return
+		}
 		writeGenerationError(w, http.StatusInternalServerError, "не удалось создать задание генерации")
 		return
 	}
@@ -464,15 +498,22 @@ func (a *App) handleGenerateRun(w http.ResponseWriter, r *http.Request) {
 		writeGenerationJobError(w, http.StatusInternalServerError, job, "не удалось сохранить параметры запуска")
 		return
 	}
-	job, err = a.store.PrepareGenerationJob(jobCtx, job.ID, domain.PreparedGenerationJob{
+	preparedJob, err := a.store.PrepareGenerationJob(jobCtx, job.ID, domain.PreparedGenerationJob{
+		InputNames: generationJobInputNames(input),
 		TemplateID: input.TemplateID, WorkflowID: input.PresetID, ModelName: input.ModelName, Seed: input.Seed,
 		PayloadCipher: payloadCipher, Dependencies: generationJobDependencies(input, user), InputCount: inputCount,
 	})
 	if err != nil {
+		if errors.Is(err, store.ErrGenerationInputUnavailable) {
+			job = a.failGenerationJob(jobCtx, job, "generation_input_unavailable", generationInputUnavailableMessage, err)
+			writeGenerationJobError(w, http.StatusConflict, job, generationInputUnavailableMessage)
+			return
+		}
 		job = a.failGenerationJob(jobCtx, job, "generation_payload_store_failed", "Не удалось сохранить параметры запуска", err)
 		writeGenerationJobError(w, http.StatusInternalServerError, job, "не удалось сохранить параметры запуска")
 		return
 	}
+	job = preparedJob
 	job, _, err = a.store.TransitionGenerationJob(jobCtx, job.ID, domain.GenerationJobTransitionParams{
 		State: domain.GenerationJobWaitingForResources, Message: "Ожидаем ресурсы",
 	})
@@ -538,11 +579,14 @@ func validGenerationRequestID(value string) bool {
 }
 
 type generationPreparation struct {
-	Input      generationForm
-	Definition workflowDefinition
-	Model      generationModel
-	Prompt     map[string]any
-	ObjectInfo comfyObjectInfoSnapshot
+	Postprocess      *postprocessDispatchPreparation
+	Input            generationForm
+	Definition       workflowDefinition
+	Model            generationModel
+	Prompt           map[string]any
+	ObjectInfo       comfyObjectInfoSnapshot
+	FileObservations *componentinspection.Response
+	Repeat           *generationRepeatConstraint
 }
 
 // prepareGeneration is deliberately shared by the preflight endpoint and the
@@ -575,6 +619,13 @@ func (a *App) prepareGeneration(ctx context.Context, user *User, input generatio
 	if !ok {
 		return generationPreparation{}, errors.New("выбранный workflow больше не доступен")
 	}
+	if input.isAIHub() {
+		definition, ok = findWorkflow(definitions, aiHubWorkflowID)
+		if !ok {
+			return generationPreparation{}, errors.New("workflow AIHUB не найден")
+		}
+		input.VideoMode = miniMaxH3ReferenceMode
+	}
 	model, ok := catalog.byID[preset.ModelID]
 	if input.ModelID != "" {
 		model, ok = catalog.byID[input.ModelID]
@@ -584,6 +635,12 @@ func (a *App) prepareGeneration(ctx context.Context, user *User, input generatio
 	}
 	if model.Family != preset.Family {
 		return generationPreparation{}, errors.New("эта модель не разрешена для выбранного workflow")
+	}
+	if input.isAIHub() && !model.AIHubOnly {
+		return generationPreparation{}, errors.New("для AIHUB выберите совместимую модель Turbo или Ref2VA")
+	}
+	if model.AIHubOnly && !input.isAIHub() {
+		return generationPreparation{}, errors.New("эта модель доступна только для workflow AIHUB")
 	}
 	if input.TemplateID == "image-to-image" && model.Family == modelFamilyKrea2 && model.ID != preset.ModelID {
 		return generationPreparation{}, errors.New("для Krea2: редактирование доступна только совместимая оригинальная Turbo-модель")
@@ -604,6 +661,16 @@ func (a *App) prepareGeneration(ctx context.Context, user *User, input generatio
 	input.IdentityLora = model.IdentityLora
 	input.VideoIntegratedTurbo = model.VideoIntegratedTurbo
 	input.VideoReferenceOnly = model.VideoReferenceOnly
+	if input.PresetID == kreaUltraPresetID {
+		input.TextEncoder = exactModel(comfyChoiceStrings(catalog.ObjectInfo.Info, "CLIPLoader", "clip_name"), "qwen3vl_4b_bf16.safetensors")
+		input.VAE = exactModel(comfyChoiceStrings(catalog.ObjectInfo.Info, "VAELoader", "vae_name"), "qwen_image_vae.safetensors")
+		if input.TextEncoder == "" || input.VAE == "" || !hasGenerationNodes(catalog.ObjectInfo.Info, "GatewayKreaUltraSampler") {
+			return generationPreparation{}, errors.New("Ультра качество: необходимые ноды, энкодер или VAE недоступны")
+		}
+	}
+	if input.PresetID == kreaProPresetID && input.KreaProMode != "text" && !user.CanUseQuickGenerationType("image-to-image") {
+		return generationPreparation{}, errors.New("редактирование фото недоступно для этой учётной записи")
+	}
 	if model.Family == modelFamilyMiniMaxH3 {
 		if err := validateVideoGenerationQuality(user, input); err != nil {
 			return generationPreparation{}, err
@@ -629,7 +696,7 @@ func (a *App) prepareGeneration(ctx context.Context, user *User, input generatio
 			input.LoraNames = [maxGenerationLoraSlots]string{}
 			input.LoraModel = [maxGenerationLoraSlots]float64{}
 			input.LoraClip = [maxGenerationLoraSlots]float64{}
-		} else if !input.LorasConfigured {
+		} else if !input.LorasConfigured && input.PresetID != kreaUltraPresetID && input.PresetID != kreaProPresetID {
 			input.LoraNames[0] = model.Lora
 			input.LoraModel[0] = model.LoraStrength
 			input.LoraClip[0] = 1
@@ -644,6 +711,18 @@ func (a *App) prepareGeneration(ctx context.Context, user *User, input generatio
 		for _, name := range input.LoraNames {
 			if name != "" && !generationLoraAllowed(catalog.FluxLoraGroups, name) {
 				return generationPreparation{}, errors.New("выбранная LoRA недоступна для Flux2")
+			}
+		}
+	} else if model.Family == modelFamilyQwen21 {
+		for _, name := range input.LoraNames {
+			if name != "" && !generationLoraAllowed(catalog.QwenLoraGroups, name) {
+				return generationPreparation{}, errors.New("выбранная LoRA недоступна для Qwen Image 2.1")
+			}
+		}
+	} else if model.Family == modelFamilyMoss {
+		for _, name := range input.LoraNames {
+			if name != "" && !generationLoraAllowed(catalog.MossLoraGroups, name) {
+				return generationPreparation{}, errors.New("выбранная LoRA недоступна для MOSS Image")
 			}
 		}
 	} else if model.Family == modelFamilyMiniMaxH3 {
@@ -661,7 +740,14 @@ func (a *App) prepareGeneration(ctx context.Context, user *User, input generatio
 		return generationPreparation{}, err
 	}
 	if model.Family != modelFamilyCheckpoint && definition.Builder == "" {
-		definition, ok = findWorkflow(definitions, input.TemplateID+"-"+model.Family)
+		definitionID := input.TemplateID + "-" + model.Family
+		if input.PresetID == kreaUltraPresetID {
+			definitionID = kreaUltraDefinitionID
+		}
+		if input.PresetID == kreaProPresetID {
+			definitionID = kreaProDefinitionID
+		}
+		definition, ok = findWorkflow(definitions, definitionID)
 		if !ok {
 			return generationPreparation{}, errors.New("workflow для выбранного семейства моделей не найден")
 		}
@@ -673,7 +759,7 @@ func (a *App) prepareGeneration(ctx context.Context, user *User, input generatio
 		}
 	}
 	if definition.RequiresImage || (definition.AllowsImages && input.imageCount() > 0) {
-		maxImages := maxGenerationInputImages(model.Family)
+		maxImages := generationInputImageLimit(input, model.Family)
 		if input.imageCount() > maxImages {
 			return generationPreparation{}, fmt.Errorf("для этого workflow доступно не более %d изображений", maxImages)
 		}
@@ -704,6 +790,17 @@ func (a *App) prepareGeneration(ctx context.Context, user *User, input generatio
 			return generationPreparation{}, err
 		}
 	}
+	if input.isAIHub() {
+		if err := normalizeAIHub(&input); err != nil {
+			return generationPreparation{}, err
+		}
+		if err := a.resolveAIHubDuration(ctx, user.ID, &input); err != nil {
+			return generationPreparation{}, err
+		}
+		if err := resolveAIHubModels(&input, catalog.ObjectInfo.Info); err != nil {
+			return generationPreparation{}, err
+		}
+	}
 	prompt, err := definition.buildPrompt(input)
 	if err != nil {
 		return generationPreparation{}, err
@@ -717,7 +814,7 @@ func (a *App) prepareGeneration(ctx context.Context, user *User, input generatio
 // requiresImageEditingSupport distinguishes an image-edit pipeline from a
 // workflow that merely consumes a reference frame, such as MiniMax H3.
 func requiresImageEditingSupport(definition workflowDefinition) bool {
-	return definition.RequiresImage && definition.Builder != "minimax_h3"
+	return definition.RequiresImage && definition.Builder != "minimax_h3" && definition.Builder != "aihub_minimax"
 }
 
 func (a *App) generationRunResponse(ctx context.Context, promptID string) map[string]any {
@@ -756,31 +853,8 @@ func (a *App) handleRecoverGeneration(w http.ResponseWriter, r *http.Request) {
 		writeGenerationError(w, http.StatusInternalServerError, "не удалось восстановить запуск")
 		return
 	}
+	job = a.reconcileGenerationClientJob(r.Context(), job, user.ID)
 	jobCtx := generationJobTraceContext(r.Context(), job)
-	if job.PromptID == "" && !job.State.Terminal() && (job.DispatchQueuedAt == nil || job.SubmissionStartedAt != nil) {
-		recovered, found, recoverErr := a.recoverGenerationJobPrompt(jobCtx, job)
-		if recoverErr != nil {
-			logGateway(jobCtx, slog.LevelError, "generation_job_recovery_failed", "Failed to recover generation job prompt",
-				"job_public_id", job.PublicID,
-				"error", recoverErr,
-			)
-		} else if found {
-			job = recovered
-			jobCtx = generationJobTraceContext(jobCtx, job)
-		}
-	}
-	if job.PromptID != "" && !job.State.Terminal() {
-		if status, statusErr := a.fetchGenerationStatus(jobCtx, job.PromptID, user.ID); statusErr == nil {
-			if updated, reconcileErr := a.reconcileGenerationJobStatus(jobCtx, job, status); reconcileErr == nil {
-				job = updated
-			} else {
-				logGateway(jobCtx, slog.LevelError, "generation_job_reconcile_failed", "Failed to reconcile recovered generation job",
-					"job_public_id", job.PublicID,
-					"error", reconcileErr,
-				)
-			}
-		}
-	}
 	response := a.generationJobResponse(jobCtx, job)
 	statusCode := http.StatusOK
 	if job.PromptID == "" && !job.State.Terminal() {
@@ -994,18 +1068,37 @@ func (a *App) quickGenerationUploadHandlerWithLimit(maxBody int64, kind string) 
 	})
 }
 
+func generationInputImageLimit(input generationForm, family string) int {
+	if input.PresetID == kreaProPresetID {
+		return 4
+	}
+	if input.isAIHub() {
+		if input.AIHubMode == "carousel" {
+			return 5
+		}
+		return 9
+	}
+	return maxGenerationInputImages(family)
+}
+
 func maxGenerationInputImages(family string) int {
 	switch family {
+	case modelFamilyMoss:
+		return 0
 	case modelFamilyFlux2:
 		return 4
 	case modelFamilyKrea2:
 		return 2
+	case modelFamilyQwen21:
+		return 10
 	case modelFamilyMiniMaxH3:
 		return 4
 	default:
 		return 1
 	}
 }
+
+const generationStatusUnavailableMessage = "ComfyUI временно недоступен. Задание сохранено; состояние будет проверено повторно."
 
 func (a *App) handleGenerateStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -1048,7 +1141,7 @@ func (a *App) handleGenerateStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	status, err := a.fetchGenerationStatus(jobCtx, promptID, user.ID)
 	if err != nil {
-		writeGenerationError(w, http.StatusBadGateway, "не удалось получить состояние генерации: "+err.Error())
+		writeGenerationError(w, http.StatusBadGateway, generationStatusUnavailableMessage)
 		return
 	}
 	if projectionErr := a.ensureGenerationJobProjections(jobCtx, job); projectionErr != nil {
@@ -1075,7 +1168,7 @@ func (a *App) handleLegacyGenerateStatus(w http.ResponseWriter, r *http.Request,
 	}
 	status, err := a.fetchGenerationStatus(r.Context(), promptID, user.ID)
 	if err != nil {
-		writeGenerationError(w, http.StatusBadGateway, "не удалось получить состояние генерации: "+err.Error())
+		writeGenerationError(w, http.StatusBadGateway, generationStatusUnavailableMessage)
 		return
 	}
 	if status.State == "completed" || status.State == "error" {
@@ -1137,6 +1230,9 @@ func (a *App) submitComfyPrompt(ctx context.Context, userID int64, jobPublicID s
 	if err := beforeSend(requestCtx); err != nil {
 		return "", err
 	}
+	if err := a.authorizeManagedComfyGPURequest(requestCtx, request, userID, jobPublicID); err != nil {
+		return "", err
+	}
 	response, err := (&http.Client{Timeout: 20 * time.Second, CheckRedirect: rejectUpstreamRedirect}).Do(request)
 	if err != nil {
 		return "", err
@@ -1189,7 +1285,15 @@ func attachGenerationOutputPrefixes(prompt map[string]any, jobPublicID string) {
 		if !ok {
 			continue
 		}
+		if node["class_type"] == "LCSaveImage" && inputs["path"] == "gateway-krea-pro" {
+			if filename, ok := inputs["filename"].(string); ok && !strings.HasSuffix(filename, suffix) {
+				inputs["filename"] = filename + suffix
+			}
+		}
 		prefix, ok := inputs["filename_prefix"].(string)
+		if node["class_type"] == "MiniMaxH3LongReferenceSampler" {
+			inputs["cache_name"] = "gateway-minimax-long/" + jobPublicID
+		}
 		if !ok {
 			continue
 		}
@@ -1307,9 +1411,40 @@ func (a *App) fetchGenerationStatus(ctx context.Context, promptID string, userID
 	if err := json.Unmarshal(rawEntry, &entry); err != nil {
 		return generationStatus{}, err
 	}
+	postprocess := false
+	kreaProFinal := false
+	postprocessMediaType := "image"
+	if a.store != nil {
+		job, lookupErr := a.store.GenerationJobByPromptID(ctx, promptID)
+		if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+			return generationStatus{}, lookupErr
+		}
+		if lookupErr == nil && isPostprocessJob(job) {
+			if job.UserID == nil || *job.UserID != userID {
+				return generationStatus{}, errors.New("postprocess output owner mismatch")
+			}
+			postprocess = true
+			if job.TemplateID == domain.PostprocessVideoTemplate {
+				postprocessMediaType = "video"
+			}
+			// Color matching can emit intermediate previews. Only the terminal
+			// allowlisted save node may become a managed result.
+			entry.Outputs = postprocessFinalOutputs(entry.Outputs)
+		}
+		if lookupErr == nil && job.WorkflowID == kreaProPresetID {
+			if job.UserID == nil || *job.UserID != userID {
+				return generationStatus{}, errors.New("Krea2 Pro output owner mismatch")
+			}
+			kreaProFinal = true
+			entry.Outputs = kreaProFinalOutputs(entry.Outputs)
+		}
+	}
 	outputs, err := parseGenerationOutputs(entry.Outputs)
 	if err != nil {
 		return generationStatus{}, err
+	}
+	if (postprocess || kreaProFinal) && (len(outputs) != 1 || outputs[0].Type != "output" || outputs[0].MediaType != postprocessMediaType) {
+		outputs = nil
 	}
 	status.Outputs = outputs
 	for _, output := range outputs {
@@ -1324,7 +1459,30 @@ func (a *App) fetchGenerationStatus(ctx context.Context, promptID string, userID
 	}
 	statusStr := strings.ToLower(strings.TrimSpace(entry.Status.StatusStr))
 	if statusStr == "error" || statusStr == "failed" {
+		if postprocess || kreaProFinal {
+			status.Outputs = nil
+		}
 		status.State, status.Message = "error", "ComfyUI завершил генерацию с ошибкой"
+		return status, nil
+	}
+	if kreaProFinal && (entry.Status.Completed || statusStr == "success") && len(outputs) != 1 {
+		status.Outputs = nil
+		status.State, status.Message = "error", "Ультра не вернула конечное изображение"
+		return status, nil
+	}
+	if kreaProFinal && !entry.Status.Completed && statusStr != "success" {
+		status.Outputs = nil
+		status.State, status.Message = "running", "ComfyUI выполняет полный Ultra"
+		return status, nil
+	}
+	if postprocess && (entry.Status.Completed || statusStr == "success") && len(outputs) != 1 {
+		status.Outputs = nil
+		status.State, status.Message = "error", "Постобработка не вернула единственный конечный файл"
+		return status, nil
+	}
+	if postprocess && !entry.Status.Completed && statusStr != "success" {
+		status.Outputs = nil
+		status.State, status.Message = "running", "ComfyUI выполняет постобработку"
 		return status, nil
 	}
 	if entry.Status.Completed || statusStr == "success" || len(outputs) > 0 {
@@ -2195,6 +2353,12 @@ func (a *App) refreshTrackedGenerationStatuses(ctx context.Context) (int64, erro
 			if job.DispatchQueuedAt != nil && job.SubmissionStartedAt == nil {
 				continue
 			}
+			if isPostprocessJob(job) && job.SubmissionStartedAt == nil {
+				if _, publishErr := a.resumePostprocessPublication(jobCtx, *job.UserID, job.RequestID); publishErr != nil {
+					reconciliationErrors = append(reconciliationErrors, fmt.Errorf("publish postprocess %s: %w", job.PublicID, publishErr))
+				}
+				continue
+			}
 			recovered, found, recoverErr := a.recoverGenerationJobPrompt(jobCtx, job)
 			if recoverErr != nil {
 				logGateway(jobCtx, slog.LevelError, "generation_job_recovery_failed", "Failed to recover generation job prompt",
@@ -2410,6 +2574,15 @@ func generationAuditMetadata(definition workflowDefinition, input generationForm
 		metadata["references"] = references
 	}
 	switch definition.ID {
+	case kreaProDefinitionID:
+		settings, _ := parseKreaProSettings(input.KreaProSettings)
+		metadata["krea2_pro"] = map[string]any{"source": "Lonecat v26.3 full", "source_nodes": 332, "mode": input.KreaProMode, "upscale": input.KreaProUpscale, "settings": settings, "step_swap": input.KreaUltraStepSwap, "cfg_low": input.KreaUltraLowCFG, "detail_amount": input.KreaUltraDetailAmount}
+	case kreaUltraDefinitionID:
+		metadata["krea2_ultra"] = map[string]any{
+			"source": "Lonecat v26.3 core", "step_swap": input.KreaUltraStepSwap,
+			"cfg_low": input.KreaUltraLowCFG, "detail_amount": input.KreaUltraDetailAmount,
+			"speed_boost": input.KreaUltraSpeedBoost, "grow_at_step": input.KreaUltraGrowStep,
+		}
 	case "text-to-image-krea2":
 		metadata["krea2_text"] = map[string]any{
 			"base_megapixels": input.BaseMegapixels,
@@ -2461,6 +2634,20 @@ func generationAuditMetadata(definition workflowDefinition, input generationForm
 			"color_match":         map[string]any{"enabled": input.VideoColorMatch, "method": input.VideoColorMethod, "strength": input.VideoColorStrength},
 			"sharpen":             map[string]any{"enabled": input.VideoSharpenEnabled, "method": input.VideoSharpenMethod, "strength": input.VideoSharpenStrength, "radius": input.VideoSharpenRadius, "threshold": input.VideoSharpenThreshold, "iterations": input.VideoSharpenIterations},
 			"audio_start":         input.VideoAudioStart, "output_crf": input.VideoOutputCRF, "filename": input.VideoFilename,
+		}
+	}
+	if input.VideoLongEnabled && input.TemplateID == "minimax-h3-video" && !input.isAIHub() {
+		if video, ok := metadata["minimax_h3"].(map[string]any); ok {
+			video["duration_seconds"] = input.VideoLongParts * miniMaxLongPartSeconds
+			video["output_frames"] = input.VideoLongParts * miniMaxLongPartSeconds * miniMaxH3VideoFPS
+			video["long_video"] = map[string]any{"parts": input.VideoLongParts, "part_seconds": miniMaxLongPartSeconds, "context_frames": input.VideoLongContext, "transition": input.VideoLongTransition}
+		}
+	}
+	if input.isAIHub() && input.AIHubMatchDuration && input.AIHubOutputFrames > 0 {
+		if video, ok := metadata["minimax_h3"].(map[string]any); ok {
+			video["duration_seconds"] = float64(input.AIHubOutputFrames) / 24
+			video["duration_source"] = "video_reference"
+			video["output_frames"] = input.AIHubOutputFrames
 		}
 	}
 	if input.AssistantRequested {

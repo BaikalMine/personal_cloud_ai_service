@@ -22,10 +22,17 @@
 .assistant-disclosure > div, .assistant-disclosure > p { margin: 0; padding: 4px 0 16px; }
 .assistant-disclosure .ui-field { margin: 0 0 12px; }
 .assistant-request { display: grid; gap: 12px; justify-items: start; }
+.assistant-request-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.assistant-saved-text { max-height: 280px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.6; }
 .assistant-state { margin: 0; color: var(--muted); font-size: 13px; }
 .assistant-state[data-state="error"], .assistant-state[data-state="safety"] { color: var(--color-danger); }
 .assistant-state[data-state="safety"] > * { display: block; }
 .assistant-state[data-state="approved"] { color: var(--mint); }
+.assistant-live { min-width: 0; border-top: 1px solid var(--line); padding-top: 16px; }
+.assistant-live header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; font-size: 14px; }
+.assistant-live output { font-variant-numeric: tabular-nums; color: var(--muted); }
+.assistant-live-metrics { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.assistant-live pre { margin: 16px 0 0; min-height: 96px; max-height: 320px; padding: 12px 0; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 15px; line-height: 1.6; overscroll-behavior: contain; }
 .assistant-stale { margin-bottom: 0; padding: 12px; border-left: 3px solid var(--amber); color: var(--amber); background: var(--surface-input); font-size: 13px; }
 .assistant-review { display: grid; gap: 24px; }
 .assistant-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }

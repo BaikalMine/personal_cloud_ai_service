@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 const maxLoraCaptionRequestBytes = maxLoraTrainingImageBytes + (512 << 10)
@@ -129,6 +130,14 @@ func ensureLoraCaptionTrigger(trigger, caption string) string {
 		return trigger
 	}
 	return trigger + ", " + caption
+}
+
+func validatedLoraCaption(trigger, caption string, limit int) (string, error) {
+	caption = ensureLoraCaptionTrigger(trigger, caption)
+	if utf8.RuneCountInString(caption) > limit {
+		return "", errors.New("Подпись вместе с триггером слишком длинная. Повторите описание кадра или сократите его вручную.")
+	}
+	return caption, nil
 }
 
 func trimLoraTriggerPrefix(caption, trigger string) (string, bool) {
